@@ -127,11 +127,12 @@ gcloud compute scp --recurse SANITIZED_DIRECTORY agent-swarm-1:~/ \
 if prior spending exists, deliberately preserve and migrate the authoritative budget
 ledger instead of resetting or overwriting it.
 
-Git is another option after committing the intended code and obtaining authorization
-to publish to a remote repository: clone it on the VM, then pull later commits.
-Git does not synchronize uncommitted files, ignored files, or credentials. At the time
-of recording these instructions, this repository had no commits or verified remote.
-Recheck before choosing this route. Saving these instructions does not authorize publication.
+The user authorized private GitHub sharing on October 14, 2026. The repository is
+`https://github.com/jchang153/gdm-math-swarm` (private), with `main` initially pushed
+at `d294d54`. A collaborator with access can clone it, then pull later commits.
+Git does not synchronize uncommitted files, ignored files, or credentials. To avoid
+configuring GitHub credentials on a fresh VM, transfer a reviewed Git bundle or
+source archive over IAP SSH instead. Preserve any newer local setup decisions too.
 
 Install dependencies and build Linux images on the VM according to the validation
 runbook. A local macOS virtual environment or Docker image is not a substitute for
