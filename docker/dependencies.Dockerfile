@@ -21,8 +21,12 @@ RUN elan toolchain install leanprover/lean4:v4.27.0 \
     && lake exe cache get \
     && test "$(git -C .lake/packages/mathlib rev-parse HEAD)" = a3a10db0e9d66acbebf76c5e6a135066525ac900 \
     && lake build FormalConjecturesForMathlib FormalConjectures.Util.ProblemImports \
-    && chmod -R a+rX /opt/elan /opt/lean-project \
+    && chmod -R a+rX,go-w /opt/elan /opt/lean-project \
+    && test -z "$(find /opt/lean-project /opt/elan -perm /022 -not -type l -print -quit)" \
     && rm -rf /root/.cache/mathlib /root/.cache/elan
+# Normalize copied and downloaded permissions above independently of the host's
+# umask: Linux checkouts may be group-writable. All derived images require the
+# dependency tree to be readable and non-writable by group/other users.
 # Package checkouts are root-owned, but compilers/agents run as other users. Without
 # this, git reports "dubious ownership", Lake reads an empty remote URL, decides
 # "mathlib: URL has changed" and tries to delete and re-clone .lake/packages/mathlib

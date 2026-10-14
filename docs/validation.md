@@ -3,14 +3,14 @@
 For the supplied GCP project, SSH, transfer, kernel setup, and standing requirement
 to stop the VM after use, read [gcp-vm.md](gcp-vm.md) before remote operations.
 
-Ordered procedure for the forthcoming validation VM: host preparation, unpaid Docker
-validation, then the approval-gated steps up to the paid pilot launch. Written October 13,
-2026. Nothing here has run yet.
+Ordered procedure for host preparation, unpaid Docker validation, then the
+approval-gated steps up to the paid pilot launch. Initially written October 13, 2026;
+see [the October 14 setup record](vm-setup-2026-10-14.md) for measured progress.
 
-**Do not start until the user lifts the execution hold** (docs/plan.md, "Execution hold":
-validation runs, capacity probes, the paid compatibility check and the pilot are all on
-hold). Steps marked **USER APPROVAL** need the user's explicit approval in chat, given for
-that step; one approval never covers a later step.
+**VM setup and unpaid validation were authorized on October 14, 2026** (docs/plan.md,
+"VM setup and unpaid validation authorized"). The earlier hold is lifted for those
+steps. Steps marked **USER APPROVAL** still need the user's explicit approval in chat,
+given for that step; setup approval does not authorize a paid compatibility check or pilot.
 
 Conventions:
 

@@ -6,6 +6,10 @@ Read with [plan.md](plan.md) for approvals and [validation.md](validation.md) fo
 the experiment procedure. Recording these commands does not confirm that the VM
 exists or authorize provisioning, paid calls, or lifting the execution hold.
 
+For the subsequently authorized provisioning and measured host checks, see
+[the October 14 setup record](vm-setup-2026-10-14.md). That record is a checkpoint;
+always query the live instance status before starting, stopping, or resuming work.
+
 **Standing instruction: stop the VM when it is no longer being used.** After an
 authorized work session completes or fails, preserve results, logs, and the budget
 ledger; check for other active work; stop the VM and verify `TERMINATED`.
@@ -32,6 +36,18 @@ not change the approved experiment population. Infrastructure allocation is sepa
 from model spending limits recorded in the plan.
 
 ## Authenticate and inspect from the local computer
+
+On Jonathn's Mac, Google Cloud CLI 589.0.0 was installed on October 14, 2026 at
+`/Users/jchang153/.local/share/gdm-vm-tools/google-cloud-sdk`. The system Python 3.9
+is too old for this CLI; use the project's Python 3.10.12 when invoking it:
+
+```bash
+export CLOUDSDK_PYTHON=/Users/jchang153/Documents/GitHub/gdm-math-swarm/.venv/bin/python
+export PATH="/Users/jchang153/.local/share/gdm-vm-tools/google-cloud-sdk/bin:$PATH"
+```
+
+These paths are specific to this Mac. Other operators install their own CLI and
+authenticate with their own authorized account. Never transfer local GCP credentials.
 
 Sign in with the Cornell account when prompted:
 
