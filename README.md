@@ -35,8 +35,9 @@ the authoritative record of user decisions.
   evidence bound to effective settings; source/agent/order-bound labels, strict voluntary
   exits and malformed-annotation rejection. Natural completion logs the later run
   boundary. The original rubric body and frozen pilot tasks retain their hashes.
-* **Pending:** all Docker validation (Phase B) is on hold until the user's VM is available
-  (plan row "Execution hold"). No launch evidence exists yet. All four images are rebuilt
+* **Pending:** the user authorized VM setup and unpaid Docker validation (Phase B) on
+  October 14; paid compatibility and pilot steps retain their approval checkpoints.
+  No launch evidence exists yet. All four images are rebuilt
   on the VM; of those built on the development Mac (arm64), the agent and comparator images
   are known to be stale.
 * **Nothing paid has run.** No compatibility check, no pilot. Spending: $0 of the $20

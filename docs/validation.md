@@ -58,7 +58,7 @@ Conventions:
 | # | Step | Writes | Gate | Duration (VM) | Paid / approval |
 | --- | --- | --- | --- | --- | --- |
 | 0.1 | Host checks: architecture, kernel and Landlock, Docker | `runs/phase-b/host.txt` | — | ~10 min (longer if the kernel or Docker must be installed) | kernel change: agree with the user |
-| 0.2 | Transfer the repository (no git history) | — | — | minutes | — |
+| 0.2 | Transfer the reviewed repository (clone, bundle, or sanitized copy) | — | — | minutes | — |
 | 0.3 | Python 3.10 venv, offline tests | — | — | ~10 min | — |
 | 0.4 | Analysis environment (`.venv-analysis`) | — | — | ~5 min | — |
 | 1 | Build the four images, record IDs | `runs/build-logs/` | all image checks | ~45–90 min | — |
@@ -200,8 +200,11 @@ NodeSource apt, npm, GitHub (comparator, lean4export, landrun), Docker Hub and P
 
 ### 0.2 Transfer the repository
 
-The repository has no commits, so there is nothing to clone or bundle. Copy the working
-tree from the Mac without virtualenvs, credentials, run artifacts or build residue. From
+As of October 14, the repository is committed and privately published at
+`https://github.com/jchang153/gdm-math-swarm`. Clone with authorized GitHub access, or
+transfer a Git bundle/source archive over IAP without copying credentials. Include any
+newer reviewed local setup decisions. The following sanitized working-tree copy remains
+an alternative, excluding virtualenvs, credentials, run artifacts and build residue. From
 the directory that contains `gdm-math-swarm/` on the Mac (`VM` is the user's SSH host):
 
 ```sh
@@ -227,9 +230,8 @@ rsync -av --include='.env.example' --exclude='.env' --exclude='.env.*' \
   and `state/`. No ledger exists on the Mac (`state/` is absent); if `state/budget.sqlite`
   ever exists, stop: it must be carried to wherever paid runs execute and never deleted or
   reset.
-* Alternatives: the user may ask for the repository to be committed (and tagged) first,
-  then transfer a `git bundle` or clone over SSH. That needs the user's request; pushing to
-  a hosted remote is a separate publication decision.
+* Git bundle/clone transfer is now authorized by the user's private publication and VM
+  setup requests. Public publication and credential transfer remain unauthorized.
 
 ### 0.3 Python environment and offline tests
 
