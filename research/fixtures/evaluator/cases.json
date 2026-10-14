@@ -1,0 +1,154 @@
+{
+  "schema": "gdm-evaluator-fixtures/1",
+  "note": "Researcher-only. Never copy into images, agent workspaces, the conference library or agent-visible results. Expected verdicts per category are defined in code (research_swarm.evaluator.VALIDATION_EXPECTATIONS), not here.",
+  "cases": [
+    {
+      "name": "green32_genuine",
+      "category": "genuine",
+      "submission": "submissions/green32_genuine.lean",
+      "task_id": "Green32_hasCosetHole_empty",
+      "upstream": true
+    },
+    {
+      "name": "synthetic_answer_true_genuine",
+      "category": "answer_canonical_genuine",
+      "submission": "submissions/synthetic_answer_true_genuine.lean",
+      "template": "templates/SyntheticAnswer_fermat_odd.lean",
+      "theorem_name": "SyntheticAnswer.all_fermat_odd",
+      "answer_based": true
+    },
+    {
+      "name": "synthetic_answer_false_genuine",
+      "category": "answer_canonical_genuine",
+      "submission": "submissions/synthetic_answer_false_genuine.lean",
+      "template": "templates/SyntheticAnswer_two_add_two.lean",
+      "theorem_name": "SyntheticAnswer.two_add_two_five",
+      "answer_based": true
+    },
+    {
+      "name": "synthetic_answer_numeral_genuine",
+      "category": "answer_canonical_genuine",
+      "submission": "submissions/synthetic_answer_numeral_genuine.lean",
+      "template": "templates/SyntheticAnswer_least_gt_three.lean",
+      "theorem_name": "SyntheticAnswer.least_gt_three",
+      "answer_based": true
+    },
+    {
+      "name": "synthetic_answer_default_genuine",
+      "category": "answer_template_default_genuine",
+      "submission": "submissions/synthetic_answer_default_genuine.lean",
+      "template": "templates/SyntheticAnswer_fermat_odd.lean",
+      "theorem_name": "SyntheticAnswer.all_fermat_odd",
+      "answer_based": true
+    },
+    {
+      "name": "synthetic_answer_helper_true_genuine",
+      "category": "answer_helper_genuine",
+      "submission": "submissions/synthetic_answer_helper_true_genuine.lean",
+      "template": "templates/SyntheticAnswer_fermat_odd.lean",
+      "theorem_name": "SyntheticAnswer.all_fermat_odd",
+      "answer_based": true
+    },
+    {
+      "name": "synthetic_answer_helper_false_genuine",
+      "category": "answer_helper_genuine",
+      "submission": "submissions/synthetic_answer_helper_false_genuine.lean",
+      "template": "templates/SyntheticAnswer_two_add_two.lean",
+      "theorem_name": "SyntheticAnswer.two_add_two_five",
+      "answer_based": true
+    },
+    {
+      "name": "erdos6_shadow_definition",
+      "category": "preamble_meaning_change",
+      "submission": "submissions/erdos6_shadow_definition.lean",
+      "task_id": "Erdos6_erdos_6_variants_decreasing",
+      "upstream": true
+    },
+    {
+      "name": "erdos195_instance_override",
+      "category": "preamble_meaning_change",
+      "submission": "submissions/erdos195_instance_override.lean",
+      "task_id": "Erdos195_erdos_195_variants_leq_5_bound"
+    },
+    {
+      "name": "eulerbrick_notation_override",
+      "category": "preamble_meaning_change",
+      "submission": "submissions/eulerbrick_notation_override.lean",
+      "task_id": "EulerBrick_cuboidThree"
+    },
+    {
+      "name": "fermat_canonical_notation_override",
+      "category": "preamble_meaning_change",
+      "submission": "submissions/fermat_canonical_notation_override.lean",
+      "task_id": "all_fermat_squarefree"
+    },
+    {
+      "name": "erdos6_cross_region_comment",
+      "category": "cross_region_comment",
+      "submission": "submissions/erdos6_cross_region_comment.lean",
+      "task_id": "Erdos6_erdos_6_variants_decreasing"
+    },
+    {
+      "name": "erdos6_forgery_attempt",
+      "category": "forgery_attempt",
+      "submission": "submissions/erdos6_forgery_attempt.lean",
+      "task_id": "Erdos6_erdos_6_variants_decreasing"
+    },
+    {
+      "name": "erdos6_admit_guard_msgs",
+      "category": "admitted_proof",
+      "submission": "submissions/erdos6_admit_guard_msgs.lean",
+      "task_id": "Erdos6_erdos_6_variants_decreasing"
+    },
+    {
+      "name": "erdos6_exit_command",
+      "category": "exit_command",
+      "submission": "submissions/erdos6_exit_command.lean",
+      "task_id": "Erdos6_erdos_6_variants_decreasing"
+    },
+    {
+      "name": "fermat_helper_answer",
+      "category": "answer_noncanonical",
+      "submission": "submissions/fermat_helper_answer.lean",
+      "task_id": "all_fermat_squarefree"
+    },
+    {
+      "name": "green32_compile_failure",
+      "category": "compile_failure",
+      "submission": "submissions/green32_compile_failure.lean",
+      "task_id": "Green32_hasCosetHole_empty"
+    },
+    {
+      "name": "synthetic_answer_wrong_canonical",
+      "category": "canonical_wrong_answer",
+      "submission": "submissions/synthetic_answer_wrong_canonical.lean",
+      "template": "templates/SyntheticAnswer_fermat_odd.lean",
+      "theorem_name": "SyntheticAnswer.all_fermat_odd",
+      "answer_based": true
+    },
+    {
+      "name": "green32_opaque_genuine",
+      "category": "opaque_genuine",
+      "submission": "submissions/green32_opaque_genuine.lean",
+      "task_id": "Green32_hasCosetHole_empty"
+    },
+    {
+      "name": "erdos6_opaque_admit",
+      "category": "opaque_admitted_proof",
+      "submission": "submissions/erdos6_opaque_admit.lean",
+      "task_id": "Erdos6_erdos_6_variants_decreasing"
+    },
+    {
+      "name": "erdos6_nested_opaque_admit",
+      "category": "opaque_nested_admitted_proof",
+      "submission": "submissions/erdos6_nested_opaque_admit.lean",
+      "task_id": "Erdos6_erdos_6_variants_decreasing"
+    },
+    {
+      "name": "green32_opaque_native",
+      "category": "opaque_native_axiom",
+      "submission": "submissions/green32_opaque_native.lean",
+      "task_id": "Green32_hasCosetHole_empty"
+    }
+  ]
+}
