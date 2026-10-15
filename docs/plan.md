@@ -266,6 +266,19 @@ wrapper preserves a consistent ledger backup and powers off only if no other
 containers, tmux sessions, or user jobs need the VM. A local watcher verifies
 the eventual GCP `TERMINATED` state.
 
+The pilot is now running as `runs/pilot-20261015T170231Z` on `collab-vm-1`.
+All 20 peers reached the common start at October 15, 10:03:06 AM PDT
+(17:03:06 UTC). The first observed checkpoint had 53 admitted requests and
+43 completed requests. The controller runs in tmux session `gdm-pilot`; its
+host-only wrapper is `~/supervise_pilot.py`. Lifecycle status, console output,
+and consistent before/after ledger backups live under
+`runs/phase-b/pilot-launch-20261015/` on the VM. The wrapper powers off only
+after the controller exits, the ledger is backed up, and no other work is found.
+A detached local watcher in the same ignored phase directory records eventual
+GCP shutdown verification in `shutdown-verification.json`. The VM is currently
+RUNNING for the experiment; do not stop it while this authorized pilot is active.
+No post-run model analysis has been launched.
+
 ## Engineering choices within the approved design
 
 Recorded October 13, 2026. These are implementation choices, not user decisions; each follows an approved row above and is documented in the named file. Escalate any that turns out to change experimental conditions materially.
