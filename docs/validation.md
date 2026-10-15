@@ -714,6 +714,17 @@ PYTHONPATH=src .venv/bin/python scripts/compat_check.py --i-have-user-approval
 
 ## 16. Integration confirmation and the pilot key — USER DECISION / APPROVAL
 
+**Recorded exception, October 14:** after reviewing the passing repaired check,
+the user confirmed integration and the initial pilot launch, then explicitly
+authorized the main unlimited OpenRouter key. The current config records that
+exception and its approval note. Once the user privately supplies that key, run
+the unpaid check with `--i-have-user-approval --allow-unlimited`; do not fabricate
+provider-cap evidence. The paid pilot repeats the live key check using the same
+explicit policy, while retaining the unchanged shared $20 ledger. Compatibility
+checks keep their strict policy. Automatic approval review blocked copying either
+literal key values or the local credential file; no such transfer succeeded.
+The remaining private credential step does not revoke the recorded launch approval.
+
 1. The user reviews the compatibility evidence and, if satisfied, the integrator sets
    `verified_integration: true` in `configs/pilot.json` at the user's direction.
 2. The pilot key limit: the live check at launch requires `limit_remaining` ≤ the remaining

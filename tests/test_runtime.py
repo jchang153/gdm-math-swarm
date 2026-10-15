@@ -784,7 +784,7 @@ class WarmUpTests(unittest.TestCase):
 
 
 class SharedPaidPathTests(unittest.IsolatedAsyncioTestCase):
-    def _build(self, verify, keys=None, events=None):
+    def _build(self, verify, keys=None, events=None, *, allow_unlimited=False):
         from research_swarm.provider import settings_from_config
         config = json.loads((ROOT / "configs" / "pilot.json").read_text())
         settings = settings_from_config(config, pricing_verified=True)
@@ -802,7 +802,7 @@ class SharedPaidPathTests(unittest.IsolatedAsyncioTestCase):
                            lambda root: keys.append(root) or "sk-or-v1-unpaidofflinetestplaceholder"):
             result = runtime.build_openrouter_model(settings, ROOT, 20, max_remaining_usd="19.5",
                                                     record=lambda kind, agent, payload: events.append((kind, payload)),
-                                                    verify_limit=verify)
+                                                    verify_limit=verify, allow_unlimited=allow_unlimited)
         return settings, captured, keys, events, result
 
     def test_build_openrouter_model_reads_key_only_at_build(self):
@@ -844,6 +844,30 @@ class SharedPaidPathTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.dict(sys.modules, {"research_swarm.provider_limit": None}):
             with self.assertRaises(LaunchBlocked):
                 runtime.build_openrouter_model(None, ROOT, 1, max_remaining_usd="2")
+
+    def test_unlimited_key_policy_is_explicit_and_reported_without_changing_allowance(self):
+        calls = []
+
+        def verify(key, max_remaining, **kwargs):
+            calls.append((max_remaining, kwargs))
+            return {"limit": None, "limit_remaining": None, "limit_reset": None,
+                    "unlimited_key_authorized": True, "provider_limit_enforced": False,
+                    "checks": {"limit_set": {"passed": True, "waived": True}}}
+
+        _, _, _, events, (_, report) = self._build(verify, allow_unlimited=True)
+        self.assertEqual(calls, [(Decimal("19.5"), {"allow_unlimited": True})])
+        self.assertTrue(report["unlimited_key_authorized"])
+        self.assertFalse(report["provider_limit_enforced"])
+        self.assertEqual(events[0][1]["max_remaining_usd"], "19.5")
+
+    def test_nonboolean_unlimited_argument_does_not_enable_waiver(self):
+        calls = []
+
+        def verify(key, max_remaining, **kwargs):
+            calls.append(kwargs)
+            return {"limit": 20, "limit_remaining": 19.5}
+        self._build(verify, allow_unlimited="true")
+        self.assertEqual(calls, [{}])
 
     def test_eval_options(self):
         options = runtime.eval_options(1, Path("/r"), {})
@@ -967,6 +991,7 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         self.config = dict(json.loads((ROOT / "configs" / "pilot.json").read_text()),
                            run_dir=str(self.folder / "runs" / "pilot-test"))
         self.config.setdefault("max_connections", self.config["agent_count"])
+        self.config["allow_unlimited_provider_key"] = False
         self.images = {"agent": {"tag": self.config["agent_image"], "id": "sha256:" + "a" * 64},
                        "lean": {"tag": self.config["lean_image"], "id": "sha256:" + "b" * 64}}
         self.report = {"ready": True, "blockers": [], "docker": {
@@ -997,7 +1022,9 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
             record("lean_warm_up", None, result)
             return result
 
-        def build_model(settings, repo_root, max_connections, *, max_remaining_usd, record=None):
+        def build_model(settings, repo_root, max_connections, *, max_remaining_usd, record=None,
+                        allow_unlimited=False):
+            self.model_allow_unlimited = allow_unlimited
             order.append(("model", max_connections, max_remaining_usd))
             return "paid-model", {"limit": 20, "limit_remaining": 20.0, "limit_reset": None}
 
@@ -1048,6 +1075,16 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings["effective"]["max_connections"], runtime.APPROVED_AGENT_COUNT)
         self.assertEqual(settings["config"]["max_connections"], runtime.APPROVED_AGENT_COUNT)
         self.assertEqual(settings["effective"]["track"], "spontaneous")
+
+    async def test_pilot_passes_only_explicit_unlimited_key_policy(self):
+        self.config["allow_unlimited_provider_key"] = True
+        self.config["unlimited_provider_key_approval"] = "User authorized the existing unlimited key for this pilot"
+        await self.run_pilot()
+        self.assertIs(self.model_allow_unlimited, True)
+        settings = json.loads((Path(self.config["run_dir"]) / "settings.json").read_text())
+        self.assertEqual(settings["budget"]["pilot"]["cap_usd"], "20")
+        self.assertEqual(settings["config"]["unlimited_provider_key_approval"],
+                         self.config["unlimited_provider_key_approval"])
 
     async def test_missing_max_connections_refuses_before_anything_runs(self):
         del self.config["max_connections"]
