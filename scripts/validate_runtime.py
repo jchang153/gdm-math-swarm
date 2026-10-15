@@ -340,11 +340,55 @@ def with_side_task(inner, side, *, wait_side=False):
     return side_by_side()
 
 
+def tool_result_evidence(sample, models):
+    """Recover tool results across compaction without accepting contradictory replays.
+
+    ``sample.messages`` is the bridge's final adopted conversation, which can
+    omit earlier calls after Claude Code compacts. ModelEvent inputs preserve
+    the conversations actually sent on each request. Keep provenance and error
+    metadata while deduplicating those repeated observations by tool-call ID.
+    """
+    observations = defaultdict(list)
+    for event_index, event in enumerate(models):
+        for message_index, message in enumerate(event.input):
+            if message.role == "tool":
+                observations[message.tool_call_id].append(
+                    (message, f"model_event[{event_index}].input[{message_index}]"))
+    for message_index, message in enumerate(sample.messages):
+        if message.role == "tool":
+            observations[message.tool_call_id].append((message, f"sample.messages[{message_index}]"))
+
+    results, metadata, conflicts = {}, {}, {}
+    for call_id, entries in observations.items():
+        variants = {}
+        functions = {message.function for message, _ in entries if message.function}
+        for message, source in entries:
+            # Text may be represented as a string or ContentText blocks. Compare
+            # their rendered text equally, but also bind any non-text content.
+            nontext = [block.model_dump(mode="json") for block in message.content
+                       if block.type != "text"] if isinstance(message.content, list) else []
+            error = None if message.error is None else {"type": message.error.type, "message": message.error.message}
+            signature = json.dumps({"text": message.text, "nontext": nontext, "error": error},
+                                   sort_keys=True, ensure_ascii=False)
+            digest = hashlib.sha256(signature.encode("utf-8")).hexdigest()
+            variant = variants.setdefault(digest, {"content_sha256": digest, "error": error, "sources": []})
+            variant["sources"].append(source)
+        evidence = {"functions": sorted(functions), "variants": list(variants.values())}
+        if not call_id or len(variants) != 1 or len(functions) > 1:
+            # Never choose a winner by traversal order: conflicting IDs cannot
+            # satisfy a downstream gate, and the consistency gate also fails.
+            conflicts[call_id or "<missing-tool-call-id>"] = evidence
+            continue
+        results[call_id] = entries[0][0].text
+        metadata[call_id] = {"function": next(iter(functions), None), **next(iter(variants.values()))}
+    return results, metadata, conflicts
+
+
 def sample_summary(sample):
     from inspect_ai.event import CompactionEvent, ModelEvent, ToolEvent
     models = [e for e in sample.events if isinstance(e, ModelEvent)]
     tools = [e for e in sample.events if isinstance(e, ToolEvent)]
-    results = {m.tool_call_id: m.text for m in sample.messages if m.role == "tool"}
+    results, result_metadata, result_conflicts = tool_result_evidence(sample, models)
     return {
         "error": None if sample.error is None else sample.error.message[:1500],
         "limit": None if sample.limit is None else sample.limit.model_dump(mode="json"),
@@ -358,6 +402,8 @@ def sample_summary(sample):
                                  "working_time": e.working_time, "result_excerpt": str(e.result)[:300]} for e in tools],
         "compaction_events": [e.model_dump(mode="json") for e in sample.events if isinstance(e, CompactionEvent)],
         "tool_results": results,
+        "tool_result_metadata": result_metadata,
+        "tool_result_conflicts": result_conflicts,
     }
 
 
@@ -936,6 +982,10 @@ def build_checks(result):
             and "a1-post" in r["agent-001"] and "a1-lean" in r["agent-001"],
             model_events={a: s.get("model_events") for a, s in samples.items()},
             model_events_with_raw_call={a: s.get("model_events_with_call_record") for a, s in samples.items()}),
+        "inspect_tool_result_replays_consistent": check(
+            all(not s["tool_result_conflicts"] for s in samples.values()),
+            conflicts={a: s["tool_result_conflicts"] for a, s in samples.items()
+                       if s["tool_result_conflicts"]}),
         "file_snapshots": check(
             any(p["path"].endswith("/workspace/Check.lean") for p in snapshots)
             and any(p["path"].endswith("wiki/notes.md") for p in snapshots)

@@ -743,6 +743,13 @@ class LaunchGateTests(GateFixture):
         self.write("runtime-e2e", {"all_required_passed": True, "image_ids": {"agent": agent, "lean": lean},
                                    "checks": checks}, NOW - datetime.timedelta(minutes=5))
         self.assertBlocked(self.evaluate(), "runtime-e2e", "truncated_tool_call_not_executed_and_session_continues")
+        # Legacy evidence without the replay-consistency check cannot pass,
+        # even if its aggregate boolean claims every required check passed.
+        checks = e2e_checks()
+        del checks["inspect_tool_result_replays_consistent"]
+        self.write("runtime-e2e", {"all_required_passed": True, "image_ids": {"agent": agent, "lean": lean},
+                                   "checks": checks}, NOW - datetime.timedelta(minutes=4))
+        self.assertBlocked(self.evaluate(), "runtime-e2e", "inspect_tool_result_replays_consistent")
         # A check the record marked optional still has to pass when the gate names it.
         self.write("runtime-e2e", {"all_required_passed": True, "image_ids": {"agent": agent, "lean": lean},
                                    "checks": e2e_checks(sandbox_file_outside_root_rejected={
