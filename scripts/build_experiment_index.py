@@ -20,7 +20,7 @@ def build(runs, hosted=False):
     runs = Path(runs).resolve()
     runs.mkdir(parents=True, exist_ok=True)
     entries, warnings = [], []
-    for path in sorted(runs.glob('*/results.json'), reverse=True):
+    for path in sorted(runs.glob('*/results.json')):
         if path.is_symlink() or path.parent.is_symlink():
             warnings.append(f'Skipped linked run: {path.parent.name}')
             continue
@@ -53,6 +53,8 @@ def build(runs, hosted=False):
             entries.append(entry)
         except (ValueError, KeyError, TypeError, OSError) as error:
             warnings.append(f'{path.parent.name}: {type(error).__name__}')
+    entries.sort(key=lambda e: (datetime.datetime.fromisoformat(
+        e['start_utc'].replace('Z', '+00:00')).timestamp(), e['run']))
     esc = html.escape
     rows = []
     for e in entries:
