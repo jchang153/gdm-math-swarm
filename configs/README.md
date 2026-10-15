@@ -155,7 +155,7 @@ Besides the evidence gates, `research_swarm.launch_gates` checks the config itse
 - **`runtime-e2e` and `runtime-isolation`:** named check keys must be present and passed (`REQUIRED_EVIDENCE_CHECKS`; per-agent `ISOLATION_AGENT_CHECKS` for at least two agents). This means a record from an older script version cannot satisfy the gate. The e2e list includes `background_lean_killed_at_120s`, which an offline rehearsal or `--skip-background-lean-check` records as skipped, and both lists include `compose_matches_fingerprint`; the per-agent list includes `cgroup_limits_match_compose`.
 - **`evaluator`:** the record must also pass `evaluator.validation_status()`, which checks the fixture manifest, pins, seccomp profile and comparator image. It must also contain a passing self-comparison for every pilot template, plus the answer bridge for answer-based tasks (`scripts/validate_evaluator.py --pilot-self-compare`).
 
-### Fresh baseline repetition, October 15, 2026
+### First fresh baseline repetition, October 15, 2026 (historical)
 
 `max_pilot_usd` is now the cumulative shared ledger ceiling, $119.636804044:
 the original pilot settled $19.636804044 and the user approved an additional
@@ -168,3 +168,17 @@ new spending all block launch. The unused $0.363195956 from the original $20 is
 already included in the new total remaining $100, not added on top. Analysis and
 compatibility caps remain separate $5 and $2. `paid_launch_enabled` stays false
 until the integrator completes the approved run's checks.
+
+### Fresh 8 GiB baseline, October 15, 2026
+
+The user authorized `agent_memory: "8g"` and another fresh $100 shared allowance.
+The cumulative ledger cap is $208.055621674: prior settled $105.727998474 plus
+preserved uncertain reservations $2.3276232 plus the new $100. Launch metadata
+binds `pilot_prior_settled_usd`, `pilot_prior_held_usd`,
+`pilot_prior_committed_usd` ($108.055621674), `pilot_prior_uncertain_requests` (7)
+and `pilot_additional_allowance_usd` (100). Existing request history and the audited
+cap-change chain must match; no reservation is silently reconciled or released.
+The unused allowance from the stopped run is absorbed into this new ceiling,
+rather than added to the new run's $100. Fresh runtime, isolation and capacity
+evidence at 8 GiB are required. All other experiment and judge settings remain
+unchanged, and paid launch stays disabled until full preflight passes.

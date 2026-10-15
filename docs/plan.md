@@ -1,5 +1,34 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Fresh 8 GiB baseline authorized, October 15, 2026
+
+After reviewing the stopped run's memory failures, the user explicitly authorized
+raising each agent container from 2 GiB to 8 GiB and rerunning with the same shared
+$100 model allowance, including setup, launch, monitoring, unpaid evaluation,
+private publication and idle-VM shutdown without further routine approvals.
+This authorizes one fresh run with the same 20 peers, fixed 14 tasks, balanced
+personas/seed, 90-minute maximum, model/provider/reasoning settings, judge limits,
+network isolation, spontaneous baseline and no seeded hints. Fresh workspaces and
+conference state are mandatory; do not resume the interrupted run.
+
+Preserve the original authoritative ledger: $105.727998474 cumulative settled,
+$2.3276232 held across seven uncertain requests, zero reserved/in-flight requests,
+no violations, prior ceiling $119.636804044. Keep every uncertain reservation intact.
+An audited raise to $208.055621674 gives exactly $100 available beyond the prior
+$108.055621674 committed amount. This replaces the unused prior-run allowance,
+rather than silently adding that remainder to the new run's $100. Bind launch to
+the exact prior settled, held and committed amounts and the original cap-change
+history; never replace the ledger, fabricate billing evidence or release holds.
+Analysis ($5) and cumulative compatibility ($2) remain unchanged; no paid model
+analysis or additional paid compatibility check is needed for a memory-only change
+unless a material integration issue is discovered. The unlimited provider-key
+exception remains limited to the provider cap; the shared ledger stays enforced.
+
+Keep paid launch disabled while regenerating runtime, isolation and capacity
+evidence at 8 GiB. Existing model integration evidence remains applicable when
+the underlying validated runtime/provider code and images are unchanged. Record
+all new evidence and launch preflight before the one authorized paid start.
+
 ## Early termination authorized, October 15, 2026
 
 The user requested stopping `baseline100-20261015T191545Z` early and publishing

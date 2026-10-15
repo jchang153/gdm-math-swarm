@@ -168,8 +168,8 @@ class BudgetTests(unittest.TestCase):
         self.historical_caps.stop()
         with tempfile.TemporaryDirectory() as folder:
             snap=BudgetLedger(Path(folder)/"cost.sqlite").snapshot()
-            self.assertEqual({k:v["cap_usd"] for k,v in snap.items()},{"pilot":"119.636804044","analysis":"5","compatibility":"2"})
-            self.assertEqual(DEFAULT_CAPS,{"pilot":"119.636804044","analysis":5,"compatibility":2})
+            self.assertEqual({k:v["cap_usd"] for k,v in snap.items()},{"pilot":"208.055621674","analysis":"5","compatibility":"2"})
+            self.assertEqual(DEFAULT_CAPS,{"pilot":"208.055621674","analysis":5,"compatibility":2})
     def test_default_ledger_path_outside_runs(self):
         path=DEFAULT_LEDGER_PATH(Path("/repo"))
         self.assertEqual(path,Path("/repo/state/budget.sqlite"))
@@ -221,6 +221,11 @@ class BudgetTests(unittest.TestCase):
 
 
 class RepeatBudgetTests(unittest.TestCase):
+    def setUp(self):
+        caps = mock.patch.dict(DEFAULT_CAPS, {"pilot":"119.636804044","analysis":5,"compatibility":2}, clear=True)
+        caps.start()
+        self.addCleanup(caps.stop)
+
     def test_additional_hundred_preserves_original_requests_and_caps(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "budget.sqlite"
@@ -258,3 +263,64 @@ class RepeatBudgetTests(unittest.TestCase):
                     raise_cap(path, "pilot", "119.636804044", "User approved")
                 self.assertEqual(read_snapshot(path)["pilot"]["cap_usd"], "20")
                 self.assertEqual(cap_changes(path), [])
+
+
+class EightGiBBudgetTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.path = Path(self.folder.name) / "budget.sqlite"
+        old = BudgetLedger(self.path, {"pilot":20,"analysis":5,"compatibility":2})
+        old.settle(old.reserve("pilot", "first", 20), "19.636804044")
+        raise_cap(self.path, "pilot", "119.636804044", "First repeat approved")
+        old = BudgetLedger(self.path, {"pilot":"119.636804044","analysis":5,"compatibility":2})
+        old.settle(old.reserve("pilot", "second", 90), "86.091194430")
+        for amount in [".3"] * 6 + [".5276232"]:
+            old.settle(old.reserve("pilot", "uncertain", amount), None)
+        from research_swarm.budget import _pilot_calls_sha256, _read_only
+        with closing(_read_only(self.path)) as db:
+            digest = _pilot_calls_sha256(db)
+        patch = mock.patch("research_swarm.budget.EIGHT_GIB_PRIOR_CALLS_SHA256", digest)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_preserves_all_calls_and_holds_and_admits_exactly_hundred(self):
+        before = list_requests(self.path, states=("settled", "uncertain"))
+        raise_cap(self.path, "pilot", "208.055621674", "User authorized 8 GiB fresh $100 baseline")
+        self.assertEqual(before, list_requests(self.path, states=("settled", "uncertain")))
+        current = BudgetLedger(self.path)
+        snapshot = current.snapshot()["pilot"]
+        self.assertEqual((snapshot["settled_usd"], snapshot["held_usd"], snapshot["remaining_usd"]),
+                         ("105.727998474", "2.3276232", "100"))
+        self.assertEqual(snapshot["uncertain_requests"], 7)
+        with self.assertRaises(BudgetExceeded):
+            current.reserve("pilot", "third", "100.000000001")
+        current.reserve("pilot", "third", 100)
+        with self.assertRaises(BudgetExceeded):
+            current.reserve("pilot", "third", ".000000001")
+        self.assertEqual(len(cap_changes(self.path)), 2)
+        with self.assertRaises(ValueError):
+            raise_cap(self.path, "pilot", "208.055621674", "Repeat")
+
+    def test_refuses_any_changed_prior_request_or_audit_history(self):
+        cases = ["UPDATE calls SET agent='changed' WHERE agent='first'",
+                 "UPDATE calls SET reserved=reserved+1 WHERE agent='uncertain'",
+                 "UPDATE calls SET state='reserved' WHERE agent='uncertain'",
+                 "DELETE FROM calls WHERE agent='first'",
+                 "DELETE FROM cap_changes",
+                 "UPDATE cap_changes SET previous_cap=21000000000 WHERE scope='pilot'"]
+        original = self.path.read_bytes()
+        for sql in cases:
+            with self.subTest(sql=sql):
+                self.path.write_bytes(original)
+                with sqlite3.connect(self.path) as db:
+                    db.execute(sql)
+                with self.assertRaises(ValueError):
+                    raise_cap(self.path, "pilot", "208.055621674", "User authorized")
+                self.assertEqual(read_snapshot(self.path)["pilot"]["cap_usd"], "119.636804044")
+
+    def test_direct_raise_from_original_or_replacement_is_refused(self):
+        replacement = Path(self.folder.name) / "replacement.sqlite"
+        BudgetLedger(replacement, {"pilot":20,"analysis":5,"compatibility":2})
+        with self.assertRaises(ValueError):
+            raise_cap(replacement, "pilot", "208.055621674", "User authorized")

@@ -48,6 +48,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, INITIAL_PILOT_SETTLED_USD, REPEAT_PILOT_ALLOWANCE_USD,
+                     EIGHT_GIB_CAP_USD, EIGHT_GIB_PRIOR_SETTLED_USD, EIGHT_GIB_PRIOR_HELD_USD,
+                     EIGHT_GIB_PRIOR_COMMITTED_USD, eight_gib_prior_problems,
                      LEGACY_LEDGER_RELATIVE, UNRESOLVED_STATES, list_requests,
                      read_snapshot)
 from .provider import CONFIG_OVERRIDABLE, MODEL_ID, frozen_fields, settings_from_config, validate_catalog
@@ -745,31 +747,44 @@ class _Gates:
                 problems.append(f"ledger {scope} cap {data['cap_usd']} differs from the plan (never lowered)")
         pilot = (snapshot or {}).get("pilot")
         if pilot:
-            if pilot["unresolved_requests"]:
+            if pilot["unresolved_requests"] and Decimal(str(DEFAULT_CAPS["pilot"])) != Decimal(EIGHT_GIB_CAP_USD):
                 problems.append(f"{pilot['unresolved_requests']} unresolved pilot hold(s); reconcile first "
                                 "(scripts/reconcile_ledger.py)")
             if pilot["violation"]:
                 problems.append("pilot scope has an unacknowledged estimate_violation")
             if Decimal(pilot["remaining_usd"]) <= 0:
                 problems.append("no remaining pilot allowance")
-        prior = self.config.get("pilot_prior_settled_usd")
-        if Decimal(str(DEFAULT_CAPS["pilot"])) == Decimal("119.636804044") and prior is None:
-            problems.append("repeat approval requires pilot_prior_settled_usd and pilot_additional_allowance_usd")
-        if prior is not None:
-            if (not pilot or Decimal(pilot["settled_usd"]) != Decimal(str(prior))
-                    or not pilot["cap_raises"]):
-                problems.append("repeat requires the existing cumulative pilot ledger, prior spending, "
-                                "and audited cap raise; never create a replacement ledger")
-            additional = self.config.get("pilot_additional_allowance_usd")
-            if (str(prior) != INITIAL_PILOT_SETTLED_USD or str(additional) != REPEAT_PILOT_ALLOWANCE_USD):
-                problems.append("repeat budget metadata differs from the approved prior spending and additional $100")
-            if (additional is None or Decimal(str(prior)) + Decimal(str(additional))
-                    != Decimal(str(DEFAULT_CAPS["pilot"]))):
-                problems.append("repeat prior spending plus additional allowance differs from approved cumulative cap")
+        if Decimal(str(DEFAULT_CAPS["pilot"])) == Decimal(EIGHT_GIB_CAP_USD):
+            approved_metadata = {
+                "pilot_prior_settled_usd": EIGHT_GIB_PRIOR_SETTLED_USD,
+                "pilot_prior_held_usd": EIGHT_GIB_PRIOR_HELD_USD,
+                "pilot_prior_committed_usd": EIGHT_GIB_PRIOR_COMMITTED_USD,
+                "pilot_additional_allowance_usd": REPEAT_PILOT_ALLOWANCE_USD,
+                "pilot_prior_uncertain_requests": "7",
+            }
+            if any(str(self.config.get(key)) != value for key, value in approved_metadata.items()):
+                problems.append("8 GiB repeat budget metadata differs from the exact approved prior settled, held, "
+                                "committed and additional $100 amounts")
+            problems.extend(eight_gib_prior_problems(ledger_path))
+        else:
+            prior = self.config.get("pilot_prior_settled_usd")
+            if Decimal(str(DEFAULT_CAPS["pilot"])) == Decimal("119.636804044") and prior is None:
+                problems.append("repeat approval requires pilot_prior_settled_usd and pilot_additional_allowance_usd")
+            if prior is not None:
+                if (not pilot or Decimal(pilot["settled_usd"]) != Decimal(str(prior))
+                        or not pilot["cap_raises"]):
+                    problems.append("repeat requires the existing cumulative pilot ledger, prior spending, "
+                                    "and audited cap raise; never create a replacement ledger")
+                additional = self.config.get("pilot_additional_allowance_usd")
+                if (str(prior) != INITIAL_PILOT_SETTLED_USD or str(additional) != REPEAT_PILOT_ALLOWANCE_USD):
+                    problems.append("repeat budget metadata differs from the approved prior spending and additional $100")
+                if (additional is None or Decimal(str(prior)) + Decimal(str(additional))
+                        != Decimal(str(DEFAULT_CAPS["pilot"]))):
+                    problems.append("repeat prior spending plus additional allowance differs from approved cumulative cap")
         remaining = pilot["remaining_usd"] if pilot else str(DEFAULT_CAPS["pilot"])
         self.add("ledger", not problems, "; ".join(problems) or (
             "no prior ledger; it will be created with DEFAULT_CAPS" if snapshot is None else
-            "no unresolved pilot holds or violations"), ledger_path if snapshot is not None else None,
+            "approved prior holds preserved; no new in-flight calls or violations"), ledger_path if snapshot is not None else None,
             path=self.rel(ledger_path), exists=snapshot is not None, pilot_remaining_usd=remaining)
         return snapshot, remaining
 
