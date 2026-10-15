@@ -228,10 +228,142 @@ class MountAndSocketTests(unittest.TestCase):
         mounts = namespace["parse_mountinfo"](LINUX_MOUNTINFO + INJECTED["named_volume"] + "\n")
         self.assertEqual([m["mount_point"] for m in namespace["unexpected_mounts"](mounts)], ["/workspace"])
         self.assertIn('os.walk("/")', script)
-        self.assertIn("/var/tmp/sandbox-services/", script)
+        self.assertIn('out["socket_checks"] = [socket_probe(p) for p in sorted(sockets)]', script)
+        self.assertNotIn("ALLOWED_SOCKET_PREFIXES", script)
+
+    def test_merged_usr_init_is_readonly_and_has_exact_source(self):
+        original = "/usr/bin/docker-init /sbin/docker-init ro,relatime"
+        merged = "/usr/libexec/docker/docker-init /usr/sbin/docker-init ro,relatime"
+        self.assertEqual(iso.unexpected_mounts(iso.parse_mountinfo(LINUX_MOUNTINFO.replace(original, merged))), [])
+        for rejected in (merged.replace(" ro,", " rw,"), merged.replace("/usr/libexec/docker/", "/tmp/"),
+                         merged.replace("/usr/sbin/docker-init", "/tmp/docker-init")):
+            with self.subTest(rejected=rejected):
+                self.assertEqual(len(iso.unexpected_mounts(iso.parse_mountinfo(
+                    LINUX_MOUNTINFO.replace(original, rejected)))), 1)
+
+    @staticmethod
+    def socket_evidence(native=False):
+        return {"path": "/tmp/cc-socks/590.sock" if native else iso.INSPECT_SOCKET,
+                "reply": "TimeoutError" if native else "http_reply",
+                "socket_is_socket": True, "parents_verified": True, "socket_unchanged": True,
+                "same_namespaces": True, "same_executable_inode": True, "executable_is_regular": True,
+                "socket_uid": 1000, "socket_gid": 1000, "peer": {"pid": 590, "uid": 1000, "gid": 1000},
+                "executable": iso.CLAUDE_EXECUTABLE if native else iso.INSPECT_EXECUTABLE,
+                "executable_sha256": "pinned-inspect", "immutable_claude_install": True,
+                "process_status": dict(CLEAN_STATUS, Uid="1000 1000 1000 1000", Gid="1000 1000 1000 1000")}
+
+    def test_only_exact_verified_framework_sockets_are_accepted(self):
+        for native in (False, True):
+            evidence = self.socket_evidence(native)
+            self.assertIsNone(iso.socket_problem(evidence, ["pinned-inspect"]))
+        native = self.socket_evidence(True)
+        native["path"] = "/tmp/cc-socks-1000/590.sock"
+        self.assertIsNone(iso.socket_problem(native, ["pinned-inspect"]))
+        inspect = self.socket_evidence()
+        inspect["executable_sha256"] = "not-the-pinned-bundle"
+        self.assertTrue(iso.socket_problem(inspect, ["pinned-inspect"]))
+
+    def test_docker_api_fails_including_every_formerly_exempt_directory(self):
+        for path in (iso.INSPECT_SOCKET, "/tmp/cc-socks/590.sock", "/var/tmp/sandbox-services/docker.sock"):
+            evidence = self.socket_evidence(path.startswith("/tmp/"))
+            evidence.update(path=path, reply="docker_api")
+            self.assertEqual(iso.socket_problem(evidence, ["pinned-inspect"]), "Docker API response")
+
+    def test_socket_paths_cannot_replace_authenticated_identity(self):
+        for native in (False, True):
+            base = self.socket_evidence(native)
+            mutations = {"missing_peer": {"peer": {}}, "host_peer": {"same_namespaces": False},
+                         "unreadable_peer": {"same_executable_inode": False},
+                         "socket_replaced": {"socket_unchanged": False},
+                         "symlink_parent": {"parents_verified": False},
+                         "socket_other_uid": {"socket_uid": 0}, "socket_other_gid": {"socket_gid": 0},
+                         "peer_other_uid": {"peer": {"pid": 590, "uid": 0, "gid": 1000}},
+                         "arbitrary_binary": {"executable": "/tmp/claude"},
+                         "elevated_caps": {"process_status": dict(base["process_status"], CapEff="0000000000000001")}}
+            for label, update in mutations.items():
+                with self.subTest(native=native, label=label):
+                    self.assertTrue(iso.socket_problem(dict(base, **update), ["pinned-inspect"]))
+        base = self.socket_evidence(True)
+        for update in ({"path": "/tmp/cc-socks/591.sock"}, {"path": "/tmp/cc-socks/590.sock.extra"},
+                       {"path": "/var/tmp/sandbox-services/socket"}, {"immutable_claude_install": False}):
+            self.assertTrue(iso.socket_problem(dict(base, **update), ["pinned-inspect"]))
+
+    def test_missing_identity_fields_fail_closed(self):
+        for key in self.socket_evidence(True):
+            if key in ("path", "reply", "executable_sha256"):
+                continue
+            evidence = self.socket_evidence(True)
+            del evidence[key]
+            with self.subTest(key=key):
+                self.assertTrue(iso.socket_problem(evidence, ["pinned-inspect"]))
+
+    def test_socket_collector_authenticates_peer_and_still_pings(self):
+        import socket
+        import stat
+        import struct
+
+        path = "/tmp/cc-socks/590.sock"
+        status = dict(CLEAN_STATUS, Uid="1000 1000 1000 1000", Gid="1000 1000 1000 1000")
+        stream = mock.MagicMock()
+        stream.getsockopt.return_value = struct.pack("3i", 590, 1000, 1000)
+        stream.recv.side_effect = TimeoutError
+        executable = types.SimpleNamespace(st_uid=0, st_gid=0, st_mode=stat.S_IFREG | 0o755, st_dev=10, st_ino=20)
+
+        def lstat(target):
+            if target == path:
+                return types.SimpleNamespace(st_uid=1000, st_gid=1000, st_mode=stat.S_IFSOCK | 0o600,
+                                             st_dev=10, st_ino=30)
+            if target == iso.CLAUDE_EXECUTABLE:
+                return executable
+            return types.SimpleNamespace(st_uid=0 if target != "/tmp/cc-socks" else 1000, st_gid=0,
+                                         st_mode=stat.S_IFDIR | (0o1777 if target == "/tmp" else 0o755))
+
+        def readlink(target):
+            return iso.CLAUDE_EXECUTABLE if target == "/proc/590/exe" else "same-namespace"
+
+        with mock.patch.object(socket, "socket", return_value=stream), \
+                mock.patch.object(socket, "SO_PEERCRED", 17, create=True), \
+                mock.patch.object(os, "lstat", side_effect=lstat), \
+                mock.patch.object(os, "stat", return_value=executable), \
+                mock.patch.object(os, "readlink", side_effect=readlink), \
+                mock.patch.object(os.path, "realpath", return_value=iso.CLAUDE_EXECUTABLE), \
+                mock.patch("builtins.open", mock.mock_open(read_data="\n".join(f"{k}: {v}" for k, v in status.items()))):
+            evidence = iso.socket_probe(path)
+        self.assertEqual(evidence["reply"], "TimeoutError")
+        self.assertEqual(evidence["peer"], {"pid": 590, "uid": 1000, "gid": 1000})
+        self.assertIsNone(iso.socket_problem(evidence, ["pinned-inspect"]))
+        stream.getsockopt.assert_called_once_with(socket.SOL_SOCKET, 17, 12)
+        stream.sendall.assert_called_once_with(b"GET /_ping HTTP/1.0\r\nHost: docker\r\n\r\n")
+        stream.close.assert_called_once()
+
+    def test_protocol_probe_runs_even_when_peer_executable_is_unreadable(self):
+        import socket
+        import stat
+        import struct
+
+        stream = mock.MagicMock()
+        stream.getsockopt.return_value = struct.pack("3i", 590, 1000, 1000)
+        stream.recv.return_value = b"HTTP/1.0 200 OK\r\napi-version: 1.54\r\n\r\nOK"
+        info = types.SimpleNamespace(st_uid=1000, st_gid=1000, st_mode=stat.S_IFDIR | stat.S_IFSOCK | 0o700,
+                                     st_dev=10, st_ino=20)
+        with mock.patch.object(socket, "socket", return_value=stream), \
+                mock.patch.object(socket, "SO_PEERCRED", 17, create=True), \
+                mock.patch.object(os, "lstat", return_value=info), \
+                mock.patch.object(os, "readlink", side_effect=PermissionError):
+            evidence = iso.socket_probe("/var/tmp/sandbox-services/relocated.sock")
+        self.assertEqual(evidence["identity_error"], "PermissionError")
+        self.assertEqual(evidence["reply"], "docker_api")
+        self.assertEqual(iso.socket_problem(evidence, []), "Docker API response")
+        stream.sendall.assert_called_once()
+
+    def test_pinned_inspect_hashes_cover_both_architectures(self):
+        hashes = iso.inspect_launcher_hashes()
+        self.assertEqual(len(set(hashes)), 2)
+        self.assertTrue(all(re.fullmatch("[0-9a-f]{64}", digest) for digest in hashes))
 
     def test_socket_env_and_mount_problems(self):
         clean = {"sockets": {"/var/run/docker.sock": False}, "unexpected_sockets": [], "docker_env": {},
+                 "socket_files": [], "socket_checks": [],
                  "docker_host_env": None, "mounts": iso.parse_mountinfo(LINUX_MOUNTINFO), "unexpected_mounts": []}
         self.assertEqual(iso.socket_and_mount_problems(clean), [])
         relocated = dict(clean, unexpected_sockets=[{"path": "/tmp/d.sock", "reply": "docker_api"}])
@@ -239,6 +371,21 @@ class MountAndSocketTests(unittest.TestCase):
         env = dict(clean, docker_env={"DOCKER_HOST": ["/proc/42/environ"]})
         self.assertTrue(iso.socket_and_mount_problems(env))
         self.assertTrue(iso.socket_and_mount_problems({k: v for k, v in clean.items() if k != "unexpected_mounts"}))
+
+    def test_socket_identity_reports_have_complete_unique_coverage(self):
+        native = self.socket_evidence(True)
+        clean = {"sockets": {}, "unexpected_sockets": [], "socket_files": [native["path"]],
+                 "socket_checks": [native], "docker_env": {}, "docker_host_env": None,
+                 "mounts": iso.parse_mountinfo(LINUX_MOUNTINFO), "unexpected_mounts": []}
+        with mock.patch.object(iso, "inspect_launcher_hashes", return_value=["pinned-inspect"]):
+            self.assertEqual(iso.socket_and_mount_problems(clean), [])
+            for change in ({"socket_checks": []}, {"socket_files": []},
+                           {"socket_checks": [native, native]}, {"socket_files": [native["path"]] * 2},
+                           {"socket_checks": [{"path": native["path"]}]}):
+                with self.subTest(change=change):
+                    self.assertTrue(iso.socket_and_mount_problems(dict(clean, **change)))
+            for missing in ("socket_checks", "socket_files"):
+                self.assertTrue(iso.socket_and_mount_problems({k: v for k, v in clean.items() if k != missing}))
 
     def test_scans_do_not_stop_at_mount_boundaries(self):
         for shell in (iso.image_scan_shell(["FormalConjectures/ErdosProblems"]), iso.marker_search_shell("m")):
@@ -262,6 +409,7 @@ class MountAndSocketTests(unittest.TestCase):
                 mounts = iso.parse_mountinfo(text)
                 sockets = [{"path": "/tmp/d.sock", "reply": "PermissionError"}] if label == "leaky" else []
                 fs = {"uid": 1000, "groups": [1000], "sockets": {}, "socket_files": [s["path"] for s in sockets],
+                      "socket_checks": sockets,
                       "unexpected_sockets": sockets, "docker_env": {}, "docker_host_env": None, "mounts": mounts,
                       "unexpected_mounts": iso.unexpected_mounts(mounts), "status": dict(CLEAN_STATUS),
                       "process_status": {"1": dict(CLEAN_STATUS, Name="docker-init")},
