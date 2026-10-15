@@ -1,5 +1,29 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Early termination authorized, October 15, 2026
+
+The user requested stopping `baseline100-20261015T191545Z` early and publishing
+it to the existing private experiment library. The controller received SIGINT at
+20:32:08.950910 UTC (1:32:08 PM PDT), after about 68 minutes, and exited 130 after
+container cleanup. This is a user-requested interruption, not a budget-exhaustion
+boundary. Preserve normal exits, technical memory failures and interrupted peers
+separately; never resume this run or release uncertain billing holds without evidence.
+The original supervisor skips evaluation on exit 130, so the exclusive host-only
+`finish_early_stop.py` worker performs the unpaid serial evaluator, timeline,
+consistent ledger backup and checksummed packaging. A temporary `gdm-results`
+tmux holder keeps the VM available until retrieval; remove that owned holder after
+completion, confirm no other work, stop the VM and verify TERMINATED. All four
+accepted submissions independently passed as genuine against their pinned formal
+statements, including the known Erdős 1092 formal-definition degeneracy. This is
+not an exhaustive behavioral review. The final new-run settled cost is
+$86.091194430, with $2.3276232 held across seven uncertain requests and no in-flight
+requests or budget violations. Cumulative pilot settled cost is $105.727998474;
+the original ledger and all unresolved reservations remain intact. Final peer
+outcomes are ten error exits, four harness-completed sessions and six interrupted
+sessions. Both result archives passed SHA-256 verification after retrieval; the
+consistent ledger backup and host memory-kill logs are local under the run's phase
+directory. The idle VM was stopped and independently verified TERMINATED.
+
 ## Additional baseline run authorized, October 15, 2026
 
 After the initial pilot and archive publication, the user approved reviewing the
