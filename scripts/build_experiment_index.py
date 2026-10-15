@@ -45,6 +45,7 @@ def build(runs, hosted=False):
                      'task_count': config.get('task_count'), 'agent_exits': data['agent_exits'],
                      'links': {}}
             for name, target in [('Report', 'results.html'), ('Transcripts', 'transcripts/index.html'),
+                                 ('Conference', 'conference-view/index.html'),
                                  ('Inspect View', 'inspect-view/index.html'),
                                  ('Timeline', 'analysis/timeline.md'), ('Inspect logs', 'inspect/')]:
                 if (path.parent / target).exists():

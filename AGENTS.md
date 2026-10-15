@@ -42,6 +42,9 @@ The user also authorized a private shared HF library at
 https://huggingface.co/spaces/jchang153/gdm-math-swarm-experiments.
 Follow docs/experiment-library.md for preparation, privacy and guarded updates;
 preserve other collaborators' runs and never upload host credentials or auth caches.
+Use scripts/export_conference.py --run-dir runs/<run-id> to browse saved board
+posts, DMs, library revisions, judging, organizer feedback, captured private files
+and the existing activity timeline. Keep empty sections and capture limits explicit.
 
 Freeze the 14 tasks for all 20-agent experiments. Deliver their exact names, pinned
 Lean declarations, and verified online descriptions/known solutions after selection.

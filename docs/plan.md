@@ -437,3 +437,13 @@ Publication completed privately at HF revision
 representative downloads matched, the static app returned HTTP 200 and the native
 Inspect log returned valid HTTP 206 byte-range content. The initial monolithic
 upload timed out; sequential guarded batches completed. Local originals remain.
+
+The user requested adding a clean conference browser to the same private library.
+`scripts/export_conference.py` renders saved board posts, DMs, library revisions,
+submissions and judge feedback, organizer feedback, captured private working-file
+versions and the existing timeline. The initial pilot has three posts, three shared
+proof artifacts, 40 submissions, zero saved DMs/organizer feedback, 160 captured
+workspace working files/notes and 5296 timeline entries (1116 explicitly untimed).
+All 20 captured RESEARCH.md files are empty. Do not infer unrecorded wiki edits or
+private communication from empty sections. No experimental behavior is changed,
+and no model inference is used for this view.
