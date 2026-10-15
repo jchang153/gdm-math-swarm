@@ -110,3 +110,16 @@ The browser tool blocked a local `file:` preview, so these are source, link and
 hosted-response checks rather than a claim of interactive visual validation.
 Evidence is saved in the ignored `conference-verification.json` beside the initial
 publication verification record.
+
+The user-stopped `baseline100-20261015T191545Z` is also archived privately at
+revision `95e30dad5763bcdc4c9587558f9c9fee0d467c6d`, preserving the first pilot.
+All 3453 staged file hashes matched remote metadata. Seven representative files
+were downloaded and verified; the catalogue, report, conference, transcript and
+Inspect pages returned HTTP 200 with the authored HTML intact after removing only
+the observed HF creator-metadata script. Inspect log byte ranges returned the
+expected HTTP 206 bytes. Verification, privacy-screen records and consistent host
+ledger backups remain under the ignored `runs/phase-b/baseline100-20261015T191545Z/`.
+The report distinguishes four independently verified pinned formal tasks, ten
+technical failures, four normally ended sessions and six user-interrupted sessions.
+New-run settled spending is $86.091194430, with $2.3276232 in seven unresolved
+billing holds. The VM was verified TERMINATED; no paid model analysis was run.
