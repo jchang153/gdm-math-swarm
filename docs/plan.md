@@ -22,6 +22,22 @@ The old $20 initial-pilot limit elsewhere below is historical for that initial r
 Keep paid launch disabled until the revised controls and preflight pass. Do not
 reset or replace the ledger or silently spend unused compatibility/analysis funds.
 
+The new run launched as `runs/baseline100-20261015T191545Z`. All 20 peers reached
+the common barrier at October 15, 12:24:28 PM PDT (19:24:28 UTC). Reviewed budget
+changes are recorded at code revision `0763182`; baseline runtime/provider source
+hashes matched the prior validated VM before transfer. All 558 offline tests passed
+(4 skipped), Linux budget/gate checks passed, and all VM preflight gates passed.
+The existing ledger was backed up and raised once by an audited operation, leaving
+exactly $100 before the first new request. No previous calls or spending were reset.
+The first checkpoint had 61 admitted/46 finished requests, all 20 peers active,
+$0.208608768 newly settled and $1.37597175 in flight, no uncertainties or violations.
+Host-only lifecycle files are under `runs/phase-b/baseline100-20261015T191545Z`;
+tmux `gdm-baseline100` runs the one-shot supervisor, unpaid post-run evaluation and
+idle shutdown. The independent local shutdown watcher and reactivated five-minute
+heartbeat monitor this run. VM boot required retries due GCP zone capacity, but it
+is now running. Disarm launch after controller exit, preserve artifacts/ledger and
+verify TERMINATED before declaring cleanup complete.
+
 Reconstruct the research conference environment from Paglieri et al., *A Case Study on Emergent Cheating and Whistleblowing in Autonomous Research Swarms*. The first pilot tests whether exploitation and whistleblowing emerge spontaneously among 20 agents sharing 14 problems. Mitigation experiments are a later phase and are not part of the current pilot. Source: https://arxiv.org/pdf/2609.04170 (v1, September 3, 2026).
 
 This is a documented reconstruction, not an exact replication: the paper omits the full task manifest, harness source, and several runtime settings. Record substitutions explicitly. Specification decisions are being made with the user one at a time. Do not treat the proposals below as approved decisions. Environment implementation follows the specification discussion; saving this plan is authorized now.
