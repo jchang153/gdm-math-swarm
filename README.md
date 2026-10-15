@@ -25,10 +25,9 @@ the authoritative record of user decisions.
 * **Reviewed:** an independent review (45 findings: 41 confirmed and fixed or documented,
   4 refuted) and a completeness check against every plan decision; see
   [docs/review-2026-10-13.md](docs/review-2026-10-13.md).
-* **Offline-tested:** 512 unit tests run successfully (4 skip on the development Mac: three opt-in
-  real-Lean tests and one Linux-only test), plus 33 analysis tests in `.venv-analysis`
-  (2 of them skip in `.venv`). These use fake compilers and mocked Docker; they do not
-  validate Lean semantics, isolation or capacity.
+* **Offline-tested on the VM:** 513 unit tests run successfully (3 opt-in real-Lean
+  tests skipped), plus 33 analysis tests in `.venv-analysis`. These suites use fake
+  compilers and mocked Docker; real Lean, isolation and capacity checks are separate.
 * **October 14 review fixes:** opaque-aware research proof dependency checking and
   verifier source pinning; stop/cancellation reservation cleanup and dispatch checks;
   preflight-only structural rejection handling with bounded transient retries; capacity
@@ -88,7 +87,7 @@ The project's own scripts disable Inspect's `.env` loading before any evaluation
 All from the repository root.
 
 ```sh
-PYTHONPATH=src .venv/bin/python -m unittest discover -s tests       # offline tests (512, 4 skipped on the Mac)
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests       # offline tests (513, 3 skipped on Linux)
 PYTHONPATH=src .venv-analysis/bin/python -m unittest discover -s research/analysis/tests   # analysis tests (33)
 PYTHONPATH=src .venv/bin/python scripts/preflight.py                # unpaid launch gates + spending checkpoint
 PYTHONPATH=src .venv/bin/python -m research_swarm.keyword_filter FILE.lean   # keyword stage only
