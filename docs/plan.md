@@ -408,3 +408,16 @@ Documentation checked October 13, 2026. These support the implementation approac
 ## Model settings to freeze during integration
 
 Use the selected DeepSeek V4.1 candidate with thinking enabled and high effort where the pinned OpenRouter route supports those controls. DeepSeek thinking-mode documentation lists high as the default and states temperature/frequency/presence penalties have no effect in thinking mode; do not describe an ignored temperature setting as experimental control. Preserve documented sampling defaults and verify effective parameter handling through Inspect and Claude Code. Configure a bounded per-response allowance that includes reasoning, record truncation, and never execute partial tool calls. Verify the actual context/compaction threshold exposed by the bridge rather than assuming the provider maximum is the harness limit. Pin the provider route and avoid silent model/provider substitutions; choose supported request concurrency while preserving 20 independent asynchronous sessions and recording queue delays. Archive actual request settings and provider usage. Reference: https://api-docs.deepseek.com/guides/thinking_mode/ .
+
+## Experiment browsing and archive (October 15, 2026)
+
+The user requested a clean place to revisit each experiment. The local library is
+`runs/index.html`, generated from completed `runs/<run-id>/results.json` reports by
+`scripts/build_experiment_index.py`. It shows run/model/condition, population, duration,
+model spending, distinct independently verified tasks, agent errors, and links to
+reports/transcripts/timelines/raw Inspect logs. `scripts/export_transcripts.py` is the
+reusable, offline HTML renderer for original Inspect messages. Neither exporter is a
+judge or model-judged analysis tool. Archive raw files alongside the derived views.
+The researcher AGENTS.md records rebuilding the index after future run exports.
+Generated views and raw runs remain Git-ignored, local and backed up separately; no
+cloud publication or new experiment was requested or performed.

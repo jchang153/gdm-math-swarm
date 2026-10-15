@@ -13,7 +13,7 @@ exploitation and whistleblowing emerge. There are no mitigations and no exploit 
 the seeded-contagion track is implemented but disabled. [docs/plan.md](docs/plan.md) is
 the authoritative record of user decisions.
 
-## Status (October 14, 2026)
+## Status (October 15, 2026)
 
 * **Implemented:** the frozen dataset and pilot subset, the operational judge (keyword
   filter, source integrity, Lean compilation in networkless containers), conference
@@ -41,16 +41,36 @@ the authoritative record of user decisions.
   failure and all corrections remain in the [setup record](docs/vm-setup-2026-10-14.md).
   The VM is stopped and confirmed `TERMINATED`. Paid compatibility and pilot launches
   retain their approval checkpoints.
-* **Live compatibility passed:** the user-approved Fireworks route serves the same
-  DeepSeek model. A host-side reasoning conversion defect was repaired and verified
-  through the actual Claude Code process; all nine required checks pass, including
-  exact reasoning metadata replay. Total compatibility spending is $0.144114852 of
-  $2, with no unresolved holds. No pilot has run; its $20 allowance and the separate
-  $5 analysis allowance remain untouched. The user confirmed integration and the
-  initial pilot launch, then authorized the main unlimited OpenRouter key with the
-  same shared $20 ledger cap. The exception is prepared in code; automatic review
-  blocked credential-file copying, so private user entry and final VM preflight
-  remain before launch. GCP infrastructure charges are separate.
+* **Initial pilot complete:** Fireworks US compatibility passed all nine required
+  checks; cumulative compatibility cost is $0.250809222. The approved 20-agent pilot
+  ran for 12 minutes 48 seconds and settled at $19.636804044 of its shared $20 cap,
+  with no holds or violations. Four accepted submissions independently verified as
+  genuine, covering three distinct tasks. Nineteen peers stopped at budget admission;
+  one suffered a container-memory-related harness failure. The VM is confirmed
+  `TERMINATED`; the consumed launch flag is disabled. Paid analysis remains $0.
+  See [the outcome record](docs/plan.md#initial-pilot-outcome-october-15-2026).
+
+## Saved experiments
+
+Open [the local experiment library](runs/index.html) after results have been copied
+onto this computer. It links each completed report, agent transcripts, timeline and
+original Inspect logs, with model, population, duration, spending and distinct verified
+task counts. Each run stays together under `runs/<run-id>/`.
+
+Inspect records the original `.eval` logs. The project's HTML exporter is a derived
+view of those messages; it is separate from both the conference judge and the
+independent proof evaluator. Rebuild the offline views with:
+
+```sh
+.venv/bin/python scripts/export_transcripts.py --run-dir runs/<run-id>
+.venv/bin/python scripts/build_experiment_index.py
+```
+
+The index discovers saved `results.json` reports. These commands make no model calls,
+need no Docker and read no credentials. Raw runs and generated views are Git-ignored;
+cloning or pushing the code repository does not transfer or back up experiment data.
+Preserve the full run folder and ledger backup separately. The initial pilot is saved
+both locally and on the stopped VM's persistent disk.
 
 ## Setup
 
