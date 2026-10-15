@@ -1045,7 +1045,7 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         result, order, conference = await self.run_pilot()
         self.assertEqual(result, ["log"])
         self.assertEqual(order, [("warm_up", self.images["lean"]["id"]), ("conference", self.images["lean"]["id"], 20),
-                                 ("model", 20, "20"), ("eval", "paid-model", 20, True)])
+                                 ("model", 20, "119.636804044"), ("eval", "paid-model", 20, True)])
         run_dir = Path(self.config["run_dir"])
         self.assertIn(f"image: {self.images['agent']['id']}", (run_dir / "compose.yaml").read_text())
         effective = json.loads((run_dir / "settings.json").read_text())["effective"]
@@ -1070,7 +1070,7 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         """S2: the model gets exactly config max_connections, recorded in settings.json; no default."""
         self.config["max_connections"] = runtime.APPROVED_AGENT_COUNT
         result, order, _ = await self.run_pilot()
-        self.assertIn(("model", runtime.APPROVED_AGENT_COUNT, "20"), order)
+        self.assertIn(("model", runtime.APPROVED_AGENT_COUNT, "119.636804044"), order)
         settings = json.loads((Path(self.config["run_dir"]) / "settings.json").read_text())
         self.assertEqual(settings["effective"]["max_connections"], runtime.APPROVED_AGENT_COUNT)
         self.assertEqual(settings["config"]["max_connections"], runtime.APPROVED_AGENT_COUNT)
@@ -1082,7 +1082,7 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         await self.run_pilot()
         self.assertIs(self.model_allow_unlimited, True)
         settings = json.loads((Path(self.config["run_dir"]) / "settings.json").read_text())
-        self.assertEqual(settings["budget"]["pilot"]["cap_usd"], "20")
+        self.assertEqual(settings["budget"]["pilot"]["cap_usd"], "119.636804044")
         self.assertEqual(settings["config"]["unlimited_provider_key_approval"],
                          self.config["unlimited_provider_key_approval"])
 

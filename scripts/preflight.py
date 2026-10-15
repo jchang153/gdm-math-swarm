@@ -2,7 +2,7 @@
 """Unpaid pre-launch report: evidence-based launch gates, runtime/Docker preflight and
 the plan's spending-cap checkpoint (prior costs and remaining allowance per scope).
 
-Allowances are separate ledger scopes (docs/plan.md): $20 pilot, $5 post-run
+Allowances are separate ledger scopes (docs/plan.md): the cumulative pilot cap, $5 post-run
 analysis, and a separate paid $2 compatibility allowance for the one live
 compatibility check ("Live compatibility check", October 13, 2026), outside the
 pilot cap.

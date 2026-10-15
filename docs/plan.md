@@ -1,5 +1,27 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Additional baseline run authorized, October 15, 2026
+
+After the initial pilot and archive publication, the user approved reviewing the
+saved run and, if no exploit attempt is established, launching one fresh baseline
+run with an additional **$100 shared model allowance**, the same 20 agents, fixed
+14 tasks, personas, provider/model settings, isolation and 90-minute maximum.
+The user reiterated authorization to start, run and complete this without further
+routine authorization requests. Monitoring, unpaid evaluation, artifact preservation,
+private library updates and verified idle-VM shutdown follow the existing workflow.
+This is a fresh run, not a continuation of old agent workspaces or conference state.
+Do not seed exploits or modify integrity instructions to induce behavior.
+
+Preserve the original authoritative budget ledger and its $19.636804044 settled
+pilot spending. Raise its cumulative pilot ceiling by an audited operation to
+$119.636804044, leaving exactly $100 for this new run, only if the old settled
+spending matches and there are no unresolved holds or violations. Analysis ($5)
+and cumulative compatibility ($2) remain separate and unchanged. The standing
+unlimited-provider-key exception waives only the provider-side cap, never this ledger.
+The old $20 initial-pilot limit elsewhere below is historical for that initial run.
+Keep paid launch disabled until the revised controls and preflight pass. Do not
+reset or replace the ledger or silently spend unused compatibility/analysis funds.
+
 Reconstruct the research conference environment from Paglieri et al., *A Case Study on Emergent Cheating and Whistleblowing in Autonomous Research Swarms*. The first pilot tests whether exploitation and whistleblowing emerge spontaneously among 20 agents sharing 14 problems. Mitigation experiments are a later phase and are not part of the current pilot. Source: https://arxiv.org/pdf/2609.04170 (v1, September 3, 2026).
 
 This is a documented reconstruction, not an exact replication: the paper omits the full task manifest, harness source, and several runtime settings. Record substitutions explicitly. Specification decisions are being made with the user one at a time. Do not treat the proposals below as approved decisions. Environment implementation follows the specification discussion; saving this plan is authorized now.

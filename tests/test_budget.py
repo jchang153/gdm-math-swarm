@@ -3,6 +3,7 @@ import multiprocessing
 import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 from contextlib import closing
 from pathlib import Path
 from research_swarm.budget import (BudgetLedger, BudgetExceeded, DEFAULT_CAPS, DEFAULT_LEDGER_PATH, MANUAL_BASIS,
@@ -32,6 +33,12 @@ def _open_worker(path, start, results):
 
 
 class BudgetTests(unittest.TestCase):
+    def setUp(self):
+        # Historical accounting regressions retain the original experiment caps.
+        self.historical_caps = mock.patch.dict(DEFAULT_CAPS, {"pilot":20,"analysis":5,"compatibility":2}, clear=True)
+        self.historical_caps.start()
+        self.addCleanup(self.historical_caps.stop)
+
     def test_concurrent_shared_admission(self):
         with tempfile.TemporaryDirectory() as folder:
             ledger=BudgetLedger(Path(folder)/"cost.sqlite",{"pilot":1})
@@ -158,10 +165,11 @@ class BudgetTests(unittest.TestCase):
             snap=ledger.snapshot()["pilot"]
             self.assertEqual((snap["remaining_usd"],snap["unbilled_error_requests"],snap["unresolved_requests"]),("20",1,0))
     def test_default_caps_follow_latest_decision(self):
+        self.historical_caps.stop()
         with tempfile.TemporaryDirectory() as folder:
             snap=BudgetLedger(Path(folder)/"cost.sqlite").snapshot()
-            self.assertEqual({k:v["cap_usd"] for k,v in snap.items()},{"pilot":"20","analysis":"5","compatibility":"2"})
-            self.assertEqual(DEFAULT_CAPS,{"pilot":20,"analysis":5,"compatibility":2})
+            self.assertEqual({k:v["cap_usd"] for k,v in snap.items()},{"pilot":"119.636804044","analysis":"5","compatibility":"2"})
+            self.assertEqual(DEFAULT_CAPS,{"pilot":"119.636804044","analysis":5,"compatibility":2})
     def test_default_ledger_path_outside_runs(self):
         path=DEFAULT_LEDGER_PATH(Path("/repo"))
         self.assertEqual(path,Path("/repo/state/budget.sqlite"))
@@ -210,3 +218,43 @@ class BudgetTests(unittest.TestCase):
             self.assertIsNone(read_snapshot(path))
             self.assertEqual(list_requests(path),[])
             self.assertFalse(path.exists())
+
+
+class RepeatBudgetTests(unittest.TestCase):
+    def test_additional_hundred_preserves_original_requests_and_caps(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "budget.sqlite"
+            old = BudgetLedger(path, {"pilot":20,"analysis":5,"compatibility":2})
+            request = old.reserve("pilot", "old-run-agent", 20)
+            old.settle(request, "19.636804044")
+            before = list_requests(path, states=("settled",))
+            self.assertEqual([entry["request_id"] for entry in before], [request])
+            with self.assertRaises(ValueError):
+                BudgetLedger(path)  # raising the approved cap is always explicit
+            raise_cap(path, "pilot", "119.636804044", "User approved fresh $100 baseline on 2026-10-15")
+            self.assertEqual(list_requests(path, states=("settled",)), before)
+            current = BudgetLedger(path)
+            snapshot = current.snapshot()
+            self.assertEqual(snapshot["pilot"]["remaining_usd"], "100")
+            self.assertEqual(snapshot["analysis"]["cap_usd"], "5")
+            self.assertEqual(snapshot["compatibility"]["cap_usd"], "2")
+            with self.assertRaises(BudgetExceeded):
+                current.reserve("pilot", "new-run-agent", "100.000000001")
+            current.reserve("pilot", "new-run-agent", "100")
+            with self.assertRaises(BudgetExceeded):
+                current.reserve("pilot", "another-new-agent", "0.000000001")
+            self.assertEqual(current.snapshot()["pilot"]["remaining_usd"], "0")
+            self.assertEqual(cap_changes(path)[0]["previous_cap_usd"], "20")
+
+    def test_repeat_raise_refuses_changed_spending_or_unresolved_calls(self):
+        for spend, hold in (("19.636804043", False), ("19.636804045", False), ("19.636804044", True)):
+            with self.subTest(spend=spend, hold=hold), tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / "budget.sqlite"
+                old = BudgetLedger(path, {"pilot":20,"analysis":5,"compatibility":2})
+                old.settle(old.reserve("pilot", "old", 20), spend)
+                if hold:
+                    old.reserve("pilot", "uncertain", ".1")
+                with self.assertRaises(ValueError):
+                    raise_cap(path, "pilot", "119.636804044", "User approved")
+                self.assertEqual(read_snapshot(path)["pilot"]["cap_usd"], "20")
+                self.assertEqual(cap_changes(path), [])

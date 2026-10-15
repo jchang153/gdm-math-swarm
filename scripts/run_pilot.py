@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pilot launcher. By default it runs the unpaid preflight only and spends nothing.
 
-A PAID launch (20 Claude Code peers on OpenRouter, shared $20 pilot ledger) requires
+A PAID launch (20 Claude Code peers on OpenRouter, shared cumulative pilot ledger) requires
 all of the following, in addition to every launch gate passing (including the
 compatibility evidence from the separate $2 live compatibility check; that check
 spends its own ledger scope, never the pilot's):
