@@ -798,7 +798,7 @@ Consequences:
   runtime warms it before the start barrier (6g, 2 CPUs); a VM or engine restart during a
   run, or memory pressure that evicts the cache, pushes compiles toward the 120 s limit. A
   timeout is never evidence of fraud, but it changes acceptance.
-* Configured memory ceilings at 20 agents: $20 \times 1\,\text{GiB}$ for agents plus
+* Configured memory ceilings at 20 agents: $20 \times 2\,\text{GiB}$ for agents plus
   $N \times 2\,\text{GiB}$ for $N$ concurrent judge containers, alongside the ≈ 6 GB page
   cache. With `judge_max_concurrent: null` (unbounded, as shipped) $N$ is limited only by
   how many submissions arrive at once. The probe's `memory_headroom` check requires the
@@ -807,6 +807,11 @@ Consequences:
   than a live run's, where inference latency spreads compiles out. In the other direction,
   it compiles unmodified templates, and real proofs may compile for longer (the probe
   records both limitations).
+
+The first GCP probe at `1g` per agent caused container memory kills despite ample
+host memory. The user approved `2g` per agent on October 14; runtime, isolation and
+capacity evidence must all be regenerated at this compose setting. Judge limits stay
+at `2g` / 1 CPU / 120 s. See docs/vm-setup-2026-10-14.md for the measurements.
 
 Choosing `judge_max_concurrent`:
 

@@ -100,7 +100,7 @@ separate keys or adjust the limit between the two steps (configs/README.md).
 `agent_count` (preflight requires `runtime.APPROVED_AGENT_COUNT` = 20, a single named
 constant that changes only together with a recorded decision in docs/plan.md),
 `persona_seed` (default 260904170, always written to `settings.json`), `agent_image`,
-`lean_image`, `agent_memory` (`1g`),
+`lean_image`, `agent_memory` (`2g` in the approved pilot; helper default `1g`),
 `agent_cpus`, `judge_max_concurrent`, `judge_memory` (`2g`), `judge_cpus` (1),
 `compilation_timeout_seconds` (120), `startup_timeout_seconds` (600), `max_run_seconds`
 (5400), `post_depletion_seconds` (600), `stop_grace_seconds` (180), `run_dir`,
