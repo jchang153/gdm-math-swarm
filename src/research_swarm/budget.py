@@ -34,7 +34,11 @@ SCALE = Decimal(1_000_000_000)
 # User decisions, October 13, 2026 (docs/plan.md): $20 pilot, $5 analysis, and a
 # separate $2 paid compatibility allowance ("Live compatibility check" supersedes
 # the earlier unpaid-only $0 compatibility cap). All scopes are outside each other.
-DEFAULT_CAPS = {"pilot": 20, "analysis": 5, "compatibility": 2}
+# October 15: a fresh baseline received an ADDITIONAL $100. Preserve the first
+# run's settled spending in the same ledger; this is a cumulative ceiling.
+INITIAL_PILOT_SETTLED_USD = "19.636804044"
+REPEAT_PILOT_ALLOWANCE_USD = "100"
+DEFAULT_CAPS = {"pilot": "119.636804044", "analysis": 5, "compatibility": 2}
 
 # How a settled amount was established. Only these bases release a reservation.
 # ``unbilled_error``: the provider rejected the request before any generation
@@ -210,6 +214,13 @@ def raise_cap(path, scope, new_cap, approval_note):
             raise ValueError(f"Ledger has no {scope} scope; opening BudgetLedger adds it at the approved cap")
         if row[0] >= target:
             raise ValueError(f"{scope} cap is already {usd(row[0])}; caps are never lowered or reset")
+        if scope == "pilot" and target == units("119.636804044"):
+            pilot = _snapshot(db)["pilot"]
+            if (pilot["settled_usd"] != INITIAL_PILOT_SETTLED_USD
+                    or pilot["unresolved_requests"] or pilot["violation"]
+                    or row[0] != units(20)):
+                raise ValueError("The additional $100 requires the original $20 pilot ledger with exactly "
+                                 f"${INITIAL_PILOT_SETTLED_USD} settled and no unresolved holds or violations")
         db.execute("UPDATE scopes SET cap=? WHERE name=?", (target, scope))
         db.execute("INSERT INTO cap_changes (scope,previous_cap,new_cap,note) VALUES (?,?,?,?)",
                    (scope, row[0], target, note))

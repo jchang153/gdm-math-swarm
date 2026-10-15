@@ -212,7 +212,7 @@ class CheckProviderLimitScriptTests(unittest.TestCase):
         self.assertTrue(record["unlimited_key_authorized"])
         self.assertFalse(record["provider_limit_enforced"])
         self.assertIn("no provider cap; shared ledger remains mandatory", record["warnings"])
-        self.assertEqual(self.run_script(dict(GOOD, limit_remaining=21), "--allow-unlimited")[0], 1)
+        self.assertEqual(self.run_script(dict(GOOD, limit_remaining=120), "--allow-unlimited")[0], 1)
 
     def test_unlimited_cli_flag_does_not_bypass_credential_approval(self):
         module = load_script("check_provider_limit")

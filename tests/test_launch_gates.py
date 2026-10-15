@@ -20,7 +20,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from research_swarm import launch_gates
-from research_swarm.budget import BudgetLedger, cap_changes, read_snapshot
+from research_swarm.budget import BudgetLedger, DEFAULT_CAPS, cap_changes, raise_cap, read_snapshot
 from research_swarm.dataset import FrozenDataset
 from research_swarm.provider import MODEL_ID, ProviderSettings, frozen_fields, settings_from_config
 
@@ -42,7 +42,9 @@ def load_script(name):
 
 def pilot_config(**overrides):
     config = json.loads((ROOT / "configs" / "pilot.json").read_text())
-    config.update({"verified_integration": True, "paid_launch_enabled": True,
+    config.pop("pilot_prior_settled_usd", None)
+    config.pop("pilot_additional_allowance_usd", None)
+    config.update({"max_pilot_usd": 20, "verified_integration": True, "paid_launch_enabled": True,
                    "allow_unlimited_provider_key": False, **overrides})
     return config
 
@@ -94,6 +96,10 @@ def pilot_self_compare(skip=()):
 
 class GateFixture(unittest.TestCase):
     def setUp(self):
+        # Existing evidence/provider tests describe the historical $20 pilot.
+        caps = mock.patch.dict(DEFAULT_CAPS, {"pilot":20,"analysis":5,"compatibility":2}, clear=True)
+        caps.start()
+        self.addCleanup(caps.stop)
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.tmp = Path(folder.name)
@@ -468,6 +474,28 @@ class LaunchGateTests(GateFixture):
         self.legacy.parent.mkdir(parents=True)
         self.legacy.write_bytes(b"")
         self.assertBlocked(self.evaluate(), "ledger", "legacy ledger")
+
+    def test_repeat_ledger_requires_preserved_spending_and_audited_raise(self):
+        self.ledger.unlink()
+        config = pilot_config(max_pilot_usd="119.636804044", pilot_prior_settled_usd="19.636804044",
+                              pilot_additional_allowance_usd="100")
+        with mock.patch.dict(DEFAULT_CAPS, {"pilot":"119.636804044","analysis":5,"compatibility":2}, clear=True):
+            self.assertBlocked(self.evaluate(config), "ledger", "existing cumulative pilot ledger")
+            without_prior = dict(config)
+            del without_prior["pilot_prior_settled_usd"]
+            self.assertBlocked(self.evaluate(without_prior), "ledger", "repeat approval requires")
+            old = BudgetLedger(self.ledger, {"pilot":20,"analysis":5,"compatibility":2})
+            old.settle(old.reserve("pilot", "old-run", 20), "19.636804044")
+            self.assertBlocked(self.evaluate(config), "ledger", "audited cap raise")
+            raise_cap(self.ledger, "pilot", "119.636804044", "User approved fresh $100 baseline")
+            result = self.evaluate(config)
+            self.assertTrue(result["evidence"]["ledger"]["passed"], result["evidence"]["ledger"])
+            self.assertEqual(result["evidence"]["ledger"]["pilot_remaining_usd"], "100")
+            current = BudgetLedger(self.ledger)
+            call = current.reserve("pilot", "new-run", 1)
+            self.assertBlocked(self.evaluate(config), "ledger", "unresolved")
+            current.settle(call, ".5")
+            self.assertBlocked(self.evaluate(config), "ledger", "prior spending")
 
     def test_ledger_with_old_caps_blocks(self):
         self.ledger.unlink()
