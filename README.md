@@ -26,8 +26,7 @@ the authoritative record of user decisions.
   4 refuted) and a completeness check against every plan decision; see
   [docs/review-2026-10-13.md](docs/review-2026-10-13.md).
 * **Offline-tested on the VM:** 531 unit tests run successfully (3 opt-in real-Lean
-  tests skipped), plus an earlier 33-test analysis run in `.venv-analysis` (the updated 37-test
-  suite is awaiting Linux verification). These suites use fake
+  tests skipped), plus all 37 analysis tests in `.venv-analysis`. These suites use fake
   compilers and mocked Docker; real Lean, isolation and capacity checks are separate.
 * **October 14 review fixes:** opaque-aware research proof dependency checking and
   verifier source pinning; stop/cancellation reservation cleanup and dispatch checks;
