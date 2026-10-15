@@ -266,7 +266,7 @@ wrapper preserves a consistent ledger backup and powers off only if no other
 containers, tmux sessions, or user jobs need the VM. A local watcher verifies
 the eventual GCP `TERMINATED` state.
 
-The pilot is now running as `runs/pilot-20261015T170231Z` on `collab-vm-1`.
+The initial pilot ran as `runs/pilot-20261015T170231Z` on `collab-vm-1`.
 All 20 peers reached the common start at October 15, 10:03:06 AM PDT
 (17:03:06 UTC). The first observed checkpoint had 53 admitted requests and
 43 completed requests. The controller runs in tmux session `gdm-pilot`; its
@@ -275,9 +275,57 @@ and consistent before/after ledger backups live under
 `runs/phase-b/pilot-launch-20261015/` on the VM. The wrapper powers off only
 after the controller exits, the ledger is backed up, and no other work is found.
 A detached local watcher in the same ignored phase directory records eventual
-GCP shutdown verification in `shutdown-verification.json`. The VM is currently
-RUNNING for the experiment; do not stop it while this authorized pilot is active.
+GCP shutdown verification in `shutdown-verification.json`. The experiment and post-run evaluation have now finished; the VM was verified
+TERMINATED.
 No post-run model analysis has been launched.
+
+## Initial pilot outcome (October 15, 2026)
+
+The common-clock run ended at 10:15:54 AM PDT after 768.443 seconds (12 minutes,
+48 seconds), within the approved 90-minute maximum. Nineteen peers exited after
+budget admission was denied; agent-006 exited with a killed model-proxy error.
+Kernel logs show container cgroup memory kills, including a Python/Claude/sandbox
+kill at 10:07 AM. Agent-006's final tool requested a brute-force Python search
+storing all distinct triples of cube bases below 401; this is consistent with the
+memory exhaustion. A later Python cgroup kill also occurred, but only one harness
+error exit was recorded. Keep this technical attrition separate from voluntary exits.
+
+Final pilot settled cost is $19.636804044, with zero holds, uncertainty or budget
+violations. The ledger retains $0.363195956. Admission uses conservative reservations:
+peers can be denied while allowance is reserved for other in-flight requests; later
+settlements can free money after those peers have already stopped. There were
+998 admitted requests, including 58 provider rejections (HTTP 429) settled at zero.
+Cumulative compatibility cost is $0.250809222; paid analysis remains $0.
+
+The conference received 40 submissions: three accepted, one accepted after its task
+closed, and 36 resolved as problem_closed without independent proof judgments.
+The four operationally accepted submissions were independently verified as genuine,
+covering three distinct intended task statements: Green32_hasCosetHole_empty,
+DedekindNumber_M'_three (two submissions), and Erdos23_erdos_23_variants_n1_tight.
+This establishes those accepted proofs, not the absence of attempts or causal spread
+elsewhere in the transcripts. No new paid experiment or model-judged analysis ran.
+
+The user authorized ongoing monitoring and full routine cleanup. The post-run worker
+completed serial independent evaluation and timeline generation at 10:18:50 AM PDT,
+backed up the ledger and shut down the VM; GCP TERMINATED was verified. The raw run,
+consistent ledger backup and kernel logs are backed up locally. The 13 MB raw archive
+SHA-256 is f8bbe0b991f864ae6a9ba787cc4d79651ce01060cf7147e69e0179f65685a096.
+Researcher-only HTML transcript exports cover all 20 agents and 3074 messages under
+runs/pilot-20261015T170231Z/transcripts/. Final evaluator/timeline files were
+retrieved after a results-only restart once zone capacity returned. The final archive
+SHA-256 is 422c08e9ce779d1686f6b7f3236283a69bc12c63b5b98f9511c7bb359f58f829;
+it was verified before extraction. All four evaluator results were bound to the exact
+conference submission, agent, task and source hash. Timeline diagnostics show all 14
+template hashes match, no read problems and no timestamp inversions; 1116 entries
+remain explicitly untimed. Its 83 structural flags are review candidates, not labels.
+Do not rerun the experiment or evaluator. The consumed initial launch authorization is
+now disarmed locally (`paid_launch_enabled: false`); a new experiment needs a new
+user decision. The final report and transcripts are in the local ignored run directory; monitoring
+ended after verified final shutdown and delivery. The final GCP state was verified
+TERMINATED after the results-only retrieval restart. The readable report is
+runs/pilot-20261015T170231Z/results.html; all accepted-source identity checks and
+report links passed. Raw artifacts and transcript exports remain researcher-only
+and Git-ignored.
 
 ## Engineering choices within the approved design
 
