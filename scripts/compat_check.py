@@ -37,8 +37,8 @@ evidence records ``credentials_in_environment`` measured after the run. Right af
 loading the key the builder verifies, unpaid, that the key has a non-resetting
 provider-side limit whose ``limit_remaining`` does not exceed the remaining
 compatibility allowance (``provider_limit.verify_key_limit``); otherwise nothing is
-spent. A key limited for the $20 pilot therefore needs its limit lowered (or a
-separate key) for this check.
+spent. The explicit, documented unlimited-key configuration also applies here;
+it waives only the provider cap, never the separate compatibility ledger cap.
 
 Reasoning-cap probe (required check ``reasoning_cap_enforced``): before the agent
 runs, one researcher-side request (never shown to any agent) goes through the same
@@ -743,7 +743,8 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path):
         # One agent: one in-flight request (the pilot's rule, max_connections == agent count).
         model, provider_limit = runtime.build_openrouter_model(settings, ROOT, COMPAT_MAX_CONNECTIONS,
                                                                max_remaining_usd=before["remaining_usd"],
-                                                               record=record)
+                                                               record=record,
+                                                               allow_unlimited=config.get("allow_unlimited_provider_key") is True)
         (run_dir / "settings.json").write_text(json.dumps({
             "config": config, "model": frozen_fields(settings), "personas": personas, "tasks": listing,
             "effective": {"images": images, "lean_warm_up": warm_up, "budget_scope": SCOPE,

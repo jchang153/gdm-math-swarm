@@ -35,7 +35,7 @@ except ImportError:
 CONFIG = json.loads((ROOT / "configs" / "pilot.json").read_text())
 SETTINGS = settings_from_config(CONFIG, pricing_verified=True)
 PROVIDER_NAME = {"deepseek": "DeepSeek", "fireworks": "Fireworks"}.get(
-    SETTINGS.provider_route, SETTINGS.provider_route)
+    SETTINGS.provider_route.split("/")[0], SETTINGS.provider_route)
 OTHER_PROVIDER_NAME = "DeepSeek" if SETTINGS.provider_route != "deepseek" else "Fireworks"
 IMAGES = {"agent": {"tag": "gdm-math-swarm-agent:local", "id": "sha256:" + "a" * 64},
           "lean": {"tag": "gdm-math-swarm-lean:local", "id": "sha256:" + "b" * 64}}
@@ -757,10 +757,11 @@ class OfflineRehearsalTests(unittest.TestCase):
             return task
         built = []
 
-        def fake_model(settings, repo_root, max_connections, *, max_remaining_usd, record=None):
+        def fake_model(settings, repo_root, max_connections, *, max_remaining_usd, record=None, allow_unlimited=False):
             # X2: the limit check runs inside the builder, against the remaining compatibility allowance.
             built.append((settings.model_id, max_connections, str(max_remaining_usd)))
             limit = {"limit": 2.0, "limit_remaining": float(max_remaining_usd), "limit_reset": None}
+            limit["unlimited_key_authorized"] = allow_unlimited
             record("provider_limit_verified", None, limit)
             return get_model("mockllm/model", custom_outputs=answer), limit
         folder = Path(tempfile.mkdtemp()).resolve()
@@ -841,6 +842,21 @@ class OfflineRehearsalTests(unittest.TestCase):
         self.assertLess(kinds.index("reasoning_cap_probe"), kinds.index("common_start"))
         snapshot = ledger.snapshot()
         self.assertEqual((snapshot["compatibility"]["unresolved_requests"], snapshot["pilot"]["committed_usd"]), (0, "0"))
+
+    def test_compatibility_uses_explicit_key_policy_and_separate_ledger(self):
+        async def outputs(input, tools, tool_choice, config, n):
+            return _probe_output(config, truncated=False)
+
+        for flag in (None, False, True, "true"):
+            with self.subTest(flag=flag):
+                config = dict(CONFIG)
+                config.pop("allow_unlimited_provider_key", None)
+                if flag is not None:
+                    config["allow_unlimited_provider_key"] = flag
+                result, ledger, _, _, _, _ = self.rehearse(outputs, config=config)
+                self.assertIs(result["provider_limit"]["unlimited_key_authorized"], flag is True)
+                self.assertEqual(ledger.snapshot()["pilot"]["committed_usd"], "0")
+                self.assertGreater(Decimal(ledger.snapshot()["compatibility"]["committed_usd"]), 0)
 
     def test_failed_cap_probe_skips_the_agent_run(self):
         agent_calls = []

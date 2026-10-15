@@ -232,6 +232,28 @@ Raw logs, the passing Linux test log, source hashes and a consistent ledger back
 are preserved under `runs/phase-b/reasoning-repair-20261015/` and the VM disk.
 Terminal Git with an SSH remote is the standing commit/push method.
 
+## October 15 launch attempt and Fireworks US authorization
+
+The user again requested launch. Google Cloud sign-in was refreshed and the
+existing VM started on the second attempt after a temporary zone capacity failure.
+The user privately replaced the VM host key; an unpaid metadata-only check confirms
+an unlimited, non-resetting key and the explicit exception. No credential was copied
+by an agent. The prior credential blocker is resolved.
+
+A fresh public route freeze reports `fireworks` unavailable (status -2), while
+`fireworks/us` is available (status 0). The user explicitly authorized switching to
+Fireworks US, a fresh compatibility check within the remaining $1.855885148, and the
+already-approved $20 pilot if it passes. Keep the same model, resources, prompts,
+20-agent population, and all ledger caps. The approved main unlimited key also
+applies to this newly authorized compatibility check: waive only the provider cap;
+retain the separate $2 cumulative compatibility ledger and its existing spending.
+Fireworks US publishes input/output prices of $0.45/$1.80 per million tokens
+(50% above the prior route); reservation bounds match those published rates.
+The shared dollar caps remain unchanged, so they may cover fewer turns.
+The compatibility builder now forwards that explicit configuration policy, with
+strict behavior when the flag is absent or false. Integration confirmation is reset
+until the new endpoint passes. No pilot spending has occurred.
+
 ## Engineering choices within the approved design
 
 Recorded October 13, 2026. These are implementation choices, not user decisions; each follows an approved row above and is documented in the named file. Escalate any that turns out to change experimental conditions materially.

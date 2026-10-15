@@ -721,9 +721,14 @@ exception and its approval note. Once the user privately supplies that key, run
 the unpaid check with `--i-have-user-approval --allow-unlimited`; do not fabricate
 provider-cap evidence. The paid pilot repeats the live key check using the same
 explicit policy, while retaining the unchanged shared $20 ledger. Compatibility
-checks keep their strict policy. Automatic approval review blocked copying either
+checks default to their strict policy. On October 15 the user separately authorized
+the Fireworks US compatibility check with the approved main unlimited key; that
+explicit config policy now applies to its builder too, while the separate cumulative
+$2 compatibility ledger remains enforced. Automatic approval review blocked copying either
 literal key values or the local credential file; no such transfer succeeded.
-The remaining private credential step does not revoke the recorded launch approval.
+Private user entry on October 15 resolved the credential step. The original
+`fireworks` endpoint then became unavailable; `fireworks/us` and a fresh paid check
+were explicitly authorized, with unchanged dollar caps and published US prices.
 
 1. The user reviews the compatibility evidence and, if satisfied, the integrator sets
    `verified_integration: true` in `configs/pilot.json` at the user's direction.
