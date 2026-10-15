@@ -254,6 +254,18 @@ The compatibility builder now forwards that explicit configuration policy, with
 strict behavior when the flag is absent or false. Integration confirmation is reset
 until the new endpoint passes. No pilot spending has occurred.
 
+The Fireworks US retest passed all nine required checks
+(`compatibility-20261015T165757Z.json`), costing $0.106694370 in 13 requests.
+Cumulative compatibility spending is $0.250809222, leaving $1.749190778;
+no unresolved holds or estimate violations. Local tests passed 555 cases
+(4 skips). Linux passed all but one archive-metadata read; removing eight
+macOS sidecars resolved it and all 51 affected launch-gate tests passed.
+The user pre-authorized pilot launch after this check passes; integration and
+paid-launch flags are now enabled for the same initial pilot. The host lifecycle
+wrapper preserves a consistent ledger backup and powers off only if no other
+containers, tmux sessions, or user jobs need the VM. A local watcher verifies
+the eventual GCP `TERMINATED` state.
+
 ## Engineering choices within the approved design
 
 Recorded October 13, 2026. These are implementation choices, not user decisions; each follows an approved row above and is documented in the named file. Escalate any that turns out to change experimental conditions materially.
