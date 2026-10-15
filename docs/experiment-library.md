@@ -27,6 +27,24 @@ cd /private/tmp
   --output-dir /private/tmp/inspect-RUN_ID
 ```
 
+Also run `python3 scripts/export_conference.py --run-dir runs/RUN_ID` to generate
+`conference-view/index.html` and per-file captured-version pages before preparing
+the upload bundle. This offline exporter reads the saved conference database,
+cross-checks its events against JSONL, binds independent evaluations to exact
+submission identity/source hashes, verifies library/snapshot hashes, and links
+timeline messages to existing transcript anchors where available. It uses no
+model calls or running containers.
+
+The conference tabs show board posts, participant-grouped private DMs, shared
+library revisions, submissions with conference and independent judgments,
+organizer feedback, captured workspace working files/notes, and the saved activity
+timeline. Search, agent/task/type filters and pagination operate locally in the
+page. Empty sections are explicit. Board posts have no recorded reply relationship;
+the viewer does not invent threads. Untimed events remain unknown. File captures
+are observations rather than a complete edit history, and were not automatically
+available to peers. SDK session JSONL is covered by the agent transcript viewer;
+task templates and build manifests are omitted from the private working-file list.
+
 From the repository, prepare a fresh, non-existing output directory:
 
 ```bash
@@ -81,3 +99,14 @@ the Inspect `.eval` request returned HTTP 206 with the exact requested bytes.
 The Space reported RUNNING and private. Verification records are saved locally in
 `runs/phase-b/hf-library-preparation/publication-verification.json`. Local originals
 were retained; no new experimental or analysis inference was run.
+
+The conference-browser update is published at revision
+`940c27542fc8958d8379f9b783df82b524b44fe3`. The catalogue's Conference link opens
+it. All 1053 archive files matched remote hashes; downloaded conference HTML and
+manifest matched, and the private conference route returned HTTP 200. Offline
+checks validated 5850 links, the JavaScript syntax, all four independent evaluation
+bindings, the 1116 unknown-time entries and the 20 empty RESEARCH.md captures.
+The browser tool blocked a local `file:` preview, so these are source, link and
+hosted-response checks rather than a claim of interactive visual validation.
+Evidence is saved in the ignored `conference-verification.json` beside the initial
+publication verification record.
