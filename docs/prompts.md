@@ -417,28 +417,50 @@ recording it as a harness confound (docs/plan.md, "Effective agent system prompt
 October 13, 2026). It is a deviation from the paper, whose base prompt is unpublished:
 we do not know whether its agents saw comparable harness text.
 
-Built-in content expected from Claude Code's documented behavior. This is a
-description, **not a transcription**; the exact text for this setup has not yet been
-captured.
+Captured on the VM in the passing unpaid `runtime-e2e-20261015T021631Z` run.
+This is a `mockllm` capture from Claude Code **2.1.296**, not evidence of the live
+provider's model-dependent instructions. The full researcher-only captures and every
+block hash are in [the archive](../research/effective-instructions/validation-runtime-20261015T021631Z/structure.json).
+The representative [agent-001 source](../research/effective-instructions/validation-runtime-20261015T021631Z/agent-001-8ea93afa57fb9d39.json) has the following
+system blocks in the order sent:
 
-| Built-in part | Why it may matter |
-| --- | --- |
-| Identity line (Claude Code, Anthropic's CLI) | The served model is DeepSeek v4.1. The line also sits beside the conference identity in `INTRODUCTION`. |
-| Security paragraph (defensive-security and CTF guidance) | May change how agents treat verification weaknesses, or frame them as security issues. |
-| Honesty and confirm-before-risky-action guidance | May change reporting or caution relative to the paper's unknown base prompt. |
-| Auto-memory section | Claude Code's auto-memory is enabled (approved). It adds memory instructions and a memory location separate from the paper's wiki path `/tmp/w/memory/wiki/`. |
-| Skills list | Lists any skills present in the agent image. |
-| Tool descriptions | Claude Code's built-in tools (minus the disallowed `Agent`, `Task`, `WebSearch`, `WebFetch`) and the twelve conference tools from the bridged MCP server `conference`, with model-visible names such as `mcp__conference__post_intent`. `COMMUNICATION` mentions the prefix. |
+| Block | Captured content | Characters | SHA-256 |
+| --- | --- | --- | --- |
+| 0 | Billing metadata (`x-anthropic-billing-header`) | 74 | `91556e9af0487b0570dc4852df4ecd314944f456bec64c672f75b5f07d9ac7c4` |
+| 1 | Claude Code / Claude Agent SDK identity | 94 | `6c1afcd9232947a1d8f7c44a79316f8fe08d06dcdc6e7453f09e2d78fa858e5e` |
+| 2 | Harness instructions followed by the exact conference prompt | 15,064 | `302a9434d409a11107db12841a035980ad6a0c8593ec8a25daa0d4054c0f7f8b` |
+
+Block 2 starts with the headings `Harness`, `Session-specific guidance`, `Memory`,
+`Environment`, and `Context management`. Its 5,637-character built-in prefix is identical
+across all three agents (SHA-256 `82b0fb0351526a4f36ca4a4fb55d8b7037d7b7909c006a6b00657d23b1de86f2`).
+These sections can affect identity, memory use and context handling relative to the
+paper's unpublished base prompt. The exact `prompts.build_prompt` output then appears
+once, contiguously, at the end: conference introduction, persona, problems, working
+environment, submissions, communication, private notes, working pace and integrity text.
+There are zero characters after the assembled conference prompt.
+
+Every capture contains the same 29 tool definitions: twelve conference tools and these
+seventeen built-ins: `Bash`, `CronCreate`, `CronDelete`, `CronList`, `Edit`, `EnterWorktree`, `ExitWorktree`, `ListAgents`, `NotebookEdit`, `Read`, `ReportFindings`, `ScheduleWakeup`, `SendMessage`, `Skill`, `TaskStop`, `Workflow`, `Write`.
+`Agent`, `Task`, `WebSearch` and `WebFetch` are absent. Tool-definition SHA-256 is
+`20612a41b332975d944a21c5d7a93dec75850435c354930d9ece989d3ef3c4f1` for all captures.
+
+The archive contains four distinct captures: agent-001 has two billing-header variants;
+agents 002 and 003 each have one. The shared built-in instructions and tool definitions
+are identical. Agent-specific application text equals the generated identifier/persona
+prompt in each case. The representative `effective_instructions` event digest is
+`8ea93afa57fb9d39eaf3fce48eb9f523ae7912c4a66896779ab714bf661b6c6b`; all four digests were verified against
+the runtime event log. The agent image is `sha256:5a009aa1f593609fe4742bc6f7223f7beccff4a790d1daa8f6064f5b17a294c6`.
+Compare every live pilot's blocks and definitions against this capture; billing metadata
+and model-dependent text may differ.
 
 **Capture.** `inspect_adapter.InstructionArchive` stores every distinct system prompt and
 tool-name list that the CLI sends, researcher-side, under
 `<run_dir>/instructions/<agent>-<hash>.json`. The Phase B unpaid mock run
-(`scripts/validate_runtime.py`, runtime workstream) produces the first capture; this
-section must then link the archived file and replace the table above with what was
-actually sent. Every pilot run archives its own copy.
+(`scripts/validate_runtime.py`, runtime workstream) produced the capture linked above. Update this record if the image or effective
+instructions change. Every pilot run archives its own copy.
 
 **Capture procedure** (once, after the VM end-to-end run, docs/validation.md steps 8 and
-8a). Nothing below has been done yet; the table above stays descriptive until it is.
+8a). Completed for the passing VM run above; retain this procedure for recapture.
 
 1. Copy the archive of the passing `runtime-e2e` run into the researcher-only record:
    `cp -R runs/validation-runtime-<UTC>/instructions

@@ -25,7 +25,7 @@ the authoritative record of user decisions.
 * **Reviewed:** an independent review (45 findings: 41 confirmed and fixed or documented,
   4 refuted) and a completeness check against every plan decision; see
   [docs/review-2026-10-13.md](docs/review-2026-10-13.md).
-* **Offline-tested on the VM:** 513 unit tests run successfully (3 opt-in real-Lean
+* **Offline-tested on the VM:** 522 unit tests run successfully (3 opt-in real-Lean
   tests skipped), plus 33 analysis tests in `.venv-analysis`. These suites use fake
   compilers and mocked Docker; real Lean, isolation and capacity checks are separate.
 * **October 14 review fixes:** opaque-aware research proof dependency checking and
@@ -35,8 +35,11 @@ the authoritative record of user decisions.
   exits and malformed-annotation rejection. Natural completion logs the later run
   boundary. The original rubric body and frozen pilot tasks retain their hashes.
 * **VM validation in progress:** all four Linux images built; the evaluator smoke test,
-  operational judge, all 14 declarations, and compile timing checks passed. A dependency
-  source-search quoting fix is being validated before continuing the remaining checks.
+  operational judge, all 14 declarations, compile timing, reuse and conference checks
+  passed. The full evaluator passed all 22 fixtures and all 22 self-comparisons.
+  Runtime validation passed after a compaction evidence-reader fix. Isolation stopped
+  on unrecognized harness IPC sockets and Docker's init mount alias; a precise probe
+  correction is in progress. Capacity remains pending and the VM is stopped.
   See [the setup record](docs/vm-setup-2026-10-14.md). Paid compatibility and pilot steps
   retain their approval checkpoints. Mac images are not reused for VM validation.
 * **No paid model calls have run.** No compatibility check, no pilot. Model spending:
@@ -87,7 +90,7 @@ The project's own scripts disable Inspect's `.env` loading before any evaluation
 All from the repository root.
 
 ```sh
-PYTHONPATH=src .venv/bin/python -m unittest discover -s tests       # offline tests (513, 3 skipped on Linux)
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests       # offline tests (522, 3 skipped on Linux)
 PYTHONPATH=src .venv-analysis/bin/python -m unittest discover -s research/analysis/tests   # analysis tests (33)
 PYTHONPATH=src .venv/bin/python scripts/preflight.py                # unpaid launch gates + spending checkpoint
 PYTHONPATH=src .venv/bin/python -m research_swarm.keyword_filter FILE.lean   # keyword stage only
