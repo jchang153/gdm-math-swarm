@@ -35,13 +35,14 @@ the authoritative record of user decisions.
   evidence bound to effective settings; source/agent/order-bound labels, strict voluntary
   exits and malformed-annotation rejection. Natural completion logs the later run
   boundary. The original rubric body and frozen pilot tasks retain their hashes.
-* **Pending:** the user authorized VM setup and unpaid Docker validation (Phase B) on
-  October 14; paid compatibility and pilot steps retain their approval checkpoints.
-  No launch evidence exists yet. All four images are rebuilt
-  on the VM; of those built on the development Mac (arm64), the agent and comparator images
-  are known to be stale.
-* **Nothing paid has run.** No compatibility check, no pilot. Spending: $0 of the $20
-  pilot, $5 analysis and $2 compatibility allowances.
+* **VM validation in progress:** all four Linux images built; the evaluator smoke test,
+  operational judge, all 14 declarations, and compile timing checks passed. A dependency
+  source-search quoting fix is being validated before continuing the remaining checks.
+  See [the setup record](docs/vm-setup-2026-10-14.md). Paid compatibility and pilot steps
+  retain their approval checkpoints. Mac images are not reused for VM validation.
+* **No paid model calls have run.** No compatibility check, no pilot. Model spending:
+  $0 of the $20 pilot, $5 analysis and $2 compatibility allowances. Authorized GCP VM
+  setup incurs infrastructure charges separately.
 
 ## Setup
 
