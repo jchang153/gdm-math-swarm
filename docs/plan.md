@@ -192,8 +192,28 @@ Ten new actual-SDK round-trip tests and an installation-order regression cover t
 repair; provider-dependent fixtures were corrected to follow the configured route,
 and the disabled seeded template retains configuration parity. All 542 main tests
 passed on Linux in 56.075 seconds. Images, prompts, tools, gate semantics, resources
-and spending caps were unchanged. The authorized live retest is pending; keep
-verified integration and paid launch disabled until its evidence is reviewed.
+and spending caps were unchanged.
+
+The repaired live retest passed all nine required checks:
+`compatibility-20261015T042206Z.json`. All 11 requests replaying earlier reasoning
+were accepted; 14 Bash calls and three identity-bound conference calls executed
+without parse errors. The actual provider wire logs independently match the exact
+reasoning details for all 11 replaying requests, covering 64 earlier assistant turns.
+Its 13 requests (including the separate reasoning-cap probe)
+settled at $0.051163872. Cumulative compatibility spending is $0.144114852 across
+26 settled requests, leaving $1.855885148 of the original $2, with no holds or
+violations. Pilot/analysis spending remains $0. The run took 371.8 seconds,
+including 250.898 seconds warming the cold Lean cache. Truncation and compaction
+were not observed in the agent session; those live checks remain informational.
+
+Final preflight passes every technical gate, including compatibility and the
+current ledger-backed evidence. Only `verified_integration` and
+`paid_launch_enabled` remain false for the user's evidence review/launch decision.
+Before a pilot, use a separate non-resetting $20 key (or adjust the existing key's
+limit consistently with the pilot allowance), verify its limit, and show the
+spending checkpoint. The current compatibility key has only about $1.86 remaining.
+Raw logs, the passing Linux test log, source hashes and a consistent ledger backup
+are preserved under `runs/phase-b/reasoning-repair-20261015/` and the VM disk.
 Terminal Git with an SSH remote is the standing commit/push method.
 
 ## Engineering choices within the approved design
