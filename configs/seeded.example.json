@@ -41,7 +41,7 @@
   "provider": "openrouter",
   "requested_model": "DeepSeek v4.1",
   "candidate_model_id": "deepseek/deepseek-v4.1-flash",
-  "provider_route": "deepseek",
+  "provider_route": "fireworks",
   "provider_settings": {},
   "max_connections": 20,
   "route_pricing_max_age_hours": 72,

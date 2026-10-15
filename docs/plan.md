@@ -59,6 +59,7 @@ Updated October 13, 2026, America/Los_Angeles.
 | Live compatibility check (October 13, 2026) | **Supersedes the compatibility part of "Approved spending limits":** a separate paid compatibility allowance of $2, outside the $20 pilot and $5 analysis allowances, for one agent running a few turns on the frozen route with explicit abort criteria (tool-call parsing, reasoning replay, provider cost reporting, truncation behavior). Ledger scope `compatibility` cap becomes $2. Validate enforcement with unpaid mock checks before running it, and confirm with the user immediately before the paid call. |
 | Live compatibility execution authorized (October 14, 2026) | After the host key passed the unpaid OpenRouter check with a $2 non-resetting limit and $0 usage, the user said "go ahead and run it" in response to the proposed live compatibility test capped at $2. Authorizes one live compatibility attempt and necessary VM startup/prerequisite checks. Does not authorize the paid pilot, a second paid attempt, or changes to the frozen model, settings or allowances. Preserve evidence and the ledger, then stop the idle VM and verify TERMINATED. |
 | Alternative provider authorized (October 14, 2026) | After DeepSeek's own endpoint was unavailable and Fireworks was proposed, the user said "please go ahead and try those too." Authorizes selecting the OpenRouter `fireworks` endpoint for the same `deepseek/deepseek-v4.1-flash` model and running its live compatibility check within the existing shared $2 allowance. Refresh and validate the route first; no automatic provider fallbacks, no spending reset, and no pilot launch. Other model settings, population, resources and allowances are unchanged. |
+| Reasoning bridge repair and retest authorized (October 14, 2026) | After the first Fireworks check exposed typed reasoning being flattened by the Inspect Anthropic bridge, the user said "just do whatever you need to do." Authorizes repairing the two-way representation, meaningful offline/runtime verification, and a new paid compatibility attempt using the existing remaining $1.90704902 allowance. Preserve all prior spending and evidence. Keep the same model, Fireworks route, limits, prompts and tool semantics; no pilot launch before compatibility passes and its separate launch checkpoint. |
 | Research evaluator opaque-helper fix (October 14, 2026) | User authorized the independent evaluator to inspect all reachable proof dependencies, including opaque helper bodies; reject admissions/unapproved axioms and keep inspection failures unresolved. Add genuine, direct-admission, nested-admission and forbidden-axiom opaque fixtures, researcher-only. The weak operational judge stays unchanged. Implementation and offline checks are authorized now; real Lean/container validation remains on hold for the VM. Verifier digest and evaluator semantics v3 invalidate old evaluator evidence and require a comparator rebuild/revalidation. |
 | Stop-boundary correction (October 14, 2026) | User authorized rechecking stop/cancellation after budget reservation and sandbox file reads and before dispatch. Release reservations for model requests that were never dispatched; retain settlement/grace for requests already admitted. Refuse queued conference actions when the run has stopped. Implement and validate offline now; Docker/runtime validation remains on hold. No compatibility, capacity or analysis-label fixes are authorized by this row. |
 | Compatibility rejection policy (October 14, 2026) | User authorized a refined fix: detect API rejections converted into model outputs; preserve existing bounded retries for temporary API failures, including HTTP 408/429; fail only the small preflight compatibility check for structural incompatibilities. The pilot retry behavior is unchanged and a single rejection must not stop the entire pilot. The compatibility allowance, request/time limits and paid-check approval checkpoint stay unchanged; implementation/testing now is offline only. This supersedes the engineering first-4xx compatibility-abort rule. |
@@ -140,7 +141,7 @@ This checklist maps the initial research inventory to the specification discussi
 ## Implementation status
 
 Updated October 14, 2026 (PDT). The authorized review fixes and deployment corrections
-are implemented. All 531 main tests ran successfully on Linux (3 opt-in skips), and
+are implemented. All 542 main tests ran successfully on Linux (3 opt-in skips), and
 all 37 analysis tests passed. The compaction-safe runtime and analysis readers retain
 historical tool results with exact source references; the frozen rubric is unchanged.
 
@@ -184,10 +185,15 @@ text blocks. The pinned Inspect Anthropic bridge flattens non-Anthropic reasonin
 in `message_block_params`; restoring only a thinking block would still lose the
 OpenRouter reasoning-details signature on the reverse conversion. This is an
 integration defect, not evidence that Fireworks rejected reasoning replay.
-Fix both directions of the bridge conversion and verify an exact offline round-trip
-of provider reasoning details before requesting a new paid attempt; never count
-flattened text as successful reasoning replay. No bridge implementation was changed
-in this execution session. Keep verified integration and paid launch disabled.
+The user subsequently authorized repairing and retesting the bridge. The host-side
+`reasoning_bridge.py` now preserves the exact original provider reasoning through
+authenticated, per-agent thinking signatures, restoring it before model dispatch.
+Ten new actual-SDK round-trip tests and an installation-order regression cover the
+repair; provider-dependent fixtures were corrected to follow the configured route,
+and the disabled seeded template retains configuration parity. All 542 main tests
+passed on Linux in 56.075 seconds. Images, prompts, tools, gate semantics, resources
+and spending caps were unchanged. The authorized live retest is pending; keep
+verified integration and paid launch disabled until its evidence is reviewed.
 Terminal Git with an SSH remote is the standing commit/push method.
 
 ## Engineering choices within the approved design

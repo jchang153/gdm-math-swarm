@@ -28,11 +28,6 @@ ROOT = Path(__file__).resolve().parents[1]
 NOW = datetime.datetime(2026, 10, 14, 12, 0, tzinfo=datetime.timezone.utc)
 IMAGES = {"gdm-math-swarm-lean:local": "sha256:" + "a" * 64, "gdm-math-swarm-agent:local": "sha256:" + "b" * 64,
           "gdm-math-swarm-comparator:local": "sha256:" + "c" * 64}
-CATALOG = {"data": {"id": MODEL_ID, "endpoints": [{
-    "tag": "deepseek", "status": 0, "context_length": 1048576, "max_completion_tokens": 393216,
-    "supported_parameters": ["tools", "reasoning", "max_tokens"],
-    "pricing": {"prompt": "0.00000015", "completion": "0.0000006", "input_cache_read": "0.000000003",
-                "overrides": [{"prompt": "0.0000003", "completion": "0.0000012", "input_cache_read": "0.000000006"}]}}]}}
 CREDENTIALS_OK = {"environment_variable_set": True, "env_file_present": False, "env_file_regular": None,
                   "env_file_private": None, "credentials_read": False}
 JUDGE_LIMITS = {"timeout_seconds": 120, "memory": "2g", "cpus": 1}  # configs/pilot.json judge limits
@@ -49,6 +44,24 @@ def pilot_config(**overrides):
     config = json.loads((ROOT / "configs" / "pilot.json").read_text())
     config.update({"verified_integration": True, "paid_launch_enabled": True, **overrides})
     return config
+
+
+def other_route(route):
+    return "deepseek" if route != "deepseek" else "fireworks"
+
+
+def route_catalog(settings):
+    """Fabricate catalog evidence for the configured route and price bounds."""
+    return {"data": {"id": settings.model_id, "endpoints": [{
+        "tag": settings.provider_route, "status": 0, "context_length": settings.context_length,
+        "max_completion_tokens": max(393216, settings.max_tokens),
+        "supported_parameters": ["tools", "reasoning", "max_tokens"],
+        "pricing": {"prompt": str(Decimal(settings.prompt_usd_per_token) / 2),
+                    "completion": str(Decimal(settings.output_usd_per_token) / 2),
+                    "input_cache_read": str(Decimal(settings.prompt_usd_per_token) / 100),
+                    "overrides": [{"prompt": settings.prompt_usd_per_token,
+                                   "completion": settings.output_usd_per_token,
+                                   "input_cache_read": str(Decimal(settings.prompt_usd_per_token) / 50)}]}}]}}
 
 
 def passed_checks(names, **overrides):
@@ -125,14 +138,16 @@ class GateFixture(unittest.TestCase):
     def write(self, prefix, record, when=NOW - datetime.timedelta(hours=1)):
         return launch_gates.write_evidence(self.validation, prefix, record, when)
 
-    def write_route(self, catalog=CATALOG, settings=None, when=NOW - datetime.timedelta(hours=1), **extra):
+    def write_route(self, catalog=None, settings=None, when=NOW - datetime.timedelta(hours=1), **extra):
+        settings = settings or settings_from_config(pilot_config())
+        catalog = route_catalog(settings) if catalog is None else catalog
         raw = json.dumps(catalog).encode()
         sha = hashlib.sha256(raw).hexdigest()
         (self.validation / "catalog-snapshots").mkdir(parents=True, exist_ok=True)
         (self.validation / "catalog-snapshots" / f"{sha}.json").write_bytes(raw)
         from dataclasses import asdict
         record = {"valid": True, "credential_used": False, "catalog_sha256": sha,
-                  "settings": asdict(settings or ProviderSettings()), "all_required_passed": True, **extra}
+                  "settings": asdict(settings), "all_required_passed": True, **extra}
         return self.write("route-pricing", record, when)
 
     def write_all(self):
@@ -176,7 +191,7 @@ class GateFixture(unittest.TestCase):
         record = {"schema": launch_gates.COMPATIBILITY_SCHEMA, "all_required_passed": True,
                   "image_ids": {"agent": IMAGES["gdm-math-swarm-agent:local"],
                                 "lean": IMAGES["gdm-math-swarm-lean:local"]},
-                  "model_id": MODEL_ID, "provider_route": "deepseek",
+                  "model_id": MODEL_ID, "provider_route": settings_from_config(pilot_config()).provider_route,
                   "settings": frozen_fields(settings_from_config(pilot_config())), "spent_usd": spent,
                   "requests": len(ids) if isinstance(ids, list) else 1, "request_ids": ids,
                   "checks": passed_checks(launch_gates.COMPATIBILITY_REQUIRED_CHECKS, truncation_observed={
@@ -209,7 +224,7 @@ class LaunchGateTests(GateFixture):
         self.assertTrue(result["ready"])
         self.assertEqual(self.ledger.read_bytes(), before)  # read-only: the ledger is never written
         self.assertEqual(self.status_calls, [(self.validation, "gdm-math-swarm-comparator:local")])
-        self.assertEqual(result["evidence"]["route_pricing"]["provider_route"], "deepseek")
+        self.assertEqual(result["evidence"]["route_pricing"]["provider_route"], pilot_config()["provider_route"])
         for name, check in result["evidence"].items():
             self.assertTrue(check["reason"], name)
         self.assertTrue(result["evidence"]["judge"]["evidence"].endswith(".json"))
@@ -232,7 +247,8 @@ class LaunchGateTests(GateFixture):
         result = self.evaluate(lower)
         self.assertBlocked(result, "route_pricing", "differ from the ProviderSettings")
         self.assertIn("offline catalog validation failed", result["evidence"]["route_pricing"]["reason"])
-        self.assertBlocked(self.evaluate(pilot_config(provider_route="fireworks")), "route_pricing")
+        self.assertBlocked(self.evaluate(pilot_config(provider_route=other_route(pilot_config()["provider_route"]))),
+                           "route_pricing")
         snapshot = next((self.validation / "catalog-snapshots").iterdir())
         snapshot.write_text("{}")
         self.assertBlocked(self.evaluate(), "route_pricing", "snapshot")
@@ -493,7 +509,7 @@ class LaunchGateTests(GateFixture):
         blocked("all_required_passed", all_required_passed=False)
         blocked("schema", schema="gdm-compatibility/0")
         blocked("model_id", model_id="deepseek/deepseek-v4.1")
-        blocked("provider_route", provider_route="fireworks")
+        blocked("provider_route", provider_route=other_route(pilot_config()["provider_route"]))
         blocked("settings differ", settings=dict(frozen_fields(settings_from_config(pilot_config())), max_tokens=8192))
         blocked("exceeds the $2", spent_usd="2.01")
         blocked("nonnegative decimal", spent_usd="NaN")
