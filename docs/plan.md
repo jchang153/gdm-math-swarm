@@ -62,6 +62,7 @@ Updated October 13, 2026, America/Los_Angeles.
 | Compatibility rejection policy (October 14, 2026) | User authorized a refined fix: detect API rejections converted into model outputs; preserve existing bounded retries for temporary API failures, including HTTP 408/429; fail only the small preflight compatibility check for structural incompatibilities. The pilot retry behavior is unchanged and a single rejection must not stop the entire pilot. The compatibility allowance, request/time limits and paid-check approval checkpoint stay unchanged; implementation/testing now is offline only. This supersedes the engineering first-4xx compatibility-abort rule. |
 | Remaining review fixes (October 14, 2026) | User authorized implementing all proposed fixes: capacity evidence must bind actual startup, subprocess, inference-concurrency and warm-up settings and require named checks; behavioral labels must bind the correct source/agent/submission and order, exclude forced/error exits from voluntary exits, and fail on malformed annotation files. Keep the frozen rubric definitions and baseline outcomes unchanged. This authorizes implementation/offline verification, not lifting the VM hold, paid calls or changing population/resources/budget. |
 | GCP access and shutdown reference (October 14, 2026) | User requested persistent storage of the Slack VM setup instructions for future threads and agents. See docs/gcp-vm.md for project GCP-PROJECT, IAP SSH, transfer/setup, and the standing instruction to stop the VM after use, preserve results and the budget ledger, and verify TERMINATED. Project-root and repository AGENTS.md point to this reference. Recording instructions does not establish that a VM exists, authorize provisioning or paid calls, or lift the execution hold. |
+| Agent memory increase (October 14, 2026) | User explicitly authorized raising each agent container from `1g` to `2g` and rerunning unpaid runtime, isolation and capacity validation. The first 20-agent capacity probe recorded 58 memory kills across all 20 containers and six failed CLI sessions despite ample VM memory. Keep 20 agents, the same VM, the `2g` judge cap, other resource/time limits, and all model spending caps. The compose fingerprint invalidates all three prior runtime-side records; rerun them without overrides. This does not authorize paid calls. |
 | VM setup and unpaid validation authorized (October 14, 2026) | User said "go ahead" after the assistant explicitly requested authorization for VM setup and unpaid validation, including creating or starting the VM with GCP charges. This lifts the execution hold for setup, real Docker/Lean validation, and unpaid capacity/isolation probes. Use the supplied private GCP VM configuration; keep the 20-agent pilot population. The paid compatibility check and paid pilot still require their separate approval checkpoints. Preserve results and the ledger, stop the VM when no longer in use, and verify TERMINATED. |
 | Execution hold (October 13, 2026; partially superseded October 14) | Originally held validation runs, capacity probes, the paid compatibility check and the pilot pending VM access. The October 14 VM setup authorization lifts this hold only for setup and unpaid validation. Paid steps remain subject to their existing checkpoints. |
 | VM sizing target (October 14, 2026) | The user is requesting a dedicated GCP VM and asked to size it for the later 100-agent scale, not only the 20-agent pilot. This sets the infrastructure planning target; it does not approve running 100 agents, the 100-agent task set, or any spending beyond the approved allowances. |
@@ -142,8 +143,10 @@ separate approval checkpoints. The supplied private GCP VM has been provisioned 
 four Linux images built with verified ancestry. See docs/vm-setup-2026-10-14.md for the
 measured checkpoint and docs/validation.md for the remaining sequence.
 
-The Linux offline suite ran 531 tests successfully (3 opt-in real-Lean tests skipped),
-and all 33 analysis tests passed. Real validation passed the 26 required judge checks,
+The Linux offline suite ran 531 tests successfully (3 opt-in real-Lean tests skipped).
+The analysis suite has 37 tests after correcting the same compaction evidence issue in
+the timeline reader and validating exact historical-message source references; its
+updated Linux run is pending (the earlier 33-test suite passed). Real validation passed the 26 required judge checks,
 all 14 declarations, timing, reuse and conference race checks. The full independent
 evaluator passed all 22 fixtures (including opaque-helper cases) and all 22
 self-comparisons. The frozen tasks, weak judge and resource limits remain unchanged.
@@ -153,8 +156,9 @@ apostrophes in frozen task names, and reconstruction of runtime tool evidence ac
 conversation compaction. Both have offline regression coverage. Runtime validation passed
 after the evidence-reader correction. Isolation passed after authenticating exact native
 harness sockets to their local peer processes and recognizing the read-only Docker init
-mount alias. No broad socket exemption remains. The final 20-agent unpaid capacity probe
-is running on the VM.
+mount alias. No broad socket exemption remains. The first 20-agent capacity probe failed because the `1g` per-agent cap caused memory
+kills (six CLI sessions crashed). The user approved `2g` per agent; repeat runtime,
+isolation and capacity at that setting. Other settings and model caps are unchanged.
 No paid model calls or pilot have run. Terminal Git with an SSH remote is the standing
 commit/push method; do not use GitHub Desktop.
 

@@ -26,7 +26,8 @@ the authoritative record of user decisions.
   4 refuted) and a completeness check against every plan decision; see
   [docs/review-2026-10-13.md](docs/review-2026-10-13.md).
 * **Offline-tested on the VM:** 531 unit tests run successfully (3 opt-in real-Lean
-  tests skipped), plus 33 analysis tests in `.venv-analysis`. These suites use fake
+  tests skipped), plus an earlier 33-test analysis run in `.venv-analysis` (the updated 37-test
+  suite is awaiting Linux verification). These suites use fake
   compilers and mocked Docker; real Lean, isolation and capacity checks are separate.
 * **October 14 review fixes:** opaque-aware research proof dependency checking and
   verifier source pinning; stop/cancellation reservation cleanup and dispatch checks;
@@ -39,7 +40,8 @@ the authoritative record of user decisions.
   passed. The full evaluator passed all 22 fixtures and all 22 self-comparisons.
   Runtime validation passed after a compaction evidence-reader fix. Strict isolation
   validation also passed after correcting harness socket identification and Docker's
-  init mount alias. The final 20-agent unpaid capacity probe is running on the VM.
+  init mount alias. The first 20-agent capacity probe found memory kills at the `1g` per-agent cap.
+  The user approved `2g`; runtime, isolation and capacity will repeat at that setting.
   See [the setup record](docs/vm-setup-2026-10-14.md). Paid compatibility and pilot steps
   retain their approval checkpoints. Mac images are not reused for VM validation.
 * **No paid model calls have run.** No compatibility check, no pilot. Model spending:
@@ -91,7 +93,7 @@ All from the repository root.
 
 ```sh
 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests       # offline tests (531, 3 skipped on Linux)
-PYTHONPATH=src .venv-analysis/bin/python -m unittest discover -s research/analysis/tests   # analysis tests (33)
+PYTHONPATH=src .venv-analysis/bin/python -m unittest discover -s research/analysis/tests   # analysis tests (37)
 PYTHONPATH=src .venv/bin/python scripts/preflight.py                # unpaid launch gates + spending checkpoint
 PYTHONPATH=src .venv/bin/python -m research_swarm.keyword_filter FILE.lean   # keyword stage only
 PYTHONPATH=src .venv/bin/python scripts/evaluate_run.py --run-dir RUN [--dry-run]
