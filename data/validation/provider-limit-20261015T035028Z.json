@@ -1,0 +1,44 @@
+{
+  "schema": "provider-limit/v1",
+  "created_at": "2026-10-15T03:50:28.282103+00:00",
+  "image_ids": {},
+  "kind": "provider_side_limit_check",
+  "credential_used": true,
+  "credential_recorded": false,
+  "endpoint": "https://openrouter.ai/api/v1/key",
+  "checked_at": "2026-10-15T03:50:28.282103+00:00",
+  "paid_calls": 0,
+  "limit": 2,
+  "limit_remaining": 2,
+  "limit_reset": null,
+  "usage": 0,
+  "usage_daily": 0,
+  "usage_weekly": 0,
+  "usage_monthly": 0,
+  "is_free_tier": false,
+  "include_byok_in_limit": false,
+  "expires_at": null,
+  "max_remaining_usd": "2",
+  "checks": {
+    "limit_set": {
+      "passed": true
+    },
+    "limit_does_not_reset": {
+      "passed": true,
+      "limit_reset": null
+    },
+    "remaining_within_allowance": {
+      "passed": true,
+      "limit_remaining": 2,
+      "max_remaining_usd": "2"
+    },
+    "key_not_expired": {
+      "passed": true,
+      "expires_at": null
+    }
+  },
+  "warnings": [
+    "BYOK usage is excluded from the limit"
+  ],
+  "all_required_passed": true
+}
