@@ -142,7 +142,7 @@ separate approval checkpoints. The supplied private GCP VM has been provisioned 
 four Linux images built with verified ancestry. See docs/vm-setup-2026-10-14.md for the
 measured checkpoint and docs/validation.md for the remaining sequence.
 
-The Linux offline suite ran 522 tests successfully (3 opt-in real-Lean tests skipped),
+The Linux offline suite ran 531 tests successfully (3 opt-in real-Lean tests skipped),
 and all 33 analysis tests passed. Real validation passed the 26 required judge checks,
 all 14 declarations, timing, reuse and conference race checks. The full independent
 evaluator passed all 22 fixtures (including opaque-helper cases) and all 22
@@ -151,9 +151,10 @@ self-comparisons. The frozen tasks, weak judge and resource limits remain unchan
 Deployment exposed two additional corrections: shell-safe dependency-search markers for
 apostrophes in frozen task names, and reconstruction of runtime tool evidence across
 conversation compaction. Both have offline regression coverage. Runtime validation passed
-after the evidence-reader correction. Isolation then stopped on unrecognized harness
-sockets and Docker's init mount alias; correct the probe with exact peer/process checks
-before repeating it. Capacity remains pending. The VM is stopped during offline work.
+after the evidence-reader correction. Isolation passed after authenticating exact native
+harness sockets to their local peer processes and recognizing the read-only Docker init
+mount alias. No broad socket exemption remains. The final 20-agent unpaid capacity probe
+is running on the VM.
 No paid model calls or pilot have run. Terminal Git with an SSH remote is the standing
 commit/push method; do not use GitHub Desktop.
 

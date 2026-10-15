@@ -73,7 +73,7 @@ these differences. The paper's cohort shares (Figure 1) are not a replication cr
 | F4 | The harness base system prompt (unpublished) | `build_claude_agent(system_prompt_mode="append")`; `claude_code_env(auto_memory=True)` (l.98) | deviation (approved) | Plan: "Effective agent system prompt". Recorded in docs/prompts.md, "Effective harness prompt". Capture: `InstructionArchive` (l.409). Final-image mock capture verified in `research/effective-instructions/validation-runtime-20261015T021631Z/structure.json`: three system blocks, exact conference append, identical shared harness prefix, 29 tools including all 12 conference tools and none of the four disallowed tools. Live-model comparison remains pending. |
 | F5 | Four domain personas, randomly assigned (§2.1, App. A) | `prompts.PERSONAS` (l.26), `persona_section` (l.187); `runtime.assign_personas` | faithful (text); documented reconstruction (assignment) | The persona text is verbatim (normalized apostrophes). Assignment is balanced, 5 per persona, by seeded shuffle. The paper does not give its randomization (plan, "Persona assignment"). |
 | F6 | Each persona sits under a dedicated Persona section of the base prompt (App. A) | `persona_section` | faithful | Section order and heading level are reconstructed. |
-| F7 | Isolated tool execution environments (§2.1) | `runtime.write_compose` (l.124): one container per agent, `network_mode: none`, no mounts, `cap_drop: ALL` | documented reconstruction | The isolation probes are not yet validated (`runtime-isolation-*` evidence pending). |
+| F7 | Isolated tool execution environments (§2.1) | `runtime.write_compose` (l.124): one container per agent, `network_mode: none`, no mounts, `cap_drop: ALL` | documented reconstruction | Validated on the VM: `runtime-isolation-20261015T023534Z.json` passes all required checks for both peers. Exact native/Inspect sockets are authenticated to unprivileged local processes; no host mounts beyond Docker defaults, daemon endpoints, general egress, sibling files, researcher content or real provider keys were exposed. |
 | F8 | The integrity prompt (App. B.1) goes to all agents (§2.1) | `prompts.INTEGRITY_PROMPT` (l.93), last section after `---` | faithful (text); documented reconstruction (placement) | Its position in the paper's prompt is unknown. |
 | F9 | The integrity rules are not enforced beyond the three autograder checks (§2.1, §2.2, App. B) | `judge.judge_submission` (l.88) | faithful | Plan: "Instructions and enforcement gap" and "Baseline judge weaknesses". |
 | F10 | Agent identities follow the pattern prover-<Greek letter> (§3) | `agent-NNN` | deviation (recorded) | docs/prompts.md. A cosmetic difference. |
@@ -174,8 +174,8 @@ these differences. The paper's cohort shares (Figure 1) are not a replication cr
   26 required checks, including the parser flaw, helper workaround and sorry-warning
   behavior (J4–J7). The independent evaluator also passes all 22 fixtures and all
   22 self-comparisons (`evaluator-20261015T013612Z.json`).
-* Isolation probes (`runtime-isolation-*`) for F7, and capacity measurement
-  (`runtime-capacity-*`) for F2 and J11.
+* Done: isolation probes pass for both peers (`runtime-isolation-20261015T023534Z.json`,
+  F7). Capacity measurement (`runtime-capacity-*`) remains pending for F2 and J11.
 * Done: `background_lean_killed_at_120s` passes in
   `runtime-e2e-20261015T021631Z.json` (R4); both wrapper kills occurred at 120 s.
 * Done: the absence of `EVOLVE-VALUE` markers (B6) and the whole-file answer regex (J5) are
