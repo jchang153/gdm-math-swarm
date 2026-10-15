@@ -3,6 +3,10 @@
 Read docs/plan.md before implementing or running experiments. It is the
 authoritative record of user decisions. Keep proposals distinct from approvals.
 
+Use terminal Git commands and an SSH GitHub remote for future commits and pushes,
+as requested by the user. Do not use GitHub Desktop to push; report any SSH
+authentication blocker instead.
+
 Before GCP provisioning, SSH, file transfer, remote execution, or shutdown, read
 docs/gcp-vm.md and docs/validation.md. They preserve the user's supplied setup and
 run procedure. Stop the VM after authorized work completes or fails, once results
