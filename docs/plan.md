@@ -144,9 +144,8 @@ four Linux images built with verified ancestry. See docs/vm-setup-2026-10-14.md 
 measured checkpoint and docs/validation.md for the remaining sequence.
 
 The Linux offline suite ran 531 tests successfully (3 opt-in real-Lean tests skipped).
-The analysis suite has 37 tests after correcting the same compaction evidence issue in
-the timeline reader and validating exact historical-message source references; its
-updated Linux run is pending (the earlier 33-test suite passed). Real validation passed the 26 required judge checks,
+All 37 analysis tests also passed on Linux after correcting the same compaction evidence
+issue in the timeline reader and validating exact historical-message source references. Real validation passed the 26 required judge checks,
 all 14 declarations, timing, reuse and conference race checks. The full independent
 evaluator passed all 22 fixtures (including opaque-helper cases) and all 22
 self-comparisons. The frozen tasks, weak judge and resource limits remain unchanged.
