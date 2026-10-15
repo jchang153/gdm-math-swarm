@@ -42,6 +42,8 @@ def load_script(name):
 
 def pilot_config(**overrides):
     config = json.loads((ROOT / "configs" / "pilot.json").read_text())
+    for key in ("pilot_prior_held_usd", "pilot_prior_committed_usd", "pilot_prior_uncertain_requests"):
+        config.pop(key, None)
     config.pop("pilot_prior_settled_usd", None)
     config.pop("pilot_additional_allowance_usd", None)
     config.update({"max_pilot_usd": 20, "verified_integration": True, "paid_launch_enabled": True,
@@ -496,6 +498,59 @@ class LaunchGateTests(GateFixture):
             self.assertBlocked(self.evaluate(config), "ledger", "unresolved")
             current.settle(call, ".5")
             self.assertBlocked(self.evaluate(config), "ledger", "prior spending")
+
+    def test_eight_gib_repeat_requires_exact_preserved_snapshot_and_metadata(self):
+        from research_swarm.budget import _pilot_calls_sha256, _read_only
+        from contextlib import closing
+        import sqlite3
+        self.ledger.unlink()
+        old = BudgetLedger(self.ledger, {"pilot":20,"analysis":5,"compatibility":2})
+        old.settle(old.reserve("pilot", "first", 20), "19.636804044")
+        raise_cap(self.ledger, "pilot", "119.636804044", "First repeat approved")
+        old = BudgetLedger(self.ledger, {"pilot":"119.636804044","analysis":5,"compatibility":2})
+        old.settle(old.reserve("pilot", "second", 90), "86.091194430")
+        for amount in [".3"] * 6 + [".5276232"]:
+            old.settle(old.reserve("pilot", "uncertain", amount), None)
+        with closing(_read_only(self.ledger)) as db:
+            digest = _pilot_calls_sha256(db)
+        config = pilot_config(max_pilot_usd="208.055621674", pilot_prior_settled_usd="105.727998474",
+                              pilot_prior_held_usd="2.3276232", pilot_prior_committed_usd="108.055621674",
+                              pilot_additional_allowance_usd="100", pilot_prior_uncertain_requests=7)
+        with mock.patch.dict(DEFAULT_CAPS, {"pilot":"208.055621674","analysis":5,"compatibility":2}, clear=True), \
+                mock.patch("research_swarm.budget.EIGHT_GIB_PRIOR_CALLS_SHA256", digest):
+            self.assertBlocked(self.evaluate(config), "ledger")
+            raise_cap(self.ledger, "pilot", "208.055621674", "User authorized 8 GiB repeat")
+            result = self.evaluate(config)
+            self.assertTrue(result["evidence"]["ledger"]["passed"], result["evidence"]["ledger"])
+            self.assertEqual(result["evidence"]["ledger"]["pilot_remaining_usd"], "100")
+            for key in ("pilot_prior_settled_usd", "pilot_prior_held_usd", "pilot_prior_committed_usd",
+                        "pilot_additional_allowance_usd", "pilot_prior_uncertain_requests"):
+                for replacement in (None, "0"):
+                    with self.subTest(key=key, replacement=replacement):
+                        changed = dict(config)
+                        if replacement is None:
+                            del changed[key]
+                        else:
+                            changed[key] = replacement
+                        self.assertBlocked(self.evaluate(changed), "ledger", "metadata")
+            clean = self.ledger.read_bytes()
+            for sql in ("UPDATE calls SET agent='changed' WHERE agent='first'", "DELETE FROM cap_changes",
+                        "UPDATE calls SET state='reserved' WHERE agent='uncertain'"):
+                with self.subTest(sql=sql):
+                    self.ledger.write_bytes(clean)
+                    with sqlite3.connect(self.ledger) as db:
+                        db.execute(sql)
+                    self.assertBlocked(self.evaluate(config), "ledger")
+            self.ledger.write_bytes(clean)
+            current = BudgetLedger(self.ledger)
+            call = current.reserve("pilot", "new", 1)
+            self.assertBlocked(self.evaluate(config), "ledger")
+            current.settle(call, ".5")
+            self.assertBlocked(self.evaluate(config), "ledger")
+            self.ledger.unlink()
+            self.assertBlocked(self.evaluate(config), "ledger", "replacement ledger")
+            BudgetLedger(self.ledger)
+            self.assertBlocked(self.evaluate(config), "ledger")
 
     def test_ledger_with_old_caps_blocks(self):
         self.ledger.unlink()
