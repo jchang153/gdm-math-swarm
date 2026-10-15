@@ -25,7 +25,7 @@ the authoritative record of user decisions.
 * **Reviewed:** an independent review (45 findings: 41 confirmed and fixed or documented,
   4 refuted) and a completeness check against every plan decision; see
   [docs/review-2026-10-13.md](docs/review-2026-10-13.md).
-* **Offline-tested on the VM:** 531 unit tests run successfully (3 opt-in real-Lean
+* **Offline-tested on the VM:** 542 unit tests run successfully (3 opt-in real-Lean
   tests skipped), plus all 37 analysis tests in `.venv-analysis`. These suites use fake
   compilers and mocked Docker; real Lean, isolation and capacity checks are separate.
 * **October 14 review fixes:** opaque-aware research proof dependency checking and
@@ -41,9 +41,13 @@ the authoritative record of user decisions.
   failure and all corrections remain in the [setup record](docs/vm-setup-2026-10-14.md).
   The VM is stopped and confirmed `TERMINATED`. Paid compatibility and pilot launches
   retain their approval checkpoints.
-* **No paid model calls have run.** No compatibility check, no pilot. Model spending:
-  $0 of the $20 pilot, $5 analysis and $2 compatibility allowances. Authorized GCP VM
-  setup incurs infrastructure charges separately.
+* **Live compatibility passed:** the user-approved Fireworks route serves the same
+  DeepSeek model. A host-side reasoning conversion defect was repaired and verified
+  through the actual Claude Code process; all nine required checks pass, including
+  exact reasoning metadata replay. Total compatibility spending is $0.144114852 of
+  $2, with no unresolved holds. No pilot has run; its $20 allowance and the separate
+  $5 analysis allowance remain untouched. Integration review and pilot launch retain
+  their approval checkpoints. GCP infrastructure charges are separate.
 
 ## Setup
 
@@ -89,7 +93,7 @@ The project's own scripts disable Inspect's `.env` loading before any evaluation
 All from the repository root.
 
 ```sh
-PYTHONPATH=src .venv/bin/python -m unittest discover -s tests       # offline tests (531, 3 skipped on Linux)
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests       # offline tests (542, 3 skipped on Linux)
 PYTHONPATH=src .venv-analysis/bin/python -m unittest discover -s research/analysis/tests   # analysis tests (37)
 PYTHONPATH=src .venv/bin/python scripts/preflight.py                # unpaid launch gates + spending checkpoint
 PYTHONPATH=src .venv/bin/python -m research_swarm.keyword_filter FILE.lean   # keyword stage only
