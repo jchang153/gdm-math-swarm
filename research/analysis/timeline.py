@@ -560,10 +560,42 @@ def inspect_sample_stream(sample, log_name):
     agent = str(getattr(sample, "id", None))
     base = {"file": log_name, "sample_id": agent}
     entries, issued = [], {}
-    tool_messages = {}
+    # Final messages are the adopted conversation, not the complete history:
+    # compaction can remove earlier results. Model inputs preserve what was
+    # actually observed on each request. Never resolve conflicting replays by
+    # choosing the last copy.
+    observations = defaultdict(list)
+    for event in getattr(sample, "events", None) or []:
+        if getattr(event, "event", None) != "model":
+            continue
+        for index, message in enumerate(getattr(event, "input", None) or []):
+            if getattr(message, "role", None) == "tool":
+                observations[getattr(message, "tool_call_id", None)].append((message,
+                    dict(base, event_uuid=getattr(event, "uuid", None), input_message_index=index,
+                         message_id=getattr(message, "id", None)), _as_timestamp(getattr(event, "timestamp", None))))
     for index, message in enumerate(getattr(sample, "messages", None) or []):
-        if getattr(message, "role", None) == "tool" and getattr(message, "tool_call_id", None):
-            tool_messages[message.tool_call_id] = (index, message)
+        if getattr(message, "role", None) == "tool":
+            observations[getattr(message, "tool_call_id", None)].append((message,
+                dict(base, message_id=getattr(message, "id", None), transcript_index=index), None))
+    tool_messages, conflicts = {}, set()
+    for call_id, copies in observations.items():
+        signatures, functions = set(), set()
+        for message, _, _ in copies:
+            content = getattr(message, "content", None)
+            nontext = [part.model_dump(mode="json") if hasattr(part, "model_dump") else str(part)
+                       for part in content if getattr(part, "type", None) != "text"] if isinstance(content, list) else []
+            error = getattr(message, "error", None)
+            if hasattr(error, "model_dump"):
+                error = error.model_dump(mode="json")
+            signatures.add(json.dumps({"text": _message_text(message), "nontext": nontext, "error": error},
+                                      sort_keys=True, default=str))
+            if getattr(message, "function", None):
+                functions.add(message.function)
+        if not call_id or len(signatures) != 1 or len(functions) > 1:
+            conflicts.add(call_id)
+        else:
+            tool_messages[call_id] = copies[0]
+    emitted_results = set()
     covered = set()
     for event in getattr(sample, "events", None) or []:
         kind = getattr(event, "event", None)
@@ -592,17 +624,18 @@ def inspect_sample_stream(sample, log_name):
             for call in calls:
                 issued[call["id"]] = entry
                 found = tool_messages.get(call["id"])
-                if found is not None:
-                    index, result = found
-                    covered.add(getattr(result, "id", None))
+                if found is not None and call["id"] not in emitted_results:
+                    result, result_ref, before = found
+                    emitted_results.add(call["id"])
+                    covered.update(getattr(m, "id", None) for m, _, _ in observations[call["id"]])
                     result_text, _ = _message_text(result)
                     entries.append({"source": "inspect", "kind": "tool_result", "agent_id": agent,
                                     "timestamp": None, "after_timestamp": entry["timestamp"],
-                                    "conference_seq": None, "function": getattr(result, "function", None),
-                                    "tool_call_id": call["id"], "result_excerpt": result_text[:2000],
-                                    "summary": f"{getattr(result, 'function', None)} result",
-                                    "ref": dict(base, message_id=getattr(result, "id", None),
-                                                transcript_index=index)})
+                                    "before_timestamp": before, "conference_seq": None,
+                                    "function": getattr(result, "function", None), "tool_call_id": call["id"],
+                                    "result_excerpt": result_text[:2000],
+                                    "error": str(getattr(result, "error", None) or "") or None,
+                                    "summary": f"{getattr(result, 'function', None)} result", "ref": result_ref})
         elif kind == "tool":
             calls = [{"id": getattr(event, "id", None), "function": getattr(event, "function", None),
                       "arguments": getattr(event, "arguments", None) or {}}]
@@ -622,6 +655,23 @@ def inspect_sample_stream(sample, log_name):
             entries.append({"source": "inspect", "kind": kind, "agent_id": agent, "timestamp": started,
                             "conference_seq": None, "payload": detail,
                             "summary": json.dumps(detail, ensure_ascii=False)[:300], "ref": ref})
+    # Preserve orphan observations too, without inventing execution timestamps.
+    for call_id, copies in observations.items():
+        covered.update(getattr(m, "id", None) for m, _, _ in copies)
+        if call_id in emitted_results:
+            continue
+        message, result_ref, before = copies[0]
+        conflict = call_id in conflicts
+        text, _ = _message_text(message)
+        entries.append({"source": "inspect", "kind": "tool_result_conflict" if conflict else "tool_result",
+                        "agent_id": agent, "timestamp": None, "before_timestamp": before, "conference_seq": None,
+                        "tool_call_id": call_id, "function": getattr(message, "function", None),
+                        "result_excerpt": None if conflict else text[:2000],
+                        "error": "Conflicting or missing tool-call identity" if conflict else
+                                 str(getattr(message, "error", None) or "") or None,
+                        "evidence_conflict": conflict, "observations": [ref for _, ref, _ in copies],
+                        "summary": "conflicting tool result observations" if conflict else "untimed tool result",
+                        "ref": result_ref})
     # Transcript messages without a timed model event: kept, explicitly untimed.
     # With model events present, assistant turns are already represented by them
     # (bridge message ids need not match), so only unanchored tool results remain.
@@ -748,9 +798,10 @@ def _ev(entry):
         return {"type": "evaluator_record", "file": ref.get("file"), "line": ref.get("line"),
                 "submission_id": entry["ids"].get("submission_id"), "validity": entry.get("validity")}
     if ref.get("event_uuid"):
-        return {"type": "inspect_event", "log": ref.get("file"), "sample_id": ref.get("sample_id"),
-                "event_uuid": ref.get("event_uuid"), "message_id": ref.get("message_id")}
-    return {"type": "inspect_message", "log": ref.get("file"), "sample_id": ref.get("sample_id"),
+        return {"type": "inspect_event", "file": ref.get("file"), "sample_id": ref.get("sample_id"),
+                "event_uuid": ref.get("event_uuid"), "message_id": ref.get("message_id"),
+                **({"input_message_index": ref["input_message_index"]} if "input_message_index" in ref else {})}
+    return {"type": "inspect_message", "file": ref.get("file"), "sample_id": ref.get("sample_id"),
             "message_id": ref.get("message_id"), "transcript_index": ref.get("transcript_index")}
 
 
@@ -1264,7 +1315,8 @@ def _researcher_check(ref, run_dir):
 def check_labels(records, entries, state=None, *, run_dir=None):
     """Validate source identities and deterministic rubric relationships; not intent.
 
-    Inspect references require file + sample_id + the non-null event/message ID.
+    Inspect references require file (legacy log alias accepted) + sample_id +
+    the non-null event/message ID; model-input results also require their index.
     Confirmed false accusations name attributes.named_submission_id. Spread names
     attributes.later_submission_id and earlier_submission_id or earlier_artifact_id,
     plus adoption_basis. Researcher checks live under RUN/analysis/checks and name
@@ -1340,9 +1392,19 @@ def check_labels(records, entries, state=None, *, run_dir=None):
                          and ref["sha256"] == e["payload"].get("sha256")]
             elif kind in {"inspect_event", "inspect_message"}:
                 key = "event_uuid" if kind == "inspect_event" else "message_id"
-                if ref.get("file") and ref.get("sample_id") and ref.get(key):
-                    found = [e for e in entries if e["source"] == "inspect"
-                             and all(e["ref"].get(k) == ref[k] for k in ("file", "sample_id", key))]
+                log_name = ref.get("file", ref.get("log"))
+                index = ref.get("input_message_index")
+                coordinate_ok = ("input_message_index" not in ref or
+                                 (kind == "inspect_event" and type(index) is int and index >= 0))
+                if log_name and ref.get("sample_id") and ref.get(key) and coordinate_ok and (
+                        "log" not in ref or ref["log"] == log_name):
+                    found = [e for e in entries if e["source"] == "inspect" and not e.get("evidence_conflict")
+                             and e["ref"].get("file") == log_name
+                             and ("input_message_index" not in e["ref"] or
+                                  (kind == "inspect_event" and index == e["ref"]["input_message_index"]))
+                             and all(e["ref"].get(k) == ref[k] for k in ("sample_id", key))
+                             and all(e["ref"].get(k) == ref[k] for k in
+                                     ("input_message_index", "message_id", "transcript_index") if ref.get(k) is not None)]
             elif kind == "researcher_check":
                 found = [ref] if _researcher_check(ref, run_dir) else []
             else:
