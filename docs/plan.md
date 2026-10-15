@@ -420,4 +420,14 @@ reusable, offline HTML renderer for original Inspect messages. Neither exporter 
 judge or model-judged analysis tool. Archive raw files alongside the derived views.
 The researcher AGENTS.md records rebuilding the index after future run exports.
 Generated views and raw runs remain Git-ignored, local and backed up separately; no
-cloud publication or new experiment was requested or performed.
+cloud publication or new experiment was requested or performed at that checkpoint.
+
+The user subsequently requested a shared Hugging Face library, selected namespace
+`jchang153`, completed HF authentication, made the Space private and explicitly
+authorized publication. The destination is
+https://huggingface.co/spaces/jchang153/gdm-math-swarm-experiments.
+The prepared archive includes the completed pilot, reports, HTML transcripts and
+native Inspect View. Keep host credentials/auth caches out, verify privacy and
+integrity, preserve local originals, and follow docs/experiment-library.md for later
+updates. This publication does not authorize a new paid experiment or deleting
+local evidence.
