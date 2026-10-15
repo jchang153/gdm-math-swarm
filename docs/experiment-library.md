@@ -56,8 +56,12 @@ immutable run IDs; do not replace another run with a new experiment. Regenerate
 the catalogue from both existing and newly added reports. A bundle prepared only
 from local runs is not automatically a complete shared catalogue.
 
-Use `HfApi.upload_folder` with `repo_type='space'` and `parent_commit` set to the
-revision you inspected. If the revision changes, fetch the new records and rebuild
+Use guarded `HfApi.create_commit` batches with `repo_type='space'` and
+`parent_commit` set to the revision you inspected. The initial single-folder upload
+timed out with HTTP 408; retrying in 20 sequential batches succeeded. Group at most
+120 files and approximately 4 MB per commit (larger individual files go alone).
+Publish run records before the root catalogue and manifest. If the revision changes,
+fetch the new records and rebuild
 the catalogue before retrying. Do not use deletion patterns or overwrite a newer
 catalogue blindly. Verify private visibility, remote file hashes, and report/viewer
 links after upload. Inspect View needs HTTP byte-range support for `.eval` files.
@@ -68,3 +72,12 @@ The initial archive was prepared under the ignored directory
 `runs/phase-b/hf-library-preparation/space/`. Its manifest records the published
 files; the official Hugging Face SDK performed the upload. Host credentials, auth
 caches, launch phase directories and host-only budget databases are not included.
+
+Initial publication completed at revision
+`8784a2cdd01589cbde52e6bb39fd7b6598025c1e`. All 891 archive file hashes matched
+remote object metadata. Six representative files were also downloaded and matched
+locally. The private static app returned HTTP 200 with the experiment catalogue;
+the Inspect `.eval` request returned HTTP 206 with the exact requested bytes.
+The Space reported RUNNING and private. Verification records are saved locally in
+`runs/phase-b/hf-library-preparation/publication-verification.json`. Local originals
+were retained; no new experimental or analysis inference was run.

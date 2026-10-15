@@ -431,3 +431,9 @@ native Inspect View. Keep host credentials/auth caches out, verify privacy and
 integrity, preserve local originals, and follow docs/experiment-library.md for later
 updates. This publication does not authorize a new paid experiment or deleting
 local evidence.
+
+Publication completed privately at HF revision
+`8784a2cdd01589cbde52e6bb39fd7b6598025c1e`: all 891 archive file hashes matched,
+representative downloads matched, the static app returned HTTP 200 and the native
+Inspect log returned valid HTTP 206 byte-range content. The initial monolithic
+upload timed out; sequential guarded batches completed. Local originals remain.
