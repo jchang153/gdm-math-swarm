@@ -453,6 +453,12 @@ the runtime event log. The agent image is `sha256:5a009aa1f593609fe4742bc6f7223f
 Compare every live pilot's blocks and definitions against this capture; billing metadata
 and model-dependent text may differ.
 
+The approved `2g` profile was recaptured in the passing
+`runtime-e2e-20261015T030326Z` run. Its [structure record](../research/effective-instructions/validation-runtime-20261015T030326Z/structure.json)
+verifies the same system-block and tool-definition hashes as the initial capture.
+All new archive digests match their actual runtime events; increasing container memory
+introduced no effective-prompt change in this mock run.
+
 **Capture.** `inspect_adapter.InstructionArchive` stores every distinct system prompt and
 tool-name list that the CLI sends, researcher-side, under
 `<run_dir>/instructions/<agent>-<hash>.json`. The Phase B unpaid mock run

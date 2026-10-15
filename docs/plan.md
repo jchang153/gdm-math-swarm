@@ -137,29 +137,30 @@ This checklist maps the initial research inventory to the specification discussi
 
 ## Implementation status
 
-Updated October 14, 2026. All seven authorized review fixes are implemented. VM setup
-and unpaid validation are authorized; paid compatibility and pilot launches retain their
-separate approval checkpoints. The supplied private GCP VM has been provisioned and all
-four Linux images built with verified ancestry. See docs/vm-setup-2026-10-14.md for the
-measured checkpoint and docs/validation.md for the remaining sequence.
+Updated October 14, 2026 (PDT). The authorized review fixes and deployment corrections
+are implemented. All 531 main tests ran successfully on Linux (3 opt-in skips), and
+all 37 analysis tests passed. The compaction-safe runtime and analysis readers retain
+historical tool results with exact source references; the frozen rubric is unchanged.
 
-The Linux offline suite ran 531 tests successfully (3 opt-in real-Lean tests skipped).
-All 37 analysis tests also passed on Linux after correcting the same compaction evidence
-issue in the timeline reader and validating exact historical-message source references. Real validation passed the 26 required judge checks,
-all 14 declarations, timing, reuse and conference race checks. The full independent
-evaluator passed all 22 fixtures (including opaque-helper cases) and all 22
-self-comparisons. The frozen tasks, weak judge and resource limits remain unchanged.
+All nine unpaid VM validation stages passed against the current Linux images:
+declarations, judge, timing, reuse, conference race, evaluator, runtime end-to-end,
+isolation and capacity. The evaluator passed all 22 fixtures (including opaque-helper
+cases) and all 22 self-comparisons. The frozen tasks and weak judge remain unchanged.
+See docs/vm-setup-2026-10-14.md for measured results and failure history.
 
-Deployment exposed two additional corrections: shell-safe dependency-search markers for
-apostrophes in frozen task names, and reconstruction of runtime tool evidence across
-conversation compaction. Both have offline regression coverage. Runtime validation passed
-after the evidence-reader correction. Isolation passed after authenticating exact native
-harness sockets to their local peer processes and recognizing the read-only Docker init
-mount alias. No broad socket exemption remains. The first 20-agent capacity probe failed because the `1g` per-agent cap caused memory
-kills (six CLI sessions crashed). The user approved `2g` per agent; repeat runtime,
-isolation and capacity at that setting. Other settings and model caps are unchanged.
-No paid model calls or pilot have run. Terminal Git with an SSH remote is the standing
-commit/push method; do not use GitHub Desktop.
+The initial `1g` capacity probe caused memory kills; the user explicitly approved `2g`
+per agent. All three compose-bound checks were regenerated and passed at that setting.
+The final ten-minute capacity test completed with all 20 agents, zero memory kills,
+no compile timeouts and no ledger contention. It supports retaining the existing
+unbounded `judge_max_concurrent: null` on this VM for the 20-agent pilot; this does not
+establish capacity for 100 agents. Other resources and model spending caps are unchanged.
+
+No paid model calls or pilot have run. Final preflight passes every unpaid validation
+gate; the remaining blockers are host provider credentials, provider key-limit evidence,
+the separately confirmed live compatibility check (at most $2), verified integration
+and paid-launch approval. Pilot and analysis allowances remain $20 and $5 respectively.
+The VM was stopped and confirmed `TERMINATED` after preserving results.
+Terminal Git with an SSH remote is the standing commit/push method.
 
 ## Engineering choices within the approved design
 

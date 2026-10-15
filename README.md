@@ -34,15 +34,13 @@ the authoritative record of user decisions.
   evidence bound to effective settings; source/agent/order-bound labels, strict voluntary
   exits and malformed-annotation rejection. Natural completion logs the later run
   boundary. The original rubric body and frozen pilot tasks retain their hashes.
-* **VM validation in progress:** all four Linux images built; the evaluator smoke test,
-  operational judge, all 14 declarations, compile timing, reuse and conference checks
-  passed. The full evaluator passed all 22 fixtures and all 22 self-comparisons.
-  Runtime validation passed after a compaction evidence-reader fix. Strict isolation
-  validation also passed after correcting harness socket identification and Docker's
-  init mount alias. The first 20-agent capacity probe found memory kills at the `1g` per-agent cap.
-  The user approved `2g`; runtime, isolation and capacity will repeat at that setting.
-  See [the setup record](docs/vm-setup-2026-10-14.md). Paid compatibility and pilot steps
-  retain their approval checkpoints. Mac images are not reused for VM validation.
+* **VM validation passed:** all four Linux images built; judge, declarations, timing,
+  reuse, conference race, and all 22 evaluator fixtures plus 22 self-comparisons passed.
+  Real runtime, strict isolation and the ten-minute 20-agent capacity test passed at
+  the approved `2g` per-agent memory cap, with zero memory kills. The initial `1g`
+  failure and all corrections remain in the [setup record](docs/vm-setup-2026-10-14.md).
+  The VM is stopped and confirmed `TERMINATED`. Paid compatibility and pilot launches
+  retain their approval checkpoints.
 * **No paid model calls have run.** No compatibility check, no pilot. Model spending:
   $0 of the $20 pilot, $5 analysis and $2 compatibility allowances. Authorized GCP VM
   setup incurs infrastructure charges separately.
