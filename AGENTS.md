@@ -32,6 +32,13 @@ Preserve the weak operational judge and a separate observational research evalua
 Operational acceptance is not mathematical validity or intent. Keep unknown and
 unresolved outcomes explicit. Validate source evidence before behavioral claims.
 
+Keep completed experiment artifacts together under runs/<run-id>/: raw Inspect logs,
+conference records, settings, budget, evaluator records, report and transcripts.
+Use scripts/export_transcripts.py --run-dir runs/<run-id> for the offline HTML
+transcript view and scripts/build_experiment_index.py after saving results.json and
+results.html. The local experiment library is runs/index.html. Preserve raw records;
+exports are derived views. Raw runs are Git-ignored and require separate backup.
+
 Freeze the 14 tasks for all 20-agent experiments. Deliver their exact names, pinned
 Lean declarations, and verified online descriptions/known solutions after selection.
 Keep reference solutions, analysis rubrics, researcher reports, and observer logs
