@@ -58,6 +58,7 @@ Updated October 13, 2026, America/Los_Angeles.
 | Answer-field density (October 13, 2026) | Keep the frozen 14-task subset. Document as a deviation that 8 of 14 pilot tasks (27 of 71 parent tasks) have editable answer fields, versus about 8 of 71 in the paper, and that the reconstructed `greens14` is answer-based although the paper's was exploited through notation. |
 | Live compatibility check (October 13, 2026) | **Supersedes the compatibility part of "Approved spending limits":** a separate paid compatibility allowance of $2, outside the $20 pilot and $5 analysis allowances, for one agent running a few turns on the frozen route with explicit abort criteria (tool-call parsing, reasoning replay, provider cost reporting, truncation behavior). Ledger scope `compatibility` cap becomes $2. Validate enforcement with unpaid mock checks before running it, and confirm with the user immediately before the paid call. |
 | Live compatibility execution authorized (October 14, 2026) | After the host key passed the unpaid OpenRouter check with a $2 non-resetting limit and $0 usage, the user said "go ahead and run it" in response to the proposed live compatibility test capped at $2. Authorizes one live compatibility attempt and necessary VM startup/prerequisite checks. Does not authorize the paid pilot, a second paid attempt, or changes to the frozen model, settings or allowances. Preserve evidence and the ledger, then stop the idle VM and verify TERMINATED. |
+| Alternative provider authorized (October 14, 2026) | After DeepSeek's own endpoint was unavailable and Fireworks was proposed, the user said "please go ahead and try those too." Authorizes selecting the OpenRouter `fireworks` endpoint for the same `deepseek/deepseek-v4.1-flash` model and running its live compatibility check within the existing shared $2 allowance. Refresh and validate the route first; no automatic provider fallbacks, no spending reset, and no pilot launch. Other model settings, population, resources and allowances are unchanged. |
 | Research evaluator opaque-helper fix (October 14, 2026) | User authorized the independent evaluator to inspect all reachable proof dependencies, including opaque helper bodies; reject admissions/unapproved axioms and keep inspection failures unresolved. Add genuine, direct-admission, nested-admission and forbidden-axiom opaque fixtures, researcher-only. The weak operational judge stays unchanged. Implementation and offline checks are authorized now; real Lean/container validation remains on hold for the VM. Verifier digest and evaluator semantics v3 invalidate old evaluator evidence and require a comparator rebuild/revalidation. |
 | Stop-boundary correction (October 14, 2026) | User authorized rechecking stop/cancellation after budget reservation and sandbox file reads and before dispatch. Release reservations for model requests that were never dispatched; retain settlement/grace for requests already admitted. Refuse queued conference actions when the run has stopped. Implement and validate offline now; Docker/runtime validation remains on hold. No compatibility, capacity or analysis-label fixes are authorized by this row. |
 | Compatibility rejection policy (October 14, 2026) | User authorized a refined fix: detect API rejections converted into model outputs; preserve existing bounded retries for temporary API failures, including HTTP 408/429; fail only the small preflight compatibility check for structural incompatibilities. The pilot retry behavior is unchanged and a single rejection must not stop the entire pilot. The compatibility allowance, request/time limits and paid-check approval checkpoint stay unchanged; implementation/testing now is offline only. This supersedes the engineering first-4xx compatibility-abort rule. |
@@ -156,7 +157,7 @@ no compile timeouts and no ledger contention. It supports retaining the existing
 unbounded `judge_max_concurrent: null` on this VM for the 20-agent pilot; this does not
 establish capacity for 100 agents. Other resources and model spending caps are unchanged.
 
-No paid model calls or pilot have run. The host credential passed the user-approved
+No pilot has run. The host credential passed the user-approved
 unpaid OpenRouter check with a $2 non-resetting limit, $0 usage and private file
 permissions (`provider-limit-20261015T035028Z.json`). The user then authorized one
 live compatibility attempt, but prerequisite public route refreshes at 03:53:57 and
@@ -164,15 +165,29 @@ live compatibility attempt, but prerequisite public route refreshes at 03:53:57 
 endpoint unavailable (`status: -5`). No paid check started and no spending ledger
 was created. Do not bypass this gate or silently substitute another provider.
 All nine unpaid runtime validation stages still pass against the current images.
-The remaining blockers are provider-route availability, the live compatibility
-check, verified integration and paid-launch approval. The compatibility, pilot and
-analysis allowances remain $2, $20 and $5 respectively, with no actual costs or holds.
-Public route snapshots and the spending report were preserved before VM shutdown.
-The same snapshot lists the `fireworks` endpoint for the identical model ID and
-dated checkpoint as available; offline validation accepts its parameters and prices
-within the existing bounds. This is an unapproved alternative hosting route, not
-a completed live compatibility test. Changing the pinned provider requires a user
-decision; neither configuration nor runtime code was changed to select it.
+The user subsequently approved the `fireworks` route, now selected in
+`configs/pilot.json`. Its refreshed public catalog passes existing parameter and
+price bounds (`route-pricing-20261015T040048Z.json`). One live compatibility check
+ran: `compatibility-20261015T040110Z.json`, 13 settled requests (one reasoning-cap
+probe plus 12 agent requests), cost $0.092950980, no violations or unresolved holds.
+The compatibility allowance has $1.90704902 remaining; pilot and analysis allowances
+remain untouched at $20 and $5. Raw run logs and a consistent ledger backup were
+preserved locally under `runs/phase-b/fireworks-compat-20261015/` before VM shutdown.
+
+Eight of nine required compatibility checks passed: built-in and conference tools,
+provider-reported billing, output/reasoning cap enforcement, cost bounds, route
+pinning and no sample errors. The required reasoning-replay check failed: no typed
+reasoning blocks appeared in later requests, although 11 agent responses reported
+reasoning tokens. Raw Inspect model events establish that Fireworks returned
+`ContentReasoning` blocks, then subsequent inputs contained those turns as ordinary
+text blocks. The pinned Inspect Anthropic bridge flattens non-Anthropic reasoning
+in `message_block_params`; restoring only a thinking block would still lose the
+OpenRouter reasoning-details signature on the reverse conversion. This is an
+integration defect, not evidence that Fireworks rejected reasoning replay.
+Fix both directions of the bridge conversion and verify an exact offline round-trip
+of provider reasoning details before requesting a new paid attempt; never count
+flattened text as successful reasoning replay. No bridge implementation was changed
+in this execution session. Keep verified integration and paid launch disabled.
 Terminal Git with an SSH remote is the standing commit/push method.
 
 ## Engineering choices within the approved design
