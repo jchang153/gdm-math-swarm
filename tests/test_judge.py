@@ -137,6 +137,7 @@ if __name__ == '__main__':
 # ---------------------------------------------------------------- validation scripts (offline)
 import re  # noqa: E402
 import sys  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
 from pathlib import Path  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 
@@ -295,6 +296,30 @@ class DatasetValidationScriptTests(unittest.TestCase):
         self.assertIsNone(validate_dataset.parse_reuse(['GDM_REUSE {broken']))
         self.assertTrue(re.fullmatch(r'reuse-\d{8}T\d{6}Z\.json',
                                      validate_dataset.evidence_path('reuse', validate_dataset.utc_now()).name))
+
+    def test_source_search_markers_survive_a_real_posix_shell(self):
+        tasks = self.dataset.pilot_tasks
+        task_id = "DedekindNumber_M'_three"
+        terms = dict(validate_dataset.REUSE_TERMS)
+        terms[task_id] = [*terms[task_id], r'\bSperner\b', r"quote'and\nnewline"]
+        real_run = validate_dataset.subprocess.run
+
+        def run_script_without_docker(command, **kwargs):
+            # Execute the generated shell protocol, replacing only the image's
+            # working directory and filesystem grep with a no-match shell stub.
+            script = command[-1].replace('cd /opt/lean-project', 'cd .', 1)
+            kwargs['timeout'] = 10
+            return real_run(['sh', '-c', 'grep() { return 1; }\n' + script], **kwargs)
+
+        with patch.object(validate_dataset, 'REUSE_TERMS', terms), \
+                patch.object(validate_dataset.subprocess, 'run', side_effect=run_script_without_docker):
+            result = validate_dataset.source_search(SimpleNamespace(image='unused'), tasks)
+        self.assertEqual(set(result), {task.task_id for task in tasks})
+        for task in tasks:
+            self.assertEqual(result[task.task_id], [
+                {'term': term, 'hits': 0, 'declaration_hits': []}
+                for term in terms[task.task_id]
+            ])
 
 
 # ---------------------------------------------------------------- documented weaknesses (offline, unchanged)

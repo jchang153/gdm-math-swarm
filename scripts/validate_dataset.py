@@ -635,7 +635,9 @@ def source_search(args, tasks):
     for task in tasks:
         for term in REUSE_TERMS.get(task.task_id, []):
             marker = json.dumps(dict(task=task.task_id, term=term))
-            script.append(f"echo '@@TERM {marker}'")
+            # Task names can contain apostrophes; echo may also interpret the
+            # backslashes in JSON. Quote the full payload and print it literally.
+            script.append("printf '%s\\n' " + shlex.quote('@@TERM ' + marker))
             script.append('grep -rnE --include=*.lean ' + shlex.quote(term) + ' ' + ' '.join(SEARCH_ROOTS) + ' || true')
     cmd = ['docker', 'run', '--rm', '--pull', 'never', '--log-driver', 'none', '--label', JUDGE_LABEL,
            '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
