@@ -553,7 +553,7 @@ cloud publication or new experiment was requested or performed at that checkpoin
 The user subsequently requested a shared Hugging Face library, selected namespace
 `jchang153`, completed HF authentication, made the Space private and explicitly
 authorized publication. The destination is
-https://huggingface.co/spaces/jchang153/gdm-math-swarm-experiments.
+https://huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments.
 The prepared archive includes the completed pilot, reports, HTML transcripts and
 native Inspect View. Keep host credentials/auth caches out, verify privacy and
 integrity, preserve local originals, and follow docs/experiment-library.md for later

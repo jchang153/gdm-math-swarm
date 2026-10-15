@@ -1,11 +1,28 @@
 # Shared experiment library
 
-The private library is https://huggingface.co/spaces/jchang153/gdm-math-swarm-experiments.
-The user authorized uploading the completed pilot there on October 15, 2026,
-after choosing private visibility. Check that it remains private before updates.
-An HF login with access to this Space is required to view it. Personal-namespace
-ownership does not automatically give collaborators access; configure access on
-Hugging Face or move to a shared organization when needed.
+The private library is https://huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments.
+The user authorized the initial private publication on October 15, 2026 and later
+approved creating the `gdm-math-swarm` organization and transferring the library
+there for collaboration. The organization uses the free plan. The transfer
+preserved all 6204 files and revision `8e0bc9de448c8b878476c5ef2388c669209826c1`;
+private visibility and authenticated SDK access were verified. The former
+`jchang153/gdm-math-swarm-experiments` Hub URL redirects to this destination.
+Use `gdm-math-swarm/gdm-math-swarm-experiments` as the publishing repository ID.
+
+Organization members need Read access to browse and Write access to publish.
+Write permits changes to every repository in this dedicated organization;
+Admin is unnecessary for normal publishing. Each publisher uses their own HF
+account and a fine-grained token with read/write permission for this Space.
+Never share account passwords, provider keys, auth caches or local login tokens.
+Pending collaborator invitations require the user's supplied account identities.
+
+HF access covers the archive. Experiment execution separately requires GitHub
+repository access, authorized GCP/IAP/SSH access and a configured host-only model
+credential with an approved budget. A collaborator uses their own Google login;
+never transfer GCP credentials. Follow `gcp-vm.md` and `validation.md`, preserve
+the authoritative budget ledger and unresolved holds, and coordinate exclusive
+use of the experiment VM before starting or stopping it. Membership alone does
+not authorize a paid run or a spending-cap increase.
 
 The static app contains the experiment catalogue, per-run reports, HTML transcripts,
 native Inspect View, and original run records. Inspect View renders the saved
