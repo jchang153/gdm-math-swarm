@@ -1,0 +1,332 @@
+{
+  "kind": "researcher-only mockllm effective-instruction structure",
+  "claude_code": "2.1.296",
+  "source_run": "validation-runtime-20261015T021631Z",
+  "limitations": [
+    "Mock model capture; compare live pilot blocks and tool definitions separately."
+  ],
+  "all_agents_same_builtin_prefix": true,
+  "captures": [
+    {
+      "source": "research/effective-instructions/validation-runtime-20261015T021631Z/agent-001-71c9c09fe087f0e4.json",
+      "agent_id": "agent-001",
+      "effective_instructions_sha256": "71c9c09fe087f0e4c69c80f9cb146b420b270bad1b7dfbe3f77fef30976f78eb",
+      "blocks": [
+        {
+          "index": 0,
+          "characters": 74,
+          "sha256": "5e95bc9eeadb69abd7418ce1daf878509ff5c8ff5461dd1b36be74837a020459",
+          "headings": [],
+          "first_line": "x-anthropic-billing-header: cc_version=2.1.296.c17; cc_entrypoint=sdk-cli;"
+        },
+        {
+          "index": 1,
+          "characters": 94,
+          "sha256": "6c1afcd9232947a1d8f7c44a79316f8fe08d06dcdc6e7453f09e2d78fa858e5e",
+          "headings": [],
+          "first_line": "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK."
+        },
+        {
+          "index": 2,
+          "characters": 15064,
+          "sha256": "302a9434d409a11107db12841a035980ad6a0c8593ec8a25daa0d4054c0f7f8b",
+          "headings": [
+            "# Harness",
+            "# Session-specific guidance",
+            "# Memory",
+            "# Environment",
+            "# Context management",
+            "# Lean Research Conference",
+            "## Persona: Number Theory",
+            "## Problems",
+            "## Working environment",
+            "## Submissions and credit",
+            "## Communication and shared resources",
+            "## Private notes",
+            "## Working at your own pace"
+          ],
+          "first_line": null
+        }
+      ],
+      "builtin_prefix_characters": 5637,
+      "builtin_prefix_sha256": "82b0fb0351526a4f36ca4a4fb55d8b7037d7b7909c006a6b00657d23b1de86f2",
+      "exact_conference_prompt_contiguous": true,
+      "text_after_conference_prompt_characters": 0,
+      "builtin_tools": [
+        "Bash",
+        "CronCreate",
+        "CronDelete",
+        "CronList",
+        "Edit",
+        "EnterWorktree",
+        "ExitWorktree",
+        "ListAgents",
+        "NotebookEdit",
+        "Read",
+        "ReportFindings",
+        "ScheduleWakeup",
+        "SendMessage",
+        "Skill",
+        "TaskStop",
+        "Workflow",
+        "Write"
+      ],
+      "conference_tools": [
+        "mcp__conference__get_bulletin_board",
+        "mcp__conference__get_conference_status",
+        "mcp__conference__get_messages",
+        "mcp__conference__get_problem",
+        "mcp__conference__list_library",
+        "mcp__conference__list_problems",
+        "mcp__conference__post_intent",
+        "mcp__conference__publish_notebook",
+        "mcp__conference__read_library_file",
+        "mcp__conference__send_direct_message",
+        "mcp__conference__submit_feedback",
+        "mcp__conference__submit_solution"
+      ],
+      "tool_definitions_sha256": "20612a41b332975d944a21c5d7a93dec75850435c354930d9ece989d3ef3c4f1"
+    },
+    {
+      "source": "research/effective-instructions/validation-runtime-20261015T021631Z/agent-001-8ea93afa57fb9d39.json",
+      "agent_id": "agent-001",
+      "effective_instructions_sha256": "8ea93afa57fb9d39eaf3fce48eb9f523ae7912c4a66896779ab714bf661b6c6b",
+      "blocks": [
+        {
+          "index": 0,
+          "characters": 74,
+          "sha256": "91556e9af0487b0570dc4852df4ecd314944f456bec64c672f75b5f07d9ac7c4",
+          "headings": [],
+          "first_line": "x-anthropic-billing-header: cc_version=2.1.296.b78; cc_entrypoint=sdk-cli;"
+        },
+        {
+          "index": 1,
+          "characters": 94,
+          "sha256": "6c1afcd9232947a1d8f7c44a79316f8fe08d06dcdc6e7453f09e2d78fa858e5e",
+          "headings": [],
+          "first_line": "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK."
+        },
+        {
+          "index": 2,
+          "characters": 15064,
+          "sha256": "302a9434d409a11107db12841a035980ad6a0c8593ec8a25daa0d4054c0f7f8b",
+          "headings": [
+            "# Harness",
+            "# Session-specific guidance",
+            "# Memory",
+            "# Environment",
+            "# Context management",
+            "# Lean Research Conference",
+            "## Persona: Number Theory",
+            "## Problems",
+            "## Working environment",
+            "## Submissions and credit",
+            "## Communication and shared resources",
+            "## Private notes",
+            "## Working at your own pace"
+          ],
+          "first_line": null
+        }
+      ],
+      "builtin_prefix_characters": 5637,
+      "builtin_prefix_sha256": "82b0fb0351526a4f36ca4a4fb55d8b7037d7b7909c006a6b00657d23b1de86f2",
+      "exact_conference_prompt_contiguous": true,
+      "text_after_conference_prompt_characters": 0,
+      "builtin_tools": [
+        "Bash",
+        "CronCreate",
+        "CronDelete",
+        "CronList",
+        "Edit",
+        "EnterWorktree",
+        "ExitWorktree",
+        "ListAgents",
+        "NotebookEdit",
+        "Read",
+        "ReportFindings",
+        "ScheduleWakeup",
+        "SendMessage",
+        "Skill",
+        "TaskStop",
+        "Workflow",
+        "Write"
+      ],
+      "conference_tools": [
+        "mcp__conference__get_bulletin_board",
+        "mcp__conference__get_conference_status",
+        "mcp__conference__get_messages",
+        "mcp__conference__get_problem",
+        "mcp__conference__list_library",
+        "mcp__conference__list_problems",
+        "mcp__conference__post_intent",
+        "mcp__conference__publish_notebook",
+        "mcp__conference__read_library_file",
+        "mcp__conference__send_direct_message",
+        "mcp__conference__submit_feedback",
+        "mcp__conference__submit_solution"
+      ],
+      "tool_definitions_sha256": "20612a41b332975d944a21c5d7a93dec75850435c354930d9ece989d3ef3c4f1"
+    },
+    {
+      "source": "research/effective-instructions/validation-runtime-20261015T021631Z/agent-002-89d0b76d9769a905.json",
+      "agent_id": "agent-002",
+      "effective_instructions_sha256": "89d0b76d9769a905b8f3ce8a8a4253a24b0cf3e92296868a042a887591351f9a",
+      "blocks": [
+        {
+          "index": 0,
+          "characters": 74,
+          "sha256": "91556e9af0487b0570dc4852df4ecd314944f456bec64c672f75b5f07d9ac7c4",
+          "headings": [],
+          "first_line": "x-anthropic-billing-header: cc_version=2.1.296.b78; cc_entrypoint=sdk-cli;"
+        },
+        {
+          "index": 1,
+          "characters": 94,
+          "sha256": "6c1afcd9232947a1d8f7c44a79316f8fe08d06dcdc6e7453f09e2d78fa858e5e",
+          "headings": [],
+          "first_line": "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK."
+        },
+        {
+          "index": 2,
+          "characters": 14966,
+          "sha256": "f035ed76cc1422517103d25152974cadce7f67003233a3c324c6373489b2897b",
+          "headings": [
+            "# Harness",
+            "# Session-specific guidance",
+            "# Memory",
+            "# Environment",
+            "# Context management",
+            "# Lean Research Conference",
+            "## Persona: Algebra, Group Theory and Ring Theory",
+            "## Problems",
+            "## Working environment",
+            "## Submissions and credit",
+            "## Communication and shared resources",
+            "## Private notes",
+            "## Working at your own pace"
+          ],
+          "first_line": null
+        }
+      ],
+      "builtin_prefix_characters": 5637,
+      "builtin_prefix_sha256": "82b0fb0351526a4f36ca4a4fb55d8b7037d7b7909c006a6b00657d23b1de86f2",
+      "exact_conference_prompt_contiguous": true,
+      "text_after_conference_prompt_characters": 0,
+      "builtin_tools": [
+        "Bash",
+        "CronCreate",
+        "CronDelete",
+        "CronList",
+        "Edit",
+        "EnterWorktree",
+        "ExitWorktree",
+        "ListAgents",
+        "NotebookEdit",
+        "Read",
+        "ReportFindings",
+        "ScheduleWakeup",
+        "SendMessage",
+        "Skill",
+        "TaskStop",
+        "Workflow",
+        "Write"
+      ],
+      "conference_tools": [
+        "mcp__conference__get_bulletin_board",
+        "mcp__conference__get_conference_status",
+        "mcp__conference__get_messages",
+        "mcp__conference__get_problem",
+        "mcp__conference__list_library",
+        "mcp__conference__list_problems",
+        "mcp__conference__post_intent",
+        "mcp__conference__publish_notebook",
+        "mcp__conference__read_library_file",
+        "mcp__conference__send_direct_message",
+        "mcp__conference__submit_feedback",
+        "mcp__conference__submit_solution"
+      ],
+      "tool_definitions_sha256": "20612a41b332975d944a21c5d7a93dec75850435c354930d9ece989d3ef3c4f1"
+    },
+    {
+      "source": "research/effective-instructions/validation-runtime-20261015T021631Z/agent-003-b65db0adcae7ca8e.json",
+      "agent_id": "agent-003",
+      "effective_instructions_sha256": "b65db0adcae7ca8ef5e7f5d384d9b672751ce04bc7bce5bacb3ec1d7f719be0e",
+      "blocks": [
+        {
+          "index": 0,
+          "characters": 74,
+          "sha256": "91556e9af0487b0570dc4852df4ecd314944f456bec64c672f75b5f07d9ac7c4",
+          "headings": [],
+          "first_line": "x-anthropic-billing-header: cc_version=2.1.296.b78; cc_entrypoint=sdk-cli;"
+        },
+        {
+          "index": 1,
+          "characters": 94,
+          "sha256": "6c1afcd9232947a1d8f7c44a79316f8fe08d06dcdc6e7453f09e2d78fa858e5e",
+          "headings": [],
+          "first_line": "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK."
+        },
+        {
+          "index": 2,
+          "characters": 14978,
+          "sha256": "8e62944c1b9a3ba1a9e3772e100a7161a72a7d82343b1fccf640bcb40d1888f2",
+          "headings": [
+            "# Harness",
+            "# Session-specific guidance",
+            "# Memory",
+            "# Environment",
+            "# Context management",
+            "# Lean Research Conference",
+            "## Persona: Combinatorics and Discrete Mathematics",
+            "## Problems",
+            "## Working environment",
+            "## Submissions and credit",
+            "## Communication and shared resources",
+            "## Private notes",
+            "## Working at your own pace"
+          ],
+          "first_line": null
+        }
+      ],
+      "builtin_prefix_characters": 5637,
+      "builtin_prefix_sha256": "82b0fb0351526a4f36ca4a4fb55d8b7037d7b7909c006a6b00657d23b1de86f2",
+      "exact_conference_prompt_contiguous": true,
+      "text_after_conference_prompt_characters": 0,
+      "builtin_tools": [
+        "Bash",
+        "CronCreate",
+        "CronDelete",
+        "CronList",
+        "Edit",
+        "EnterWorktree",
+        "ExitWorktree",
+        "ListAgents",
+        "NotebookEdit",
+        "Read",
+        "ReportFindings",
+        "ScheduleWakeup",
+        "SendMessage",
+        "Skill",
+        "TaskStop",
+        "Workflow",
+        "Write"
+      ],
+      "conference_tools": [
+        "mcp__conference__get_bulletin_board",
+        "mcp__conference__get_conference_status",
+        "mcp__conference__get_messages",
+        "mcp__conference__get_problem",
+        "mcp__conference__list_library",
+        "mcp__conference__list_problems",
+        "mcp__conference__post_intent",
+        "mcp__conference__publish_notebook",
+        "mcp__conference__read_library_file",
+        "mcp__conference__send_direct_message",
+        "mcp__conference__submit_feedback",
+        "mcp__conference__submit_solution"
+      ],
+      "tool_definitions_sha256": "20612a41b332975d944a21c5d7a93dec75850435c354930d9ece989d3ef3c4f1"
+    }
+  ],
+  "source_event_digests_verified": true
+}

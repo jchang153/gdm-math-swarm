@@ -136,19 +136,26 @@ This checklist maps the initial research inventory to the specification discussi
 
 ## Implementation status
 
-October 14 review correction: all seven authorized implementation fixes are in place.
-Final offline verification: 512 main tests ran successfully (4 skipped), 33 analysis
-tests passed, and all 22 evaluator fixtures passed static checks. The new opaque-aware
-Lean verifier has not been built or run under the VM hold; its real fixture verdicts
-remain a required VM validation. No paid calls were made during this work.
+Updated October 14, 2026. All seven authorized review fixes are implemented. VM setup
+and unpaid validation are authorized; paid compatibility and pilot launches retain their
+separate approval checkpoints. The supplied private GCP VM has been provisioned and all
+four Linux images built with verified ancestry. See docs/vm-setup-2026-10-14.md for the
+measured checkpoint and docs/validation.md for the remaining sequence.
 
+The Linux offline suite ran 522 tests successfully (3 opt-in real-Lean tests skipped),
+and all 33 analysis tests passed. Real validation passed the 26 required judge checks,
+all 14 declarations, timing, reuse and conference race checks. The full independent
+evaluator passed all 22 fixtures (including opaque-helper cases) and all 22
+self-comparisons. The frozen tasks, weak judge and resource limits remain unchanged.
 
-Updated October 13, 2026. Implementation is complete for the baseline pilot and the disabled seeded mechanism; Docker validation and every run are on hold (see "Execution hold").
-
-* **Implemented and offline-tested (494 unit tests pass, 4 skipped on the Mac; 25 analysis tests pass):** frozen 71-task parent pool and fixed 14-task subset (docs/problems.md delivered); keyword, source-integrity and compile judge with a first-come-first-served compile gate; conference services, tools and prompts with opaque agent-visible IDs and paged library reads; generic seeded-contagion mechanism, disabled and refused for the pilot (semantics await user decisions); independent comparator evaluator with a queue observer during the run and post-run batch evaluation; genuine Claude Code runtime through Inspect SWE with start barrier, run clock, in-flight grace, snapshots, launch interlock and image pinning; budget ledger with $20 pilot, $5 analysis and $2 compatibility scopes, reconciliation and audited cap raises; evidence-based launch gates; preflight and launch CLIs; paid compatibility check script (not run); researcher-only rubric (frozen), fidelity ledger and timeline tooling.
-* **Independent review:** 45 findings across seven dimensions, 41 confirmed and fixed, 4 refuted (docs/review-2026-10-13.md), followed by a completeness check whose gaps were closed.
-* **Runtime evidence so far:** only the October 13 route-pricing freeze, plus Mac measurements: importing the task prelude (all of Mathlib) takes about 22 s warm and about 88 s cold; a cold compile under the judge's 2 GB cap exceeded the limit. The judge image was rebuilt with the git `safe.directory` fix. The agent and comparator images changed since they were last built and must be rebuilt (on the VM).
-* **Next (on the VM, in order):** docs/validation.md — image builds, declarations/timing/reuse, judge, conference race, evaluator (including pilot self-comparisons), runtime end-to-end, isolation, capacity, then the user-approved provider-limit check, route re-freeze, cost projection, the $2 compatibility check (confirm immediately before), preflight and the paid launch (user approval). No paid calls have been made and no pilot has launched.
+Deployment exposed two additional corrections: shell-safe dependency-search markers for
+apostrophes in frozen task names, and reconstruction of runtime tool evidence across
+conversation compaction. Both have offline regression coverage. Runtime validation passed
+after the evidence-reader correction. Isolation then stopped on unrecognized harness
+sockets and Docker's init mount alias; correct the probe with exact peer/process checks
+before repeating it. Capacity remains pending. The VM is stopped during offline work.
+No paid model calls or pilot have run. Terminal Git with an SSH remote is the standing
+commit/push method; do not use GitHub Desktop.
 
 ## Engineering choices within the approved design
 
