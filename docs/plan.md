@@ -29,6 +29,23 @@ evidence at 8 GiB. Existing model integration evidence remains applicable when
 the underlying validated runtime/provider code and images are unchanged. Record
 all new evidence and launch preflight before the one authorized paid start.
 
+Launch checkpoint: `runs/baseline8g100-20261015T205316Z` reached its common start
+with all 20 peers at October 15, 2:23:53 PM PDT (21:23:53 UTC). Code `1186f85`
+passed 562 offline tests (4 skipped), 75 Linux budget/gate tests and independent
+review. Runtime `runtime-e2e-20261015T205552Z`, isolation
+`runtime-isolation-20261015T210110Z`, and capacity
+`runtime-capacity-20261015T210232Z` passed all required checks at 8 GiB. The
+capacity load window completed without OOM or compile timeouts; one final sandbox
+cleanup waited an existing 600-second RPC timeout before normal completion. No
+validation gate was skipped. Public route freeze `20261015T210226Z` was valid,
+and final preflight reported ready with no blockers. The actual 20 running agent
+containers each reported 8589934592-byte limits. The first live checkpoint had
+$0.673317828 newly settled, no new uncertain requests, errors or memory kills.
+Phase-local one-shot supervision performs unpaid evaluation and packages results
+before a bounded retrieval window and idle shutdown. The independent shutdown
+watcher and five-minute monitor are active. Do not repeat the audited raise or
+launch; preserve the seven prior uncertain holds throughout the run.
+
 ## Early termination authorized, October 15, 2026
 
 The user requested stopping `baseline100-20261015T191545Z` early and publishing
