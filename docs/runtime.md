@@ -352,7 +352,8 @@ settings; generates; settles; and strips tool calls from truncated outputs.
   `replayed_reasoning_blocks` (reasoning blocks of earlier assistant turns resent with
   `reasoning_history: all`).
 * Frozen settings: `max_tokens` 16384, reasoning effort high, `reasoning_history: all`,
-  OpenRouter provider `only: [deepseek]`, no fallbacks, `require_parameters`, no cache,
+  OpenRouter provider `only: [fireworks]` (user-approved replacement for the unavailable
+  `deepseek` endpoint), no fallbacks, `require_parameters`, no cache,
   and **no `n`** (not a supported route parameter, so `require_parameters` would
   refuse it). Retries are off below the ledger: Inspect `max_retries=0` and the OpenAI
   client `max_retries=0` (`get_model(..., max_retries=0)`, **validated** offline).
@@ -682,6 +683,29 @@ Procedure:
    separate explicit user confirmation that is also required; the evidence alone does
    not set it.
 
+
+## Reasoning transport through Claude Code
+
+The first Fireworks compatibility check exposed an Inspect 0.3.279 conversion defect:
+OpenRouter reasoning arrived as typed `ContentReasoning`, but the Anthropic bridge
+returned it to Claude Code as ordinary text. Later provider requests consequently
+lost the structured `reasoning_details` and `reasoning_content` fields.
+
+`research_swarm.reasoning_bridge.install_reasoning_bridge()` runs before each Claude
+Code agent is constructed. It wraps only the pinned bridge's request boundary and
+input/output converters. Original OpenRouter reasoning blocks travel in authenticated
+Anthropic thinking signatures and are restored exactly on the next request. A random
+signing key belongs to each bridge instance; no provider credential is involved, and
+there is no shared conversation cache. Modified or foreign transport blocks fail
+before provider dispatch. Native Anthropic conversions, text, tool calls and compaction
+remain unchanged; omitted reasoning is never reconstructed.
+
+Offline tests exercise the actual SDK round trip back into OpenRouter wire fields,
+including tools, opaque reasoning, beta responses, tampering, agent isolation and
+compaction omission. Live compatibility must additionally confirm that the pinned
+Claude Code process echoes those blocks correctly. An old session cannot be resumed
+under a new host process's signing key; crash recovery by resuming sessions is not
+supported by this pilot.
 
 ## Completed real CLI smoke check (earlier image)
 

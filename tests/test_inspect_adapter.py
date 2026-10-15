@@ -920,6 +920,15 @@ class BudgetFilterErrorTests(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(HAVE_INSPECT, "pinned Inspect packages not installed (.venv)")
 class BuildClaudeAgentTests(unittest.TestCase):
+    def test_reasoning_bridge_installed_before_agent_construction(self):
+        from research_swarm.inspect_adapter import build_claude_agent
+        order = []
+        with unittest.mock.patch("research_swarm.reasoning_bridge.install_reasoning_bridge",
+                                 side_effect=lambda: order.append("bridge")), \
+                unittest.mock.patch("inspect_swe.claude_code", side_effect=lambda **kw: order.append("agent")):
+            build_claude_agent("PROMPT", [], None)
+        self.assertEqual(order, ["bridge", "agent"])
+
     def build(self, **kwargs):
         from research_swarm.inspect_adapter import build_claude_agent
         captured = {}

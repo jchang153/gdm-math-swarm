@@ -34,12 +34,15 @@ except ImportError:
 
 CONFIG = json.loads((ROOT / "configs" / "pilot.json").read_text())
 SETTINGS = settings_from_config(CONFIG, pricing_verified=True)
+PROVIDER_NAME = {"deepseek": "DeepSeek", "fireworks": "Fireworks"}.get(
+    SETTINGS.provider_route, SETTINGS.provider_route)
+OTHER_PROVIDER_NAME = "DeepSeek" if SETTINGS.provider_route != "deepseek" else "Fireworks"
 IMAGES = {"agent": {"tag": "gdm-math-swarm-agent:local", "id": "sha256:" + "a" * 64},
           "lean": {"tag": "gdm-math-swarm-lean:local", "id": "sha256:" + "b" * 64}}
 
 
-def finished(request_id, *, basis="provider_reported_cost", completion=300, reasoning=200, name="DeepSeek",
-             model="deepseek/deepseek-v4.1-flash", error=None, agent="agent-001", stop_reason="tool_calls"):
+def finished(request_id, *, basis="provider_reported_cost", completion=300, reasoning=200, name=PROVIDER_NAME,
+             model=SETTINGS.model_id, error=None, agent="agent-001", stop_reason="tool_calls"):
     return {"kind": "inference_finished", "agent_id": agent, "payload": {
         "request_id": request_id, "settled_usd": "0.001", "basis": basis,
         "usage": {"output_tokens": completion, "reasoning_tokens": reasoning},
@@ -138,7 +141,7 @@ class BuildChecksTests(unittest.TestCase):
         events = probe + [admitted("r1"), finished("r1", completion=100, reasoning=limit), admitted("r2", 1),
                           finished("r2")]
         self.assertEqual(failed(self.checks(events=events)), ["completion_within_max_tokens"])
-        events = probe + [admitted("r1"), finished("r1", name="Fireworks"), admitted("r2", 1), finished("r2")]
+        events = probe + [admitted("r1"), finished("r1", name=OTHER_PROVIDER_NAME), admitted("r2", 1), finished("r2")]
         self.assertEqual(failed(self.checks(events=events)), ["route_pinned"])
         events = probe + [admitted("r1"), finished("r1", model="deepseek/deepseek-v3"), admitted("r2", 1),
                           finished("r2")]
@@ -160,7 +163,7 @@ class BuildChecksTests(unittest.TestCase):
             "reasoning reported separately and above the cap": probe_events(completion=100, reasoning=cap),
             "no reasoning tokens reported": probe_events(reasoning=0),
             "no provider-reported cost": probe_events(basis="usage_priced_upper_bound"),
-            "served by another provider": probe_events(name="Fireworks"),
+            "served by another provider": probe_events(name=OTHER_PROVIDER_NAME),
             "provider error output": probe_events(error="upstream"),
             "request raised": probe_events()[:2] + [{"kind": "inference_uncertain", "agent_id": cc.CAP_PROBE_AGENT,
                                                     "payload": {"request_id": "p1", "reason": "connection_lost"}}],
@@ -696,7 +699,7 @@ def _priced(output, n, *, output_tokens=120, reasoning=80, cost=0.0004):
                               reasoning_tokens=reasoning)
     output.metadata = {"openrouter_usage": {"cost": cost, "completion_tokens": output_tokens,
                                             "completion_tokens_details": {"reasoning_tokens": reasoning}},
-                       "openrouter_generation_id": f"gen-offline-{n}", "openrouter_provider": "DeepSeek",
+                       "openrouter_generation_id": f"gen-offline-{n}", "openrouter_provider": PROVIDER_NAME,
                        "openrouter_model": SETTINGS.model_id}
     return output
 

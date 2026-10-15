@@ -859,6 +859,8 @@ def build_claude_agent(prompt, tools, filter, env=None, cwd="/workspace", *, sys
     """
     if system_prompt_mode not in SYSTEM_PROMPT_MODES:
         raise ValueError(f"system_prompt_mode must be one of {SYSTEM_PROMPT_MODES}")
+    from .reasoning_bridge import install_reasoning_bridge
+    install_reasoning_bridge()
     from inspect_ai.agent import BridgedToolsSpec
     from inspect_swe import claude_code
     prompt_args = {"system_prompt": prompt} if system_prompt_mode == "append" else {"replace_system_prompt": prompt}
