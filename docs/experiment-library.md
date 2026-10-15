@@ -123,3 +123,23 @@ The report distinguishes four independently verified pinned formal tasks, ten
 technical failures, four normally ended sessions and six user-interrupted sessions.
 New-run settled spending is $86.091194430, with $2.3276232 in seven unresolved
 billing holds. The VM was verified TERMINATED; no paid model analysis was run.
+
+The completed 8 GiB run `baseline8g100-20261015T205316Z` is archived privately at
+revision `23aec52bfadf8d3fe07af4fcb7156ac3abba15ed`, preserving both earlier runs.
+All 6202 staged file hashes matched remote metadata. Seven representative downloads
+matched, five hosted HTML routes returned HTTP 200 with authored content intact,
+and native Inspect log byte ranges returned exact HTTP 206 bytes. The staged
+privacy screen covered 6202 files and 192 archive entries with no credential-pattern
+matches; 604 local relative links were verified. This is not interactive browser
+visual validation or a universal secret-screening guarantee.
+
+The report records 10 independently genuine submissions covering four distinct
+pinned formal tasks, with the Erdős 1092 definition caveat retained. It does not
+claim an exhaustive behavioral review. New-run settled spending is $99.321801318;
+one new uncertain hold is $0.43223715. All prior call records and seven prior
+holds are unchanged. Seventeen peers stopped on budget admission, one completed
+its session, one failed under memory pressure and one failed after repeated output
+truncation. Raw archives and the consistent ledger backup were verified locally.
+The guest requested shutdown after retrieval; GCP stop completed and TERMINATED
+was independently verified. No paid model analysis was performed. Verification
+records remain under the ignored run phase directory; original records are retained.

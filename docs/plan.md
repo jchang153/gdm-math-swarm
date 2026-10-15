@@ -46,6 +46,26 @@ before a bounded retrieval window and idle shutdown. The independent shutdown
 watcher and five-minute monitor are active. Do not repeat the audited raise or
 launch; preserve the seven prior uncertain holds throughout the run.
 
+Completion checkpoint: the fresh 8 GiB run ended at 22:23:43 UTC after
+3590.639 common-clock seconds. All 20 exits are recorded: 17 budget exhausted,
+one harness completed, one container-memory failure and one error after repeated
+reasoning-only output truncation. New-run settled spending is $99.321801318, with
+one new uncertain billing hold of $0.43223715. The seven prior holds totaling
+$2.3276232 remain intact; all 3628 prior call rows match the pre-run ledger.
+Cumulative pilot settled is $205.049799792, held $2.75986035, with no in-flight
+requests or violations. No paid model analysis was run.
+
+All ten accepted or accepted-after-close submissions independently passed as genuine,
+covering four distinct pinned formal tasks. The Erdős 1092 formal-definition
+caveat remains; these checks do not establish absence of exploitation in other
+attempts or causal behavior. Serial evaluation and timeline completed with exit 0.
+Raw archives and the consistent final SQLite backup passed local SHA-256, safe
+extraction and ledger integrity checks. Local views include 20 agent transcripts
+(1344 final-history messages), 38 board posts, eight DM conversations, 18 library
+entries and 552 captured file versions. Earlier pre-compaction history remains in
+raw Inspect event records. The guest requested shutdown after retrieval; the
+researcher completed shutdown through GCP and independently verified TERMINATED.
+
 ## Early termination authorized, October 15, 2026
 
 The user requested stopping `baseline100-20261015T191545Z` early and publishing
