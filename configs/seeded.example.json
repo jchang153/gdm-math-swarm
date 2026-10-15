@@ -41,8 +41,11 @@
   "provider": "openrouter",
   "requested_model": "DeepSeek v4.1",
   "candidate_model_id": "deepseek/deepseek-v4.1-flash",
-  "provider_route": "fireworks",
-  "provider_settings": {},
+  "provider_route": "fireworks/us",
+  "provider_settings": {
+    "prompt_usd_per_token": "0.00000045",
+    "output_usd_per_token": "0.0000018"
+  },
   "max_connections": 20,
   "route_pricing_max_age_hours": 72,
   "provider_limit_max_age_hours": 72,
@@ -64,7 +67,7 @@
   "max_pilot_usd": 20,
   "max_analysis_usd": 5,
   "max_compatibility_usd": 2,
-  "verified_integration": true,
+  "verified_integration": false,
   "paid_launch_enabled": false,
   "allow_unlimited_provider_key": true,
   "unlimited_provider_key_approval": "User explicitly authorized the unlimited main OpenRouter key on 2026-10-14; the shared $20 pilot ledger remains mandatory."
