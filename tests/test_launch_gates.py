@@ -661,7 +661,8 @@ class LaunchGateTests(GateFixture):
         result = self.evaluate(config)
         for prefix in launch_gates.COMPOSE_BOUND_EVIDENCE:
             self.assertTrue(result["evidence"][prefix]["passed"], result["evidence"][prefix])
-        result = self.evaluate(pilot_config(agent_memory="2g"))
+        changed_memory = "3g" if config["agent_memory"] != "3g" else "2g"
+        result = self.evaluate(pilot_config(agent_memory=changed_memory))
         for prefix in ("runtime-e2e", "runtime-isolation"):
             self.assertBlocked(result, prefix, "compose file differs")
 
