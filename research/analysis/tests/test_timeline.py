@@ -584,6 +584,87 @@ class CredentialSafetyTests(unittest.TestCase):
             self.assertFalse([p for p in opened if Path(p).name.startswith(".env")])
             self.assertNotIn("GDM_ANALYSIS_TEST_SENTINEL", os.environ)
 
+class CompactionTimelineTests(unittest.TestCase):
+    def messages(self, *, text="original result", error=None, function="Write"):
+        tool = SimpleNamespace(role="tool", id="result-1", tool_call_id="call-1", function=function,
+                               content=text, error=error)
+        call = SimpleNamespace(id="call-1", function="Write", arguments={"file_path": "/workspace/test.lean"})
+        assistant = SimpleNamespace(role="assistant", id="assistant-1", content="local test", tool_calls=[call])
+        return assistant, tool
+
+    def sample(self, copies=None, final_tools=None):
+        assistant, tool = self.messages()
+        first = SimpleNamespace(event="model", uuid="request-1", timestamp=T0, completed=T0 + 1,
+            input=[], output=SimpleNamespace(message=assistant, stop_reason="tool_calls"))
+        final = SimpleNamespace(role="assistant", id="assistant-final", content="done", tool_calls=[])
+        next_request = SimpleNamespace(event="model", uuid="request-2", timestamp=T0 + 5, completed=T0 + 6,
+            input=[assistant, tool] if copies is None else copies,
+            output=SimpleNamespace(message=final, stop_reason="stop"))
+        compacted = SimpleNamespace(event="compaction", uuid="compact-1", timestamp=T0 + 7)
+        return SimpleNamespace(id="agent-001", messages=[final] + (final_tools or []),
+                               events=[first, next_request, compacted])
+
+    def label(self, ref):
+        return {"label": "exploration_local_test", "status": "confirmed", "agent_id": "agent-001",
+                "evidence": [ref], "facts": ["observed local test"], "interpretation": "human source review",
+                "reviewer": "test", "reviewed_at": "2026-10-14T00:00:00Z", "rubric_sha256": timeline.rubric_hash()[1]}
+
+    def test_recovers_compacted_result_with_exact_observation_source(self):
+        entries = timeline.inspect_sample_stream(self.sample(), "inspect/history.eval")
+        results = [e for e in entries if e["kind"] == "tool_result"]
+        self.assertEqual(len(results), 1)
+        result = results[0]
+        self.assertEqual(result["result_excerpt"], "original result")
+        self.assertEqual(result["ref"], {"file": "inspect/history.eval", "sample_id": "agent-001",
+            "event_uuid": "request-2", "input_message_index": 1, "message_id": "result-1"})
+        self.assertIsNone(result["timestamp"])
+        self.assertEqual(result["after_timestamp"], T0 + 1)
+        self.assertEqual(result["before_timestamp"], T0 + 5)
+        ref = timeline._ev(result)
+        self.assertEqual(timeline.check_labels([self.label(ref)], entries), [])
+        for wrong in ({"input_message_index": 0}, {"input_message_index": True}, {"input_message_index": -1},
+                      {"event_uuid": "request-1"}, {"message_id": "wrong"}, {"file": "inspect/other.eval"},
+                      {"log": "inspect/other.eval"}):
+            self.assertTrue(timeline.check_labels([self.label(dict(ref, **wrong))], entries), wrong)
+        incomplete = dict(ref)
+        incomplete.pop("input_message_index")
+        self.assertTrue(timeline.check_labels([self.label(incomplete)], entries))
+        alias = dict(ref, log=ref["file"])
+        alias.pop("file")
+        self.assertEqual(timeline.check_labels([self.label(alias)], entries), [])
+
+    def test_deduplicates_unchanged_repeated_inputs_and_final_messages(self):
+        assistant, tool = self.messages()
+        sample = self.sample(copies=[assistant, tool, tool], final_tools=[tool])
+        results = [e for e in timeline.inspect_sample_stream(sample, "inspect/history.eval") if e["kind"] == "tool_result"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["ref"]["input_message_index"], 1)
+        _, equivalent = self.messages(text=[SimpleNamespace(type="text", text="original result")])
+        results = [e for e in timeline.inspect_sample_stream(self.sample(final_tools=[equivalent]), "inspect/history.eval")
+                   if e["kind"] == "tool_result"]
+        self.assertEqual(len(results), 1)
+
+    def test_conflicting_result_replays_are_not_valid_source_evidence(self):
+        for change in ({"text": "contradictory result"}, {"error": {"type": "failure", "message": "failed"}},
+                       {"function": "Bash"}):
+            _, contradictory = self.messages(**change)
+            entries = timeline.inspect_sample_stream(self.sample(final_tools=[contradictory]), "inspect/history.eval")
+            self.assertFalse([e for e in entries if e["kind"] == "tool_result"], change)
+            conflict = next(e for e in entries if e["kind"] == "tool_result_conflict")
+            self.assertIsNone(conflict["result_excerpt"])
+            self.assertTrue(conflict["evidence_conflict"])
+            self.assertTrue(timeline.check_labels([self.label(timeline._ev(conflict))], entries))
+
+    def test_orphan_input_result_keeps_actual_reference_and_unknown_time(self):
+        sample = self.sample()
+        sample.events = sample.events[1:]
+        entries = timeline.inspect_sample_stream(sample, "inspect/history.eval")
+        result = next(e for e in entries if e["kind"] == "tool_result")
+        self.assertIsNone(result["timestamp"])
+        self.assertNotIn("after_timestamp", result)
+        self.assertEqual(result["before_timestamp"], T0 + 5)
+        self.assertEqual(timeline.check_labels([self.label(timeline._ev(result))], entries), [])
+
 
 class RubricFreezeTests(unittest.TestCase):
     def test_rubric_hash_matches_footer(self):
