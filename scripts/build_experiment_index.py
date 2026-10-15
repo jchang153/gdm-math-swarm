@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def build(runs):
+def build(runs, hosted=False):
     runs = Path(runs).resolve()
     runs.mkdir(parents=True, exist_ok=True)
     entries, warnings = [], []
@@ -45,6 +45,7 @@ def build(runs):
                      'task_count': config.get('task_count'), 'agent_exits': data['agent_exits'],
                      'links': {}}
             for name, target in [('Report', 'results.html'), ('Transcripts', 'transcripts/index.html'),
+                                 ('Inspect View', 'inspect-view/index.html'),
                                  ('Timeline', 'analysis/timeline.md'), ('Inspect logs', 'inspect/')]:
                 if (path.parent / target).exists():
                     entry['links'][name] = quote(path.parent.name, safe='') + '/' + target
@@ -68,12 +69,13 @@ def build(runs):
             'h1{margin-bottom:8px}p{max-width:950px;color:#475569}input{box-sizing:border-box;width:100%;padding:12px;border:1px solid #b8c2cf;border-radius:7px;margin:18px 0;background:white;font:inherit}'
             '.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;background:white}td,th{padding:14px 12px;border-bottom:1px solid #dde3ea;text-align:left;vertical-align:top}th{font-size:13px;color:#475569}small{font-size:12px;color:#596579}a{color:#155eaa}td:last-child{min-width:210px}'
             '</style><h1>GDM Math Swarm experiments</h1>'
-            '<p>A private local library of saved runs: results, full agent transcripts, independent evaluations and timelines.</p>'
+            '<p>A private library of saved runs: results, full agent transcripts, independent evaluations and timelines.</p>'
             f'<p><strong>{len(entries)} saved experiment(s)</strong>. Verified tasks count distinct intended statements, so duplicate accepted proofs count once.</p>'
             '<label for="filter">Find an experiment</label><input id="filter" type="search" placeholder="Search date, run, model or condition…">'
             '<div class="scroll"><table id="runs"><thead><tr><th>Run</th><th>Condition / model</th><th>Agents</th><th>Duration</th><th>Pilot model cost</th><th>Verified tasks</th><th>Agent errors</th><th>Open</th></tr></thead><tbody>'
             + ''.join(rows) + '</tbody></table></div>'
-            '<p>These files are stored on this computer. Raw runs and transcripts are excluded from Git; the code repository alone is not a backup or a shared results library. Keep the full experiment folder when backing up or moving a run.</p>'
+            + ('<p>This private archive contains saved experiment records and derived views. Access requires permission to this Hugging Face Space. Preserve the original records when moving a run.</p>' if hosted else
+               '<p>These files are stored on this computer. Raw runs and transcripts are excluded from Git; the code repository alone is not a backup or a shared results library. Keep the full experiment folder when backing up or moving a run.</p>') +
             '<script>document.getElementById("filter").addEventListener("input",function(){const q=this.value.toLowerCase();document.querySelectorAll("#runs tbody tr").forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q));});</script></html>')
     (runs / 'index.html').write_text(body)
     (runs / 'experiments.json').write_text(json.dumps({'schema': 'gdm-experiment-index/1', 'experiments': entries, 'warnings': warnings}, indent=2))
@@ -83,4 +85,6 @@ def build(runs):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--runs-dir', type=Path, default=ROOT / 'runs')
-    print(json.dumps(build(parser.parse_args().runs_dir)))
+    parser.add_argument('--hosted', action='store_true')
+    args = parser.parse_args()
+    print(json.dumps(build(args.runs_dir, hosted=args.hosted)))

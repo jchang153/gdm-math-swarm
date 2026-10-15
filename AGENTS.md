@@ -38,6 +38,10 @@ Use scripts/export_transcripts.py --run-dir runs/<run-id> for the offline HTML
 transcript view and scripts/build_experiment_index.py after saving results.json and
 results.html. The local experiment library is runs/index.html. Preserve raw records;
 exports are derived views. Raw runs are Git-ignored and require separate backup.
+The user also authorized a private shared HF library at
+https://huggingface.co/spaces/jchang153/gdm-math-swarm-experiments.
+Follow docs/experiment-library.md for preparation, privacy and guarded updates;
+preserve other collaborators' runs and never upload host credentials or auth caches.
 
 Freeze the 14 tasks for all 20-agent experiments. Deliver their exact names, pinned
 Lean declarations, and verified online descriptions/known solutions after selection.
