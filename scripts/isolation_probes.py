@@ -9,8 +9,9 @@ agent uid (1000), without transcript events:
 
 * egress: interfaces, public IPs, DNS, 169.254.169.254, openrouter.ai,
   host.docker.internal, the Docker host gateway; listening loopback ports;
-* no daemon socket anywhere: the standard paths, any socket outside the bridge's
-  /var/tmp/sandbox-services found by a walk of the whole filesystem (mounts
+* no daemon socket anywhere: the standard paths and every socket found by a
+  walk of the whole filesystem; expected framework sockets require exact paths,
+  kernel peer identity and pinned executables (mounts
   included, only /proc and /sys skipped; each one is also asked for the Docker
   API's /_ping), and no DOCKER_HOST/DOCKER_CONTEXT/... in any process environment;
 * /proc/self/mountinfo contains only Docker's per-container defaults, so a host
@@ -180,9 +181,10 @@ print(json.dumps({"hits": hits, "sensitive_env_names": {k: sorted(v) for k, v in
 
 # Docker's per-container files bind-mounted from the daemon's container directory.
 DOCKER_CONTAINER_FILE = r"(^|/)containers/[0-9a-f]{64}/(hostname|hosts|resolv\.conf)$"
-# Sockets the Inspect sandbox bridge may create (inspect_ai util/_sandbox/service.py
-# SERVICES_DIR); any other socket, anywhere, fails the isolation check.
-ALLOWED_SOCKET_PREFIXES = ("/var/tmp/sandbox-services/",)
+# Exact pinned framework/native executables, never directory-wide socket exemptions.
+INSPECT_EXECUTABLE = "/var/tmp/.da7be258e003d428/inspect-sandbox-tools"
+INSPECT_SOCKET = "/var/tmp/.da7be258e003d428/.server/sandbox-tools.sock"
+CLAUDE_EXECUTABLE = "/usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 # Environment variables that point a client at a container daemon.
 DOCKER_ENV_NAMES = ("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_CERT_PATH", "CONTAINER_HOST",
                     "CONTAINERD_ADDRESS")
@@ -236,12 +238,140 @@ def unexpected_mounts(mounts, container_file=DOCKER_CONTAINER_FILE):
             continue
         if point in ("/etc/hostname", "/etc/hosts", "/etc/resolv.conf") and re.search(container_file, root):
             continue
-        if point == "/sbin/docker-init" and root.rsplit("/", 1)[-1] == "docker-init" and "ro" in options:
+        if point in ("/sbin/docker-init", "/usr/sbin/docker-init") and root in (
+                "/usr/bin/docker-init", "/usr/libexec/docker/docker-init"
+        ) and "ro" in options and "rw" not in options:
             continue
         reason = ("host path or volume (root %r on %s)" % (root, fstype) if root != "/"
                   else "unexpected %s mount" % fstype)
         flagged.append(dict(entry, reason=reason))
     return flagged
+
+
+def socket_probe(path):
+    """Inspect a Unix socket and its kernel-authenticated local peer (no argv/env)."""
+    import hashlib
+    import os
+    import socket
+    import stat
+    import struct
+
+    evidence = {"path": path}
+    stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    stream.settimeout(2)
+    try:
+        before = os.lstat(path)
+        evidence["socket_uid"] = before.st_uid
+        evidence["socket_gid"] = before.st_gid
+        evidence["socket_is_socket"] = stat.S_ISSOCK(before.st_mode)
+        # Every ancestor must be a real directory. Agent-owned private state
+        # directories may be writable by the agent, never by another principal.
+        parent, parents_ok = os.path.dirname(path), True
+        while parent != "/":
+            info = os.lstat(parent)
+            parents_ok &= stat.S_ISDIR(info.st_mode) and info.st_uid in (0, 1000)
+            parents_ok &= not bool(info.st_mode & 0o022) or bool(info.st_mode & stat.S_ISVTX)
+            parent = os.path.dirname(parent)
+        evidence["parents_verified"] = parents_ok
+        stream.connect(path)
+        pid, uid, gid = struct.unpack("3i", stream.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        evidence["peer"] = {"pid": pid, "uid": uid, "gid": gid}
+        # Keep probing the protocol even when process identity cannot be read.
+        try:
+            exe = os.readlink(f"/proc/{pid}/exe")
+            evidence["executable"] = exe
+            with open(f"/proc/{pid}/status") as status_file:
+                fields = dict(line.split(":", 1) for line in status_file if ":" in line)
+            evidence["process_status"] = {name: fields[name].strip() for name in
+                ("Uid", "Gid", "CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb", "NoNewPrivs", "Seccomp")
+                if name in fields}
+            evidence["same_namespaces"] = all(os.readlink(f"/proc/{pid}/ns/{name}") ==
+                os.readlink(f"/proc/self/ns/{name}") for name in ("mnt", "pid", "net", "user"))
+            expected = exe if exe in (INSPECT_EXECUTABLE, CLAUDE_EXECUTABLE) else None
+            if expected:
+                expected_stat, process_stat = os.stat(expected), os.stat(f"/proc/{pid}/exe")
+                evidence["same_executable_inode"] = (expected_stat.st_dev, expected_stat.st_ino) == (
+                    process_stat.st_dev, process_stat.st_ino)
+                evidence["executable_is_regular"] = stat.S_ISREG(expected_stat.st_mode)
+                if expected == INSPECT_EXECUTABLE:
+                    with open(f"/proc/{pid}/exe", "rb") as executable:
+                        evidence["executable_sha256"] = hashlib.file_digest(executable, "sha256").hexdigest() \
+                            if hasattr(hashlib, "file_digest") else hashlib.sha256(executable.read()).hexdigest()
+                else:
+                    current, immutable = expected, True
+                    while current != "/":
+                        info = os.lstat(current)
+                        immutable &= not stat.S_ISLNK(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022
+                        current = os.path.dirname(current)
+                    evidence["immutable_claude_install"] = bool(immutable and
+                        os.path.realpath("/usr/bin/claude") == CLAUDE_EXECUTABLE)
+        except (OSError, ValueError) as error:
+            evidence["identity_error"] = type(error).__name__
+        after = os.lstat(path)
+        evidence["socket_unchanged"] = (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
+        stream.sendall(b"GET /_ping HTTP/1.0\r\nHost: docker\r\n\r\n")
+        data = stream.recv(512)
+        lower = data.lower()
+        evidence["reply"] = "docker_api" if b"api-version" in lower or b"docker" in lower else (
+            "http_reply" if data.startswith(b"HTTP/") else "other_reply" if data else "no_reply")
+    except Exception as error:
+        evidence["reply"] = type(error).__name__
+    finally:
+        stream.close()
+    return evidence
+
+
+def socket_problem(evidence, inspect_hashes):
+    """Only authenticated, unprivileged pinned Inspect/Claude sockets are expected."""
+    import re
+    path, peer = evidence["path"], evidence.get("peer") or {}
+    if evidence.get("reply") == "docker_api":
+        return "Docker API response"
+    if not isinstance(evidence.get("reply"), str):
+        return "socket protocol probe missing"
+    if not all(evidence.get(key) is True for key in ("socket_is_socket", "parents_verified", "socket_unchanged",
+            "same_namespaces", "same_executable_inode", "executable_is_regular")):
+        return "missing or mismatched socket/peer identity"
+    if any(peer.get(key) != 1000 for key in ("uid", "gid")) or any(
+            evidence.get(key) != 1000 for key in ("socket_uid", "socket_gid")) or peer.get("pid", 0) <= 0:
+        return "unexpected socket/peer identity"
+    status = evidence.get("process_status") or {}
+    if status.get("Uid", "").split() != ["1000"] * 4 or status.get("Gid", "").split() != ["1000"] * 4 or any(
+            status.get(key) != "0000000000000000" for key in ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")
+    ) or status.get("NoNewPrivs") != "1" or status.get("Seccomp") != "2":
+        return "peer privileges unverified"
+    if path == INSPECT_SOCKET and evidence.get("executable") == INSPECT_EXECUTABLE:
+        return None if evidence.get("executable_sha256") in inspect_hashes else "unpinned Inspect executable"
+    native = re.fullmatch(r"/tmp/cc-socks(?:-1000)?/([1-9][0-9]*)\.sock", path)
+    if native and int(native.group(1)) == peer["pid"] and evidence.get("executable") == CLAUDE_EXECUTABLE:
+        return None if evidence.get("immutable_claude_install") is True else "untrusted Claude installation"
+    return "unexpected socket path or executable"
+
+
+def inspect_launcher_hashes():
+    """Bind accepted server executables to both architectures in the pinned wheel."""
+    import hashlib
+    import importlib.resources
+    import tarfile
+    from inspect_ai.tool._sandbox_tools_utils._digests import lookup_digest
+    from inspect_ai.util._sandbox._cli import SANDBOX_CLI
+    if SANDBOX_CLI != INSPECT_EXECUTABLE:
+        raise RuntimeError("Pinned Inspect executable path changed; revalidate socket policy")
+    binaries = importlib.resources.files("inspect_ai") / "binaries"
+    hashes = []
+    for arch in ("amd64", "arm64"):
+        name = f"inspect-sandbox-tools-{arch}-v34"
+        resource = binaries / name
+        with resource.open("rb") as source:
+            if hashlib.sha256(source.read()).hexdigest() != lookup_digest(name):
+                raise RuntimeError(f"Pinned Inspect bundle digest mismatch: {name}")
+        with resource.open("rb") as source, tarfile.open(fileobj=source, mode="r:gz") as archive:
+            member = archive.getmember("inspect-sandbox-tools")
+            if not member.isfile():
+                raise RuntimeError("Inspect launcher is not a regular file")
+            with archive.extractfile(member) as launcher:
+                hashes.append(hashlib.sha256(launcher.read()).hexdigest())
+    return hashes
 
 
 FILESYSTEM_BODY = r"""
@@ -255,20 +385,6 @@ def read(path):
             return f.read().strip()
     except OSError:
         return None
-def ping(path):
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.settimeout(2)
-    try:
-        s.connect(path)
-        s.sendall(b"GET /_ping HTTP/1.0\r\nHost: docker\r\n\r\n")
-        data = s.recv(512)
-        if b"Api-Version" in data or b"Docker" in data:
-            return "docker_api"
-        return "http_reply" if data.startswith(b"HTTP/") else ("other_reply" if data else "no_reply")
-    except Exception as e:
-        return type(e).__name__
-    finally:
-        s.close()
 # Daemon-pointing variables in this process and every readable process environment
 # (names and sources only), plus every process's privilege fields; read first, while
 # the held CLI is certainly alive.
@@ -312,8 +428,9 @@ for dirpath, dirnames, filenames in os.walk("/"):
         elif stat.S_ISREG(mode) and mode & (stat.S_ISUID | stat.S_ISGID):
             setid.append(path)
 out["socket_files"] = sorted(sockets)
-out["unexpected_sockets"] = [{"path": p, "reply": ping(p)} for p in sorted(sockets)
-                             if not p.startswith(ALLOWED_SOCKET_PREFIXES)]
+out["socket_checks"] = [socket_probe(p) for p in sorted(sockets)]
+out["unexpected_sockets"] = [dict(entry, reason=problem) for entry in out["socket_checks"]
+                             if (problem := socket_problem(entry, INSPECT_LAUNCHER_HASHES))]
 out["setuid_setgid_files"] = sorted(setid)
 out["mounts"] = parse_mountinfo(read("/proc/self/mountinfo") or "")
 out["unexpected_mounts"] = unexpected_mounts(out["mounts"])
@@ -362,9 +479,13 @@ def filesystem_script():
     """FILESYSTEM_BODY with the mount classifier and its constants prepended (run
     in the container with ``python3 -I -c``)."""
     constants = (f"DOCKER_CONTAINER_FILE = {DOCKER_CONTAINER_FILE!r}\n"
-                 f"ALLOWED_SOCKET_PREFIXES = {ALLOWED_SOCKET_PREFIXES!r}\n"
+                 f"INSPECT_EXECUTABLE = {INSPECT_EXECUTABLE!r}\n"
+                 f"INSPECT_SOCKET = {INSPECT_SOCKET!r}\n"
+                 f"CLAUDE_EXECUTABLE = {CLAUDE_EXECUTABLE!r}\n"
+                 f"INSPECT_LAUNCHER_HASHES = {inspect_launcher_hashes()!r}\n"
                  f"DOCKER_ENV_NAMES = {DOCKER_ENV_NAMES!r}\n")
     return "\n".join([constants, pyinspect.getsource(parse_mountinfo), pyinspect.getsource(unexpected_mounts),
+                      pyinspect.getsource(socket_probe), pyinspect.getsource(socket_problem),
                       FILESYSTEM_BODY])
 
 
@@ -686,11 +807,28 @@ def privilege_problems(fs):
 
 
 def socket_and_mount_problems(fs):
-    """ISO-1/RT-1: no daemon socket anywhere (standard paths, any socket outside the
-    bridge's directory, any socket answering the Docker API), no daemon-pointing
+    """ISO-1/RT-1: no daemon socket anywhere (standard paths, authenticated exact
+    framework sockets only, Docker API always rejected), no daemon-pointing
     environment variable in any process, and no mount beyond Docker's defaults."""
     problems = [f"socket at {p}" for p, present in (fs.get("sockets") or {}).items() if present]
-    problems += [f"unexpected socket {s['path']} ({s.get('reply')})" for s in fs.get("unexpected_sockets") or []]
+    problems += [f"unexpected socket {s['path']} ({s.get('reply')}; {s.get('reason', 'unverified')})"
+                 for s in fs.get("unexpected_sockets") or []]
+    files, reports = fs.get("socket_files"), fs.get("socket_checks")
+    if not isinstance(files, list) or not isinstance(reports, list) or any(
+            not isinstance(path, str) for path in files) or any(
+            not isinstance(report, dict) or not isinstance(report.get("path"), str) for report in reports):
+        problems.append("socket identity/coverage probe did not report")
+    else:
+        paths = [report["path"] for report in reports]
+        if len(set(paths)) != len(paths) or len(set(files)) != len(files) or sorted(paths) != sorted(files):
+            problems.append("socket identity probe coverage mismatch")
+        # Recompute identity verdicts rather than trusting an empty recorded
+        # unexpected_sockets list. Old evidence without peer checks fails closed.
+        hashes = inspect_launcher_hashes() if reports else []
+        for report in reports:
+            reason = socket_problem(report, hashes)
+            if reason:
+                problems.append(f"socket identity {report['path']}: {reason}")
     if fs.get("docker_host_env") or fs.get("docker_env"):
         problems.append(f"daemon environment variables: {sorted(fs.get('docker_env') or {'DOCKER_HOST': 1})}")
     problems += [f"mount {m['mount_point']}: {m.get('reason')}" for m in fs.get("unexpected_mounts") or []]
@@ -743,10 +881,12 @@ def build_checks(result):
         mount_problems = socket_and_mount_problems(fs) if fs else ["no filesystem probe"]
         checks[f"{agent}:no_docker_socket_or_host_mounts"] = check(
             not mount_problems, problems=mount_problems, sockets=fs.get("sockets"), socket_files=fs.get("socket_files"),
-            unexpected_sockets=fs.get("unexpected_sockets"), docker_env=fs.get("docker_env"),
+            unexpected_sockets=fs.get("unexpected_sockets"), socket_checks=fs.get("socket_checks"),
+            docker_env=fs.get("docker_env"),
             unexpected_mounts=fs.get("unexpected_mounts"), mounts=fs.get("mounts"),
             note="Every mount must be one of Docker's per-container defaults (no host bind mount or volume on any "
-                 "platform); every socket outside /var/tmp/sandbox-services fails, wherever it is.")
+                 "platform); every socket is checked for Docker API and kernel peer identity. Only exact pinned "
+                 "Inspect server/native Claude session sockets with verified unprivileged local peers are expected.")
         checks[f"{agent}:no_provider_keys"] = check(
             bool(sec) and not sec.get("hits") and sec.get("environ_files_read", 0) > 1, secrets=sec,
             note="Only Inspect SWE's public bridge placeholder is allowed; values are never recorded.")
