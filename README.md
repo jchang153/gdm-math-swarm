@@ -46,8 +46,11 @@ the authoritative record of user decisions.
   through the actual Claude Code process; all nine required checks pass, including
   exact reasoning metadata replay. Total compatibility spending is $0.144114852 of
   $2, with no unresolved holds. No pilot has run; its $20 allowance and the separate
-  $5 analysis allowance remain untouched. Integration review and pilot launch retain
-  their approval checkpoints. GCP infrastructure charges are separate.
+  $5 analysis allowance remain untouched. The user confirmed integration and the
+  initial pilot launch, then authorized the main unlimited OpenRouter key with the
+  same shared $20 ledger cap. The exception is prepared in code; automatic review
+  blocked credential-file copying, so private user entry and final VM preflight
+  remain before launch. GCP infrastructure charges are separate.
 
 ## Setup
 

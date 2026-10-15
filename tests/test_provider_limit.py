@@ -49,9 +49,10 @@ def load_script(name):
 
 @mock.patch("urllib.request.urlopen", no_network)
 class VerifyKeyLimitTests(unittest.TestCase):
-    def verify(self, data, cap="20", **kwargs):
+    def verify(self, data, cap="20", *, allow_unlimited=False, **kwargs):
         get = FakeGet(data, **kwargs)
-        return verify_key_limit(FAKE_KEY, Decimal(cap), http_get=get, now=NOW), get
+        return verify_key_limit(FAKE_KEY, Decimal(cap), http_get=get, now=NOW,
+                                allow_unlimited=allow_unlimited), get
 
     def test_passing_key_returns_a_key_free_report(self):
         report, get = self.verify(GOOD)
@@ -65,6 +66,46 @@ class VerifyKeyLimitTests(unittest.TestCase):
         self.assertNotIn("label", report)
         self.assertNotIn("sk-", text)
         self.assertNotIn("Authorization", text)
+        self.assertFalse(report["unlimited_key_authorized"])
+        self.assertTrue(report["provider_limit_enforced"])
+
+    def test_unlimited_key_requires_explicit_authorization(self):
+        data = dict(GOOD, limit=None, limit_remaining=None)
+        with self.assertRaises(ProviderLimitError):
+            self.verify(data)
+        report, _ = self.verify(data, allow_unlimited=True)
+        self.assertTrue(report["all_required_passed"])
+        self.assertTrue(report["unlimited_key_authorized"])
+        self.assertFalse(report["provider_limit_enforced"])
+        self.assertIn("no provider cap; shared ledger remains mandatory", report["warnings"])
+        for name in ("limit_set", "remaining_within_allowance"):
+            self.assertTrue(report["checks"][name]["waived"])
+        self.assertNotIn("waived", report["checks"]["key_not_expired"])
+        text = json.dumps(report)
+        for forbidden in (FAKE_KEY, "label", "Authorization", "sk-"):
+            self.assertNotIn(forbidden, text)
+
+    def test_unlimited_authorization_does_not_excuse_missing_or_invalid_metadata(self):
+        unlimited = dict(GOOD, limit=None, limit_remaining=None)
+        cases = [dict(unlimited, expires_at="2026-10-01T00:00:00Z"),
+                 dict(unlimited, expires_at="invalid date"),
+                 dict(unlimited, limit_reset="monthly"),
+                 dict(GOOD, limit=25, limit_remaining=21),
+                 dict(GOOD, limit_remaining=None), dict(GOOD, limit=None)]
+        for field in ("limit", "limit_remaining", "limit_reset"):
+            cases.append({name: value for name, value in unlimited.items() if name != field})
+        for data in cases:
+            with self.subTest(data=data), self.assertRaises(ProviderLimitError):
+                self.verify(data, allow_unlimited=True)
+        report, _ = self.verify(GOOD, allow_unlimited=True)
+        self.assertTrue(report["provider_limit_enforced"])
+        self.assertFalse(any(check.get("waived") for check in report["checks"].values()))
+
+    def test_unlimited_response_still_scrubs_credentials(self):
+        with self.assertRaises(ProviderLimitError) as caught:
+            self.verify(dict(GOOD, limit=None, limit_remaining=None, usage=FAKE_KEY), allow_unlimited=True)
+        self.assertIsNone(caught.exception.report)
+        self.assertNotIn(FAKE_KEY, str(caught.exception))
 
     def test_refusals(self):
         cases = {
@@ -162,6 +203,24 @@ class CheckProviderLimitScriptTests(unittest.TestCase):
         code, record = self.run_script(dict(GOOD, limit_reset="daily"))
         self.assertEqual(code, 1)
         self.assertFalse(record["all_required_passed"])
+
+    def test_unlimited_cli_flag_records_explicit_waiver(self):
+        unlimited = dict(GOOD, limit=None, limit_remaining=None)
+        self.assertEqual(self.run_script(unlimited)[0], 1)
+        code, record = self.run_script(unlimited, "--allow-unlimited")
+        self.assertEqual(code, 0)
+        self.assertTrue(record["unlimited_key_authorized"])
+        self.assertFalse(record["provider_limit_enforced"])
+        self.assertIn("no provider cap; shared ledger remains mandatory", record["warnings"])
+        self.assertEqual(self.run_script(dict(GOOD, limit_remaining=21), "--allow-unlimited")[0], 1)
+
+    def test_unlimited_cli_flag_does_not_bypass_credential_approval(self):
+        module = load_script("check_provider_limit")
+        with mock.patch("research_swarm.secrets.load_openrouter_key") as load, \
+                mock.patch("sys.stderr", new=io.StringIO()), self.assertRaises(SystemExit) as caught:
+            module.main(["--allow-unlimited"], http_get=FakeGet(GOOD))
+        self.assertEqual(caught.exception.code, 2)
+        load.assert_not_called()
 
     def test_launch_gate_accepts_the_written_evidence_shape(self):
         from research_swarm import launch_gates

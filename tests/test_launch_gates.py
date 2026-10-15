@@ -42,7 +42,8 @@ def load_script(name):
 
 def pilot_config(**overrides):
     config = json.loads((ROOT / "configs" / "pilot.json").read_text())
-    config.update({"verified_integration": True, "paid_launch_enabled": True, **overrides})
+    config.update({"verified_integration": True, "paid_launch_enabled": True,
+                   "allow_unlimited_provider_key": False, **overrides})
     return config
 
 
@@ -407,7 +408,7 @@ class LaunchGateTests(GateFixture):
         self.assertEqual({k: v for k, v in example.items() if k not in track_keys},
                          {k: v for k, v in pilot.items() if k not in track_keys})  # stays in sync with the pilot
         self.assertEqual((example["track"], example["seeded_contagion_enabled"], example["verified_integration"],
-                          example["paid_launch_enabled"]), ("seeded", False, False, False))
+                          example["paid_launch_enabled"]), ("seeded", False, pilot["verified_integration"], False))
         block = example["seeded"]
         documentation = set(getattr(seeded_module, "DOCUMENTATION_KEYS", ("note",)))
         self.assertEqual(set(block) - documentation, {f.name for f in fields(SeededTrackConfig)})  # contract with seeded.py
@@ -797,7 +798,8 @@ class LaunchGateTests(GateFixture):
         self.write("provider-limit", {"all_required_passed": True, "note": "sk-or-v1-abcdef"},
                    NOW - datetime.timedelta(minutes=1))
         self.assertBlocked(self.evaluate(), "provider_limit", "credential")
-        self.write("provider-limit", {"all_required_passed": True, "limit_remaining": 5}, NOW - datetime.timedelta(seconds=30))
+        self.write("provider-limit", {"all_required_passed": True, "limit": 5, "limit_remaining": 5,
+                                      "limit_reset": None}, NOW - datetime.timedelta(seconds=30))
         result = self.evaluate()
         self.assertTrue(result["evidence"]["provider_limit"]["passed"])
         self.assertTrue(any("below the ledger" in w for w in result["evidence"]["provider_limit"]["warnings"]))
@@ -805,11 +807,13 @@ class LaunchGateTests(GateFixture):
         self.assertIn("paid launch re-verifies the key it loads", result["evidence"]["provider_limit"]["reason"])
         ledger = BudgetLedger(self.ledger)
         ledger.settle(ledger.reserve("pilot", "agent-001", 1), "0.25", "provider_reported_cost")
-        self.write("provider-limit", {"all_required_passed": True, "limit_remaining": 20},
+        self.write("provider-limit", {"all_required_passed": True, "limit": 20, "limit_remaining": 20,
+                                      "limit_reset": None},
                    NOW - datetime.timedelta(seconds=20))
         # The live check at paid launch would refuse 20 > 19.75; the gate reports it first.
         self.assertBlocked(self.evaluate(), "provider_limit", "exceeds the remaining pilot allowance 19.75")
-        self.write("provider-limit", {"all_required_passed": True, "limit_remaining": "19.75"},
+        self.write("provider-limit", {"all_required_passed": True, "limit": 20, "limit_remaining": "19.75",
+                                      "limit_reset": None},
                    NOW - datetime.timedelta(seconds=10))
         self.assertTrue(self.evaluate()["evidence"]["provider_limit"]["passed"])
         for path in launch_gates.evidence_files(self.validation, "provider-limit"):
@@ -824,6 +828,54 @@ class LaunchGateTests(GateFixture):
                         return_value=dict(CREDENTIALS_OK, env_file_present=True, env_file_regular=True,
                                           env_file_private=False)):
             self.assertBlocked(self.evaluate(), "credential_presence", "mode 600")
+
+    def test_unlimited_key_requires_explicit_boolean_policy_and_approval_note(self):
+        for value in (None, "true", 1, [], {}):
+            with self.subTest(value=value):
+                self.assertBlocked(self.evaluate(pilot_config(allow_unlimited_provider_key=value)),
+                                   "approved_settings", "must be a boolean")
+        for note in (None, "", "   ", True, 42):
+            with self.subTest(note=note):
+                self.assertBlocked(self.evaluate(pilot_config(
+                    allow_unlimited_provider_key=True, unlimited_provider_key_approval=note)),
+                    "approved_settings", "nonempty unlimited_provider_key_approval")
+
+    def test_unlimited_provider_evidence_reassessed_and_waiver_explicit(self):
+        from research_swarm.provider_limit import assess
+        unlimited = {"limit": None, "limit_remaining": None, "limit_reset": None,
+                     "usage": 0, "expires_at": None}
+        report = assess(unlimited, Decimal("20"), NOW, allow_unlimited=True)
+        self.write("provider-limit", report, NOW - datetime.timedelta(minutes=1))
+        self.assertBlocked(self.evaluate(), "provider_limit", "waiver evidence")
+        config = pilot_config(allow_unlimited_provider_key=True,
+                              unlimited_provider_key_approval="Explicit user approval for this pilot")
+        result = self.evaluate(config)
+        self.assertTrue(result["ready"], result["blockers"])
+        gate = result["evidence"]["provider_limit"]
+        self.assertTrue(gate["unlimited_key_authorized"])
+        self.assertFalse(gate["provider_limit_enforced"])
+        self.assertIn("waived, not enforced", gate["reason"])
+        self.assertTrue(any(check.get("waived") for check in gate["checks"].values()))
+        # Even the authorized waiver cannot bless stale/tampered expiry metadata.
+        report["expires_at"] = "2026-10-01T00:00:00Z"
+        self.write("provider-limit", report, NOW - datetime.timedelta(seconds=30))
+        self.assertBlocked(self.evaluate(config), "provider_limit", "key_not_expired")
+
+    def test_passing_flag_cannot_hide_invalid_provider_metadata(self):
+        self.write("provider-limit", {"all_required_passed": True, "limit": None,
+                                      "limit_remaining": None, "limit_reset": None},
+                   NOW - datetime.timedelta(minutes=1))
+        self.assertBlocked(self.evaluate(), "provider_limit", "metadata requirements not met")
+
+    def test_unlimited_policy_preserves_ledger_caps_and_holds(self):
+        from research_swarm.provider_limit import assess
+        config = pilot_config(allow_unlimited_provider_key=True,
+                              unlimited_provider_key_approval="User approved unlimited provider key")
+        self.write("provider-limit", assess({"limit": None, "limit_remaining": None, "limit_reset": None},
+                                            Decimal("20"), NOW, allow_unlimited=True))
+        ledger = BudgetLedger(self.ledger)
+        ledger.reserve("pilot", "agent-001", "1")
+        self.assertBlocked(self.evaluate(config), "ledger", "unresolved")
 
 
 class ScriptTests(GateFixture):

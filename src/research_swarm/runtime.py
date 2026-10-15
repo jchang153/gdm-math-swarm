@@ -1093,7 +1093,7 @@ def _redact(text, secret):
 
 
 def build_openrouter_model(settings, repo_root, max_connections, *, max_remaining_usd, record=None,
-                           verify_limit=None):
+                           verify_limit=None, allow_unlimited=False):
     """The paid OpenRouter model, exactly as every paid path builds it: ``(model, provider_limit)``.
 
     The host credential is read here, at model construction, through
@@ -1105,6 +1105,9 @@ def build_openrouter_model(settings, repo_root, max_connections, *, max_remainin
     ``max_remaining_usd`` (the calling scope's remaining ledger allowance), else
     ``ProviderLimitError`` propagates and nothing is built. The returned dict (no key)
     is recorded as ``provider_limit_verified`` and returned for settings.json.
+    Only the pilot's explicitly approved ``allow_unlimited=True`` policy may waive
+    the additional provider cap for an unlimited key; the shared ledger remains
+    unchanged, and the report records that the provider cap is not enforced.
     ``max_retries=0`` on both Inspect's retry loop and the OpenAI client itself: no
     silent paid retries below the ledger. ``capture_openrouter_cost`` copies
     OpenRouter's reported usage/cost and generation id into each output for settlement.
@@ -1121,7 +1124,8 @@ def build_openrouter_model(settings, repo_root, max_connections, *, max_remainin
                                 "verified before paid requests") from ex
     key = load_openrouter_key(repo_root)
     try:
-        limit = verify_limit(key, Decimal(str(max_remaining_usd)))
+        limit = verify_limit(key, Decimal(str(max_remaining_usd)),
+                             **({"allow_unlimited": True} if allow_unlimited is True else {}))
     except Exception as ex:
         _safe_record(record, "provider_limit_refused", None,
                      {"error": type(ex).__name__, "detail": _redact(ex, key)[:500],
@@ -1245,7 +1249,8 @@ async def run_pilot(config, repo_root, conference_factory=None):
         # remaining allowance (unpaid) before any paid request.
         model, provider_limit = build_openrouter_model(
             settings, repo_root, connections,
-            max_remaining_usd=ledger.snapshot()["pilot"]["remaining_usd"], record=record)
+            max_remaining_usd=ledger.snapshot()["pilot"]["remaining_usd"], record=record,
+            allow_unlimited=config.get("allow_unlimited_provider_key") is True)
         effective = {
             "agent_count": agent_count, "persona_seed": persona_seed, "persona_counts": persona_counts(personas),
             "agent_image": images["agent"]["tag"], "lean_image": images["lean"]["tag"], "images": images,

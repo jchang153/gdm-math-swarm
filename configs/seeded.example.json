@@ -64,6 +64,8 @@
   "max_pilot_usd": 20,
   "max_analysis_usd": 5,
   "max_compatibility_usd": 2,
-  "verified_integration": false,
-  "paid_launch_enabled": false
+  "verified_integration": true,
+  "paid_launch_enabled": false,
+  "allow_unlimited_provider_key": true,
+  "unlimited_provider_key_approval": "User explicitly authorized the unlimited main OpenRouter key on 2026-10-14; the shared $20 pilot ledger remains mandatory."
 }

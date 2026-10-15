@@ -50,7 +50,7 @@ from pathlib import Path
 from .budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, LEGACY_LEDGER_RELATIVE, UNRESOLVED_STATES, list_requests,
                      read_snapshot)
 from .provider import CONFIG_OVERRIDABLE, MODEL_ID, frozen_fields, settings_from_config, validate_catalog
-from .provider_limit import TOLERANCE_USD as LIMIT_TOLERANCE_USD
+from .provider_limit import TOLERANCE_USD as LIMIT_TOLERANCE_USD, assess as assess_provider_limit
 
 PILOT_SUBSET = "data/pilot_subset.json"
 PARENT_MANIFEST = "data/manifest.json"
@@ -431,6 +431,13 @@ class _Gates:
             drift[MAX_CONNECTIONS_KEY] = {"config": self.config.get(MAX_CONNECTIONS_KEY),
                                           "approved": "equal to agent_count"}
         problems += connections
+        unlimited = self.config.get("allow_unlimited_provider_key", False)
+        if type(unlimited) is not bool:
+            problems.append("allow_unlimited_provider_key must be a boolean")
+        elif unlimited:
+            approval = self.config.get("unlimited_provider_key_approval")
+            if not isinstance(approval, str) or not approval.strip():
+                problems.append("allow_unlimited_provider_key requires a nonempty unlimited_provider_key_approval note")
         self.add("approved_settings", not problems, "; ".join(problems) or
                  "config matches approved plan values (max_connections equals agent_count)", drift=drift,
                  max_connections=self.config.get(MAX_CONNECTIONS_KEY), agent_count=self.config.get("agent_count"))
@@ -674,16 +681,28 @@ class _Gates:
             return self.add("provider_limit", False, "no provider-limit evidence; the user must set an OpenRouter key "
                             "credit limit and approve scripts/check_provider_limit.py")
         problems = []
+        approval = self.config.get("unlimited_provider_key_approval")
+        allow_unlimited = (self.config.get("allow_unlimited_provider_key") is True
+                           and isinstance(approval, str) and bool(approval.strip()))
         if record.get("all_required_passed") is not True:
             problems.append("provider-side limit requirements not met: " + ", ".join(
                 k for k, v in (record.get("checks") or {}).items() if not v.get("passed", True)))
+        assessment = assess_provider_limit(
+            record, pilot_remaining if pilot_remaining is not None else DEFAULT_CAPS["pilot"], self.now,
+            **({"allow_unlimited": True} if allow_unlimited else {}))
+        failed = [name for name, check in assessment["checks"].items() if check.get("passed") is not True]
+        if not assessment["all_required_passed"]:
+            problems.append("provider-side metadata requirements not met: " + ", ".join(failed))
+        if not allow_unlimited and (record.get("unlimited_key_authorized") is True
+                                    or record.get("provider_limit_enforced") is False):
+            problems.append("unlimited-key waiver evidence requires the current approved configuration")
         age = (self.now - _created(record, path)).total_seconds() / 3600
         limit = float(self.config.get("provider_limit_max_age_hours", DEFAULT_MAX_AGE_HOURS))
         if age > limit or age < -0.1:
             problems.append(f"limit check is {age:.1f} h old (limit {limit:g} h)")
         if re.search(r"\bsk-[A-Za-z0-9]", json.dumps(record)):
             problems.append("evidence appears to contain a credential; delete it and re-run the check")
-        warnings = list(record.get("warnings") or [])
+        warnings = list(dict.fromkeys([*(record.get("warnings") or []), *assessment.get("warnings", [])]))
         remaining = record.get("limit_remaining")
         if remaining is not None and pilot_remaining is not None:
             if Decimal(str(remaining)) > Decimal(pilot_remaining) + LIMIT_TOLERANCE_USD:
@@ -693,11 +712,18 @@ class _Gates:
             elif Decimal(str(remaining)) < Decimal(pilot_remaining):
                 warnings.append("provider limit remaining is below the ledger's pilot allowance; the provider would "
                                 "stop the pilot first")
+        waived = assessment.get("provider_limit_enforced") is False
+        description = ("user-authorized unlimited key; provider-side cap is waived, not enforced; shared ledger "
+                       "still enforces the pilot allowance" if waived else
+                       "provider-side limit set, no reset, within the pilot allowance")
         self.add("provider_limit", not problems, "; ".join(problems) or
-                 "provider-side limit set, no reset, within the pilot allowance (evidence is not bound to a key; the "
-                 "paid launch re-verifies the key it loads with provider_limit.verify_key_limit)",
+                 description + " (evidence is not bound to a key; the paid launch re-verifies the key it loads "
+                 "with provider_limit.verify_key_limit)",
                  path, age_hours=round(age, 2), limit=record.get("limit"), limit_remaining=remaining,
-                 limit_reset=record.get("limit_reset"), warnings=warnings)
+                 limit_reset=record.get("limit_reset"), warnings=warnings,
+                 unlimited_key_authorized=assessment.get("unlimited_key_authorized", False),
+                 provider_limit_enforced=assessment.get("provider_limit_enforced", not waived),
+                 checks=assessment["checks"])
 
     def ledger(self, ledger_path, legacy):
         snapshot = read_snapshot(ledger_path)

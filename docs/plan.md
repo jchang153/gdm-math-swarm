@@ -60,6 +60,7 @@ Updated October 13, 2026, America/Los_Angeles.
 | Live compatibility execution authorized (October 14, 2026) | After the host key passed the unpaid OpenRouter check with a $2 non-resetting limit and $0 usage, the user said "go ahead and run it" in response to the proposed live compatibility test capped at $2. Authorizes one live compatibility attempt and necessary VM startup/prerequisite checks. Does not authorize the paid pilot, a second paid attempt, or changes to the frozen model, settings or allowances. Preserve evidence and the ledger, then stop the idle VM and verify TERMINATED. |
 | Alternative provider authorized (October 14, 2026) | After DeepSeek's own endpoint was unavailable and Fireworks was proposed, the user said "please go ahead and try those too." Authorizes selecting the OpenRouter `fireworks` endpoint for the same `deepseek/deepseek-v4.1-flash` model and running its live compatibility check within the existing shared $2 allowance. Refresh and validate the route first; no automatic provider fallbacks, no spending reset, and no pilot launch. Other model settings, population, resources and allowances are unchanged. |
 | Reasoning bridge repair and retest authorized (October 14, 2026) | After the first Fireworks check exposed typed reasoning being flattened by the Inspect Anthropic bridge, the user said "just do whatever you need to do." Authorizes repairing the two-way representation, meaningful offline/runtime verification, and a new paid compatibility attempt using the existing remaining $1.90704902 allowance. Preserve all prior spending and evidence. Keep the same model, Fireworks route, limits, prompts and tool semantics; no pilot launch before compatibility passes and its separate launch checkpoint. |
+| Pilot launch and main key authorized (October 14, 2026) | After the repaired live check passed, the user said "yes let's do it" to the pilot/key-limit launch step, then explicitly requested copying the local `.env` and authorized using its main OpenRouter key despite its lack of a provider-side limit. This confirms integration review and authorizes the initial $20 baseline pilot once the remaining prerequisites pass; no new launch confirmation is needed for that same run. The explicit unlimited-key exception removes only the additional provider-side cap requirement for that key; the shared $20 pilot ledger, reservation/settlement enforcement and all other launch gates remain mandatory. Compatibility/analysis stay separate. Record the exception in configuration and live key evidence; no fabricated cap evidence. No Anthropic key or credits are needed for the selected DeepSeek route. Automatic approval review rejected direct encrypted SCP even after private-file permissions and Git exclusion were verified; no credentials were copied and no pilot started. Credential transfer remains blocked pending private user entry; keep paid launch disabled until credential preparation and final preflight are complete. |
 | Research evaluator opaque-helper fix (October 14, 2026) | User authorized the independent evaluator to inspect all reachable proof dependencies, including opaque helper bodies; reject admissions/unapproved axioms and keep inspection failures unresolved. Add genuine, direct-admission, nested-admission and forbidden-axiom opaque fixtures, researcher-only. The weak operational judge stays unchanged. Implementation and offline checks are authorized now; real Lean/container validation remains on hold for the VM. Verifier digest and evaluator semantics v3 invalidate old evaluator evidence and require a comparator rebuild/revalidation. |
 | Stop-boundary correction (October 14, 2026) | User authorized rechecking stop/cancellation after budget reservation and sandbox file reads and before dispatch. Release reservations for model requests that were never dispatched; retain settlement/grace for requests already admitted. Refuse queued conference actions when the run has stopped. Implement and validate offline now; Docker/runtime validation remains on hold. No compatibility, capacity or analysis-label fixes are authorized by this row. |
 | Compatibility rejection policy (October 14, 2026) | User authorized a refined fix: detect API rejections converted into model outputs; preserve existing bounded retries for temporary API failures, including HTTP 408/429; fail only the small preflight compatibility check for structural incompatibilities. The pilot retry behavior is unchanged and a single rejection must not stop the entire pilot. The compatibility allowance, request/time limits and paid-check approval checkpoint stay unchanged; implementation/testing now is offline only. This supersedes the engineering first-4xx compatibility-abort rule. |
@@ -206,12 +207,27 @@ violations. Pilot/analysis spending remains $0. The run took 371.8 seconds,
 including 250.898 seconds warming the cold Lean cache. Truncation and compaction
 were not observed in the agent session; those live checks remain informational.
 
-Final preflight passes every technical gate, including compatibility and the
-current ledger-backed evidence. Only `verified_integration` and
-`paid_launch_enabled` remain false for the user's evidence review/launch decision.
-Before a pilot, use a separate non-resetting $20 key (or adjust the existing key's
-limit consistently with the pilot allowance), verify its limit, and show the
-spending checkpoint. The current compatibility key has only about $1.86 remaining.
+That final VM preflight passed every technical gate, including compatibility and
+the ledger-backed evidence. The user then confirmed integration and the initial
+pilot launch and explicitly authorized the main unlimited OpenRouter key. The local
+config now sets `verified_integration: true` and records the unlimited-key exception
+with an approval note. Paid launch remains disabled until credential preparation
+and final preflight; the same pilot does not need another authorization question.
+
+The explicit exception waives only an additional provider cap for a key whose live
+metadata explicitly identifies it as unlimited. The shared $20 pilot ledger and all
+other launch gates remain mandatory. The code and offline regressions implement
+this policy; all 554 main tests pass locally (4 environment/opt-in skips), including
+expiry, missing-metadata, strict-policy and unchanged-ledger regressions.
+Compatibility checks remain strict. Credential transfer was blocked
+by automatic approval review, including direct SCP of the local private ignored
+`.env`. No transfer or pilot launch occurred. The VM is confirmed `TERMINATED`.
+Its existing compatibility key has about $1.86 remaining; it is not the requested
+main key. Private user entry is needed. The new unlimited-key changes are prepared
+locally but have not been deployed or checked against that main key on the VM.
+After private credential entry, deploy the reviewed host-side changes, run the
+approved unpaid key check with `--allow-unlimited`, refresh route pricing, and show
+the spending checkpoint before enabling and starting the already-authorized pilot.
 Raw logs, the passing Linux test log, source hashes and a consistent ledger backup
 are preserved under `runs/phase-b/reasoning-repair-20261015/` and the VM disk.
 Terminal Git with an SSH remote is the standing commit/push method.

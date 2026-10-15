@@ -684,6 +684,21 @@ Procedure:
    not set it.
 
 
+## Explicitly authorized unlimited pilot key
+
+On October 14 the user authorized the main OpenRouter key despite its lack of a
+provider-side cap. The pilot configuration records `allow_unlimited_provider_key:
+true` and a nonempty `unlimited_provider_key_approval` note. Strict provider-cap
+enforcement remains the code default and the compatibility-check policy.
+
+For the approved pilot only, live key verification may accept explicit null
+`limit`, `limit_remaining` and `limit_reset` fields, provided the key is not expired.
+Missing metadata, API errors, expired keys, and finite limits above the remaining
+allowance still fail. Evidence and run settings identify the waived safeguard as
+`provider_limit_enforced: false`; they never claim that an unlimited key has a cap.
+The shared $20 pilot ledger, conservative reservations, settlement, existing charges,
+unresolved holds, route pricing and all other launch gates remain enforced.
+
 ## Reasoning transport through Claude Code
 
 The first Fireworks compatibility check exposed an Inspect 0.3.279 conversion defect:

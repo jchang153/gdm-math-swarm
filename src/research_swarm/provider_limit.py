@@ -57,13 +57,20 @@ def _decimal(value):
     return result if result.is_finite() else None
 
 
-def assess(data, max_remaining_usd, now=None):
-    """Pure evaluation of an /api/v1/key ``data`` object (no key, label or header in the result)."""
+def assess(data, max_remaining_usd, now=None, *, allow_unlimited=False):
+    """Pure evaluation of an /api/v1/key ``data`` object (no key, label or header).
+
+    Explicit authorization permits only an explicitly unlimited key (both limit
+    fields null). It never excuses a finite limit above the remaining allowance,
+    expiration, or a resetting limit. The shared ledger is mandatory either way.
+    """
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cap = Decimal(str(max_remaining_usd))
     data = data if isinstance(data, dict) else {}
     report = {name: data.get(name) for name in FIELDS}
     limit, remaining, usage = data.get("limit"), data.get("limit_remaining"), data.get("usage")
+    unlimited = (allow_unlimited is True and "limit" in data and "limit_remaining" in data
+                 and limit is None and remaining is None)
     expires = data.get("expires_at")
     expired = False
     if expires:
@@ -81,14 +88,25 @@ def assess(data, max_remaining_usd, now=None):
             "limit_remaining": remaining, "max_remaining_usd": str(cap)},
         "key_not_expired": {"passed": not expired, "expires_at": expires},
     }
+    if unlimited:
+        for name in ("limit_set", "remaining_within_allowance"):
+            checks[name].update(passed=True, waived=True,
+                                reason="user authorized an unlimited key; shared ledger remains mandatory")
+        # Unlimited keys require an explicit reset field; omitted metadata does
+        # not establish that a provider-side spending window cannot reset.
+        checks["limit_does_not_reset"]["passed"] = "limit_reset" in data and data["limit_reset"] is None
     warnings = []
+    if unlimited:
+        warnings.append("no provider cap; shared ledger remains mandatory")
     if usage:
-        warnings.append(f"key already has usage {usage}; provider-side remaining is limit minus usage")
+        warnings.append(f"key already has usage {usage}" +
+                        ("" if unlimited else "; provider-side remaining is limit minus usage"))
     if limit is not None and _decimal(limit) is not None and _decimal(limit) > cap:
         warnings.append(f"limit {limit} exceeds the allowance {cap}; only limit_remaining protects it")
     if data.get("include_byok_in_limit") is False:
         warnings.append("BYOK usage is excluded from the limit")
     return {**report, "max_remaining_usd": str(cap), "checks": checks, "warnings": warnings,
+            "unlimited_key_authorized": allow_unlimited is True, "provider_limit_enforced": not unlimited,
             "all_required_passed": all(c["passed"] for c in checks.values())}
 
 
@@ -123,25 +141,29 @@ def fetch_key_data(api_key, *, http_get=None):
     return data
 
 
-def key_limit_report(api_key, max_remaining_usd, *, http_get=None, now=None):
+def key_limit_report(api_key, max_remaining_usd, *, http_get=None, now=None, allow_unlimited=False):
     """Non-raising assessment of the live key (raises only when it cannot be queried)."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     report = {"endpoint": KEY_URL, "checked_at": now.astimezone(datetime.timezone.utc).isoformat(), "paid_calls": 0,
-              **assess(fetch_key_data(api_key, http_get=http_get), max_remaining_usd, now)}
+              **assess(fetch_key_data(api_key, http_get=http_get), max_remaining_usd, now,
+                       allow_unlimited=allow_unlimited)}
     text = json.dumps(report, default=str)
     if (len(api_key) >= 8 and api_key in text) or _CREDENTIAL_LIKE.search(text):
         raise ProviderLimitError("the key-limit response contained a credential-like string; nothing was recorded")
     return report
 
 
-def verify_key_limit(api_key, max_remaining_usd, *, http_get=None, now=None):
+def verify_key_limit(api_key, max_remaining_usd, *, http_get=None, now=None, allow_unlimited=False):
     """Live check of the key a paid path loaded; returns the key-free report or raises.
 
     Raises ``ProviderLimitError`` when the key has no limit, a resetting limit, a
     ``limit_remaining`` above ``max_remaining_usd`` (+``TOLERANCE_USD``), an expiry in
-    the past, or when the endpoint cannot be queried. Unpaid (GET /api/v1/key).
+    the past, or when the endpoint cannot be queried. ``allow_unlimited=True``
+    explicitly waives only the two cap checks for an unlimited key, records that
+    safeguard's absence, and leaves the shared ledger mandatory. Unpaid GET.
     """
-    report = key_limit_report(api_key, max_remaining_usd, http_get=http_get, now=now)
+    report = key_limit_report(api_key, max_remaining_usd, http_get=http_get, now=now,
+                              allow_unlimited=allow_unlimited)
     if not report["all_required_passed"]:
         failed = [name for name, check in report["checks"].items() if not check["passed"]]
         raise ProviderLimitError(
