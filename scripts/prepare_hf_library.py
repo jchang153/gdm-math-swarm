@@ -12,6 +12,7 @@ import re
 import shutil
 
 from build_experiment_index import build
+from space_navigation import private_space_navigation
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -87,6 +88,9 @@ are distinct; see each report for limitations. No model or experiment runs here.
 This archive must be hosted in a **private** Space. Do not upload credentials.
 ''')
     (output / 'robots.txt').write_text('User-agent: *\nDisallow: /\n')
+    for page in output.rglob('*.html'):
+        modules = ['./assets/' + p.name for p in sorted((page.parent / 'assets').glob('*.js'))] if page.parent.name == 'inspect-view' else []
+        page.write_text(private_space_navigation(page.read_text(), modules))
     files = {str(p.relative_to(output)): {'bytes': p.stat().st_size,
              'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
              for p in sorted(output.rglob('*')) if p.is_file()}
