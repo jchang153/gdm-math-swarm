@@ -32,16 +32,35 @@ is required to browse. Local originals and host ledger backups are retained.
 
 ## Preparing an archive
 
-Export the completed run with `scripts/export_transcripts.py`. Save the report's
+Install the optional publisher dependencies in your environment and authenticate
+with **your own** HF account after accepting the organization invitation:
+
+```bash
+python -m pip install -e '.[publication]'
+hf auth login
+```
+
+Use a fine-grained token with read/write access to
+`gdm-math-swarm/gdm-math-swarm-experiments`. No model API key is needed to publish.
+The export steps also require the pinned `runtime` dependencies. The script does
+not create experiments, run proof evaluation, or invent a results report: first
+complete the run and save its checked `results.json` and `results.html`, preserving
+run-specific spending separately from the cumulative ledger and any uncertain holds.
+
+Export the completed run with `python scripts/export_transcripts.py --run-dir runs/RUN_ID`. Save the report's
 `results.json` and `results.html` alongside the raw records. Create a native Inspect
 bundle with the pinned Inspect installation, running outside the repository to
 avoid automatic dotenv loading:
 
 ```bash
-cd /private/tmp
-/Users/owner/Documents/GitHub/gdm-math-swarm/.venv/bin/inspect view bundle \
-  --log-dir /Users/owner/Documents/GitHub/gdm-math-swarm/runs/RUN_ID/inspect \
-  --output-dir /private/tmp/inspect-RUN_ID
+# From your own repository checkout; replace RUN_ID with the completed run ID.
+REPO_DIR="$PWD"
+RUN_ID=your-run-id
+cd /tmp
+"$REPO_DIR/.venv/bin/inspect" view bundle \
+  --log-dir "$REPO_DIR/runs/$RUN_ID/inspect" \
+  --output-dir "$REPO_DIR/runs/phase-b/inspect-$RUN_ID"
+cd "$REPO_DIR"
 ```
 
 Also run `python3 scripts/export_conference.py --run-dir runs/RUN_ID` to generate
@@ -66,7 +85,7 @@ From the repository, prepare a fresh, non-existing output directory:
 
 ```bash
 python3 scripts/prepare_hf_library.py \
-  --run RUN_ID=/private/tmp/inspect-RUN_ID \
+  --run "$RUN_ID=runs/phase-b/inspect-$RUN_ID" \
   --output-dir runs/phase-b/hf-library-preparation/NEW_BUNDLE
 ```
 
@@ -91,17 +110,38 @@ immutable run IDs; do not replace another run with a new experiment. Regenerate
 the catalogue from both existing and newly added reports. A bundle prepared only
 from local runs is not automatically a complete shared catalogue.
 
-Use guarded `HfApi.create_commit` batches with `repo_type='space'` and
-`parent_commit` set to the revision you inspected. The initial single-folder upload
-timed out with HTTP 408; retrying in 20 sequential batches succeeded. Group at most
-120 files and approximately 4 MB per commit (larger individual files go alone).
-Publish run records before the root catalogue and manifest. If the revision changes,
-fetch the new records and rebuild
-the catalogue before retrying. Do not use deletion patterns or overwrite a newer
-catalogue blindly. Verify private visibility, remote file hashes, and report/viewer
-links after upload. Inspect View needs HTTP byte-range support for `.eval` files.
-Keep local originals until remote integrity and access are verified; deleting local
-records requires a separate user decision.
+Publish a prepared bundle with the reusable command included in the repository:
+
+```bash
+# Read-only preview; downloads the current catalogue but uploads nothing.
+python scripts/publish_hf_library.py --bundle runs/phase-b/hf-library-preparation/NEW_BUNDLE
+
+# Publish after reviewing the preview and the prepared experiment records.
+python scripts/publish_hf_library.py \
+  --bundle runs/phase-b/hf-library-preparation/NEW_BUNDLE \
+  --commit --receipt runs/phase-b/hf-library-preparation/publication-receipt.json
+```
+
+You only need to prepare **your new runs**. The publisher merges their catalogue
+entries with all existing remote entries and sorts by actual start time. It
+preserves existing Space configuration and run files, refuses conflicting run IDs,
+requires a private Space, verifies bundle hashes, and screens obvious credential
+filenames and token patterns (including compressed Inspect logs). Pattern scanning
+is not a universal secret-detection guarantee; review new data sources before upload.
+
+Uploads use guarded `HfApi.create_commit` batches of at most 120 files and roughly
+4 MB, with larger files alone. The catalogue and manifest are committed last.
+Every batch checks the latest revision and privacy. Concurrent changes cause a
+refusal; rerun the command to merge the newer catalogue. A failed partial upload
+can resume only when every existing file for that run matches exactly. No deletion
+operations are issued. Final verification checks uploaded hashes and that unrelated
+remote files are unchanged; keep the receipt outside the prepared bundle.
+
+The upload command verifies repository content, not an interactive browser session.
+After publication, check the hosted report, conference, transcript and native Inspect
+links; Inspect View needs HTTP byte-range support for `.eval` logs. Keep local
+originals until remote integrity and access are verified. Deleting local records
+requires a separate user decision.
 
 The initial archive was prepared under the ignored directory
 `runs/phase-b/hf-library-preparation/space/`. Its manifest records the published
