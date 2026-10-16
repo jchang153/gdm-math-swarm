@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Render saved conference records and captured private files, without inference."""
 import argparse
+import base64
 from collections import Counter, defaultdict
 from datetime import datetime
 import hashlib
+import gzip
 import html
 import json
 from pathlib import Path
@@ -34,6 +36,38 @@ def page(title, body):
     return ('<!doctype html><html lang="en"><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{html.escape(title)}</title><style>{STYLE}</style>{body}</html>')
+
+
+def compact_browser_page(document):
+    """Keep self-contained HTML below HF's large-file attachment threshold.
+
+    Only the embedded records change representation. Browser-side decompression
+    preserves the original JSON, links, filters and textContent rendering.
+    """
+    pattern = r'<script id="data" type="application/json">(.*?)</script><script>(.*?)</script>'
+    match = re.search(pattern, document, re.S)
+    if match is None:
+        raise ValueError('Missing conference data and renderer')
+    encoded, script = match.groups()
+    json.loads(encoded)  # Refuse malformed records before producing an export.
+    prefix = "const data=JSON.parse(document.getElementById('data').textContent);"
+    if not script.lstrip().startswith(prefix):
+        raise ValueError('Unexpected conference renderer bootstrap')
+    packed = base64.b64encode(gzip.compress(encoded.encode('utf-8'), mtime=0)).decode('ascii')
+    bootstrap = '''(async()=>{
+if(typeof DecompressionStream==='undefined')throw new Error('This viewer needs a browser with gzip decompression support. Please use a current Chrome, Firefox, Edge or Safari.');
+document.getElementById('status').textContent='Loading conference records…';
+const bytes=Uint8Array.from(atob(document.getElementById('data').textContent),c=>c.charCodeAt(0));
+const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+const data=JSON.parse(await new Response(stream).text());
+'''
+    renderer = bootstrap + script.lstrip()[len(prefix):] + '''
+})().catch(error=>{document.getElementById('status').textContent='Could not load conference: '+error.message;});'''
+    replacement = '<script id="data" type="application/gzip+base64">' + packed + '</script><script>' + renderer + '</script>'
+    result = document[:match.start()] + replacement + document[match.end():]
+    if len(result.encode('utf-8')) >= 8_000_000:
+        raise ValueError('Conference HTML needs a split-data export before HF publication')
+    return result
 
 
 def export(run):
@@ -224,7 +258,7 @@ const links=node('p');for(const [label,url] of r.links){if(!url)continue;const a
 if(r.detail){const d=node('details');d.append(node('summary',selected==='submissions'?'Judge feedback & evidence':'Record details & provenance'),node('pre',JSON.stringify(r.detail,null,2)));card.append(d);}main.append(card);}}
 for(const id of ['search','agent','task','kind'])el(id).addEventListener(id==='search'?'input':'change',()=>{pageNo=0;render();});el('previous').onclick=()=>{pageNo--;render();};el('next').onclick=()=>{pageNo++;render();};window.addEventListener('hashchange',()=>{if(sections[location.hash.slice(1)]&&selected!==location.hash.slice(1)){selected=location.hash.slice(1);pageNo=0;options();render();}});options();render();
 '''
-    (out / 'index.html').write_text(page('Conference · ' + run.name, body + '<script id="data" type="application/json">' + encoded + '</script><script>' + script + '</script>'))
+    (out / 'index.html').write_text(compact_browser_page(page('Conference · ' + run.name, body + '<script id="data" type="application/json">' + encoded + '</script><script>' + script + '</script>')))
     manifest = {'schema': 'gdm-conference-view/1', 'run': run.name, 'counts': counts, 'captured_files': len(versions),
                 'conference_events': len(events), 'timeline_entries': len(timeline), 'warnings': warnings,
                 'sources': {str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest()
