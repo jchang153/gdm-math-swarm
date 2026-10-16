@@ -27,6 +27,7 @@ from decimal import Decimal
 from pathlib import Path
 from .budget import BudgetLedger
 from .provider import ProviderSettings, settings_from_config  # noqa: F401 (ProviderSettings re-exported)
+from .prompt_cache import TOKEN_COUNTER_NORMALIZATION_VERSION
 
 AGENT_IMAGE = "gdm-math-swarm-agent:local"
 LEAN_IMAGE = "gdm-math-swarm-lean:local"
@@ -1261,6 +1262,7 @@ async def run_pilot(config, repo_root, conference_factory=None):
                                                                 ("memory", "memory"), ("cpus", "cpus"),
                                                                 ("max_concurrent", "max_concurrent"))},
             "lean_warm_up": warm_up, "system_prompt_mode": mode, "claude_auto_memory": auto_memory,
+            "prompt_cache_normalization": TOKEN_COUNTER_NORMALIZATION_VERSION,
             "claude_code_env": claude_code_env(auto_memory), "ledger_path": str(ledger_file), "budget_scope": "pilot",
             "evaluator_observer": None if observer is None else "queue",
             "fixed_task_manifest": config.get("fixed_task_manifest"), "inspect_dotenv": dotenv,
