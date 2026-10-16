@@ -38,7 +38,8 @@ def build(runs, hosted=False):
             date = stamp.astimezone(ZoneInfo('America/Los_Angeles')).strftime('%Y-%m-%d %H:%M %Z')
             # All entries are completed reports; incomplete runs remain in their folders.
             entry = {'run': path.parent.name, 'date': date, 'start_utc': data['start_utc'],
-                     'track': config.get('track', 'unknown'), 'agents': sum(data['agent_exits'].values()),
+                     'track': config.get('track', 'unknown'), 'prompt_variant': config.get('prompt_variant', 'baseline'),
+                     'agents': sum(data['agent_exits'].values()),
                      'model': config.get('candidate_model_id', 'unknown'),
                      'provider_route': config.get('provider_route', 'unknown'),
                      'elapsed_seconds': elapsed, 'pilot_spent_usd': str(spent),
@@ -75,7 +76,8 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
         tasks = f'{e["distinct_verified_tasks"]} / {e["task_count"] or "?"}'
         errors = e['agent_exits'].get('error', 0)
         rows.append('<tr><td><strong>' + esc(e['date']) + '</strong><br><small>' + esc(e['run']) + '</small></td>'
-                    '<td>' + esc(e['track']) + '<br><small>' + esc(e['model']) + '<br>' + esc(e['provider_route']) + '</small></td>'
+                    '<td>' + esc(e['track']) + ('' if e['prompt_variant'] == 'baseline' else ' · prompt: ' + esc(e['prompt_variant']))
+                    + '<br><small>' + esc(e['model']) + '<br>' + esc(e['provider_route']) + '</small></td>'
                     f'<td>{e["agents"]}</td><td>{duration}</td><td>${Decimal(e["pilot_spent_usd"]):.2f}</td>'
                     f'<td>{tasks}</td><td>{errors}</td><td>{links}</td></tr>')
     body = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
