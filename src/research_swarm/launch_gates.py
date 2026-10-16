@@ -50,6 +50,8 @@ from pathlib import Path
 from .budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, INITIAL_PILOT_SETTLED_USD, REPEAT_PILOT_ALLOWANCE_USD,
                      EIGHT_GIB_CAP_USD, EIGHT_GIB_PRIOR_SETTLED_USD, EIGHT_GIB_PRIOR_HELD_USD,
                      EIGHT_GIB_PRIOR_COMMITTED_USD, eight_gib_prior_problems,
+                     CACHE_REPEAT_CAP_USD, CACHE_REPEAT_PRIOR_SETTLED_USD, CACHE_REPEAT_PRIOR_HELD_USD,
+                     CACHE_REPEAT_PRIOR_COMMITTED_USD, CACHE_REPEAT_PRIOR_CALLS_SHA256, cache_repeat_prior_problems,
                      LEGACY_LEDGER_RELATIVE, UNRESOLVED_STATES, list_requests,
                      read_snapshot)
 from .provider import CONFIG_OVERRIDABLE, MODEL_ID, frozen_fields, settings_from_config, validate_catalog
@@ -70,7 +72,7 @@ DEFAULT_MAX_AGE_HOURS = 72
 _APPROVED_STATIC_SETTINGS = {
     "track": "spontaneous", "seeded_contagion_enabled": False, "mitigations_enabled": False,  # Initial execution
     "task_count": 14,                                          # Current pilot scope / Initial task sampling
-    "max_run_seconds": 5400, "post_depletion_seconds": 600,    # Run duration and stopping
+    "max_run_seconds": 10800, "post_depletion_seconds": 600,    # Run duration and stopping
     "compilation_timeout_seconds": 120,                        # Compilation time limit
     "system_prompt_mode": "append", "claude_auto_memory": True,  # Effective agent system prompt
     "general_internet_enabled": False,                         # Controlled baseline access
@@ -747,14 +749,28 @@ class _Gates:
                 problems.append(f"ledger {scope} cap {data['cap_usd']} differs from the plan (never lowered)")
         pilot = (snapshot or {}).get("pilot")
         if pilot:
-            if pilot["unresolved_requests"] and Decimal(str(DEFAULT_CAPS["pilot"])) != Decimal(EIGHT_GIB_CAP_USD):
+            if pilot["unresolved_requests"] and Decimal(str(DEFAULT_CAPS["pilot"])) not in (Decimal(EIGHT_GIB_CAP_USD), Decimal(CACHE_REPEAT_CAP_USD)):
                 problems.append(f"{pilot['unresolved_requests']} unresolved pilot hold(s); reconcile first "
                                 "(scripts/reconcile_ledger.py)")
             if pilot["violation"]:
                 problems.append("pilot scope has an unacknowledged estimate_violation")
             if Decimal(pilot["remaining_usd"]) <= 0:
                 problems.append("no remaining pilot allowance")
-        if Decimal(str(DEFAULT_CAPS["pilot"])) == Decimal(EIGHT_GIB_CAP_USD):
+        if Decimal(str(DEFAULT_CAPS["pilot"])) == Decimal(CACHE_REPEAT_CAP_USD):
+            approved_metadata = {
+                "pilot_prior_settled_usd": CACHE_REPEAT_PRIOR_SETTLED_USD,
+                "pilot_prior_held_usd": CACHE_REPEAT_PRIOR_HELD_USD,
+                "pilot_prior_committed_usd": CACHE_REPEAT_PRIOR_COMMITTED_USD,
+                "pilot_additional_allowance_usd": REPEAT_PILOT_ALLOWANCE_USD,
+                "pilot_prior_uncertain_requests": "8",
+                "pilot_prior_calls_sha256": CACHE_REPEAT_PRIOR_CALLS_SHA256,
+                "prompt_cache_normalization": "counter-user-v1",
+            }
+            if any(str(self.config.get(key)) != value for key, value in approved_metadata.items()):
+                problems.append("cached repeat budget metadata differs from the exact approved prior snapshot, "
+                                "additional $100 and counter-user-v1 normalization")
+            problems.extend(cache_repeat_prior_problems(ledger_path))
+        elif Decimal(str(DEFAULT_CAPS["pilot"])) == Decimal(EIGHT_GIB_CAP_USD):
             approved_metadata = {
                 "pilot_prior_settled_usd": EIGHT_GIB_PRIOR_SETTLED_USD,
                 "pilot_prior_held_usd": EIGHT_GIB_PRIOR_HELD_USD,

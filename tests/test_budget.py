@@ -168,8 +168,8 @@ class BudgetTests(unittest.TestCase):
         self.historical_caps.stop()
         with tempfile.TemporaryDirectory() as folder:
             snap=BudgetLedger(Path(folder)/"cost.sqlite").snapshot()
-            self.assertEqual({k:v["cap_usd"] for k,v in snap.items()},{"pilot":"208.055621674","analysis":"5","compatibility":"2"})
-            self.assertEqual(DEFAULT_CAPS,{"pilot":"208.055621674","analysis":5,"compatibility":2})
+            self.assertEqual({k:v["cap_usd"] for k,v in snap.items()},{"pilot":"307.809660142","analysis":"5","compatibility":"2"})
+            self.assertEqual(DEFAULT_CAPS,{"pilot":"307.809660142","analysis":5,"compatibility":2})
     def test_default_ledger_path_outside_runs(self):
         path=DEFAULT_LEDGER_PATH(Path("/repo"))
         self.assertEqual(path,Path("/repo/state/budget.sqlite"))
@@ -288,7 +288,7 @@ class EightGiBBudgetTests(unittest.TestCase):
         before = list_requests(self.path, states=("settled", "uncertain"))
         raise_cap(self.path, "pilot", "208.055621674", "User authorized 8 GiB fresh $100 baseline")
         self.assertEqual(before, list_requests(self.path, states=("settled", "uncertain")))
-        current = BudgetLedger(self.path)
+        current = BudgetLedger(self.path, {"pilot":"208.055621674","analysis":5,"compatibility":2})
         snapshot = current.snapshot()["pilot"]
         self.assertEqual((snapshot["settled_usd"], snapshot["held_usd"], snapshot["remaining_usd"]),
                          ("105.727998474", "2.3276232", "100"))
