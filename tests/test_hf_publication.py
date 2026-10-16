@@ -10,7 +10,7 @@ from unittest.mock import patch
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from publish_hf_library import publish, digest, load_bundle, merge_entries
+from publish_hf_library import publish, digest, load_bundle, merge_entries, validate_lfs_additions
 from build_experiment_index import write_index
 
 
@@ -46,6 +46,13 @@ class Hub:
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_bytes(self.files[name])
         return f
+
+    def list_repo_tree(self, repo, *, repo_type, revision, recursive):
+        assert revision == str(self.revision) and recursive
+        yield SimpleNamespace(path='a-folder', tree_id='folder')
+        for n, d in self.files.items():
+            yield SimpleNamespace(path=n, blob_id=hashlib.sha1(
+                b'blob ' + str(len(d)).encode() + b'\0' + d).hexdigest(), lfs=None)
 
     def create_commit(self, **kwargs):
         assert kwargs['parent_commit'] == str(self.revision)
@@ -119,6 +126,28 @@ class PublicationTests(unittest.TestCase):
         result = self.run_publish()
         self.assertFalse(result['committed'])
         self.assertEqual(self.hub.commits, [])
+
+    def test_truncated_repo_info_inventory_does_not_hide_old_files(self):
+        original = self.hub.repo_info
+        def truncated(*args, **kwargs):
+            info = original(*args, **kwargs)
+            info.siblings = []
+            return info
+        self.hub.repo_info = truncated
+        result = self.run_publish(commit=True)
+        self.assertEqual(result['runs'], ['z-old', 'a-new'])
+        self.assertEqual(self.hub.files['z-old/results.html'], b'old run untouched')
+
+    def test_only_exact_new_file_lfs_attribute_additions_allowed(self):
+        name = 'a-new/log.eval'
+        line = (name + ' filter=lfs diff=lfs merge=lfs -text\n').encode()
+        files = {name: SimpleNamespace(lfs=SimpleNamespace(sha256='example'))}
+        validate_lfs_additions(b'old\n', b'old\n'+line, {'a-new'}, {name}, files)
+        for old, new, changed in [(b'old\n', b'changed\n'+line, {name}),
+                                  (b'old\n', b'old\n'+line, set()),
+                                  (b'old\n', b'old\n*.eval filter=lfs diff=lfs merge=lfs -text\n', {name})]:
+            with self.assertRaises(ValueError):
+                validate_lfs_additions(old, new, {'a-new'}, changed, files)
 
     def test_public_space_refused(self):
         self.hub.private = False

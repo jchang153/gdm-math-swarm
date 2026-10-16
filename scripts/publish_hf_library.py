@@ -151,6 +151,29 @@ def batches(items):
         yield batch
 
 
+def remote_files(api, repo, revision):
+    # repo_info.siblings can truncate large inventories. The tree iterator
+    # follows pagination; pin it to the same commit used for every comparison.
+    return {item.path: item for item in api.list_repo_tree(
+        repo, repo_type='space', revision=revision, recursive=True)
+        if hasattr(item, 'blob_id')}
+
+
+def validate_lfs_additions(old, new, selected, changed, final_files):
+    old_lines, new_lines = old.splitlines(), new.splitlines()
+    if new_lines[:len(old_lines)] != old_lines:
+        raise ValueError('Existing LFS attributes changed')
+    for line in new_lines[len(old_lines):]:
+        suffix = b' filter=lfs diff=lfs merge=lfs -text'
+        if not line.endswith(suffix):
+            raise ValueError('Unexpected LFS attributes addition')
+        name = line[:-len(suffix)].decode('utf-8')
+        safe_path(name)
+        if (name.split('/')[0] not in selected or name not in changed
+                or name not in final_files or not final_files[name].lfs):
+            raise ValueError('LFS attributes addition is not a newly uploaded run file')
+
+
 def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=None,
             operation=None):
     manifest, incoming = load_bundle(bundle)
@@ -158,7 +181,7 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
     info = api.repo_info(repo, repo_type='space', files_metadata=True)
     if not info.private:
         raise ValueError('Publication requires a private Space')
-    remote = {x.rfilename: x for x in info.siblings}
+    remote = remote_files(api, repo, info.sha)
     def read_json(name, empty):
         if name not in remote:
             return empty
@@ -226,7 +249,7 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
     final = api.repo_info(repo, repo_type='space', files_metadata=True)
     if not final.private or final.sha != revision:
         raise ValueError('Space changed before verification; inspect the latest revision')
-    final_files = {x.rfilename: x for x in final.siblings}
+    final_files = remote_files(api, repo, final.sha)
     changed = dict(uploads + root_uploads)
     if set(final_files) != set(remote) | set(changed):
         raise ValueError('Remote file inventory changed unexpectedly')
@@ -234,7 +257,11 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
         if name not in changed:
             new = final_files[name]
             if old.blob_id != new.blob_id or old.lfs != new.lfs:
-                raise ValueError('Unrelated remote file changed: ' + name)
+                if name != '.gitattributes':
+                    raise ValueError('Unrelated remote file changed: ' + name)
+                old_attrs = Path(download(repo, name, repo_type='space', revision=info.sha)).read_bytes()
+                new_attrs = Path(download(repo, name, repo_type='space', revision=final.sha)).read_bytes()
+                validate_lfs_additions(old_attrs, new_attrs, selected, changed, final_files)
     for name, data in changed.items():
         if not matches(payload(data), final_files[name]):
             raise ValueError('Uploaded file hash mismatch: ' + name)
