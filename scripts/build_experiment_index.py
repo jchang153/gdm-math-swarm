@@ -53,6 +53,14 @@ def build(runs, hosted=False):
             entries.append(entry)
         except (ValueError, KeyError, TypeError, OSError) as error:
             warnings.append(f'{path.parent.name}: {type(error).__name__}')
+    return write_index(runs, entries, warnings, hosted=hosted)
+
+
+def write_index(runs, entries, warnings=(), *, hosted=False):
+    """Render catalogue entries, including previously published remote runs."""
+    runs = Path(runs)
+    runs.mkdir(parents=True, exist_ok=True)
+    entries = list(entries)
     entries.sort(key=lambda e: (datetime.datetime.fromisoformat(
         e['start_utc'].replace('Z', '+00:00')).timestamp(), e['run']))
     esc = html.escape

@@ -42,6 +42,9 @@ The user also authorized a private shared HF library at
 https://huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments.
 Follow docs/experiment-library.md for preparation, privacy and guarded updates;
 preserve other collaborators' runs and never upload host credentials or auth caches.
+Use scripts/publish_hf_library.py --bundle PREPARED_DIRECTORY for a read-only
+publication preview; --commit merges and publishes using the operator's own HF
+login, guarded revisions and immutable run records. Install the publication extra.
 Use scripts/export_conference.py --run-dir runs/<run-id> to browse saved board
 posts, DMs, library revisions, judging, organizer feedback, captured private files
 and the existing activity timeline. Keep empty sections and capture limits explicit.
