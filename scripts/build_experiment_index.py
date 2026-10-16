@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
+from space_navigation import private_space_navigation
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -88,7 +89,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
             + ('<p>This private archive contains saved experiment records and derived views. Access requires permission to this Hugging Face Space. Preserve the original records when moving a run.</p>' if hosted else
                '<p>These files are stored on this computer. Raw runs and transcripts are excluded from Git; the code repository alone is not a backup or a shared results library. Keep the full experiment folder when backing up or moving a run.</p>') +
             '<script>document.getElementById("filter").addEventListener("input",function(){const q=this.value.toLowerCase();document.querySelectorAll("#runs tbody tr").forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q));});</script></html>')
-    (runs / 'index.html').write_text(body)
+    (runs / 'index.html').write_text(private_space_navigation(body) if hosted else body)
     (runs / 'experiments.json').write_text(json.dumps({'schema': 'gdm-experiment-index/1', 'experiments': entries, 'warnings': warnings}, indent=2))
     return {'index': str(runs / 'index.html'), 'experiments': len(entries), 'warnings': warnings}
 

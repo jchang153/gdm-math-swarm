@@ -90,6 +90,15 @@ Large HTML files tracked through HF LFS can be served with
 Check inline HTML headers and the actual catalogue button after publishing;
 HTTP 200 and matching file hashes alone do not establish browser behavior.
 
+Hosted HTML also needs private-session continuity across page navigation.
+`space_navigation.py` is applied to the hosted catalogue and every derived HTML
+page during archive preparation. At browser runtime it carries the visitor's
+existing temporary HF signed session only to the exact same Space origin, including
+Inspect module imports, stylesheet resources and range fetches. It embeds no host
+token, stores/logs no session and disables outgoing referrers. External destinations
+never receive the session. Local exports are inert. Reopen the Hub's Space App page
+to obtain a fresh session if it expires; do not share signed inner-page URLs.
+
 From the repository, prepare a fresh, non-existing output directory:
 
 ```bash
@@ -246,3 +255,16 @@ publication receipts remain under the ignored
 `runs/phase-b/conference-browser-fix-20261016/` directory. The latest-run Conference
 button was tested in authenticated Chrome, including board, direct messages,
 shared library, judging and search. The 63 offline conference tests passed.
+
+A separate private-navigation repair was deployed at revision
+`c7a906bf6307952fbe57c3cebbebcc1eb079387a`, updating 1,816 derived HTML pages and
+their archive checksums. It addresses the reproduced transcript-index-to-agent-page
+`Invalid username or password` failure. All raw records, other files and private
+visibility were preserved. Three regression tests exercise same-origin session
+handling with fabricated values, external-origin exclusion, anchors, Inspect module
+mapping, idempotence and preservation of range headers; the 13 publication tests
+also pass. The live catalogue showed the repaired internal links, but the browser
+connection became unavailable before deep navigation could be confirmed. Keep this
+limitation explicit; SDK-authenticated HTTP checks are not an end-to-end browser test.
+Backups and verification receipts remain under the ignored
+`runs/phase-b/space-navigation-fix-20261016/` directory.
