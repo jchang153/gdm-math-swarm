@@ -81,6 +81,15 @@ are observations rather than a complete edit history, and were not automatically
 available to peers. SDK session JSONL is covered by the agent transcript viewer;
 task templates and build manifests are omitted from the private working-file list.
 
+Conference exports compress their embedded JSON records with gzip/base64 and
+decompress them locally in the browser. This preserves the records and keeps the
+self-contained page below 8 MB; larger exports fail with an explicit request for
+a split-data export. A browser with `DecompressionStream` support is required.
+Large HTML files tracked through HF LFS can be served with
+`Content-Disposition: attachment`, causing Conference to download instead of open.
+Check inline HTML headers and the actual catalogue button after publishing;
+HTTP 200 and matching file hashes alone do not establish browser behavior.
+
 From the repository, prepare a fresh, non-existing output directory:
 
 ```bash
@@ -227,3 +236,13 @@ was $56.065928904 settled plus one new unresolved reservation of $0.19172520;
 remained unchanged. Archives and the consistent ledger backup passed local integrity
 checks, and GCP was independently verified TERMINATED. Verification records remain
 in the ignored `runs/phase-b/cache100-20261016T020259Z/` directory.
+
+On October 16, the conference download defect was repaired for all four saved runs
+at private revision `44411d6dbc2aedbad94f2c6325b2722de78fd12b`.
+This narrow maintenance update replaced only the four derived conference index
+pages, removed their three exact LFS tracking rules, and updated archive checksums.
+All other 10,104-file inventory entries were preserved. Original HTML backups and
+publication receipts remain under the ignored
+`runs/phase-b/conference-browser-fix-20261016/` directory. The latest-run Conference
+button was tested in authenticated Chrome, including board, direct messages,
+shared library, judging and search. The 63 offline conference tests passed.
