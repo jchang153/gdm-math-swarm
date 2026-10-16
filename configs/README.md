@@ -56,9 +56,9 @@ Changing a key that the launch gates compare (`launch_gates.approved_settings()`
 | Key | Value | Meaning |
 | --- | --- | --- |
 | `startup_timeout_seconds` | `600` | If not every peer reaches the common start barrier in time, the run aborts. It does not shrink the swarm. |
-| `max_run_seconds` | `5400` | The 90-minute maximum, measured from the common start. Gate. |
+| `max_run_seconds` | `10800` | The user-approved 180-minute maximum for the cached repetition, measured from the common start. Gate. |
 | `post_depletion_seconds` | `600` | Observation window after the last task closes, within the maximum. Gate. |
-| `post_depletion_within_run_maximum` | `true` | *Label*: records that the window never extends the 90 minutes. |
+| `post_depletion_within_run_maximum` | `true` | *Label*: records that the window never extends the approved maximum. |
 | `stop_grace_seconds` | `180` | How long samples have to stop on their own before cancellation. `runtime.supervise` hard-cancels the evaluation `stop_grace_seconds + in_flight_grace_seconds` after the stop (300 s by default). |
 
 ## Optional keys
@@ -86,7 +86,7 @@ How the parts fit together:
 
 | Key | Value | Meaning |
 | --- | --- | --- |
-| `max_pilot_usd`, `max_analysis_usd`, `max_compatibility_usd` | `20`, `5`, `2` | Must equal `budget.DEFAULT_CAPS`. These are three separate allowances: the pilot's shared $20, post-run analysis's $5, and a separate paid $2 for the live compatibility check (plan row "Live compatibility check", which supersedes the earlier unpaid-only, $0 compatibility cap). The ledger, not this file, enforces the caps. The shared ledger is `state/budget.sqlite`, and spending in it is never reset. |
+| `max_pilot_usd`, `max_analysis_usd`, `max_compatibility_usd` | `307.809660142`, `5`, `2` | Must equal `budget.DEFAULT_CAPS`. These are three separate allowances: the pilot's shared $20, post-run analysis's $5, and a separate paid $2 for the live compatibility check (plan row "Live compatibility check", which supersedes the earlier unpaid-only, $0 compatibility cap). The ledger, not this file, enforces the caps. The shared ledger is `state/budget.sqlite`, and spending in it is never reset. |
 | `verified_integration` | `false` | The user's explicit confirmation of the live compatibility evidence. It is not sufficient alone: launch also needs the `compatibility` gate to pass on the evidence file (see below). Set it only after that evidence passes and the user has reviewed it. |
 | `paid_launch_enabled` | `false` | Set only by the user. A paid launch also requires `--launch-paid-pilot` and a typed confirmation of the remaining allowance. |
 
@@ -182,3 +182,22 @@ The unused allowance from the stopped run is absorbed into this new ceiling,
 rather than added to the new run's $100. Fresh runtime, isolation and capacity
 evidence at 8 GiB are required. All other experiment and judge settings remain
 unchanged, and paid launch stays disabled until full preflight passes.
+
+## Cached-counter repetition, October 15, 2026
+
+The user authorized one fresh 20-agent run with the `counter-user-v1` correction
+and a new shared $100 allowance. `max_pilot_usd` is $307.809660142 cumulatively:
+prior settled $205.049799792 plus eight held requests totaling $2.75986035, plus
+exactly $100. The previous unused $0.245961532 is replaced rather than added.
+`pilot_prior_settled_usd`, `pilot_prior_held_usd`, `pilot_prior_committed_usd`
+($207.809660142), `pilot_prior_uncertain_requests` (8), and
+`pilot_additional_allowance_usd` (100) bind the exact approval boundary.
+`pilot_prior_calls_sha256` additionally binds all original pilot request rows.
+`prompt_cache_normalization` must be `counter-user-v1`, matching the runtime's
+recorded request transformation. Prior holds must stay untouched during this run.
+Keep default `paid_launch_enabled` false; only the one-shot supervisor's private
+launch configuration enables the authorized run after full preflight. No provider,
+reasoning, memory, task, seed, judge or isolation setting changes.
+
+The user subsequently extended this cached run to `max_run_seconds: 10800`
+(180 minutes), keeping the additional shared $100 allowance unchanged.

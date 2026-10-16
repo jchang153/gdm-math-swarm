@@ -1,5 +1,41 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Cached 20-agent repetition authorized, October 15, 2026
+
+After the paid cache diagnosis confirmed the counter-role defect and the
+`counter-user-v1` correction was pushed as `f8c36e5`, the user authorized another
+fresh 20-agent pilot with $100 shared model spending. Preserve 8 GiB agent RAM,
+the fixed 14 tasks/personas/seed, 180-minute common clock, DeepSeek V4.1 Flash on
+Fireworks US with high reasoning, original judging/isolation/communication
+settings and spontaneous baseline without hints. The counter normalization is
+the only intended experimental change. Use fresh workspaces/conference state;
+do not resume a prior run. Monitor actual cache usage rather than assuming the
+synthetic test's savings generalize to every request or to higher concurrency.
+
+Preserve the original authoritative ledger: pilot settled $205.049799792,
+eight uncertain holds totaling $2.75986035, committed $207.809660142, no in-flight
+requests or violations, and prior cumulative ceiling $208.055621674. An audited
+raise to $307.809660142 gives exactly $100 available beyond prior commitments;
+do not add the previous unused remainder or release any of the eight holds
+during this run. Bind admission to the exact prior pilot call hash
+`5e0678ca0dd35c661d0633644d5461459f54910c3876f9296cc57216880199c9`
+and the original cap-change history. Analysis remains $5 and compatibility $2,
+with compatibility $0.320034936 already settled. The unlimited host-key exception
+continues to waive only the provider cap. No new paid behavioral analysis or
+provider switch is authorized.
+
+Use fresh preflight and applicable validation evidence. Keep default paid launch
+disabled and use an exclusive one-shot lifecycle supervisor for this run only.
+After completion, preserve raw outputs and a consistent ledger backup, perform
+unpaid independent evaluation/timeline, export reports/transcripts/conference and
+Inspect views, publish privately without overwriting collaborators' runs, and
+stop the idle VM with independent TERMINATED verification. Prior study results
+and unresolved billing reservations remain unchanged.
+
+The user subsequently extended this run to 180 minutes (10800 seconds), with
+the same additional shared $100 allowance. The earlier budget-exhaustion stop
+remains in force, and this authorizes no further model spending.
+
 ## Paid cache diagnosis authorized, October 15, 2026
 
 The user authorized a small paid comparison of the suspected per-turn token-counter

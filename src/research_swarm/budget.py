@@ -48,7 +48,13 @@ EIGHT_GIB_CAP_USD = "208.055621674"
 # Exact immutable call history at the authorized second-repeat boundary. The hash
 # includes request identities, reservations and states, not just cost aggregates.
 EIGHT_GIB_PRIOR_CALLS_SHA256 = "4bcff206b4726c9c651ffc543762b140289a3e29f14e12f90fe6afc08cce23a4"
-DEFAULT_CAPS = {"pilot": EIGHT_GIB_CAP_USD, "analysis": 5, "compatibility": 2}
+# User-authorized fresh cached-counter run; this replaces the unused remainder.
+CACHE_REPEAT_PRIOR_SETTLED_USD = "205.049799792"
+CACHE_REPEAT_PRIOR_HELD_USD = "2.75986035"
+CACHE_REPEAT_PRIOR_COMMITTED_USD = "207.809660142"
+CACHE_REPEAT_CAP_USD = "307.809660142"
+CACHE_REPEAT_PRIOR_CALLS_SHA256 = "5e0678ca0dd35c661d0633644d5461459f54910c3876f9296cc57216880199c9"
+DEFAULT_CAPS = {"pilot": CACHE_REPEAT_CAP_USD, "analysis": 5, "compatibility": 2}
 
 # How a settled amount was established. Only these bases release a reservation.
 # ``unbilled_error``: the provider rejected the request before any generation
@@ -231,6 +237,40 @@ def eight_gib_prior_problems(path):
         return _eight_gib_prior_problems(db, after_raise=True)
 
 
+def _cache_repeat_prior_problems(db, *, after_raise):
+    """Bind this one approval to the exact existing ledger, preserving eight holds."""
+    pilot = _snapshot(db).get("pilot", {})
+    expected = {"settled_usd": CACHE_REPEAT_PRIOR_SETTLED_USD,
+                "held_usd": CACHE_REPEAT_PRIOR_HELD_USD,
+                "committed_usd": CACHE_REPEAT_PRIOR_COMMITTED_USD,
+                "uncertain_requests": 8, "unresolved_requests": 8,
+                "in_flight_requests": 0, "violation": False,
+                "acknowledged_violations": 0,
+                "cap_usd": CACHE_REPEAT_CAP_USD if after_raise else EIGHT_GIB_CAP_USD}
+    problems = []
+    if any(pilot.get(key) != value for key, value in expected.items()):
+        problems.append("cached repeat requires the exact approved prior spending and eight preserved uncertain "
+                        "holds; no new spending, reserved calls or violations")
+    changes = db.execute("SELECT previous_cap,new_cap FROM cap_changes WHERE scope='pilot' ORDER BY id").fetchall()
+    expected_changes = [(units(20), units(FIRST_REPEAT_CAP_USD)),
+                        (units(FIRST_REPEAT_CAP_USD), units(EIGHT_GIB_CAP_USD))]
+    if after_raise:
+        expected_changes.append((units(EIGHT_GIB_CAP_USD), units(CACHE_REPEAT_CAP_USD)))
+    if changes != expected_changes:
+        problems.append("cached repeat requires the original audited cap raise history; never use a replacement ledger")
+    if _pilot_calls_sha256(db) != CACHE_REPEAT_PRIOR_CALLS_SHA256:
+        problems.append("cached repeat prior request history differs from the approved ledger snapshot")
+    return problems
+
+
+def cache_repeat_prior_problems(path):
+    """Read-only launch check after the one approved raise; never releases holds."""
+    if not Path(path).exists():
+        return ["cached repeat requires the existing cumulative pilot ledger; never create a replacement ledger"]
+    with closing(_read_only(path)) as db:
+        return _cache_repeat_prior_problems(db, after_raise=True)
+
+
 def raise_cap(path, scope, new_cap, approval_note):
     """Raise one scope of an EXISTING ledger to its approved cap, with an audit row.
 
@@ -248,7 +288,7 @@ def raise_cap(path, scope, new_cap, approval_note):
         raise ValueError(f"Unknown budget scope {scope!r}")
     target = units(new_cap)
     if target != units(DEFAULT_CAPS[scope]) and not (
-            scope == "pilot" and target == units(FIRST_REPEAT_CAP_USD)):
+            scope == "pilot" and target in (units(FIRST_REPEAT_CAP_USD), units(EIGHT_GIB_CAP_USD))):
         raise ValueError(f"A cap may only be raised to its approved value ({scope}: ${DEFAULT_CAPS[scope]})")
     path = Path(path)
     if not path.exists():
@@ -271,6 +311,10 @@ def raise_cap(path, scope, new_cap, approval_note):
                                  f"${INITIAL_PILOT_SETTLED_USD} settled and no unresolved holds or violations")
         if scope == "pilot" and target == units(EIGHT_GIB_CAP_USD):
             problems = _eight_gib_prior_problems(db, after_raise=False)
+            if problems:
+                raise ValueError("; ".join(problems))
+        if scope == "pilot" and target == units(CACHE_REPEAT_CAP_USD):
+            problems = _cache_repeat_prior_problems(db, after_raise=False)
             if problems:
                 raise ValueError("; ".join(problems))
         db.execute("UPDATE scopes SET cap=? WHERE name=?", (target, scope))
