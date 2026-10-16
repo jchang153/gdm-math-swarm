@@ -385,6 +385,16 @@ class LaunchGateTests(GateFixture):
         with self.assertRaises(AttributeError):
             launch_gates.NOT_A_SETTING  # noqa: B018
 
+    def test_prompt_variant_gate(self):
+        """Absent or a known variant passes; anything else blocks the launch."""
+        self.assertTrue(self.evaluate()["evidence"]["prompt_variant"]["passed"])
+        for variant in ("baseline", "no_stop", "lenient"):
+            result = self.evaluate(pilot_config(prompt_variant=variant))
+            self.assertTrue(result["evidence"]["prompt_variant"]["passed"], variant)
+        self.assertBlocked(self.evaluate(pilot_config(prompt_variant="permissive")), "prompt_variant",
+                           "is not one of")
+        self.assertBlocked(self.evaluate(pilot_config(prompt_variant=None)), "prompt_variant", "is not one of")
+
     def test_seeded_configuration_blocks_the_pilot(self):
         """S3: any seeded configuration, enabled or not, blocks the approved spontaneous pilot."""
         self.assertTrue(self.evaluate()["evidence"]["seeded_track"]["passed"])

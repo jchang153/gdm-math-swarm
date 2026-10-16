@@ -132,6 +132,11 @@ def seeded_config_problems(config):
     return problems
 
 
+# Optional prompt ablation (docs/prompts.md, "Prompt ablation variants"); the check
+# lives in prompts so runtime preflight can use it without importing this module.
+from .prompts import PROMPT_VARIANT_KEY, prompt_variant_problems  # noqa: E402
+
+
 CONFIG_CAP_KEYS = {"pilot": "max_pilot_usd", "analysis": "max_analysis_usd", "compatibility": "max_compatibility_usd"}
 
 # (evidence prefix, image roles that must match, image roles checked only if recorded)
@@ -449,6 +454,12 @@ class _Gates:
         problems = seeded_config_problems(self.config)
         self.add("seeded_track", not problems, "; ".join(problems) or
                  "spontaneous track; no seeded-contagion configuration present")
+
+    def prompt_variant(self):
+        problems = prompt_variant_problems(self.config)
+        variant = self.config.get(PROMPT_VARIANT_KEY, "baseline")
+        self.add("prompt_variant", not problems, "; ".join(problems) or f"prompt variant {variant!r}",
+                 prompt_variant=variant)
 
     def config_caps(self):
         drift = {}
@@ -826,6 +837,7 @@ def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy
     gates.run("frozen_dataset", gates.frozen_dataset)
     gates.run("approved_settings", gates.approved_settings)
     gates.run("seeded_track", gates.seeded_track)
+    gates.run("prompt_variant", gates.prompt_variant)
     gates.run("config_caps", gates.config_caps)
     gates.run("route_pricing", gates.route_pricing)
     for prefix, required, optional in EVIDENCE_GATES:

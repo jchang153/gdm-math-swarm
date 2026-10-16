@@ -25,6 +25,7 @@ Changing a key that the launch gates compare (`launch_gates.approved_settings()`
 | `execution`, `deployment`, `agent_harness` | `asynchronous`, `local`, `claude_code` | *Labels* recording the approved design. |
 | `system_prompt_mode` | `append` | `append` keeps Claude Code's built-in prompt and appends the conference prompt (`--append-system-prompt`). `replace` would replace it. The plan approves `append`. Gate. |
 | `claude_auto_memory` | `true` | Keeps Claude Code's normal auto-memory, as the plan approves. Gate. |
+| `prompt_variant` | absent | Optional prompt ablation from `prompts.PROMPT_VARIANTS` (`baseline`, `no_stop`, `no_detection_claim`, `no_rule6`, `lenient`). Absent or `baseline` keeps the prompt byte-identical. Recorded in `settings.json` and the task metadata. Not part of the paper reconstruction; see docs/prompts.md, "Prompt ablation variants". Gate (`prompt_variant`: refuses unknown values). |
 | `general_internet_enabled` | `false` | Agent containers have no network. Gate. |
 
 ## Model and provider
