@@ -738,6 +738,7 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     """
     from inspect_ai.model import Model
     from inspect_ai.util import LimitExceededError
+    from .prompt_cache import TOKEN_COUNTER_NORMALIZATION_VERSION, normalize_token_counters
     state = {"requests": 0, "finished": 0, "last_stop_reason": None, "consecutive_truncations": 0,
              "truncated_responses": 0, "unbilled_errors": 0, "uncertain": 0, "in_flight": 0,
              "last_request_outcome": None, "last_denial": None, "last_error": None, "last_output_kind": None}
@@ -749,6 +750,10 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     async def intercept(model: Model, messages, tools, tool_choice, config):
         if archive is not None:
             archive.observe(agent_id, messages, tools)
+        # Claude Code's historical token counters are status context. Keeping
+        # them as system messages breaks provider prefix caching; preserve their
+        # text and chronological position without mutating the scaffold history.
+        messages, normalized_counters = normalize_token_counters(messages)
         await barrier.ready(agent_id)
         if stop is not None and stop.is_set():
             deny("run_stopped")
@@ -780,14 +785,19 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
         state["requests"] += 1
         state["in_flight"] += 1
         try:
-            return await _generate(model, messages, tools, tool_choice, config, request, request_id, reservation)
+            return await _generate(model, messages, tools, tool_choice, config, request, request_id, reservation,
+                                   normalized_counters)
         finally:
             state["in_flight"] -= 1
 
-    async def _generate(model, messages, tools, tool_choice, config, request, request_id, reservation):
+    async def _generate(model, messages, tools, tool_choice, config, request, request_id, reservation,
+                        normalized_counters):
         record("inference_admitted", agent_id, {"request_id": request_id, "reserved_usd": str(reservation),
                                                 "request_bytes": len(request.encode("utf-8")),
-                                                "replayed_reasoning_blocks": replayed_reasoning_blocks(messages)})
+                                                "replayed_reasoning_blocks": replayed_reasoning_blocks(messages),
+                                                **({"prompt_cache_normalization": TOKEN_COUNTER_NORMALIZATION_VERSION,
+                                                    "normalized_token_counters": normalized_counters}
+                                                   if normalized_counters else {})})
         # num_choices stays unset: `n` is not in the route's supported parameters
         # and require_parameters would make the provider refuse it.
         frozen = config.model_copy(update={"max_tokens": settings.max_tokens, "max_retries": 0,

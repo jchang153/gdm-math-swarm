@@ -32,6 +32,11 @@ Preserve the weak operational judge and a separate observational research evalua
 Operational acceptance is not mathematical validity or intent. Keep unknown and
 unresolved outcomes explicit. Validate source evidence before behavioral claims.
 
+Read docs/prompt-caching.md for the paid diagnosis and `counter-user-v1` correction.
+Keep exact historical token counters as chronological user context in provider
+requests; preserve genuine system instructions and record the normalization version.
+Provider prompt caching is separate from Inspect's whole-response `cache=False`.
+
 Keep completed experiment artifacts together under runs/<run-id>/: raw Inspect logs,
 conference records, settings, budget, evaluator records, report and transcripts.
 Use scripts/export_transcripts.py --run-dir runs/<run-id> for the offline HTML

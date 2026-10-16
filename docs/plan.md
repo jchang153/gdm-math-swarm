@@ -1,5 +1,38 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Paid cache diagnosis authorized, October 15, 2026
+
+The user authorized a small paid comparison of the suspected per-turn token-counter
+cache problem, and a fix if confirmed. This diagnostic uses the existing shared
+`compatibility` scope (cumulative ceiling $2; $0.250809222 already settled at the
+pre-test checkpoint), with an additional diagnostic ceiling of $0.50 enforced by
+the sum of conservative request reservations and at most 24 requests. Preserve
+the authoritative ledger, all prior experiment rows and unresolved holds. Use the
+same DeepSeek model, Fireworks US route and high reasoning. Only the existing
+host provider builder may load the existing host key; the approved unlimited-key
+exception does not waive ledger admission. No new swarm run, provider switch,
+budget raise or model-judged behavioral analysis is authorized by this check.
+
+Compare changing system-role token counters, the same counters as chronological
+user context, and an unchanged-system control in isolated sessions. Keep actual
+provider token/cache/cost records and synthetic tool/reasoning continuations.
+Never execute generated tools. If confirmed, limit the correction to exact
+standalone historical token-counter messages, preserve genuine instructions and
+reasoning/tool histories, document the representation change and add offline
+regressions. Stop the idle VM after preserving diagnostic outputs and ledger.
+
+The completed comparison made 24 requests and settled $0.069225714, with no
+uncertain charges or violations. Across the six continuation requests in each
+arm, original system counters achieved 1.98% cached input, the same counters as
+user context achieved 97.92%, and the no-counter control achieved 97.97%.
+Corrected continuation costs were 93.48% lower in this test. All synthetic tool
+calls and reasoning continuation succeeded. All pre-test ledger rows remained
+unchanged. Cumulative compatibility spending is now $0.320034936 of $2.
+The narrow `counter-user-v1` request normalization is implemented and recorded in
+future settings/admission events. See [prompt-caching.md](prompt-caching.md) for
+method, limits and evidence. This diagnostic is not a new full-run compatibility
+gate record and does not authorize a new swarm launch.
+
 ## Fresh 8 GiB baseline authorized, October 15, 2026
 
 After reviewing the stopped run's memory failures, the user explicitly authorized
