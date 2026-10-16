@@ -143,6 +143,13 @@ links; Inspect View needs HTTP byte-range support for `.eval` logs. Keep local
 originals until remote integrity and access are verified. Deleting local records
 requires a separate user decision.
 
+The publisher inventories files through the revision-pinned, paginated tree API;
+the repository-info sibling list can truncate large libraries. When HF automatically
+appends LFS tracking rules, verification permits only exact additions for newly
+uploaded LFS files in the selected run. Existing rules, unrelated files and earlier
+experiment contents must remain unchanged. Regression checks cover truncated
+inventories and refusal of broader attribute changes.
+
 The initial archive was prepared under the ignored directory
 `runs/phase-b/hf-library-preparation/space/`. Its manifest records the published
 files; the official Hugging Face SDK performed the upload. Host credentials, auth
@@ -200,3 +207,23 @@ truncation. Raw archives and the consistent ledger backup were verified locally.
 The guest requested shutdown after retrieval; GCP stop completed and TERMINATED
 was independently verified. No paid model analysis was performed. Verification
 records remain under the ignored run phase directory; original records are retained.
+
+The cached 180-minute run `cache100-20261016T020259Z` is archived privately at
+revision `01cf5b306e0ffba1b1558ec0c68481110c8b9415`. The paginated inventory
+contains 10,104 files, including all three earlier experiments and 3,900 new run
+files. New-run hashes matched; older experiment files were unchanged. The only
+non-catalogue metadata change was HF appending six exact LFS tracking rules for
+large files in this run. Representative downloads matched, all five checked hosted
+HTML routes returned exact authored content with HTTP 200, and the Inspect log
+returned exact HTTP 206 byte ranges. This is content/access verification, not
+interactive visual testing.
+
+The archive includes 20 agent transcript pages (1,755 final-history messages),
+conference views and a 26,483-entry timeline. All 13 selected submissions passed
+independent formal verification, covering five distinct pinned tasks; the known
+informal/formal caveats and incomplete behavioral review remain explicit. Spending
+was $56.065928904 settled plus one new unresolved reservation of $0.19172520;
+91.70% of input tokens were cached. All older calls and eight prior uncertain holds
+remained unchanged. Archives and the consistent ledger backup passed local integrity
+checks, and GCP was independently verified TERMINATED. Verification records remain
+in the ignored `runs/phase-b/cache100-20261016T020259Z/` directory.

@@ -70,6 +70,37 @@ experiment nor bypasses normal launch gates. Full-run cache performance remains
 to be measured in a separately authorized experiment. No provider switch,
 reasoning reduction, context truncation or spending-cap change is part of this fix.
 
+## Completed cached baseline, October 15–16, 2026
+
+The separately authorized `cache100-20261016T020259Z` run retained 20 agents,
+8 GiB per agent, the frozen 14 tasks and Fireworks US route. The user extended
+its common-clock maximum to 180 minutes. It reached that limit at
+2026-10-16 05:14:58 UTC; no settings were changed during execution.
+
+Provider records report 500,810,537 input tokens, including 459,245,906 cached
+tokens: **91.70% input caching**, compared with 25.84% in the preceding 8 GiB
+run. Completion tokens totaled 18,460,351; reported reasoning tokens are included
+in that total, not charged a second time. Settled model spending was
+$56.065928904, with one new unresolved reservation of $0.19172520. The eight
+older unresolved holds totaling $2.75986035 and all older call records remained
+unchanged. No budget violation occurred and no paid model analysis was run.
+
+At the pinned fresh/cached input prices, the observed cached tokens received
+about $202.53 in input discounts versus charging those exact tokens as fresh.
+This is a same-token accounting counterfactual, not a controlled estimate of
+total savings caused by the correction. The old and new runs have different
+trajectories, durations and technical attrition; do not compare their totals as
+matched experiments or extrapolate the synthetic 93.48% saving without qualification.
+
+Independent unpaid evaluation verified all 13 selected accepted/accepted-after-close
+submissions against their pinned formal statements, covering five distinct tasks.
+This does not establish absence of exploitation elsewhere or resolve the known
+Erdős 1092 informal/formal definition caveat. Four peers had killed-process
+failures, seven failed after repeated reasoning-only output truncation, seven
+ended their sessions normally, and two reached the time limit. Technical failures
+and incomplete behavioral review limit interpretation. Raw records, evaluator
+bindings and consistent ledger backups remain under the ignored run/phase folders.
+
 ## References
 
 - [Fireworks prompt caching](https://docs.fireworks.ai/guides/prompt-caching)
