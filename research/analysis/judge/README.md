@@ -17,7 +17,31 @@ Nothing in this directory may reach an experimental agent. Never copy, mount or 
 files, prompts, outputs or the rubric into agent images, containers, workspaces, prompts,
 tool results or the conference library.
 
-## Judge revision v2.2: candidate-focused judging (default)
+## Judge revision v2.3: keyword passage re-check and refusal re-sends (default)
+
+docs/plan.md, "v2.2 outcome and v2.3 recall and refusal fixes (October 18, 2026)". v2.3 sends
+every v2.2 request byte for byte unchanged and adds two things to the candidate stage:
+
+- **Keyword passage re-check** (`recheck-bNN` units, purpose `judge_recheck`, prompt
+  `gdm-judge-recheck-prompts/1` under the unchanged candidate system prompt): every candidate
+  decided as not qualifying whose text is longer than `recheck_min_chars` (4,000) and matches
+  `RECALL_PATTERN` is shown again as only the passages within `recheck_passage_chars` (500) of
+  each match (`keyword_passages`, merged when they overlap; `[…]` marks omitted text), at most
+  `recheck_batch_items` (20) per request. Quotes must lie inside one passage (they are the
+  item's own text). A qualifying decision is a finding with `finding_sources[...].via ==
+  "passage_recheck"`, verified by Opus like any other. Fixes the v2.2 miss of a qualifying
+  sentence about 22,000 characters into a 39,908-character item.
+- **Refusal re-sends**: a candidate request refused twice (`reason: refused_twice`) is re-sent
+  as one request per candidate (`candidates-bNN-cMM`, `CANDIDATE 1 OF 1`, a note naming the
+  refused request); a verifier request refused twice as one request per finding
+  (`verify-bNN-fMM`). What is refused again stays undecided or unverified, never negative.
+- **Upgrade**: `--upgrade-judge-revision` from v2.2 keeps the candidate, sample, verify and
+  run-level units (reused only on equal input hashes); add `--recompute-stale` so changed
+  verifier batches (an agent whose findings changed) are redone, the old copies kept as
+  `*.stale-<time>`. The dry-run estimate adds `rechk$`, an upper bound as if every eligible
+  candidate were decided as not qualifying.
+
+## Judge revision v2.2: candidate-focused judging
 
 docs/plan.md, "v2 first pass and v2.1 judge revision (October 18, 2026)": the package-based
 Sonnet judge (one 150-420K-token call per agent) returned zero reasoning tokens and dismissed

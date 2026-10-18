@@ -4,7 +4,7 @@
 docs/plan.md, "Superseding decision (October 17, 2026, evening): misbehavior-focused judge"
 (rubric gdm-judge-rubric/2: cheating, whistleblowing and evaluation awareness only): Claude
 Haiku 5.5 screens narrowly, Claude Sonnet 5.5 judges, Claude Opus 5.5 re-checks every positive
-finding and writes the short run-level summary. Judge revision v2.2 (October 18, 2026; the
+finding and writes the short run-level summary. Judge revision v2.2/v2.3 (October 18, 2026; the
 default --judge-mode candidates): Sonnet decides every candidate (prefilter selections, forced
 windows, keyword recall, submissions) on its own in small batches and judges each random-sample
 window in its own request; --judge-mode package is the superseded v2/v2.1 one-call-per-agent
@@ -119,8 +119,8 @@ def parse_args(argv=None):
     parser.add_argument("--recompute-stale", action="store_true", help="redo cached units whose prompt changed")
     parser.add_argument("--no-label-check", action="store_true", help="skip timeline.check_labels in the report stage")
     parser.add_argument("--judge-mode", choices=("candidates", "package"),
-                        help="candidates (default; judge revision v2.2: every candidate decided on its own in small "
-                             "batches) or package (the superseded v2/v2.1 one-call-per-agent package); --rescore-cached "
+                        help="candidates (default; judge revision v2.3: every candidate decided on its own in small "
+                             "batches, long negatives re-checked on their keyword passages) or package (the superseded v2/v2.1 one-call-per-agent package); --rescore-cached "
                              "defaults to the judge directory's recorded mode")
     parser.add_argument("--candidate-batch-items", type=int, default=10,
                         help="candidates per Sonnet request in candidate mode (default 10)")
@@ -133,7 +133,9 @@ def parse_args(argv=None):
     parser.add_argument("--upgrade-judge-revision", action="store_true",
                         help="switch an existing judge directory whose only binding difference is the judge mode or "
                              "revision to the requested mode: its previous judge outputs move to superseded/, the "
-                             "cached prefilter units are reused (recorded in manifest.json and state.json)")
+                             "cached prefilter units are reused (recorded in manifest.json and state.json); between "
+                             "two candidate-mode revisions the cached candidate/sample/verify units also stay and are "
+                             "reused only where the request is byte-identical (add --recompute-stale to redo the rest)")
     parser.add_argument("--mock-cap", default="50", help="rehearsal ledger cap in USD (mock only)")
     parser.add_argument("--estimate-output", type=Path, help="write the full estimate JSON here")
     parser.add_argument("--estimate-fractions", default="0.02,0.05,0.10,0.20")
@@ -207,7 +209,7 @@ def models_of(settings):
 
 
 def print_candidate_estimate(result, out=sys.stdout):
-    """The candidate-mode (judge revision v2.2) projection table."""
+    """The candidate-mode (judge revision v2.2/v2.3) projection table."""
     projection = result["projection"]
     haiku = projection["haiku"]
     settings = result["settings"]
@@ -242,7 +244,7 @@ def print_candidate_estimate(result, out=sys.stdout):
           file=out)
     fits = f"fits ${remaining}" if remaining is not None else f"fits ${projection['cap_usd']}"
     print(f"{'scenario':>11} {'sel tok':>7} {'cands':>6} {'cand tok':>10} {'calls':>5} {'sample':>6} {'haiku':>6} "
-          f"{'cands$':>7} {'sample$':>7} {'verify':>7} {'run':>5} {'TOTAL':>7} {'cached':>7} {'high':>7} "
+          f"{'cands$':>7} {'sample$':>7} {'rechk$':>7} {'verify':>7} {'run':>5} {'TOTAL':>7} {'cached':>7} {'high':>7} "
           f"{'stress':>7} {fits:>12}", file=out)
     for name, row in projection["scenarios"].items():
         central, high, stress = row["central"], row["high"], row["stress"]
@@ -252,10 +254,12 @@ def print_candidate_estimate(result, out=sys.stdout):
         print(f"{name:>11} {row['selected_token_fraction']:>7.1%} {row['candidate_items']:>6} "
               f"{row['candidate_item_tokens']:>10,} {row['candidate_calls']:>5} {row['sample_calls']:>6} "
               f"{usd['haiku_prefilter']:>6} {usd['sonnet_candidates']:>7} {usd['sonnet_sample_windows']:>7} "
+              f"{usd.get('sonnet_recheck_upper_bound', '0'):>7} "
               f"{usd['opus_verifier']:>7} {usd['opus_runlevel']:>5} {central['total_usd']:>7} "
               f"{central['total_usd_with_prompt_cache']:>7} {high['total_usd']:>7} {stress['total_usd']:>7} "
               f"{str(all(fit)):>12}", file=out)
-    print("Per stage (central, USD): cands$ = Sonnet candidate requests, sample$ = Sonnet random-sample windows, verify = "
+    print("Per stage (central, USD): cands$ = Sonnet candidate requests, sample$ = Sonnet random-sample windows, rechk$ "
+          "= v2.3 keyword passage re-check upper bound (every eligible candidate decided as not qualifying), verify = "
           "Opus verification of the assumed positive findings over measured passages, run = Opus run-level summary. "
           "'recall-only' = no prefilter selection (keyword recall and submissions only: an exact lower bound); 'actual' "
           "= the cached Haiku selections of --output-dir. cached = central with prompt caching of the shared system "

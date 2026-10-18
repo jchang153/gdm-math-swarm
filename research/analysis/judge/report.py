@@ -85,12 +85,16 @@ CANDIDATE_LIMITATION = (
     "“No misbehavior found” means no candidate qualified among those decided (prefilter selections, unscreened "
     "windows, keyword-recall matches and every submission) and in the random-sample windows; read it with the "
     "prefilter miss rate.")
-REVISION_V22 = ("Judge revision v2.2 (candidate-focused judging): Claude Sonnet 5.5 decided every candidate on its own, "
+REVISION_V22 = ("Judge revision v2.3 (candidate-focused judging): Claude Sonnet 5.5 decided every candidate on its own, "
                 "in small chronological batches that show each candidate in full with short context excerpts, and judged "
-                "each random-sample window in its own request; the host assembled each agent's verdict from the "
-                "qualifying decisions, and Claude Opus 5.5 verified every finding against the full passages.")
+                "each random-sample window in its own request; long candidates it decided as not qualifying were "
+                "re-checked on the passages around the keyword safety net's matches, and a request refused twice was "
+                "re-sent one candidate (or, for verification, one finding) at a time; the host assembled each agent's "
+                "verdict from the qualifying decisions, and Claude Opus 5.5 verified every finding against the full "
+                "passages.")
 SUPERSEDED_DEFAULT = ("Earlier v2 (first package-mode pass) and v2.1 (package mode with keyword recall) judge passes are "
-                      "superseded by judge revision v2.2 (candidate-focused judging) and are not reported.")
+                      "superseded by candidate-focused judging (revision v2.2, extended in place by v2.3) and are not "
+                      "reported.")
 
 
 # ------------------------------------------------------------------ provenance
@@ -448,8 +452,11 @@ def summary_text(report):
              + "".join(f", {counts[k]} {k.replace('_', ' ')}" for k in ("ungraded", "grading_failed") if counts[k]) + "."]
     candidates = report.get("candidates") or {}
     if candidates.get("candidates") is not None:
-        parts.append(f"Candidate-focused judging (v2.2): {candidates.get('decided', 0)} of {candidates['candidates']} "
+        recheck = candidates.get("recheck") or {}
+        parts.append(f"Candidate-focused judging (v2.3): {candidates.get('decided', 0)} of {candidates['candidates']} "
                      f"candidates decided individually, {candidates.get('qualifying', 0)} qualifying"
+                     + (f"; {recheck['candidates']} long candidate(s) re-checked on their keyword passages, "
+                        f"{recheck.get('qualifying', 0)} qualifying there" if recheck.get("candidates") else "")
                      + (f", {candidates['undecided']} undecided (listed, not negatives)" if candidates.get("undecided")
                         else "")
                      + (f", {candidates['dropped_findings']} decision(s) dropped by host validation"
@@ -722,7 +729,9 @@ def build_report(run_dir, judge_dir=None, *, now=None, update_results=True):
                 f"The superseded {((upgrade.get('from') or {}).get('judge_mode') or 'package')}-mode outputs were "
                 f"archived to {upgrade.get('archived_to')} ({spend.get('requests', 0)} archived judge request(s), "
                 f"${spend.get('settled_usd', '0')} settled, not part of this pass's spend); the "
-                f"{upgrade.get('prefilter_units_kept', 0)} paid prefilter units were reused unchanged.")
+                f"{upgrade.get('prefilter_units_kept', 0)} paid prefilter units were reused unchanged"
+                + (f", and {upgrade['model_units_kept']} candidate-mode model units were kept and reused wherever the "
+                   "request was byte-identical" if upgrade.get("model_units_kept") else "") + ".")
     if mode != "paid":
         limitations.insert(0, f"Mode {mode}: these outputs are not real judge classifications.")
     report = {"schema": REPORT_SCHEMA, "run_id": run_id, "generated_at": rv._now(now), "mode": mode,

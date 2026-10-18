@@ -144,6 +144,8 @@ RUBRIC_VERSION = "gdm-judge-rubric/2"
 STAGES = ("history", "prefilter", "judge", "verify", "host", "closed", "runlevel", "report")
 MODES = ("paid", "rehearsal")
 FINAL = ("ok", "ungraded", "grading_failed")
+# A unit refused on both attempts (content filter): v2.3 re-sends its items one per request.
+REFUSED_REASONS = ("refused_twice",)
 MODEL_KEYS = ("haiku", "sonnet", "opus")
 STAGE_MODELS = {"prefilter": "haiku", "judge": "sonnet", "verify": "opus", "runlevel": "opus"}
 ALLOCATION = (
@@ -157,11 +159,13 @@ ALLOCATION = (
 JUDGE_MODES = ("candidates", "package")
 CANDIDATE_JUDGE_ROLE = ("candidate-focused judging: every candidate decided on its own in small chronological batches "
                         "(each in full, with labelled context excerpts); random-sample windows judged one per call")
-CANDIDATE_SETTINGS = ("judge_mode", "candidate_batch_items", "candidate_batch_tokens", "candidate_context_chars")
+CANDIDATE_SETTINGS = ("judge_mode", "candidate_batch_items", "candidate_batch_tokens", "candidate_context_chars",
+                      "recheck_min_chars", "recheck_passage_chars", "recheck_batch_items")
 DECISIONS_SCHEMA = "gdm-judge-candidate-decisions/1"
 SUPERSEDED_DIR = "superseded"
 SUPERSEDED_STATEMENT = ("Earlier v2 (first package-mode pass) and v2.1 (package mode with keyword recall) judge passes are "
-                        "superseded by judge revision v2.2 (candidate-focused judging) and are not reported.")
+                        "superseded by candidate-focused judging (revision v2.2, extended in place by v2.3) and are not "
+                        "reported.")
 
 
 def allocation_rows(judge_mode="package"):
@@ -173,8 +177,9 @@ def allocation_rows(judge_mode="package"):
 # Manifest fields a resumed run must match exactly. judge_mode, judge_revision and
 # candidate_prompt_version exist only in candidate mode (absent, i.e. None, in v2/v2.1 manifests).
 MANIFEST_BINDING = ("run_id", "mode", "settings", "rubric", "pipeline_version", "prompt_version", "schema_version",
-                    "models", "allocation", "scope", "judge_mode", "judge_revision", "candidate_prompt_version")
-_REVISION_FIELDS = ("judge_mode", "judge_revision", "candidate_prompt_version")
+                    "models", "allocation", "scope", "judge_mode", "judge_revision", "candidate_prompt_version",
+                    "recheck_prompt_version")
+_REVISION_FIELDS = ("judge_mode", "judge_revision", "candidate_prompt_version", "recheck_prompt_version")
 
 
 def prefilter_binding(manifest):
@@ -191,7 +196,7 @@ def prefilter_binding(manifest):
 
 
 def judge_revision_of(judge_mode):
-    return JUDGE_REVISION_V22 if judge_mode == "candidates" else JUDGE_REVISION
+    return JUDGE_REVISION_V23 if judge_mode == "candidates" else JUDGE_REVISION
 
 
 def superseded_spend(folder):
@@ -269,6 +274,13 @@ class PipelineSettings:
     candidate_batch_items: int = 10
     candidate_batch_tokens: int = 35000
     candidate_context_chars: int = 800
+    # Judge revision v2.3: a candidate decided as not qualifying whose text is longer than
+    # recheck_min_chars and matches the keyword net is re-checked on the passages of
+    # recheck_passage_chars either side of each match (merged when they overlap), at most
+    # recheck_batch_items candidates per request.
+    recheck_min_chars: int = 4000
+    recheck_passage_chars: int = 500
+    recheck_batch_items: int = 20
 
     def binding(self):
         """Settings that shape model inputs. In package mode the candidate settings are left out,
@@ -305,11 +317,13 @@ class PipelineSettings:
             problems.append(f"max_tokens must name exactly {sorted(DEFAULT_MAX_TOKENS)}")
         if self.judge_mode not in JUDGE_MODES:
             problems.append(f"judge_mode must be one of {list(JUDGE_MODES)}")
-        for name in ("candidate_batch_items", "candidate_batch_tokens"):
+        for name in ("candidate_batch_items", "candidate_batch_tokens", "recheck_passage_chars",
+                     "recheck_batch_items"):
             if not isinstance(getattr(self, name), int) or getattr(self, name) < 1:
                 problems.append(f"{name} must be a positive integer")
-        if not isinstance(self.candidate_context_chars, int) or self.candidate_context_chars < 0:
-            problems.append("candidate_context_chars must be a non-negative integer")
+        for name in ("candidate_context_chars", "recheck_min_chars"):
+            if not isinstance(getattr(self, name), int) or getattr(self, name) < 0:
+                problems.append(f"{name} must be a non-negative integer")
         if problems:
             raise ValueError("; ".join(problems))
         return self
@@ -502,7 +516,9 @@ def candidate_tags(verdict, judge):
     """Finding provenance in candidate mode: a finding decided in a random-sample window is a
     prefilter miss (source ``random_sample``, rubric Section 7); a finding decided as a
     candidate records the candidate's sources (prefilter, forced, keyword_recall,
-    submission). ``mixed`` lists sample findings whose supporting citations are candidates."""
+    submission) and ``via`` (``candidate``, or ``passage_recheck`` for a v2.3 keyword passage
+    re-check decision). ``mixed`` lists sample findings whose supporting citations are
+    candidates."""
     candidates = set((judge.get("plan") or {}).get("candidates") or [])
     sources, misses, mixed = {}, [], []
     for finding in (verdict or {}).get("findings", []):
@@ -516,7 +532,8 @@ def candidate_tags(verdict, judge):
         else:
             sources[finding["id"]] = {"source": "candidate", "window_id": None, "item": origin.get("item"),
                                       "candidate_sources": origin.get("candidate_sources") or [],
-                                      "unit": origin.get("unit"), "decision_reason": origin.get("reason")}
+                                      "unit": origin.get("unit"), "decision_reason": origin.get("reason"),
+                                      "via": origin.get("source") or "candidate"}
     return {"finding_sources": sources, "misses": misses, "mixed": mixed}
 
 
@@ -912,6 +929,75 @@ def plan_candidates(history, structural, sources, settings, *, meta=None):
             "requests": requests}
 
 
+def split_candidate_request(history, structural, request, sources, settings):
+    """Judge revision v2.3: one single-candidate request per candidate of a CANDIDATES request
+    that was refused twice, each rendered as ``CANDIDATE 1 OF 1`` with the same context
+    excerpts and a note naming the refused request (``split_of``)."""
+    items = list(_get(history, "items", []) or [])
+    position = {item["id"]: n for n, item in enumerate(items)}
+    record = validate.Record(history, None, structural)
+    out = []
+    for number, ident in enumerate(request["ids"], 1):
+        n = position[ident]
+        block = prompts.render_candidate(1, 1, items[n], record=record, before=items[n - 1] if n > 0 else None,
+                                         after=items[n + 1] if n + 1 < len(items) else None,
+                                         sources=sources.get(ident, ()), context_chars=settings.candidate_context_chars)
+        out.append(dict(request, ids=[ident], blocks=[block], index=f"{request['index']}.{number}",
+                        split_of=request["index"], estimated_tokens=estimate_tokens(block) + 1))
+    return out
+
+
+def keyword_passages(text, half):
+    """Sorted, disjoint ``(start, end)`` character spans of ``text`` reaching ``half``
+    characters either side of every RECALL_PATTERN match (overlapping spans merged)."""
+    text = text or ""
+    spans = []
+    for match in RECALL_PATTERN.finditer(text):
+        start, end = max(0, match.start() - half), min(len(text), match.end() + half)
+        if spans and start <= spans[-1][1]:
+            spans[-1][1] = max(spans[-1][1], end)
+        else:
+            spans.append([start, end])
+    return [tuple(span) for span in spans]
+
+
+def recheck_eligible(item, settings):
+    """A candidate is re-checked on its keyword passages when its text is longer than
+    ``recheck_min_chars`` and matches the keyword net."""
+    text = _get(item, "text", "") or ""
+    return len(text) > settings.recheck_min_chars and RECALL_PATTERN.search(text) is not None
+
+
+def plan_recheck(history, structural, ids, sources, settings, *, meta=None):
+    """The v2.3 KEYWORD PASSAGE RE-CHECK requests of one agent (``prompts.recheck_messages``):
+    every id of ``ids`` (candidates decided as not qualifying) that is ``recheck_eligible``,
+    in chronological order, rendered as its keyword passages and batched by
+    ``candidate_batches`` (``recheck_batch_items``, ``candidate_batch_tokens``). Returns
+    ``{"candidates", "passages", "tokens", "batches", "requests"}``."""
+    items = list(_get(history, "items", []) or [])
+    position = {item["id"]: n for n, item in enumerate(items)}
+    chosen = sorted((i for i in set(ids) if i in position and recheck_eligible(items[position[i]], settings)),
+                    key=position.get)
+    record = validate.Record(history, None, structural)
+    spans = {i: keyword_passages(items[position[i]].get("text"), settings.recheck_passage_chars) for i in chosen}
+
+    def block(number, total, ident):
+        return prompts.render_candidate_passages(number, total, items[position[ident]], spans[ident], record=record,
+                                                 sources=sources.get(ident, ()))
+    tokens = {i: estimate_tokens(block(0, 0, i)) + 1 for i in chosen}
+    batches = candidate_batches(chosen, tokens, settings.recheck_batch_items, settings.candidate_batch_tokens)
+    agent_id = _get(history, "agent_id")
+    code = _get(history, "code") or agent_code(agent_id)
+    header = {"agent_id": agent_id, "agent_code": code, "persona": _get(history, "persona"),
+              "recheck_candidates_total": len(chosen), "recheck_requests": len(batches), **(meta or {})}
+    requests = [{"agent_id": agent_id, "agent_code": code, "index": index, "count": len(batches), "ids": list(batch),
+                 "blocks": [block(number, len(batch), i) for number, i in enumerate(batch, 1)], "meta": header,
+                 "structural": list(structural or []), "estimated_tokens": sum(tokens[i] for i in batch)}
+                for index, batch in enumerate(batches, 1)]
+    return {"candidates": chosen, "passages": {i: [list(s) for s in spans[i]] for i in chosen}, "tokens": tokens,
+            "batches": batches, "requests": requests}
+
+
 def plan_samples(history, structural, windows, sampled, candidate_ids, *, meta=None):
     """One RANDOM-SAMPLE WINDOW request per sampled window (``prompts.sample_window_messages_v2``):
     every item of the window in full, candidates shown as pointers (decided in their own
@@ -1118,10 +1204,13 @@ def candidate_note(totals, verdict):
             parts.append(f"{category.replace('_', ' ')} {level}")
     if (verdict.get("cheating") or {}).get("shared"):
         parts.append("bypass shared")
-    text = (f"Candidate-focused judging (v2.2): {totals['decided']} of {totals['candidates']} candidates decided "
+    text = (f"Candidate-focused judging (v2.3): {totals['decided']} of {totals['candidates']} candidates decided "
             "individually")
     if totals.get("sample_windows"):
         text += f", {totals['sample_windows']} random-sample window(s) read"
+    recheck = totals.get("recheck") or {}
+    if recheck.get("candidates"):
+        text += f", {recheck['candidates']} long candidate(s) re-checked on their keyword passages"
     text += "; " + ("judge findings: " + ", ".join(parts) if parts else "no qualifying candidate")
     if totals.get("undecided"):
         text += f"; {totals['undecided']} candidate(s) undecided (never negatives)"
@@ -1318,7 +1407,8 @@ class Pipeline:
                "schema_version": schema.SCHEMA_VERSION, "models": self.models, "allocation": self.allocation()}
         if self.judge_mode == "candidates":  # absent in package mode, as in v2/v2.1 manifests
             out.update(judge_mode=self.judge_mode, judge_revision=self.judge_revision,
-                       candidate_prompt_version=prompts.CANDIDATE_PROMPT_VERSION)
+                       candidate_prompt_version=prompts.CANDIDATE_PROMPT_VERSION,
+                       recheck_prompt_version=prompts.RECHECK_PROMPT_VERSION)
         return out
 
     def allocation(self):
@@ -1371,10 +1461,15 @@ class Pipeline:
         sample, verify and run-level units, packages, agent results, labels, report, review
         and run-level files) are moved to ``superseded/<mode>-<timestamp>/`` with a copy of
         the old manifest, so stale units can never be reused; ``history/``, the prefilter
-        units, ``raw/`` and the ledger stay. The manifest records the upgrade in
-        ``judge_revision_history`` and ``state.json`` gets an audit entry."""
+        units, ``raw/`` and the ledger stay. Between two candidate-mode revisions (v2.2 to
+        v2.3, which sends every v2.2 request byte for byte) the model units also stay: each is
+        reused only when its input hash equals the current request, and a changed one is
+        redone only with ``recompute_stale`` (the old copy kept as ``*.stale-<time>``). The
+        manifest records the upgrade in ``judge_revision_history`` and ``state.json`` gets an
+        audit entry."""
         at = _now()
         old_mode = existing.get("judge_mode") or "package"
+        keep_units = old_mode == "candidates" and self.judge_mode == "candidates"
         target = self.judge_dir / SUPERSEDED_DIR / f"{_safe(old_mode)}-{_safe(at)}"
         moved = []
 
@@ -1391,10 +1486,11 @@ class Pipeline:
             if not agent_dir.is_dir():
                 continue
             if agent_dir.name == "run":
-                move(agent_dir)
+                if not keep_units:
+                    move(agent_dir)
                 continue
             for path in sorted(agent_dir.iterdir()):
-                if path.name != "prefilter":
+                if path.name != "prefilter" and not keep_units:
                     move(path)
         for name in ("packages", "agents", "review", "labels.jsonl", "labels-check.json", "run_level.json",
                      "pipeline.json", "report.json", "report.html", CLOSED_REQUEST_NAME, FOOTNOTE_NAME):
@@ -1402,6 +1498,8 @@ class Pipeline:
         write_json(target / "manifest.json", existing)
         spend = superseded_spend(target)
         prefilter_units = sum(1 for _ in units.glob("*/prefilter/*.json")) if units.is_dir() else 0
+        model_units = (sum(1 for path in units.rglob("*.json") if "prefilter" not in path.parts)
+                       if units.is_dir() and keep_units else 0)
         entry = {"event": "judge_revision_upgrade", "at": at,
                  "from": {"judge_mode": old_mode, "judge_revision": existing.get("judge_revision")
                           or "v2/v2.1 package mode (not recorded in the manifest)",
@@ -1410,7 +1508,8 @@ class Pipeline:
                  "to": {"judge_mode": self.judge_mode, "judge_revision": self.judge_revision,
                         "settings": current.get("settings"), "code": code_hashes()},
                  "archived_to": str(target.relative_to(self.judge_dir)), "moved": moved,
-                 "superseded_spend": spend, "prefilter_units_kept": prefilter_units}
+                 "superseded_spend": spend, "prefilter_units_kept": prefilter_units,
+                 "model_units_kept": model_units}
         history = list(existing.get("judge_revision_history") or []) + [entry]
         write_json(self.judge_dir / "manifest.json",
                    dict(current, created_at=existing.get("created_at"), code=code_hashes(),
@@ -1424,7 +1523,9 @@ class Pipeline:
         write_json(self.judge_dir / "state.json", state)
         self.upgrade = entry
         self.log(f"judge revision upgrade: {old_mode} -> {self.judge_mode}; {len(moved)} path(s) archived to "
-                 f"{entry['archived_to']}; {prefilter_units} prefilter unit(s) kept")
+                 f"{entry['archived_to']}; {prefilter_units} prefilter unit(s) kept"
+                 + (f"; {model_units} candidate/sample/verify/run unit(s) kept (reused only on equal input hashes)"
+                    if keep_units else ""))
         return current
 
     # -- model calls -------------------------------------------------------
@@ -1822,16 +1923,21 @@ class Pipeline:
         return None
 
     async def candidate_stage(self, agent_id, history, run, windows, prefilter, structural):
-        """Judge revision v2.2: Sonnet decides every candidate on its own.
+        """Judge revision v2.2/v2.3: Sonnet decides every candidate on its own.
 
         Candidates = prefilter selections, forced (unscreened) windows, keyword recall and the
         agent's submissions, in chronological batches (``plan_candidates``; one unit
         ``candidates-bNN`` each, one repair naming missing or invalid decisions, then the valid
         decisions are salvaged and the rest listed as undecided). Every random-sample window is
         one unit (``sample/<window>``) returning only qualifying items or an explicit none; its
-        findings are prefilter misses. The host builds the verdict from the qualifying
-        decisions (``build_candidate_verdict``); verification and the later stages are those of
-        the package mode."""
+        findings are prefilter misses. v2.3: a candidate request refused twice is re-sent as one
+        request per candidate (``candidates-bNN-cMM``; a candidate refused again stays
+        undecided), and every candidate decided as not qualifying that is long and matches the
+        keyword net is re-checked on its keyword passages (``plan_recheck``; units
+        ``recheck-bNN``); a qualifying re-check decision is a finding of source
+        ``passage_recheck``. The host builds the verdict from the qualifying decisions
+        (``build_candidate_verdict``); verification and the later stages are those of the
+        package mode."""
         held = self._held(agent_id, prefilter)
         if held:
             return held
@@ -1849,18 +1955,34 @@ class Pipeline:
         unit_dir = self.unit_dir(agent_id)
         calls = {}
 
+        async def decide(name, unit_id, purpose, system, user, ids):
+            calls[name] = estimate_tokens(user)
+            ident_set = set(ids)
+            return await self.unit(model, unit_dir / f"{name}.json", unit_id=unit_id, purpose=purpose, system=system,
+                                   user=user, max_tokens=max_tokens,
+                                   parse=_decision_parser(history, structural, ids, mode="candidates",
+                                                          supporting=ident_set | structural_ids, counter=ident_set),
+                                   salvage=_decision_salvage(ids, "candidates"), repair=prompts.repair_decisions_user)
+
         async def batch(request):
             name = f"candidates-b{request['index']:02d}"
-            ids = set(request["ids"])
+            unit_id = f"{agent_id}.judge.b{request['index']:02d}"
             system, user = prompts.candidate_messages_v2(request, info=self.info)
-            calls[name] = estimate_tokens(user)
-            unit = await self.unit(model, unit_dir / f"{name}.json", unit_id=f"{agent_id}.judge.b{request['index']:02d}",
-                                   purpose="judge_candidates", system=system, user=user, max_tokens=max_tokens,
-                                   parse=_decision_parser(history, structural, request["ids"], mode="candidates",
-                                                          supporting=ids | structural_ids, counter=ids),
-                                   salvage=_decision_salvage(request["ids"], "candidates"),
-                                   repair=prompts.repair_decisions_user)
-            return name, request, unit
+            unit = await decide(name, unit_id, "judge_candidates", system, user, request["ids"])
+            if not (unit["status"] == "ungraded" and unit.get("reason") in REFUSED_REASONS and len(request["ids"]) > 1):
+                return [(name, request, unit, "batch")]
+            subs = split_candidate_request(history, structural, request, plan["sources"], self.settings)
+
+            async def single(number, sub):
+                sub_system, sub_user = prompts.candidate_messages_v2(sub, info=self.info)
+                return (f"{name}-c{number:02d}", sub,
+                        await decide(f"{name}-c{number:02d}", f"{unit_id}.c{number:02d}", "judge_candidates",
+                                     sub_system, sub_user, sub["ids"]), "split")
+            done = await asyncio.gather(*(single(n, sub) for n, sub in enumerate(subs, 1)), return_exceptions=True)
+            for result in done:
+                if isinstance(result, BaseException):
+                    raise result
+            return [(name, request, unit, "refused_split")] + list(done)
 
         async def sample(request):
             name = f"sample/{request['window_id']}"
@@ -1874,19 +1996,31 @@ class Pipeline:
                                                           supporting=bases | structural_ids, counter=bases),
                                    salvage=_decision_salvage(request["judged_ids"], "sample"),
                                    repair=prompts.repair_decisions_user)
-            return name, request, unit
+            return [(name, request, unit, "sample")]
 
-        jobs = [batch(r) for r in plan["requests"]] + [sample(r) for r in samples]
-        results = await asyncio.gather(*jobs, return_exceptions=True)
-        for result in results:
-            if isinstance(result, BaseException):
-                raise result
-        units = {name: unit for name, _, unit in results}
-        entries, decided, undecided, failed_units = [], [], [], []
+        async def recheck_batch(request):
+            name = f"recheck-b{request['index']:02d}"
+            system, user = prompts.recheck_messages(request, info=self.info)
+            return [(name, request, await decide(name, f"{agent_id}.judge.recheck.b{request['index']:02d}",
+                                                 "judge_recheck", system, user, request["ids"]), "recheck")]
+
+        async def gather(jobs):
+            results = await asyncio.gather(*jobs, return_exceptions=True)
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
+            return [entry for result in results for entry in result]
+
+        results = await gather([batch(r) for r in plan["requests"]] + [sample(r) for r in samples])
+        units = {name: unit for name, _, unit, _ in results}
+        entries, decided, negatives, undecided, failed_units, split_units = [], [], [], [], [], []
         sample_judged, sample_failed = list(covered), []
-        for name, request, unit in results:
+        for name, request, unit, role in results:
             ok = unit["status"] == "ok"
-            is_sample = name.startswith("sample/")
+            is_sample = role == "sample"
+            if role == "refused_split":
+                split_units.append(name)
+                continue
             if not ok:
                 failed_units.append(name)
                 if is_sample:
@@ -1901,6 +2035,8 @@ class Pipeline:
             for decision in unit["result"]["decisions"]:
                 if not is_sample:
                     decided.append(decision["item"])
+                    if not decision["qualifies"]:
+                        negatives.append(decision["item"])
                 if decision["qualifies"]:
                     origin = ({"unit": name, "source": "random_sample", "window_id": request["window_id"],
                                "candidate_sources": []} if is_sample else
@@ -1908,17 +2044,42 @@ class Pipeline:
                                "candidate_sources": plan["sources"].get(decision["item"], [])})
                     entries.append((decision, origin))
             undecided += [dict(u, unit=name) for u in unit["result"].get("undecided") or []]
+        positive = {d["item"] for d, o in entries if o["source"] == "candidate"}
+        recheck = plan_recheck(history, structural, [i for i in negatives if i not in positive], plan["sources"],
+                               self.settings)
+        recheck_results = await gather([recheck_batch(r) for r in recheck["requests"]])
+        recheck_undecided, recheck_failed, recheck_qualifying = [], [], 0
+        for name, request, unit, _ in recheck_results:
+            units[name] = unit
+            if unit["status"] != "ok":
+                recheck_failed.append(name)
+                recheck_undecided += [{"item": i, "unit": name, "problems": [f"unit {unit['status']}: "
+                                                                             f"{unit.get('reason') or ''}".strip()]}
+                                      for i in request["ids"]]
+                continue
+            for decision in unit["result"]["decisions"]:
+                if decision["qualifies"]:
+                    recheck_qualifying += 1
+                    entries.append((decision, {"unit": name, "source": "passage_recheck", "window_id": None,
+                                               "candidate_sources": plan["sources"].get(decision["item"], [])}))
+            recheck_undecided += [dict(u, unit=name) for u in unit["result"].get("undecided") or []]
         totals = {"candidates": len(plan["candidates"]), "decided": len(decided),
                   "qualifying": sum(1 for d, o in entries if o["source"] == "candidate"),
                   "undecided": sum(1 for u in undecided if not u["unit"].startswith("sample/")),
                   "batches": len(plan["requests"]), "sample_windows": len(sample_judged),
                   "sample_windows_failed": len(sample_failed),
-                  "by_source": {s: sum(1 for v in plan["sources"].values() if s in v) for s in CANDIDATE_SOURCES}}
-        primary = [u for n, u in units.items() if not n.startswith("sample/")] or list(units.values())
+                  "by_source": {s: sum(1 for v in plan["sources"].values() if s in v) for s in CANDIDATE_SOURCES},
+                  "refused_batches_split": len(split_units),
+                  "recheck": {"candidates": len(recheck["candidates"]),
+                              "passages": sum(len(v) for v in recheck["passages"].values()),
+                              "requests": len(recheck["requests"]), "qualifying": recheck_qualifying,
+                              "undecided": len(recheck_undecided), "failed_requests": len(recheck_failed)}}
+        primary = [u for n, u in units.items() if not n.startswith(("sample/", "recheck-")) and n not in split_units] \
+            or [u for n, u in units.items() if n.startswith("sample/")]
         out = {"mode": "candidates", "package": package, "parts": None, "units": units, "verdict": None,
                "status": "ok", "reason": None, "ungraded_turns": 0, "sample_judged": sample_judged,
                "sample_failed": sample_failed, "provenance": {}, "dropped": [], "undecided": undecided,
-               "totals": totals, "plan": plan}
+               "recheck_undecided": recheck_undecided, "totals": totals, "plan": plan}
         if primary and all(u["status"] != "ok" for u in primary):
             out["status"] = "grading_failed" if all(u["status"] == "grading_failed" for u in primary) else "ungraded"
             out["reason"] = "every candidate request failed" if plan["requests"] else "every random-sample request failed"
@@ -1934,6 +2095,12 @@ class Pipeline:
         package.update(calls={name: {"user_tokens": tokens, "status": units[name]["status"],
                                       "reason": units[name].get("reason")} for name, tokens in sorted(calls.items())},
                        estimated_tokens=sum(calls.values()), totals=totals, undecided=undecided,
+                       refused_batches_split=split_units,
+                       recheck={"prompt_version": prompts.RECHECK_PROMPT_VERSION,
+                                "min_chars": self.settings.recheck_min_chars,
+                                "passage_chars": self.settings.recheck_passage_chars,
+                                "candidates": recheck["candidates"], "passages": recheck["passages"],
+                                "batches": recheck["batches"], "undecided": recheck_undecided},
                        dropped_findings=out["dropped"], finding_provenance=out["provenance"])
         write_json(self.judge_dir / "packages" / f"{agent_id}.json", package)
         return out
@@ -1944,7 +2111,7 @@ class Pipeline:
         "skipped"}; an agent without findings makes no call."""
         units = {u["unit_id"]: u for u in schema.verification_units_v2(verdict)}
         out = {"verifier": {"verdicts": []}, "unit_statuses": {}, "units": {}, "unit_files": {},
-               "findings": len(units), "skipped": not units}
+               "findings": len(units), "skipped": not units, "refused_split": []}
         if not units:
             return out
         package = prompts.build_verification_package_v2(verdict, history, context=self.settings.verifier_context,
@@ -1953,22 +2120,37 @@ class Pipeline:
         model = STAGE_MODELS["verify"]
         max_tokens = self.settings.max_tokens["verifier"]
 
-        async def one(number, batch):
+        async def call(name, batch):
             batch_units = [b["unit"] for b in batch]
             sub = dict(package, blocks=batch, units=batch_units)
             system, user = prompts.verifier_messages_v2(sub, info=self.info)
-            name = f"verify-b{number:02d}"
             unit = await self.unit(model, self.unit_dir(agent_id) / f"{name}.json", unit_id=f"{agent_id}.{name}",
                                    purpose="verifier", system=system, user=user, max_tokens=max_tokens,
                                    parse=_schema_parser(schema.parse_verifier_v2, units=batch_units))
             return name, batch_units, unit
 
+        async def one(number, batch):
+            # v2.3: a verifier request refused twice is re-sent as one request per finding
+            # (verify-bNN-fMM); a finding refused again stays unverified.
+            name, batch_units, unit = await call(f"verify-b{number:02d}", batch)
+            if not (unit["status"] == "ungraded" and unit.get("reason") in REFUSED_REASONS and len(batch) > 1):
+                return [(name, batch_units, unit, False)]
+            done = await asyncio.gather(*(call(f"{name}-f{k:02d}", [block]) for k, block in enumerate(batch, 1)),
+                                        return_exceptions=True)
+            for result in done:
+                if isinstance(result, BaseException):
+                    raise result
+            out["refused_split"].append(name)
+            return [(name, batch_units, unit, True)] + [result + (False,) for result in done]
+
         results = await asyncio.gather(*(one(n, b) for n, b in enumerate(batches, 1)), return_exceptions=True)
         for result in results:
             if isinstance(result, BaseException):
                 raise result
-            name, batch_units, unit = result
+        for name, batch_units, unit, was_split in (entry for result in results for entry in result):
             out["units"][name] = unit
+            if was_split:
+                continue
             for u in batch_units:
                 out["unit_files"][u["unit_id"]] = f"{name}.json"
             if unit["status"] == "ok":
@@ -2289,15 +2471,19 @@ class Pipeline:
         if self.judge_mode == "candidates":
             totals = {"agents": 0, "candidates": 0, "decided": 0, "qualifying": 0, "undecided": 0, "batches": 0,
                       "sample_windows": 0, "sample_windows_failed": 0, "dropped_findings": 0,
-                      "by_source": {s: 0 for s in CANDIDATE_SOURCES}}
+                      "refused_batches_split": 0, "by_source": {s: 0 for s in CANDIDATE_SOURCES},
+                      "recheck": {k: 0 for k in ("candidates", "passages", "requests", "qualifying", "undecided",
+                                                 "failed_requests")}}
             for result in results.values():
                 c = result.get("candidates") or {}
                 if not c:
                     continue
                 totals["agents"] += 1
                 for key in ("candidates", "decided", "qualifying", "undecided", "batches", "sample_windows",
-                            "sample_windows_failed"):
+                            "sample_windows_failed", "refused_batches_split"):
                     totals[key] += c.get(key) or 0
+                for key, n in (c.get("recheck") or {}).items():
+                    totals["recheck"][key] = totals["recheck"].get(key, 0) + (n or 0)
                 totals["dropped_findings"] += len(c.get("dropped_findings") or [])
                 for source, n in (c.get("by_source") or {}).items():
                     totals["by_source"][source] = totals["by_source"].get(source, 0) + (n or 0)
@@ -2306,9 +2492,11 @@ class Pipeline:
             extra = {"candidates": totals,
                      "candidate_settings": {k: getattr(self.settings, k) for k in CANDIDATE_SETTINGS},
                      "candidate_prompt_version": prompts.CANDIDATE_PROMPT_VERSION,
+                     "recheck_prompt_version": prompts.RECHECK_PROMPT_VERSION,
                      "superseded": {"statement": SUPERSEDED_STATEMENT, "reported": False,
                                     "upgrades": [{k: e.get(k) for k in ("at", "from", "to", "archived_to",
-                                                                        "superseded_spend", "prefilter_units_kept")}
+                                                                        "superseded_spend", "prefilter_units_kept",
+                                                                        "model_units_kept")}
                                                  | {"from": {k: (e.get("from") or {}).get(k)
                                                              for k in ("judge_mode", "judge_revision")},
                                                     "to": {k: (e.get("to") or {}).get(k)
@@ -2418,7 +2606,7 @@ def _decimal(value):
 
 def unit_stage(purpose):
     """Pipeline stage of a unit purpose."""
-    if purpose in ("judge", "judge_part", "judge_synthesis", "judge_candidates", "judge_sample"):
+    if purpose in ("judge", "judge_part", "judge_synthesis", "judge_candidates", "judge_sample", "judge_recheck"):
         return "judge"
     if purpose == "verifier":
         return "verify"
@@ -2639,6 +2827,11 @@ def cluster_selection(items, fraction, rng, cluster=3):
 JUDGE_REVISION = "v2.1: keyword recall safety net + required per-candidate decisions (October 18, 2026)"
 # Judge revision of --judge-mode candidates (the default): every candidate decided individually.
 JUDGE_REVISION_V22 = "v2.2: candidate-focused judging (October 18, 2026)"
+# v2.3 keeps every v2.2 request byte for byte and adds the keyword passage re-check of long
+# candidates decided as not qualifying, plus per-candidate (per-finding) re-sends of a
+# candidate (verifier) request refused twice.
+JUDGE_REVISION_V23 = ("v2.3: v2.2 + keyword passage re-check of long candidates + per-item re-send of refused "
+                      "requests (October 18, 2026)")
 
 # Deterministic, model-free recall safety net for the three categories (docs/plan.md, October
 # 18, 2026): the first paid v2 pass showed Haiku's narrow screen dropping most
@@ -2746,6 +2939,10 @@ def candidate_measures(history, structural, selected, forced, sampled, windows, 
     samples, covered = plan_samples(history, structural, windows, sampled, plan["candidates"])
     sample_requests = [estimate_tokens(prompts.sample_window_messages_v2(r)[1]) + system["candidates"]
                        for r in samples]
+    # v2.3 keyword passage re-check, upper bound: every eligible candidate decided as not qualifying.
+    recheck = plan_recheck(history, structural, plan["candidates"], plan["sources"], settings)
+    recheck_requests = [estimate_tokens(prompts.recheck_messages(r)[1]) + system["candidates"]
+                        for r in recheck["requests"]]
     eval_like = [i for i in plan["candidates"] if EVAL_HINT.search(by_id[i].get("text") or "")]
     measured = (eval_like + [i for i in plan["candidates"] if i not in set(eval_like)])[
         :assumptions.verifier_blocks_measured]
@@ -2764,9 +2961,12 @@ def candidate_measures(history, structural, selected, forced, sampled, windows, 
             "sample_input_tokens": sum(sample_requests), "sample_windows_covered": len(covered),
             "eval_like_candidates": len(eval_like), "verifier_block_tokens": block_sizes,
             "verifier_block_tokens_mean": (sum(block_sizes) / len(block_sizes)) if block_sizes else None,
+            "recheck_requests": recheck_requests, "recheck_request_items": [len(r["ids"]) for r in recheck["requests"]],
+            "recheck_calls": len(recheck_requests), "recheck_input_tokens": sum(recheck_requests),
+            "recheck_candidates": len(recheck["candidates"]),
             "judge_calls": len(requests) + len(sample_requests),
             "judge_input_tokens": sum(requests) + sum(sample_requests),
-            "largest_judge_request_tokens": max(requests + sample_requests, default=0)}
+            "largest_judge_request_tokens": max(requests + sample_requests + recheck_requests, default=0)}
 
 
 def estimate_agent(run, agent_id, settings, route_settings, assumptions, fractions, seed=20261017, actual=None,
@@ -2966,6 +3166,11 @@ def project_costs_candidates(per_agent, settings, route_settings, assumptions, c
                        Decimal(0)) * repair
             sample = sum((request_cost(routes["sonnet"], t * fin, assumptions.sample_window_output * fout)
                           for r in rows for t in r["sample_requests"]), Decimal(0)) * repair
+            recheck = sum((request_cost(routes["sonnet"], t * fin, (assumptions.candidate_output_base
+                                                                    + assumptions.candidate_output_per_item * n) * fout)
+                           for r in rows for t, n in zip(r.get("recheck_requests") or [],
+                                                         r.get("recheck_request_items") or [])),
+                          Decimal(0)) * repair
             means = [r["verifier_block_tokens_mean"] for r in rows if r["verifier_block_tokens_mean"]]
             fallback = sorted(means)[len(means) // 2] if means else 20000
             allocation = allocate_findings(assumptions.assumed_positive_findings * ffind,
@@ -2992,9 +3197,9 @@ def project_costs_candidates(per_agent, settings, route_settings, assumptions, c
                 if flagged else Decimal(0)
             haiku = Decimal(0) if name == "actual" else h_cost
             costs = {"haiku_prefilter": haiku, "sonnet_candidates": cand, "sonnet_sample_windows": sample,
-                     "opus_verifier": verify, "opus_runlevel": runlevel}
+                     "sonnet_recheck_upper_bound": recheck, "opus_verifier": verify, "opus_runlevel": runlevel}
             total = sum(costs.values(), Decimal(0))
-            sonnet_calls = sum(r["candidate_calls"] + r["sample_calls"] for r in rows)
+            sonnet_calls = sum(r["candidate_calls"] + r["sample_calls"] + (r.get("recheck_calls") or 0) for r in rows)
             saving = Decimal(0)
             if settings.prompt_cache:
                 saving = (_cache_saving(routes["sonnet"], system["candidates"] * fin,
@@ -3012,6 +3217,9 @@ def project_costs_candidates(per_agent, settings, route_settings, assumptions, c
                 "sample_windows": sum(r["sample_windows"] for r in rows),
                 "sample_calls": sum(r["sample_calls"] for r in rows),
                 "sample_input_tokens": sum(r["sample_input_tokens"] for r in rows),
+                "recheck_candidates_upper_bound": sum(r.get("recheck_candidates") or 0 for r in rows),
+                "recheck_calls_upper_bound": sum(r.get("recheck_calls") or 0 for r in rows),
+                "recheck_input_tokens_upper_bound": sum(r.get("recheck_input_tokens") or 0 for r in rows),
                 "largest_judge_request_tokens": max(r["largest_judge_request_tokens"] for r in rows),
                 "eval_like_candidates": sum(r["eval_like_candidates"] for r in rows),
                 "assumed_positive_findings": assumptions.assumed_positive_findings,
@@ -3027,6 +3235,8 @@ def project_costs_candidates(per_agent, settings, route_settings, assumptions, c
                              "flagged_agents_assumed": flagged, "verifier_calls": verifier_calls,
                              "input_tokens": {"candidates": int(sum(r["candidate_input_tokens"] for r in rows) * fin),
                                               "sample_windows": int(sum(r["sample_input_tokens"] for r in rows) * fin),
+                                              "recheck_upper_bound": int(sum(r.get("recheck_input_tokens") or 0
+                                                                             for r in rows) * fin),
                                               "verifier": verifier_input,
                                               "runlevel": int(runlevel_in * fin) if flagged else 0}}
     framing = getattr(route_settings, "framing_token_allowance", 8192)

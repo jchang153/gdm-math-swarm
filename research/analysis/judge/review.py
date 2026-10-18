@@ -1054,6 +1054,8 @@ def render_finding(agent_id, finding, result, index, unit_models):
     source, window = finding_source(result, finding)
     badges = [("borderline", finding.get("borderline") is True),
               (f"prefilter miss ({window})", source == "random_sample"),
+              ("keyword passage re-check", _dict(_dict(result.get("finding_sources")).get(finding.get("id")))
+               .get("via") == "passage_recheck"),
               ("cites random-sample and selected items", is_mixed(result, finding))]
     adjustment = finding_adjustment(finding)
     claimed, established = finding_level(finding)
