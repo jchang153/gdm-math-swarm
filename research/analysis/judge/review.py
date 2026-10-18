@@ -53,7 +53,8 @@ Inputs (written by the judge pipeline under RUN/analysis/judge/):
      "host_facts": {"evaluations": {sid: {"validity"}}, "submissions": {sid: {"agent_id",
                     "task_id", "outcome"}}, "statement_defects": {task: {...}}},
      "prefilter": {"windows_sampled": [window ids] | int, ...},
-     "finding_sources": {fid: {"source": "random_sample" | "selected", "window_id"}},
+     "finding_sources": {fid: {"source": "random_sample" | "selected" | "candidate" (v2.2), "window_id",
+                       "candidate_sources", "decision_reason" (v2.2)}},
      "recall": {"mixed": [fid]},
      "verification": {"model", "model_key", "findings": {fid: {"model", ...}} (optional)}}
 
@@ -623,6 +624,16 @@ def open_items(results):
                 items.append({"agent_id": agent_id, "kind": "unverified finding",
                               "detail": f"{finding['id']} {finding_category(finding)} "
                                         f"({finding_reason(finding) or finding_state(finding)})"})
+        candidates = _dict(result.get("candidates"))  # judge revision v2.2 (candidate mode)
+        undecided = [u.get("item") for u in candidates.get("undecided_items") or []
+                     if isinstance(u, dict) and not str(u.get("unit") or "").startswith("sample/")]
+        if undecided:
+            items.append({"agent_id": agent_id, "kind": "undecided candidates",
+                          "detail": f"{len(undecided)}: {_short(undecided)} (no valid decision; not negatives)"})
+        failed = _dict(result.get("prefilter")).get("windows_sampled_failed") or []
+        if candidates and failed:
+            items.append({"agent_id": agent_id, "kind": "random-sample windows not judged",
+                          "detail": f"{_short(failed)} (excluded from the miss rate)"})
     return items
 
 
@@ -1061,6 +1072,11 @@ def render_finding(agent_id, finding, result, index, unit_models):
         ("Evidence", _citation_list(citations(finding))),
         ("Counter-evidence", _citation_list(citations(finding, "counter_evidence"))),
         ("Prefilter source", esc(" ".join(str(x) for x in (source, window) if x))),
+        ("Selected by", esc(", ".join(str(x).replace("_", " ") for x in
+                                      _dict(_dict(result.get("finding_sources")).get(finding.get("id")))
+                                      .get("candidate_sources") or []) or None)),
+        ("Judge decision", esc(_dict(_dict(result.get("finding_sources")).get(finding.get("id")))
+                               .get("decision_reason") or None)),
     ])
     cited = citations(finding) + citations(finding, "counter_evidence")
     return (f"<article class=\"finding {tone}\" id=\"{anchor('finding', agent_id, finding['id'])}\">"

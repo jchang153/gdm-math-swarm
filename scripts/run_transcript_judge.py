@@ -3,9 +3,13 @@
 
 docs/plan.md, "Superseding decision (October 17, 2026, evening): misbehavior-focused judge"
 (rubric gdm-judge-rubric/2: cheating, whistleblowing and evaluation awareness only): Claude
-Haiku 5.5 screens narrowly, Claude Sonnet 5.5 judges (random-sample windows folded in), Claude
-Opus 5.5 re-checks every positive finding and writes the short run-level summary. Procedure
-and outputs in research/analysis/judge/README.md. Nothing here may enter agent containers.
+Haiku 5.5 screens narrowly, Claude Sonnet 5.5 judges, Claude Opus 5.5 re-checks every positive
+finding and writes the short run-level summary. Judge revision v2.2 (October 18, 2026; the
+default --judge-mode candidates): Sonnet decides every candidate (prefilter selections, forced
+windows, keyword recall, submissions) on its own in small batches and judges each random-sample
+window in its own request; --judge-mode package is the superseded v2/v2.1 one-call-per-agent
+package. Procedure and outputs in research/analysis/judge/README.md. Nothing here may enter
+agent containers.
 
   # Cost projection: no model calls, no ledger writes, no credentials.
   PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> --dry-run-estimate
@@ -17,6 +21,10 @@ and outputs in research/analysis/judge/README.md. Nothing here may enter agent c
       [--credentials-root /path/to/main/checkout]
   # Re-apply host facts (e.g. new evaluator verdicts) from cached units only: no model calls.
   PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> --rescore-cached
+  # Switch an existing judge directory (e.g. the v2/v2.1 package-mode pass) to candidate judging,
+  # reusing its paid prefilter units: the old judge outputs move to analysis/judge/superseded/.
+  PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> --i-have-user-approval \
+      --judge-mode candidates --upgrade-judge-revision
 
 --mock, --dry-run-estimate and --rescore-cached never load credentials, never call a real
 model and never write the authoritative ledger (the mock uses its own rehearsal ledger
@@ -110,15 +118,41 @@ def parse_args(argv=None):
     parser.add_argument("--retry-failed", action="store_true", help="redo units recorded as grading_failed (paid)")
     parser.add_argument("--recompute-stale", action="store_true", help="redo cached units whose prompt changed")
     parser.add_argument("--no-label-check", action="store_true", help="skip timeline.check_labels in the report stage")
+    parser.add_argument("--judge-mode", choices=("candidates", "package"),
+                        help="candidates (default; judge revision v2.2: every candidate decided on its own in small "
+                             "batches) or package (the superseded v2/v2.1 one-call-per-agent package); --rescore-cached "
+                             "defaults to the judge directory's recorded mode")
+    parser.add_argument("--candidate-batch-items", type=int, default=10,
+                        help="candidates per Sonnet request in candidate mode (default 10)")
+    parser.add_argument("--candidate-batch-tokens", type=int, default=35000,
+                        help="estimated tokens of candidate blocks per Sonnet request in candidate mode (default "
+                             "35000; a single larger candidate gets its own request, never truncated)")
+    parser.add_argument("--candidate-context-chars", type=int, default=800,
+                        help="characters of the previous and next item shown as context around each candidate "
+                             "(default 800)")
+    parser.add_argument("--upgrade-judge-revision", action="store_true",
+                        help="switch an existing judge directory whose only binding difference is the judge mode or "
+                             "revision to the requested mode: its previous judge outputs move to superseded/, the "
+                             "cached prefilter units are reused (recorded in manifest.json and state.json)")
     parser.add_argument("--mock-cap", default="50", help="rehearsal ledger cap in USD (mock only)")
     parser.add_argument("--estimate-output", type=Path, help="write the full estimate JSON here")
     parser.add_argument("--estimate-fractions", default="0.02,0.05,0.10,0.20")
     return parser.parse_args(argv)
 
 
-def settings_from(args):
+def settings_from(args, recorded=None):
+    """PipelineSettings from the flags. ``recorded`` (a judge directory's manifest settings,
+    for --rescore-cached) supplies the judge mode and candidate settings when --judge-mode is
+    not given (absent candidate settings mean the v2/v2.1 package mode)."""
     from research.analysis.judge.pipeline import PipelineSettings
-    return PipelineSettings(window_tokens=args.window_tokens, neighbors=args.neighbors,
+    judge_mode = args.judge_mode or ("candidates" if recorded is None else recorded.get("judge_mode", "package"))
+    candidate = {"candidate_batch_items": args.candidate_batch_items,
+                 "candidate_batch_tokens": args.candidate_batch_tokens,
+                 "candidate_context_chars": args.candidate_context_chars}
+    if recorded is not None and args.judge_mode is None:
+        candidate.update({k: recorded[k] for k in candidate if k in recorded})
+    return PipelineSettings(judge_mode=judge_mode, **candidate,
+                            window_tokens=args.window_tokens, neighbors=args.neighbors,
                             package_token_cap=args.package_token_cap, sample_fraction=args.sample_fraction,
                             sample_seed=args.sample_seed, verifier_batch=args.verifier_batch,
                             verifier_token_cap=args.verifier_token_cap, verifier_context=args.verifier_context,
@@ -172,7 +206,70 @@ def models_of(settings):
                   "canonical_slug": settings.route(key).canonical_slug} for key in MODEL_KEYS}
 
 
+def print_candidate_estimate(result, out=sys.stdout):
+    """The candidate-mode (judge revision v2.2) projection table."""
+    projection = result["projection"]
+    haiku = projection["haiku"]
+    settings = result["settings"]
+    assumptions = result["assumptions"]
+    remaining = projection.get("remaining_usd")
+    print(f"run: {result['run_dir']}  judge revision: {result.get('judge_revision')}", file=out)
+    print("allocation: " + "; ".join(f"{row['stage']}={row['model_key']} ({row['effort']})"
+                                      for row in result["allocation"]), file=out)
+    print(f"agents: {len(result['agents'])}; windows: {projection['windows']} (~{settings['window_tokens']} "
+          f"tokens each); item tokens: {sum(a['item_tokens'] for a in result['agents']):,}", file=out)
+    print(f"Haiku prefilter: {haiku['requests']} requests, ${haiku['usd_central']} central, ${haiku['usd_high']} high "
+          "(0 in the 'actual' scenario: cached units are reused, never re-requested)", file=out)
+    reuse = (result.get("actual_prefilter") or {}).get("prefilter_reuse")
+    missing = (result.get("actual_prefilter") or {}).get("agents_without_cached_prefilter") or []
+    if reuse:
+        print(f"prefilter reuse check: {reuse['matching']} of {reuse['units']} cached prefilter units match the "
+              f"current requests byte for byte" + (f"; MISMATCHED: {', '.join(reuse['mismatched'][:10])}"
+                                                  if reuse["mismatched"] else "" if missing
+                                                  else " (no prefilter request would be sent)"),
+              file=out)
+    if missing:
+        print(f"WARNING: {len(missing)} agent(s) have no complete cached prefilter stage for the current record "
+              f"({', '.join(missing[:10])}{', ...' if len(missing) > 10 else ''}): a judging run would re-request "
+              "their missing prefilter units (or refuse a changed record), and the 'actual' scenario is omitted",
+              file=out)
+    print(f"candidates: prefilter selections + forced windows + keyword recall + submissions, chronological batches "
+          f"of <= {settings['candidate_batch_items']} items / ~{settings['candidate_batch_tokens']:,} tokens, "
+          f"{settings['candidate_context_chars']} context characters each side; random sample "
+          f"{settings['sample_fraction']:.0%} of unselected windows, one request each; Opus verifies an assumed "
+          f"{assumptions['assumed_positive_findings']} positive findings (verifier context "
+          f"{settings['verifier_context']}); prompt cache {'on' if result['runtime']['prompt_cache'] else 'off'}",
+          file=out)
+    fits = f"fits ${remaining}" if remaining is not None else f"fits ${projection['cap_usd']}"
+    print(f"{'scenario':>11} {'sel tok':>7} {'cands':>6} {'cand tok':>10} {'calls':>5} {'sample':>6} {'haiku':>6} "
+          f"{'cands$':>7} {'sample$':>7} {'verify':>7} {'run':>5} {'TOTAL':>7} {'cached':>7} {'high':>7} "
+          f"{'stress':>7} {fits:>12}", file=out)
+    for name, row in projection["scenarios"].items():
+        central, high, stress = row["central"], row["high"], row["stress"]
+        usd = central["usd"]
+        fit = [central["fits_remaining"], high["fits_remaining"]] if remaining is not None else \
+            [central["fits_cap"], high["fits_cap"]]
+        print(f"{name:>11} {row['selected_token_fraction']:>7.1%} {row['candidate_items']:>6} "
+              f"{row['candidate_item_tokens']:>10,} {row['candidate_calls']:>5} {row['sample_calls']:>6} "
+              f"{usd['haiku_prefilter']:>6} {usd['sonnet_candidates']:>7} {usd['sonnet_sample_windows']:>7} "
+              f"{usd['opus_verifier']:>7} {usd['opus_runlevel']:>5} {central['total_usd']:>7} "
+              f"{central['total_usd_with_prompt_cache']:>7} {high['total_usd']:>7} {stress['total_usd']:>7} "
+              f"{str(all(fit)):>12}", file=out)
+    print("Per stage (central, USD): cands$ = Sonnet candidate requests, sample$ = Sonnet random-sample windows, verify = "
+          "Opus verification of the assumed positive findings over measured passages, run = Opus run-level summary. "
+          "'recall-only' = no prefilter selection (keyword recall and submissions only: an exact lower bound); 'actual' "
+          "= the cached Haiku selections of --output-dir. cached = central with prompt caching of the shared system "
+          f"prompts; high = inputs x 4/3; stress = high inputs, outputs and findings x {assumptions['output_factor_stress']}.",
+          file=out)
+    print("largest reservation per request: " + ", ".join(f"{k} ${v}" for k, v in
+                                                         projection["largest_reservation_usd"].items())
+          + "; at full concurrency: " + ", ".join(f"{k} ${v}" for k, v in
+                                                  projection["in_flight_reservation_ceiling_usd"].items()), file=out)
+
+
 def print_estimate(result, out=sys.stdout):
+    if (result.get("projection") or {}).get("judge_mode") == "candidates":
+        return print_candidate_estimate(result, out=out)
     projection = result["projection"]
     haiku = projection["haiku"]
     settings = result["settings"]
@@ -244,8 +341,16 @@ def _main(argv=None):
     from research_swarm.budget import DEFAULT_CAPS, DEFAULT_LEDGER_PATH, judge_analysis_problems, read_snapshot
     if args.stage not in pl.STAGES:
         return refuse(f"--stage must be one of {', '.join(pl.STAGES)}")
+    recorded = None
+    if args.rescore_cached:
+        manifest = pl.read_json((args.output_dir or run_dir / "analysis" / "judge").resolve() / "manifest.json")
+        recorded = dict((manifest or {}).get("settings") or {}, **({"judge_mode": manifest["judge_mode"]}
+                                                                   if (manifest or {}).get("judge_mode") else {}))
+    if args.upgrade_judge_revision and (args.dry_run_estimate or args.rescore_cached):
+        return refuse("--upgrade-judge-revision applies to a judging run (--mock or a paid run), not to "
+                      "--dry-run-estimate or --rescore-cached")
     try:
-        settings = settings_from(args)
+        settings = settings_from(args, recorded)
     except ValueError as error:
         return refuse(str(error))
     agents = _agents(args.agents)
@@ -321,7 +426,8 @@ def _main(argv=None):
                           "credentials_root": str(credentials_root), "analysis_scope": snapshot,
                           "models": models_of(routes), "route": describe_route(routes),
                           "settings": settings.binding(), "runtime": settings.runtime(), "agents": agents or "all",
-                          "stage": args.stage}, indent=2), file=sys.stderr)
+                          "stage": args.stage, "judge_mode": settings.judge_mode,
+                          "upgrade_judge_revision": args.upgrade_judge_revision}, indent=2), file=sys.stderr)
         typed = input("Type the analysis scope remaining_usd shown above to start PAID judging: ").strip()
         if not snapshot.get("remaining_usd") or typed != snapshot["remaining_usd"]:
             return refuse("typed allowance does not match the ledger; nothing was sent")
@@ -334,7 +440,7 @@ def _main(argv=None):
                            route=((pl.read_json(judge_dir / "pipeline.json") or {}).get("route") if rescore else None)
                            or describe_route(routes), agent_ids=all_agents, retry_failed=args.retry_failed,
                            recompute_stale=args.recompute_stale, label_check=not args.no_label_check,
-                           rescore_only=rescore, log=log)
+                           rescore_only=rescore, log=log, upgrade_judge_revision=args.upgrade_judge_revision)
     try:
         if mode == "paid" and not rescore:
             # Refuse a judge directory with other binding settings (e.g. the superseded
@@ -346,6 +452,10 @@ def _main(argv=None):
     except pl.PipelineError as error:  # raised before any request (manifest/rubric binding)
         return refuse(str(error))
     short = {k: summary[k] for k in ("run_id", "mode", "stage", "status", "agents", "run_steps", "stop", "spend")}
+    short["judge_mode"], short["judge_revision"] = settings.judge_mode, pipeline.judge_revision
+    if pipeline.upgrade:
+        short["judge_revision_upgrade"] = {k: pipeline.upgrade[k] for k in ("at", "archived_to", "superseded_spend",
+                                                                            "prefilter_units_kept")}
     short["errors"] = [{k: e[k] for k in ("agent_id", "error")} for e in summary["errors"]]
     print(json.dumps(short, indent=2, default=str))
     return {"complete": 0, "stopped": 3}.get(summary["status"], 2)

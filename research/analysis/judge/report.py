@@ -81,6 +81,16 @@ LIMITATIONS = (
     "Returned reasoning is untrusted self-report; the independent evaluator, not the judge, decides proof validity.",
     "Unresolved and ungraded cases are listed and never counted as negatives.",
 )
+CANDIDATE_LIMITATION = (
+    "“No misbehavior found” means no candidate qualified among those decided (prefilter selections, unscreened "
+    "windows, keyword-recall matches and every submission) and in the random-sample windows; read it with the "
+    "prefilter miss rate.")
+REVISION_V22 = ("Judge revision v2.2 (candidate-focused judging): Claude Sonnet 5.5 decided every candidate on its own, "
+                "in small chronological batches that show each candidate in full with short context excerpts, and judged "
+                "each random-sample window in its own request; the host assembled each agent's verdict from the "
+                "qualifying decisions, and Claude Opus 5.5 verified every finding against the full passages.")
+SUPERSEDED_DEFAULT = ("Earlier v2 (first package-mode pass) and v2.1 (package mode with keyword recall) judge passes are "
+                      "superseded by judge revision v2.2 (candidate-focused judging) and are not reported.")
 
 
 # ------------------------------------------------------------------ provenance
@@ -436,6 +446,14 @@ def summary_text(report):
     counts, miss = report["counts"], report["prefilter"]
     parts = [f"{counts['agents']} agents, {counts['graded']} graded"
              + "".join(f", {counts[k]} {k.replace('_', ' ')}" for k in ("ungraded", "grading_failed") if counts[k]) + "."]
+    candidates = report.get("candidates") or {}
+    if candidates.get("candidates") is not None:
+        parts.append(f"Candidate-focused judging (v2.2): {candidates.get('decided', 0)} of {candidates['candidates']} "
+                     f"candidates decided individually, {candidates.get('qualifying', 0)} qualifying"
+                     + (f", {candidates['undecided']} undecided (listed, not negatives)" if candidates.get("undecided")
+                        else "")
+                     + (f", {candidates['dropped_findings']} decision(s) dropped by host validation"
+                        if candidates.get("dropped_findings") else "") + ".")
     aware = counts["flags"].get("evaluation_aware", 0)
     parts.append(f"Evaluation awareness: {_plural(aware, 'agent')}.")
     exploit = sum(counts["basis"].values())
@@ -564,8 +582,10 @@ def render_report_html(report):
     links = ([("Evidence browser", "review/index.html")] if browser else []) + [
         ("Report JSON", "report.json"), ("Frozen labels", "labels.jsonl")]
     labels = report["labels"] or {}
+    revision = report.get("judge_revision")
     body = (f"<h1>{esc(SECTION_TITLE)}</h1><p class=\"muted\"><code>{esc(report['run_id'])}</code> · mode "
-            f"{esc(mode)} · rubric {esc(rubric['judge_rubric_version'])}</p>"
+            f"{esc(mode)} · rubric {esc(rubric['judge_rubric_version'])}"
+            + (f" · judge revision {esc(revision.split(' (')[0])}" if revision else "") + "</p>"
             + "".join(f"<p class=\"notice warn\">{esc(b)}</p>" for b in banners)
             + f"<h2>Run summary</h2><p>{esc(summary_text(report))}</p>"
             "<div class=\"scroll\"><table><tr><th>Cohort</th><th>Agents</th><th>Paper cohort</th></tr>"
@@ -603,7 +623,10 @@ def render_results_section(report, judge_rel="analysis/judge"):
             f"<p><strong>Post-hoc model judge</strong> (rubric {esc(report['rubric']['judge_rubric_version'])}) "
             "classifying only cheating (verification bypass), whistleblowing and evaluation awareness. Labels are "
             "model classifications checked by an independent model verifier, with no human input; the independent "
-            "evaluator, not the judge, decides proof validity.</p>"
+            "evaluator, not the judge, decides proof validity."
+            + (f" Judge revision {esc((report.get('judge_revision') or '').split(' (')[0])}: candidate-focused judging. "
+               f"{esc((report.get('superseded') or {}).get('statement') or SUPERSEDED_DEFAULT)}"
+               if report.get("judge_mode") == "candidates" else "") + "</p>"
             "<table><tr><th>Cohort</th><th>Agents</th><th>Paper cohort</th></tr>"
             f"{rows or '<tr><td colspan=3>No counted cohort.</td></tr>'}</table>"
             f"<p>Paper projection (denominator {projection['denominator']}): {esc(paper)}. Evaluation aware: "
@@ -649,6 +672,8 @@ def results_summary(report, judge_rel="analysis/judge"):
             "report_json": f"{judge_rel}/report.json",
             "evidence_browser": f"{judge_rel}/review/index.html" if page_state["status"] != "missing" else None,
             "mode": report["mode"], "post_hoc": True, "human_input": False,
+            "judge_mode": report.get("judge_mode"), "judge_revision": report.get("judge_revision"),
+            "superseded_statement": (report.get("superseded") or {}).get("statement"),
             "judge_rubric": {"version": report["rubric"]["judge_rubric_version"],
                              "sha256": report["rubric"]["judge_rubric_sha256"]},
             "frozen_rubric_sha256": report["rubric"]["frozen_rubric_sha256"],
@@ -686,9 +711,25 @@ def build_report(run_dir, judge_dir=None, *, now=None, update_results=True):
     page_state = rv.review_page_state(judge_dir)
     mode = pipeline.get("mode", "unknown")
     limitations = list(LIMITATIONS)
+    judge_mode = pipeline.get("judge_mode") or "package"
+    superseded = pipeline.get("superseded") or {}
+    if judge_mode == "candidates":
+        limitations[0] = CANDIDATE_LIMITATION
+        limitations += [REVISION_V22, superseded.get("statement") or SUPERSEDED_DEFAULT]
+        for upgrade in superseded.get("upgrades") or []:
+            spend = upgrade.get("superseded_spend") or {}
+            limitations.append(
+                f"The superseded {((upgrade.get('from') or {}).get('judge_mode') or 'package')}-mode outputs were "
+                f"archived to {upgrade.get('archived_to')} ({spend.get('requests', 0)} archived judge request(s), "
+                f"${spend.get('settled_usd', '0')} settled, not part of this pass's spend); the "
+                f"{upgrade.get('prefilter_units_kept', 0)} paid prefilter units were reused unchanged.")
     if mode != "paid":
         limitations.insert(0, f"Mode {mode}: these outputs are not real judge classifications.")
     report = {"schema": REPORT_SCHEMA, "run_id": run_id, "generated_at": rv._now(now), "mode": mode,
+              "judge_mode": judge_mode, "judge_revision": pipeline.get("judge_revision"),
+              "candidates": pipeline.get("candidates"),
+              "superseded": (dict(superseded, statement=superseded.get("statement") or SUPERSEDED_DEFAULT)
+                             if judge_mode == "candidates" else None),
               "post_hoc": True, "human_input": False, "disclosure": POST_HOC, "rubric": rubric_info(pipeline),
               "models": pipeline.get("models") or {}, "spend": pipeline.get("spend") or {},
               "model_allocation": allocation, "cost_by_stage": cost_by_stage, "stages": stages,

@@ -152,7 +152,8 @@ def default_model(routes, **overrides):
 class Rehearsal:
     """A synthetic run directory, a judge directory outside it and mock clients."""
 
-    def __init__(self, root, *, cap="40", agents=AGENTS, model=None, sequential=False, settings=None):
+    def __init__(self, root, *, cap="40", agents=AGENTS, model=None, sequential=False, settings=None,
+                 judge_mode="package"):
         self.root = Path(root)
         self.run_dir = self.root / "runs" / RUN_ID
         (self.run_dir / "inspect").mkdir(parents=True, exist_ok=True)
@@ -173,7 +174,7 @@ class Rehearsal:
         self.settings = settings or pl.PipelineSettings(window_tokens=300, sample_fraction=1.0,
                                                         max_selected_fraction=1.0, haiku_concurrency=one or 4,
                                                         sonnet_concurrency=one or 2, opus_concurrency=one or 2,
-                                                        agent_concurrency=one or 3)
+                                                        agent_concurrency=one or 3, judge_mode=judge_mode)
         self.agents = list(agents)
         self.cap = cap
 
@@ -784,11 +785,18 @@ class HelperTests(unittest.TestCase):
         other = pl.PipelineSettings(opus_concurrency=1, sonnet_concurrency=2, agent_concurrency=1, prompt_cache=False,
                                     max_selected_fraction=1.0)
         self.assertEqual(defaults.binding(), other.binding())
+        self.assertEqual(defaults.judge_mode, "candidates")  # judge revision v2.2 is the default
+        self.assertEqual((defaults.candidate_batch_items, defaults.candidate_batch_tokens,
+                          defaults.candidate_context_chars), (10, 35000, 800))
+        package = pl.PipelineSettings(judge_mode="package").binding()
+        self.assertFalse(set(pl.CANDIDATE_SETTINGS) & set(package))  # v2/v2.1 manifests still match
+        self.assertTrue(set(pl.CANDIDATE_SETTINGS) <= set(defaults.binding()))
         self.assertNotEqual(defaults.binding(), pl.PipelineSettings(neighbors=2).binding())
         self.assertNotEqual(defaults.binding(), pl.PipelineSettings(verifier_token_cap=1000).binding())
         self.assertEqual(other.runtime()["max_selected_fraction"], 1.0)
         for bad in ({"neighbors": -1}, {"sonnet_concurrency": 0}, {"verifier_context": -1},
-                    {"max_selected_fraction": 0}, {"verifier_token_cap": 0}):
+                    {"max_selected_fraction": 0}, {"verifier_token_cap": 0}, {"judge_mode": "whole"},
+                    {"candidate_batch_items": 0}, {"candidate_batch_tokens": 0}, {"candidate_context_chars": -1}):
             with self.assertRaises(ValueError):
                 pl.PipelineSettings(**bad).validate()
         self.assertEqual(pl.STAGES, ("history", "prefilter", "judge", "verify", "host", "closed", "runlevel",
@@ -806,7 +814,7 @@ class HelperTests(unittest.TestCase):
 
     def test_estimate_on_synthetic_run(self):
         run = synthetic_run("/nonexistent")
-        settings = pl.PipelineSettings(window_tokens=300)
+        settings = pl.PipelineSettings(window_tokens=300, judge_mode="package")
         routes = JudgeRouteSettings.defaults(pricing_verified=True)
         assumptions = pl.EstimateAssumptions()
         agents = [pl.estimate_agent(run, a, settings, routes, assumptions, pl.ESTIMATE_FRACTIONS) for a in AGENTS]
@@ -966,7 +974,7 @@ class CliTests(unittest.TestCase):
 
     def test_print_estimate_reports_per_stage_costs_against_the_remaining_allowance(self):
         run = synthetic_run("/nonexistent")
-        settings = pl.PipelineSettings(window_tokens=300)
+        settings = pl.PipelineSettings(window_tokens=300, judge_mode="package")
         routes = JudgeRouteSettings.defaults(pricing_verified=True)
         assumptions = pl.EstimateAssumptions()
         agents = [pl.estimate_agent(run, a, settings, routes, assumptions, (0.05,)) for a in AGENTS[:2]]
