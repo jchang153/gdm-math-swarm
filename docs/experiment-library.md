@@ -115,6 +115,51 @@ review new data sources before publishing. Never point it at a host home directo
 repository root, credential directory, or launch phase directory. All generated
 records remain Git-ignored; commit only code and researcher documentation.
 
+## Behavior judge outputs
+
+The post-hoc transcript judge (docs/plan.md, October 17, 2026) writes researcher-only
+records under `RUN/analysis/judge/`. There is no human marking step: the judge's
+adversarially verified labels are the reported labels (docs/plan.md, superseding decision
+"no human marks"). The pipeline's report stage builds both outputs; to rebuild them from
+saved records without any model call, run
+`python -m research.analysis.judge.review build --run-dir RUN` and then
+`python -m research.analysis.judge.report --run-dir RUN` (all `PYTHONPATH=src:.`).
+`review/` is a read-only findings browser: `review/index.html` lists every finding,
+refuted ones included and labelled, with the verifier's verdict and the model that
+verified it, every agent's dimensions and cohort, and the run-level results;
+`review/agents/<agent>.html` shows each agent's full evidence passages. It has no form
+controls, scripts or browser storage. `review/manifest.json` records the SHA-256 of every
+input and page. The report adds a marked section to `results.html`, a `behavior_judge`
+key to `results.json` (including the model allocation and cost per stage), and the index
+builder links `analysis/judge/report.html`.
+
+Rule applied by `prepare_hf_library.py`: judge outputs are published only from a `paid`
+run whose findings browser and report still match the judge outputs. It refuses
+`rehearsal`/unknown-mode outputs, a missing findings browser or report, a judge input or
+browser page whose SHA-256 differs from `review/manifest.json`, a judge output added after
+the browser was built, an agent page the current build did not produce (remove pages left by
+an earlier build; nothing is deleted automatically), a `report.json` not rebuilt after the
+current browser, and a `results.html` judge section without its judge directory. Within
+`analysis/judge/` only an allowlist is copied: `report.html`, `report.json`, `labels.jsonl`,
+`pipeline.json`, `run_level.json`, `review/index.html`, `review/manifest.json`,
+`review/agents/`, `agents/` and `packages/`. Everything else stays local and is listed in `archive-manifest.json` under
+`behavior_judge`, notably `raw/` provider request/response archives, `units/`, any ledger
+copy and any other file under `review/` (for example marks files left by the withdrawn
+spot-check design). The library already publishes each run's complete raw records (Inspect
+logs with returned reasoning, private-file snapshots, conference database), so judge input
+packages add no new transcript exposure; their host-only evaluator and statement-defect
+context is researcher material for this private Space. Raw provider archives duplicate the
+packages and add provider request metadata, which the library does not publish. Credentials
+and auth caches are never included.
+
+Adding judge outputs to an already published run changes its `results.html`,
+`results.json` and catalogue entry. `publish_hf_library.py` refuses changes to existing
+run files by design, so that needs a separately reviewed maintenance update like the
+October 16 repairs, after a user decision. For `cache100-20261016T020259Z` the user
+decided on such a narrow update (docs/plan.md, October 17, 2026): it replaces only that
+run's `results.html`, `results.json` and catalogue entry and adds the judge files, and it
+no longer waits for any spot-check. Other runs need their own decision.
+
 ## Uploading and preserving other collaborators' experiments
 
 Authenticate with the official HF CLI, entering credentials privately. If login

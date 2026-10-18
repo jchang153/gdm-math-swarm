@@ -18,7 +18,16 @@ ledger lives outside run scratch (``DEFAULT_LEDGER_PATH``). The only cap change 
 ``raise_cap()``: an explicit, user-approved raise of one scope to its current
 approved value in ``DEFAULT_CAPS`` (e.g. a ledger created while the compatibility
 cap was $0), recorded in the ``cap_changes`` audit table. Caps are never lowered
-and recorded spending is never touched.
+and recorded spending is never touched. The one other audited change is
+``raise_judge_analysis_cap()``: the October 17 transcript-judge authorization raises
+the untouched ``analysis`` scope from $5 to $40 once (see its docstring);
+``raise_cap(path, "analysis", 40, note)`` delegates to it.
+
+``DEFAULT_CAPS["analysis"]`` is the approved $40. A ledger whose analysis cap is still
+the prior $5 (the audited judge raise not yet applied) opens with the default caps
+unchanged: it keeps enforcing $5 and is never raised implicitly, so other tools
+(reconciliation, the pilot runtime) keep working before the raise. Any other
+difference from ``DEFAULT_CAPS`` still refuses to open.
 """
 from __future__ import annotations
 
@@ -54,7 +63,13 @@ CACHE_REPEAT_PRIOR_HELD_USD = "2.75986035"
 CACHE_REPEAT_PRIOR_COMMITTED_USD = "207.809660142"
 CACHE_REPEAT_CAP_USD = "307.809660142"
 CACHE_REPEAT_PRIOR_CALLS_SHA256 = "5e0678ca0dd35c661d0633644d5461459f54910c3876f9296cc57216880199c9"
-DEFAULT_CAPS = {"pilot": CACHE_REPEAT_CAP_USD, "analysis": 5, "compatibility": 2}
+# October 17, 2026 (docs/plan.md "Transcript behavior judge specified, October 17,
+# 2026", Spending row): the analysis allowance is $40 for judging
+# cache100-20261016T020259Z, reached on the authoritative ledger only through the one
+# audited raise ``raise_judge_analysis_cap`` (from the prior $5). See below.
+JUDGE_ANALYSIS_PRIOR_CAP_USD = "5"
+JUDGE_ANALYSIS_CAP_USD = "40"
+DEFAULT_CAPS = {"pilot": CACHE_REPEAT_CAP_USD, "analysis": JUDGE_ANALYSIS_CAP_USD, "compatibility": 2}
 
 # How a settled amount was established. Only these bases release a reservation.
 # ``unbilled_error``: the provider rejected the request before any generation
@@ -279,13 +294,21 @@ def raise_cap(path, scope, new_cap, approval_note):
     decision made it $2), which ``BudgetLedger`` otherwise refuses to open. Only an
     increase to exactly ``DEFAULT_CAPS[scope]`` is accepted, ``approval_note`` must
     record the user's approval, and recorded spending is untouched (prior costs and
-    holds stay counted against the raised cap). Never called automatically.
+    holds stay counted against the raised cap). Never called automatically. The
+    ``analysis`` scope is delegated to ``raise_judge_analysis_cap`` (the only approved
+    analysis raise, with its lineage binding and audit note).
     """
     note = str(approval_note or "").strip()
     if not note:
         raise ValueError("A cap raise requires a note recording the user's approval")
     if scope not in DEFAULT_CAPS:
         raise ValueError(f"Unknown budget scope {scope!r}")
+    if scope == "analysis":
+        # The only approved analysis raise is the audited transcript-judge raise, with
+        # its lineage binding (scripts/preflight.py --raise-ledger-cap analysis).
+        if units(new_cap) != units(JUDGE_ANALYSIS_CAP_USD):
+            raise ValueError(f"The analysis cap may only be raised to its approved value (${JUDGE_ANALYSIS_CAP_USD})")
+        return raise_judge_analysis_cap(path, note)
     target = units(new_cap)
     if target != units(DEFAULT_CAPS[scope]) and not (
             scope == "pilot" and target in (units(FIRST_REPEAT_CAP_USD), units(EIGHT_GIB_CAP_USD))):
@@ -323,6 +346,114 @@ def raise_cap(path, scope, new_cap, approval_note):
     return {"scope": scope, "previous_cap_usd": usd(row[0]), "new_cap_usd": usd(target), "note": note}
 
 
+# User decision, October 17, 2026 (docs/plan.md "Transcript behavior judge specified,
+# October 17, 2026", Spending row): a $40 analysis allowance for judging
+# cache100-20261016T020259Z, enforced by the shared ledger's ``analysis`` scope through
+# an audited cap raise. The raise is bound to the authoritative ledger lineage (the
+# three audited pilot raises, so a replacement ledger is refused) and to an untouched
+# analysis scope ($5 cap, no recorded requests, no earlier analysis raise), so exactly
+# $40 is available. ``DEFAULT_CAPS["analysis"]`` is $40 (JUDGE_ANALYSIS_CAP_USD, defined
+# above); before the raise is applied, BudgetLedger opens a $5 analysis scope with the
+# default caps without changing it (``_pending_judge_analysis_raise``). A ledger created
+# fresh with the default caps has a $40 analysis scope but no audit row and no pilot
+# lineage, so the judge refuses it (never a replacement ledger).
+JUDGE_ANALYSIS_PLAN_SECTION = "Transcript behavior judge specified, October 17, 2026"
+JUDGE_ANALYSIS_RUN_ID = "cache100-20261016T020259Z"
+JUDGE_ANALYSIS_PILOT_CAP_HISTORY = (("20", FIRST_REPEAT_CAP_USD), (FIRST_REPEAT_CAP_USD, EIGHT_GIB_CAP_USD),
+                                    (EIGHT_GIB_CAP_USD, CACHE_REPEAT_CAP_USD))
+
+
+def _judge_analysis_problems(db, *, after_raise):
+    """Problems binding the judge analysis raise to this ledger ([] when bound)."""
+    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if not {"scopes", "calls"} <= tables:
+        return ["not a budget ledger; never create a replacement ledger"]
+    analysis = _snapshot(db).get("analysis")
+    if analysis is None:
+        return ["ledger has no analysis scope; never create a replacement ledger"]
+    problems = []
+    expected_cap = JUDGE_ANALYSIS_CAP_USD if after_raise else JUDGE_ANALYSIS_PRIOR_CAP_USD
+    if Decimal(analysis["cap_usd"]) != Decimal(expected_cap):
+        problems.append(f"judge analysis raise requires the analysis cap at ${expected_cap} "
+                        f"(found ${analysis['cap_usd']})")
+    if not after_raise:
+        count = db.execute("SELECT COUNT(*) FROM calls WHERE scope='analysis'").fetchone()[0]
+        if count:
+            problems.append(f"analysis scope already has {count} recorded request(s) (spending, holds or "
+                            "violations); the $40 judge allowance requires an untouched analysis scope")
+    changes = (db.execute("SELECT previous_cap,new_cap,note FROM cap_changes WHERE scope='analysis' ORDER BY id")
+               .fetchall() if "cap_changes" in tables else [])
+    expected_changes = ([(units(JUDGE_ANALYSIS_PRIOR_CAP_USD), units(JUDGE_ANALYSIS_CAP_USD))]
+                        if after_raise else [])
+    if [(row[0], row[1]) for row in changes] != expected_changes:
+        problems.append("analysis cap history differs from the single audited judge raise "
+                        f"(${JUDGE_ANALYSIS_PRIOR_CAP_USD} -> ${JUDGE_ANALYSIS_CAP_USD})")
+    elif after_raise and not str(changes[0][2]).startswith(JUDGE_ANALYSIS_PLAN_SECTION):
+        problems.append("analysis cap raise is not bound to the transcript judge authorization")
+    pilot = (db.execute("SELECT previous_cap,new_cap FROM cap_changes WHERE scope='pilot' ORDER BY id").fetchall()
+             if "cap_changes" in tables else [])
+    if pilot != [(units(a), units(b)) for a, b in JUDGE_ANALYSIS_PILOT_CAP_HISTORY]:
+        problems.append("judge analysis raise requires the authoritative ledger's three audited pilot raises; "
+                        "never use a replacement ledger")
+    return problems
+
+
+def judge_analysis_problems(path):
+    """Read-only check that ``path`` carries the applied, audited judge analysis raise."""
+    if not Path(path).exists():
+        return ["judge analysis requires the existing authoritative ledger; never create a replacement ledger"]
+    with closing(_read_only(path)) as db:
+        return _judge_analysis_problems(db, after_raise=True)
+
+
+def raise_judge_analysis_cap(path, approval_note):
+    """One-time audited raise of the ``analysis`` scope from $5 to $40 (judge authorization).
+
+    Follows ``raise_cap``: an existing ledger only, a note recording the user's approval
+    (stored after the plan-section binding in ``cap_changes``), one exclusive
+    transaction, caps never lowered and recorded spending untouched. Refuses unless the
+    ledger is the authoritative lineage (the three audited pilot raises) and the
+    analysis scope is untouched ($5 cap, no recorded requests, no earlier raise), so a
+    second application is refused. Never called automatically; apply only on the
+    authoritative ledger immediately before the first paid judge request, after the
+    user's confirmation (plan: "confirm with the user immediately before the first
+    paid request"). Command line: ``scripts/preflight.py --raise-ledger-cap analysis
+    --approval-note TEXT --i-have-user-approval`` (through ``raise_cap``).
+    """
+    note = str(approval_note or "").strip()
+    if not note:
+        raise ValueError("A cap raise requires a note recording the user's approval")
+    path = Path(path)
+    if not path.exists():
+        raise ValueError(f"No ledger at {path}; the judge raise applies only to the existing authoritative ledger")
+    recorded = (f"{JUDGE_ANALYSIS_PLAN_SECTION} ({JUDGE_ANALYSIS_RUN_ID}; analysis "
+                f"${JUDGE_ANALYSIS_PRIOR_CAP_USD} -> ${JUDGE_ANALYSIS_CAP_USD}): {note}")
+    with closing(sqlite3.connect(str(path), timeout=30)) as db, db:
+        db.execute("PRAGMA busy_timeout=30000")
+        db.execute("BEGIN EXCLUSIVE")
+        problems = _judge_analysis_problems(db, after_raise=False)
+        if problems:
+            raise ValueError("; ".join(problems))
+        previous = db.execute("SELECT cap FROM scopes WHERE name='analysis'").fetchone()[0]
+        target = units(JUDGE_ANALYSIS_CAP_USD)
+        if previous >= target:  # defensive; the problem check already pins $5
+            raise ValueError("analysis cap is already at or above the judge allowance; caps are never lowered or reset")
+        db.execute("UPDATE scopes SET cap=? WHERE name='analysis'", (target,))
+        db.execute("INSERT INTO cap_changes (scope,previous_cap,new_cap,note) VALUES (?,?,?,?)",
+                   ("analysis", previous, target, recorded))
+    return {"scope": "analysis", "previous_cap_usd": usd(previous), "new_cap_usd": usd(target), "note": recorded}
+
+
+def _pending_judge_analysis_raise(scope, existing_cap_units, configured_cap):
+    """True for an analysis scope still at the prior $5 opened with the approved $40.
+
+    Such a ledger is opened unchanged (it keeps enforcing $5): the raise happens only
+    through the audited ``raise_judge_analysis_cap``, never implicitly on open.
+    """
+    return (scope == "analysis" and existing_cap_units == units(JUDGE_ANALYSIS_PRIOR_CAP_USD)
+            and units(configured_cap) == units(JUDGE_ANALYSIS_CAP_USD))
+
+
 class BudgetLedger:
     """SQLite BEGIN IMMEDIATE admission is shared by all processes and agents.
 
@@ -345,6 +476,8 @@ class BudgetLedger:
             for scope, cap in (caps or DEFAULT_CAPS).items():
                 existing = db.execute("SELECT cap FROM scopes WHERE name=?", (scope,)).fetchone()
                 if existing and existing[0] != units(cap):
+                    if _pending_judge_analysis_raise(scope, existing[0], cap):
+                        continue  # keeps the ledger's $5 until the audited judge raise
                     raise ValueError(f"Existing ledger {scope} cap {usd(existing[0])} differs from {cap}; never reset "
                                      "spending (an approved raise uses budget.raise_cap, via scripts/preflight.py "
                                      "--raise-ledger-cap)")

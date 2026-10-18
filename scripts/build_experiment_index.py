@@ -48,7 +48,10 @@ def build(runs, hosted=False):
             for name, target in [('Report', 'results.html'), ('Transcripts', 'transcripts/index.html'),
                                  ('Conference', 'conference-view/index.html'),
                                  ('Inspect View', 'inspect-view/index.html'),
-                                 ('Timeline', 'analysis/timeline.md'), ('Inspect logs', 'inspect/')]:
+                                 ('Timeline', 'analysis/timeline.md'),
+                                 # Researcher-only post-hoc transcript judge (docs/plan.md, Oct 17).
+                                 ('Behavior judge', 'analysis/judge/report.html'),
+                                 ('Inspect logs', 'inspect/')]:
                 if (path.parent / target).exists():
                     entry['links'][name] = quote(path.parent.name, safe='') + '/' + target
             entries.append(entry)
