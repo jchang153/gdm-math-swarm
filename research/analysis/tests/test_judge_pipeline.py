@@ -618,6 +618,8 @@ class RefusalRetryDeniedTests(unittest.TestCase):
         self.assertEqual(result["error"]["reason"], "refusal_retry_not_admitted")
         self.assertEqual(result["error"]["stop_reason"], "budget_admission_denied")
         self.assertTrue(pipe.stop["refusal_retry_denied"])
+        # v2.3: on resume, a multi-item unit refused this way is re-sent one item per request.
+        self.assertIn(result["error"]["reason"], pl.REFUSED_REASONS)
 
 
 def finding(fid, category="cheating", claim="level", level="explored", evidence=("A01.t0001.r",)):

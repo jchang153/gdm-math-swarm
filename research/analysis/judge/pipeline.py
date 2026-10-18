@@ -144,8 +144,9 @@ RUBRIC_VERSION = "gdm-judge-rubric/2"
 STAGES = ("history", "prefilter", "judge", "verify", "host", "closed", "runlevel", "report")
 MODES = ("paid", "rehearsal")
 FINAL = ("ok", "ungraded", "grading_failed")
-# A unit refused on both attempts (content filter): v2.3 re-sends its items one per request.
-REFUSED_REASONS = ("refused_twice",)
+# A unit refused on both attempts (content filter), or refused once with its retry not admitted
+# by the ledger: v2.3 re-sends its items one per request (never the refused request itself).
+REFUSED_REASONS = ("refused_twice", "refusal_retry_not_admitted")
 MODEL_KEYS = ("haiku", "sonnet", "opus")
 STAGE_MODELS = {"prefilter": "haiku", "judge": "sonnet", "verify": "opus", "runlevel": "opus"}
 ALLOCATION = (
