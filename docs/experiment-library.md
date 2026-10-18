@@ -391,3 +391,21 @@ connection became unavailable before deep navigation could be confirmed. Keep th
 limitation explicit; SDK-authenticated HTTP checks are not an end-to-end browser test.
 Backups and verification receipts remain under the ignored
 `runs/phase-b/space-navigation-fix-20261016/` directory.
+
+The behavior-judge maintenance update of `cache100-20261016T020259Z` (judge revision v2.3,
+docs/plan.md "v2.3 judge run completed") is published at private revision
+`b9649a2ef2370541a9f2ba73a25954583658c885`, made with `scripts/maintain_hf_run.py` from base
+revision `c7a906bf6307952fbe57c3cebbebcc1eb079387a` in 8 guarded commits. It replaced only
+that run's `results.html` and `results.json`, added the 61 allowlisted judge files, and
+regenerated the catalogue, where only this run's entry changed: it gained a "Behavior judge"
+link, and the other 3 entries were reproduced byte for byte. Verification against the base
+revision found 10,165 files: the 66 planned files matched and 10,098 were preserved unchanged.
+`.gitattributes` was unchanged. Hosted routes returned HTTP 200 inline with a signed session:
+the catalogue, the run report, the judge report, the evidence browser index, an agent page and
+the transcripts. Served HTML differs from the bundle only by HF's injected creator-metadata
+script, and `results.json` matched exactly. These are SDK/HTTP checks, not interactive browser
+tests. The Space keeps the earlier final-history transcript exports for all four runs; the
+full-history exports regenerated locally on October 18 were not uploaded (24 local differences
+skipped), because republishing them would need its own decision. The before-inventory,
+original copies, plan, receipt and hosted verification are in the ignored
+`runs/phase-b/judge-publication-cache100-20261016T020259Z/attempt-1/` directory.
