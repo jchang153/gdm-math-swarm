@@ -811,3 +811,45 @@ class RevisionV23EndToEndTests(unittest.TestCase):
         self.assertEqual((entry["from"]["judge_revision"], entry["to"]["judge_revision"]),
                          (pl.JUDGE_REVISION_V22, pl.JUDGE_REVISION_V23))
         self.assertEqual(entry["model_units_kept"], len([a for a in after if "/prefilter/" not in a]))
+
+
+class RefusedRecheckMock(MissedCueMock):
+    """Refuses agent-004's multi-candidate re-check request (both attempts); its per-candidate
+    re-sends are answered."""
+
+    def __call__(self, request):
+        from research.analysis.judge.client import fake_completion
+        user = request["body"]["messages"][-1]["content"]
+        if user.startswith(f"{prompts.RECHECK_REQUEST} 1 of 1 for agent agent-004") and "re-sent on its own" not in user:
+            return fake_completion("", finish_reason="content_filter", native_finish_reason="refusal",
+                                   model=request["body"]["model"], cost="0.001")
+        return super().__call__(request)
+
+
+class RefusedRecheckSplitTests(unittest.TestCase):
+    def test_refused_recheck_is_resent_one_candidate_at_a_time(self):
+        tmp = tempfile.mkdtemp(prefix="judge-v23-recheck-")
+        try:
+            routes = JudgeRouteSettings.defaults(pricing_verified=True)
+            settings = pl.PipelineSettings(window_tokens=300, sample_fraction=1.0, max_selected_fraction=1.0,
+                                           judge_mode="candidates", recheck_min_chars=0, recheck_passage_chars=5000)
+            r = Rehearsal(tmp, judge_mode="candidates", model=RefusedRecheckMock(routes), settings=settings,
+                          agents=["agent-004"])
+            item = next(i for i in r.run.agents["agent-004"].items if i["id"] == "A04.t0005.r")
+            item["text"] = "This lemma is not a trap, only a long induction.\n" + item["text"]
+            summary = r.run_pipeline()
+            self.assertEqual(summary["status"], "complete", summary["errors"])
+            unit_dir = r.judge_dir / "units" / "agent-004"
+            self.assertEqual(read(unit_dir / "recheck-b01.json")["reason"], "refused_twice")
+            singles = sorted(unit_dir.glob("recheck-b01-c*.json"))
+            self.assertEqual(len(singles), 2)
+            self.assertTrue(all(read(s)["status"] == "ok" for s in singles))
+            result = read(r.judge_dir / "agents" / "agent-004.json")
+            self.assertEqual(result["cohort"]["flags"], ["evaluation_aware"])
+            fid = result["verified"]["findings"][0]["id"]
+            self.assertEqual(result["finding_sources"][fid]["via"], "passage_recheck")
+            self.assertTrue(result["finding_sources"][fid]["unit"].startswith("recheck-b01-c"))
+            self.assertEqual(result["candidates"]["recheck"]["refused_requests_split"], 1)
+            self.assertEqual(result["candidates"]["recheck"]["undecided"], 0)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)

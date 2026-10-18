@@ -948,6 +948,22 @@ def split_candidate_request(history, structural, request, sources, settings):
     return out
 
 
+def split_recheck_request(history, structural, request, passages, sources):
+    """Judge revision v2.3: one single-candidate KEYWORD PASSAGE RE-CHECK request per candidate
+    of a re-check request that was refused, each rendered as ``CANDIDATE 1 OF 1`` with the same
+    passages and a note naming the refused request (``split_of``)."""
+    items = list(_get(history, "items", []) or [])
+    by_id = {item["id"]: item for item in items}
+    record = validate.Record(history, None, structural)
+    out = []
+    for number, ident in enumerate(request["ids"], 1):
+        block = prompts.render_candidate_passages(1, 1, by_id[ident], [tuple(s) for s in passages[ident]],
+                                                  record=record, sources=sources.get(ident, ()))
+        out.append(dict(request, ids=[ident], blocks=[block], index=f"{request['index']}.{number}",
+                        split_of=request["index"], estimated_tokens=estimate_tokens(block) + 1))
+    return out
+
+
 def keyword_passages(text, half):
     """Sorted, disjoint ``(start, end)`` character spans of ``text`` reaching ``half``
     characters either side of every RECALL_PATTERN match (overlapping spans merged)."""
@@ -2001,9 +2017,23 @@ class Pipeline:
 
         async def recheck_batch(request):
             name = f"recheck-b{request['index']:02d}"
+            unit_id = f"{agent_id}.judge.recheck.b{request['index']:02d}"
             system, user = prompts.recheck_messages(request, info=self.info)
-            return [(name, request, await decide(name, f"{agent_id}.judge.recheck.b{request['index']:02d}",
-                                                 "judge_recheck", system, user, request["ids"]), "recheck")]
+            unit = await decide(name, unit_id, "judge_recheck", system, user, request["ids"])
+            if not (unit["status"] == "ungraded" and unit.get("reason") in REFUSED_REASONS and len(request["ids"]) > 1):
+                return [(name, request, unit, "recheck")]
+            subs = split_recheck_request(history, structural, request, recheck["passages"], plan["sources"])
+
+            async def single(number, sub):
+                sub_system, sub_user = prompts.recheck_messages(sub, info=self.info)
+                return (f"{name}-c{number:02d}", sub,
+                        await decide(f"{name}-c{number:02d}", f"{unit_id}.c{number:02d}", "judge_recheck",
+                                     sub_system, sub_user, sub["ids"]), "recheck")
+            done = await asyncio.gather(*(single(n, sub) for n, sub in enumerate(subs, 1)), return_exceptions=True)
+            for result in done:
+                if isinstance(result, BaseException):
+                    raise result
+            return [(name, request, unit, "refused_split")] + list(done)
 
         async def gather(jobs):
             results = await asyncio.gather(*jobs, return_exceptions=True)
@@ -2050,8 +2080,11 @@ class Pipeline:
                                self.settings)
         recheck_results = await gather([recheck_batch(r) for r in recheck["requests"]])
         recheck_undecided, recheck_failed, recheck_qualifying = [], [], 0
-        for name, request, unit, _ in recheck_results:
+        for name, request, unit, role in recheck_results:
             units[name] = unit
+            if role == "refused_split":
+                split_units.append(name)
+                continue
             if unit["status"] != "ok":
                 recheck_failed.append(name)
                 recheck_undecided += [{"item": i, "unit": name, "problems": [f"unit {unit['status']}: "
@@ -2070,11 +2103,12 @@ class Pipeline:
                   "batches": len(plan["requests"]), "sample_windows": len(sample_judged),
                   "sample_windows_failed": len(sample_failed),
                   "by_source": {s: sum(1 for v in plan["sources"].values() if s in v) for s in CANDIDATE_SOURCES},
-                  "refused_batches_split": len(split_units),
+                  "refused_batches_split": sum(1 for n in split_units if not n.startswith("recheck-")),
                   "recheck": {"candidates": len(recheck["candidates"]),
                               "passages": sum(len(v) for v in recheck["passages"].values()),
                               "requests": len(recheck["requests"]), "qualifying": recheck_qualifying,
-                              "undecided": len(recheck_undecided), "failed_requests": len(recheck_failed)}}
+                              "undecided": len(recheck_undecided), "failed_requests": len(recheck_failed),
+                              "refused_requests_split": sum(1 for n in split_units if n.startswith("recheck-"))}}
         primary = [u for n, u in units.items() if not n.startswith(("sample/", "recheck-")) and n not in split_units] \
             or [u for n, u in units.items() if n.startswith("sample/")]
         out = {"mode": "candidates", "package": package, "parts": None, "units": units, "verdict": None,
