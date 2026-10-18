@@ -1715,14 +1715,18 @@ class Pipeline:
                 run_steps["footnote"] = self.footnote_stage()
             if self.reached("closed"):
                 run_steps["closed"] = self.closed_stage()
+            runlevel_stopped = False
             if self.reached("runlevel"):
                 try:
                     run_steps["runlevel"] = await self.runlevel_stage()
                 except BudgetStop:
                     run_steps["runlevel"] = "stopped"
-            if self.stop is None and self.reached("host"):
+                    runlevel_stopped = True
+            # Every agent completed before the run-level stage, so a budget stop there keeps the
+            # host-written run summary and still writes the labels and the report.
+            if (self.stop is None or runlevel_stopped) and self.reached("host"):
                 self.write_labels()
-            if self.reached("report") and self.stop is None:
+            if self.reached("report") and (self.stop is None or runlevel_stopped):
                 run_steps["report"] = self.report_stage()
         status = "stopped" if self.stop else ("error" if self.errors else "complete")
         summary = {"run_id": self.run_id, "mode": self.mode, "stage": self.stage, "status": status,
@@ -2418,10 +2422,19 @@ class Pipeline:
             cohort_counts=cohort.run_counts_v2({a: r["cohort"] for a, r in results.items() if r.get("cohort")}),
             miss_rate=miss, communications=communications)
         system, user = prompts.runlevel_messages_v2(package, info=self.info)
-        unit = await self.unit(STAGE_MODELS["runlevel"], self.judge_dir / "units" / "run" / "runlevel.json",
-                               unit_id=f"{self.run_id}.runlevel", purpose="runlevel", system=system, user=user,
-                               max_tokens=self.settings.max_tokens["runlevel"],
-                               parse=_schema_parser(schema.parse_runlevel_v2, agent_ids=agents))
+        try:
+            unit = await self.unit(STAGE_MODELS["runlevel"], self.judge_dir / "units" / "run" / "runlevel.json",
+                                   unit_id=f"{self.run_id}.runlevel", purpose="runlevel", system=system, user=user,
+                                   max_tokens=self.settings.max_tokens["runlevel"],
+                                   parse=_schema_parser(schema.parse_runlevel_v2, agent_ids=agents))
+        except BudgetStop as stop:
+            # The ledger could not admit the run-level request: the host-written summary stands
+            # in (stated as such), and a later resume with allowance can still request it.
+            document.update(status="ungraded", reason=f"not requested: {stop}", source="host",
+                            model=self.model_id(STAGE_MODELS["runlevel"]),
+                            summary=host_runlevel_summary(results, len(self._all_agents or agents), miss), result=None)
+            write_json(self.judge_dir / "run_level.json", document)
+            raise
         ok = unit["status"] == "ok"
         document.update(status=unit["status"], reason=unit.get("reason"), source="model" if ok else "host",
                         model=self.model_id(STAGE_MODELS["runlevel"]),

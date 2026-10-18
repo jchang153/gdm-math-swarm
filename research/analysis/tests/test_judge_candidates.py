@@ -853,3 +853,32 @@ class RefusedRecheckSplitTests(unittest.TestCase):
             self.assertEqual(result["candidates"]["recheck"]["undecided"], 0)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class RunLevelBudgetStopTests(unittest.TestCase):
+    def test_budget_stop_at_run_level_keeps_host_summary_and_writes_the_report(self):
+        tmp = tempfile.mkdtemp(prefix="judge-v23-runlevel-")
+        try:
+            r = Rehearsal(tmp, judge_mode="candidates")
+            self.assertEqual(r.run_pipeline()["status"], "complete")
+            for path in (r.judge_dir / "units" / "run" / "runlevel.json", r.judge_dir / "run_level.json",
+                         r.judge_dir / "report.html", r.judge_dir / "labels.jsonl"):
+                path.unlink()
+            pipe = r.pipeline()
+            original = pipe.unit
+
+            async def unit(model, path, **kwargs):
+                if kwargs.get("purpose") == "runlevel":
+                    pipe.stop = {"reason": "budget_admission_denied", "unit_id": kwargs["unit_id"]}
+                    raise pl.BudgetStop("budget_admission_denied")
+                return await original(model, path, **kwargs)
+            pipe.unit = unit
+            summary = asyncio.run(pipe.run())
+            self.assertEqual((summary["status"], summary["run_steps"]["runlevel"]), ("stopped", "stopped"))
+            document = read(r.judge_dir / "run_level.json")
+            self.assertEqual((document["source"], document["status"]), ("host", "ungraded"))
+            self.assertIn("budget_admission_denied", document["reason"])
+            self.assertTrue((r.judge_dir / "report.html").exists())
+            self.assertTrue((r.judge_dir / "labels.jsonl").exists())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
