@@ -1130,6 +1130,50 @@ class ScriptTests(GateFixture):
             self.assertEqual(module.main(["--ledger", str(self.ledger), "--run-dir", str(run_dir)]), 0)
         self.assertIn("Dry run", out.getvalue())
 
+    def test_reconcile_judge_holds_with_expected_models_and_credentials_root(self):
+        module = load_script("reconcile_ledger")
+        ledger = BudgetLedger(self.ledger)
+        opus, sonnet, pilot = (ledger.reserve(scope, agent, 1) for scope, agent in (
+            ("analysis", "judge-opus:verifier:agent-008.verify-b01"),
+            ("analysis", "judge-sonnet:judge_recheck:agent-020.judge.recheck.b01"), ("pilot", "agent-001")))
+        for request in (opus, sonnet, pilot):
+            ledger.settle(request, None)
+        from research_swarm.budget import list_requests
+        fetched = {"gen-o": {"model": "anthropic/claude-opus-5.5", "total_cost": 0},
+                   "gen-s": {"model": "anthropic/claude-sonnet-5.5", "total_cost": 0.0021}}
+        ids = {opus: "gen-o", sonnet: "gen-s"}
+        entries = module.reconcile_requests(ledger, list_requests(self.ledger, scope="analysis"), ids, fetched.get)
+        self.assertEqual({e["outcome"] for e in entries}, {"model_mismatch"})  # default: the pilot model only
+        entries = module.reconcile_requests(ledger, list_requests(self.ledger, scope="analysis"), ids, fetched.get,
+                                            model_id=("anthropic/claude-opus-5.5", "anthropic/claude-sonnet-5.5"))
+        self.assertEqual({e["request_id"]: e["outcome"] for e in entries}, {opus: "reconciled", sonnet: "reconciled"})
+        snapshot = read_snapshot(self.ledger)
+        self.assertEqual((snapshot["analysis"]["uncertain_requests"], snapshot["pilot"]["uncertain_requests"]), (0, 1))
+        self.assertEqual(snapshot["analysis"]["settled_usd"], "0.0021")
+        creds = self.tmp / "creds"
+        creds.mkdir()
+        other = ledger.reserve("analysis", "judge-opus:verifier:agent-020.verify-b01", 1)
+        ledger.settle(other, None)
+        seen = []
+
+        def key_loader(root):
+            seen.append(Path(root))
+            return "k"
+        with mock.patch("research_swarm.secrets.load_openrouter_key", side_effect=key_loader), \
+                mock.patch.object(module, "fetch_generation",
+                                  return_value={"model": "anthropic/claude-opus-5.5", "total_cost": 0.5}), \
+                redirect_stdout(io.StringIO()) as out:
+            code = module.main(["--ledger", str(self.ledger), "--scope", "analysis", "--map", f"{other}=gen-x",
+                                "--expect-model", "anthropic/claude-opus-5.5", "--credentials-root", str(creds),
+                                "--i-have-user-approval"])
+        self.assertEqual(code, 0)
+        self.assertEqual(seen, [creds])
+        self.assertIn('"reconciled"', out.getvalue())
+        self.assertEqual(read_snapshot(self.ledger)["pilot"]["uncertain_requests"], 1)  # other scopes untouched
+        audit = json.loads(sorted((self.ledger.parent / "reconciliations").glob("reconcile-*.json"))[-1].read_text())
+        self.assertEqual((audit["expected_models"], audit["scope"], audit["credential_recorded"]),
+                         (["anthropic/claude-opus-5.5"], "analysis", False))
+
     def test_reconcile_exception_path_hold_listing_and_manual_settlement(self):
         module = load_script("reconcile_ledger")
         ledger = BudgetLedger(self.ledger)

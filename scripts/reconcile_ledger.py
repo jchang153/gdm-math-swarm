@@ -18,6 +18,11 @@ file <ledger dir>/reconciliations/reconcile-<UTC>.json. Holds without a generati
 id, or whose generation is not found, model-mismatched or lacks total_cost, stay
 unresolved. Nothing is ever released automatically.
 
+Judge (analysis-scope) holds: the judge records each request's generation ids in its unit
+files, not in runtime.jsonl; pass them with --map, restrict the run with --scope analysis,
+name the judge models with --expect-model (repeatable; default the pilot model) and point
+--credentials-root at the checkout holding the host .env (default: this checkout).
+
 Manual settlement (an exception-path hold without a generation id, after the user
 has identified its charge, e.g. in the OpenRouter activity log by time and model,
 and approved the amount): ``--manual REQUEST_ID COST --note TEXT`` (repeatable
@@ -28,6 +33,8 @@ planned settlements.
 
     .venv/bin/python scripts/reconcile_ledger.py --run-dir runs/pilot-...           # dry run
     .venv/bin/python scripts/reconcile_ledger.py --run-dir runs/pilot-... --i-have-user-approval
+    .venv/bin/python scripts/reconcile_ledger.py --scope analysis --map REQUEST_ID=gen-... \\
+        --expect-model anthropic/claude-opus-5.5 --credentials-root ~/gdm-math-swarm --i-have-user-approval
     .venv/bin/python scripts/reconcile_ledger.py --manual REQUEST_ID 0.0123 \\
         --note "OpenRouter activity 2026-10-20 14:03Z, deepseek route; user approved in chat" --i-have-user-approval
 """
@@ -129,7 +136,10 @@ def fetch_generation(generation_id, key):
 
 
 def reconcile_requests(ledger, requests, generation_ids, fetch, *, model_id=MODEL_ID, allow_reserved=False):
-    """Reconcile each hold that has a generation id; returns audit entries (no secrets)."""
+    """Reconcile each hold that has a generation id; returns audit entries (no secrets).
+    ``model_id``: the expected model (a string, or a tuple of accepted models); a generation
+    whose reported model contains none of them is left unresolved (``model_mismatch``)."""
+    accepted = (model_id,) if isinstance(model_id, str) else tuple(model_id)
     entries = []
     for item in requests:
         entry = {**item, "generation_id": generation_ids.get(item["request_id"])}
@@ -147,7 +157,7 @@ def reconcile_requests(ledger, requests, generation_ids, fetch, *, model_id=MODE
             else:
                 entry.update(model=data.get("model"), provider_name=data.get("provider_name"),
                              reported_total_cost=data.get("total_cost"))
-                if model_id not in str(data.get("model") or ""):
+                if not any(m in str(data.get("model") or "") for m in accepted):
                     entry["outcome"] = "model_mismatch"
                 elif data.get("total_cost") is None:
                     entry["outcome"] = "no_total_cost"
@@ -235,6 +245,11 @@ def main(argv=None):
                         help="settle this hold at COST USD by hand (basis manual_reconciliation; repeatable); "
                              "needs --note and --i-have-user-approval")
     parser.add_argument("--note", help="audit note for --manual: where the amount came from and the user's approval")
+    parser.add_argument("--expect-model", action="append",
+                        help=f"accepted generation model (repeatable; default {MODEL_ID}), e.g. the judge's "
+                             "anthropic/claude-opus-5.5 and anthropic/claude-sonnet-5.5")
+    parser.add_argument("--credentials-root", type=Path, default=ROOT,
+                        help="checkout whose private .env holds the host key (default: this checkout)")
     parser.add_argument("--include-stale-reserved", action="store_true",
                         help="also reconcile 'reserved' holds; only after their run has fully stopped")
     parser.add_argument("--i-have-user-approval", action="store_true",
@@ -271,11 +286,13 @@ def main(argv=None):
         print("No ledger: nothing to reconcile.")
         return 0
     from research_swarm.secrets import load_openrouter_key
-    key = load_openrouter_key(ROOT)
+    key = load_openrouter_key(args.credentials_root)
     ledger = BudgetLedger(args.ledger)
+    models = tuple(args.expect_model or (MODEL_ID,))
     entries = reconcile_requests(ledger, requests, generation_ids, lambda gid: fetch_generation(gid, key),
-                                 allow_reserved=args.include_stale_reserved)
-    path = write_audit(args.ledger, ledger, entries, mode="generation_lookup")
+                                 model_id=models, allow_reserved=args.include_stale_reserved)
+    path = write_audit(args.ledger, ledger, entries, mode="generation_lookup", expected_models=list(models),
+                       scope=args.scope)
     print(json.dumps({"audit": str(path), "outcomes": {e["request_id"]: e["outcome"] for e in entries}}, indent=2))
     return 0
 
