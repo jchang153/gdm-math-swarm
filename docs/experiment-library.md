@@ -117,25 +117,32 @@ records remain Git-ignored; commit only code and researcher documentation.
 
 ## Behavior judge outputs
 
-The post-hoc transcript judge (docs/plan.md, October 17, 2026) writes researcher-only
-records under `RUN/analysis/judge/`. There is no human marking step: the judge's
-adversarially verified labels are the reported labels (docs/plan.md, superseding decision
-"no human marks"). The pipeline's report stage builds both outputs; to rebuild them from
-saved records without any model call, run
-`python -m research.analysis.judge.review build --run-dir RUN` and then
+The post-hoc transcript judge (docs/plan.md, October 17, 2026; since the evening decision the
+misbehavior-focused judge, rubric `gdm-judge-rubric/2`) writes researcher-only records under
+`RUN/analysis/judge/`. There is no human marking step: the judge's adversarially verified
+labels are the reported labels (docs/plan.md, superseding decision "no human marks"). The
+pipeline's report stage builds both outputs; to rebuild them from saved records without any
+model call, run `python -m research.analysis.judge.review build --run-dir RUN` and then
 `python -m research.analysis.judge.report --run-dir RUN` (all `PYTHONPATH=src:.`).
-`review/` is a read-only findings browser: `review/index.html` lists every finding,
-refuted ones included and labelled, with the verifier's verdict and the model that
-verified it, every agent's dimensions and cohort, and the run-level results;
-`review/agents/<agent>.html` shows each agent's full evidence passages. It has no form
-controls, scripts or browser storage. `review/manifest.json` records the SHA-256 of every
-input and page. The report adds a marked section to `results.html`, a `behavior_judge`
-key to `results.json` (including the model allocation and cost per stage), and the index
-builder links `analysis/judge/report.html`.
+`report.html` is the five-minute read: a short run summary with cohort counts beside the
+paper projection, the run-level spread and whistleblowing-reach summary, one row per agent
+(cohort, flags, one-sentence note), short evidence cards only for agents with a verified
+finding, the statement-defect footnote, the unresolved and ungraded list, spend by stage and
+model, and the rubric hash with the post-hoc disclosure. `review/` is the read-only evidence
+browser behind it: `review/index.html` is a compact index of every agent's cohort, flags and
+category levels plus the full run-level record; `review/agents/<agent>.html` exists only for
+agents with at least one judge finding (verified, refuted or unverified, each labelled) and
+shows the verifier's verdict and model and the full evidence passages. It has no form
+controls, scripts or browser storage. `review/manifest.json` (schema
+`gdm-judge-review-manifest/3`) records the SHA-256 of every input and page. The report adds a
+marked section to `results.html`, a `behavior_judge` key to `results.json` (including the model
+allocation and cost per stage), and the index builder links `analysis/judge/report.html`.
 
 Rule applied by `prepare_hf_library.py`: judge outputs are published only from a `paid`
-run whose findings browser and report still match the judge outputs. It refuses
-`rehearsal`/unknown-mode outputs, a missing findings browser or report, a judge input or
+run whose evidence browser and report still match the judge outputs. It refuses
+`rehearsal`/unknown-mode outputs, outputs of the superseded 12-dimension judge (a
+`report.json` schema other than `gdm-judge-report/3` or a browser manifest other than
+`gdm-judge-review-manifest/3`), a missing evidence browser or report, a judge input or
 browser page whose SHA-256 differs from `review/manifest.json`, a judge output added after
 the browser was built, an agent page the current build did not produce (remove pages left by
 an earlier build; nothing is deleted automatically), a `report.json` not rebuilt after the

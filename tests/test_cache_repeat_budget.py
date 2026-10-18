@@ -13,7 +13,8 @@ from research_swarm import budget, launch_gates
 class CachedRepeatBudgetTests(unittest.TestCase):
     def setUp(self):
         # These fixtures model the cached-repeat boundary, before the October 17 audited
-        # judge raise of the analysis scope ($5 -> $40, budget.raise_judge_analysis_cap).
+        # judge raises of the analysis scope ($5 -> $40 -> $50, budget.raise_judge_analysis_cap
+        # and budget.raise_judge_analysis_second_cap).
         caps = mock.patch.dict(budget.DEFAULT_CAPS, {'analysis': budget.JUDGE_ANALYSIS_PRIOR_CAP_USD})
         caps.start()
         self.addCleanup(caps.stop)

@@ -16,15 +16,18 @@ from space_navigation import private_space_navigation
 
 ROOT = Path(__file__).resolve().parents[1]
 # Behavior judge outputs under RUN/analysis/judge/ (docs/experiment-library.md, "Behavior
-# judge outputs"): published only from a paid run whose report and read-only findings
-# browser match the judge outputs. There is no human marking step (docs/plan.md, "no human
-# marks"). Allowlist; everything else stays local, notably raw/ provider request/response
-# archives, units/, any ledger copy and any file in review/ the browser did not produce.
+# judge outputs"): published only from a paid run of the misbehavior judge (rubric v2,
+# docs/plan.md "misbehavior-focused judge") whose report and read-only evidence browser
+# match the judge outputs. There is no human marking step (docs/plan.md, "no human marks").
+# Allowlist; everything else stays local, notably raw/ provider request/response archives,
+# units/, any ledger copy and any file in review/ the browser did not produce. Outputs of the
+# superseded 12-dimension judge (report schema /2, browser manifest /2) are refused.
 JUDGE_FILES = frozenset({'report.html', 'report.json', 'labels.jsonl', 'pipeline.json', 'run_level.json',
                          'review/index.html', 'review/manifest.json'})
 JUDGE_DIRS = frozenset({'packages', 'agents', 'review/agents'})
 JUDGE_SECTION_MARKER = '<!-- behavior-judge:start -->'
-JUDGE_REVIEW_SCHEMA = 'gdm-judge-review-manifest/2'
+JUDGE_REVIEW_SCHEMA = 'gdm-judge-review-manifest/3'
+JUDGE_REPORT_SCHEMA = 'gdm-judge-report/3'
 
 
 def judge_excluded(relative):
@@ -49,27 +52,30 @@ def _sha256(path):
 
 
 def judge_review_problems(judge, report):
-    """Why the findings browser and report do not match the judge outputs (empty if they do)."""
+    """Why the evidence browser and report do not match the judge outputs (empty if they do)."""
     manifest_path = judge / 'review' / 'manifest.json'
     try:
         manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
     except ValueError:
         return ['review/manifest.json is not valid JSON']
     if not isinstance(manifest, dict) or manifest.get('schema') != JUDGE_REVIEW_SCHEMA:
-        return [f'review/manifest.json must have schema {JUDGE_REVIEW_SCHEMA} (rebuild the findings browser)']
+        return [f'review/manifest.json must have schema {JUDGE_REVIEW_SCHEMA} (rebuild the evidence browser)']
     problems = []
+    if report.get('schema') != JUDGE_REPORT_SCHEMA:
+        problems.append(f'report.json must have schema {JUDGE_REPORT_SCHEMA} (outputs of the superseded '
+                        '12-dimension judge are not published)')
     page = report.get('review_page') if isinstance(report.get('review_page'), dict) else {}
     if page.get('status') != 'current' or page.get('manifest_file_sha256') != _sha256(manifest_path):
-        problems.append('report.json was not rebuilt after the current findings browser')
+        problems.append('report.json was not rebuilt after the current evidence browser')
     recorded = manifest.get('inputs_sha256') if isinstance(manifest.get('inputs_sha256'), dict) else {}
     for name, digest in sorted(recorded.items()):
         path = judge / name
         if path.is_symlink() or not path.is_file() or _sha256(path) != digest:
-            problems.append(f'judge input changed after the findings browser was built: {name}')
+            problems.append(f'judge input changed after the evidence browser was built: {name}')
     for pattern in ('agents/*.json', 'packages/*.json', 'run_level.json', 'pipeline.json', 'labels.jsonl'):
         for path in sorted(judge.glob(pattern)):
             if path.relative_to(judge).as_posix() not in recorded:
-                problems.append(f'judge output added after the findings browser was built: '
+                problems.append(f'judge output added after the evidence browser was built: '
                                 f'{path.relative_to(judge).as_posix()}')
     pages = manifest.get('pages') if isinstance(manifest.get('pages'), dict) else {}
     if 'index.html' not in pages:
@@ -77,17 +83,17 @@ def judge_review_problems(judge, report):
     for name, digest in sorted(pages.items()):
         path = judge / 'review' / name
         if path.is_symlink() or not path.is_file() or _sha256(path) != digest:
-            problems.append(f'findings browser page missing or edited: review/{name}')
+            problems.append(f'evidence browser page missing or edited: review/{name}')
     for path in sorted((judge / 'review' / 'agents').rglob('*')):
         if path.is_file() and path.relative_to(judge / 'review').as_posix() not in pages:
             problems.append(f'review/{path.relative_to(judge / "review").as_posix()} was not produced by the '
-                            'current findings browser build')
+                            'current evidence browser build')
     return problems
 
 
 def judge_publication(source):
     """None when a run has no judge outputs; else the included/excluded judge paths.
-    Refuses rehearsal or unknown-mode outputs and a report or findings browser that no
+    Refuses rehearsal or unknown-mode outputs and a report or evidence browser that no
     longer matches the judge outputs."""
     judge = source / 'analysis' / 'judge'
     if not judge.exists() and not judge.is_symlink():
@@ -99,14 +105,15 @@ def judge_publication(source):
     for name in ('report.json', 'review/manifest.json', 'review/index.html'):
         path = judge / name
         if path.is_symlink() or not path.is_file():
-            raise ValueError(f'Behavior judge outputs need {path.relative_to(source)}: build the findings '
+            raise ValueError(f'Behavior judge outputs need {path.relative_to(source)}: build the evidence '
                              'browser and the report before publishing')
     report = json.loads((judge / 'report.json').read_text(encoding='utf-8'))
     if report.get('mode') != 'paid':
         raise ValueError(f"Refusing to publish behavior judge outputs in mode {report.get('mode')!r}")
     problems = judge_review_problems(judge, report)
     if problems:
-        raise ValueError('Behavior judge findings browser or report is stale; rebuild both before publishing:\n  '
+        raise ValueError('Behavior judge evidence browser or report is stale or superseded; rebuild both before '
+                         'publishing:\n  '
                          + '\n  '.join(problems[:20]))
     files = [p.relative_to(source) for p in sorted(judge.rglob('*'))
              if p.is_symlink() or p.is_file()]

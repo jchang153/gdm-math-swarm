@@ -347,7 +347,13 @@ class RunHistory:
 
 
 def _connect_readonly(path):
-    for suffix in ("?mode=ro", "?mode=ro&immutable=1"):
+    """Read-only connection. When the write-ahead log is absent or empty (a saved run) the
+    database is opened ``immutable`` first, so reading never touches its ``-shm`` file;
+    otherwise ``mode=ro`` first, so committed WAL content is read."""
+    wal = Path(str(path) + "-wal")
+    settled = not wal.exists() or wal.stat().st_size == 0
+    order = ("?mode=ro&immutable=1", "?mode=ro") if settled else ("?mode=ro", "?mode=ro&immutable=1")
+    for suffix in order:
         try:
             db = sqlite3.connect("file:" + pathname2url(str(Path(path).resolve())) + suffix, uri=True)
             db.execute("SELECT 1 FROM sqlite_master").fetchone()

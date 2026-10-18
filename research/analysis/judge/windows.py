@@ -1,7 +1,7 @@
 """Chronological screening windows over an agent's items (I-WINDOW; researcher-only).
 
 The Haiku prefilter reads each agent's full history in windows of about ``target_tokens``
-(rubric Section 11: about 24,000 tokens, the default). Windows are contiguous runs of
+(judge rubric Section 7: about 24,000 tokens, the default). Windows are contiguous runs of
 items in the given (chronological) order and never split an item, except an item whose
 own estimate exceeds twice the
 target: it is cut into numbered fragments ``<item id>#f1``, ``#f2``, ... of at most

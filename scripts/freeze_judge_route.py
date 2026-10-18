@@ -2,9 +2,9 @@
 """Freeze the transcript judge's OpenRouter route and prices. Unpaid; no credential is read.
 
 Researcher-only (docs/plan.md "Transcript behavior judge specified, October 17, 2026",
-as superseded by "downsized model allocation"; rubric Section 11). Fetches the PUBLIC,
-unauthenticated catalog (GET /api/v1/models and /api/v1/models/<id>/endpoints for
-Claude Haiku 5.5, Claude Sonnet 5.5 and Claude Opus 5.5), validates the pinned
+as superseded by "downsized model allocation" and the misbehavior-focused judge; judge
+rubric Section 7). Fetches the PUBLIC, unauthenticated catalog (GET /api/v1/models and
+/api/v1/models/<id>/endpoints for Claude Haiku 5.5, Claude Sonnet 5.5 and Claude Opus 5.5), validates the pinned
 Anthropic endpoint of each with research.analysis.judge.route.build_route (model ids,
 availability, required parameters, effort control and the frozen effort, per-request
 fees, discounts, internal-reasoning prices, output ceiling, and cache read/write prices

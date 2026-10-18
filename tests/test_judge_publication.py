@@ -36,9 +36,11 @@ def _sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def write_judge(run, *, mode='paid', report_current=True, stale_input=False, legacy_marks=False):
-    """Synthetic judge outputs with a read-only findings browser bound to its inputs
-    (review.py manifest schema gdm-judge-review-manifest/2) and a report bound to it."""
+def write_judge(run, *, mode='paid', report_current=True, stale_input=False, legacy_marks=False,
+                report_schema='gdm-judge-report/3'):
+    """Synthetic judge outputs with a read-only evidence browser bound to its inputs
+    (review.py manifest schema gdm-judge-review-manifest/3, misbehavior judge rubric v2) and a
+    report bound to it."""
     judge = run / 'analysis' / 'judge'
     files = {'report.html': '<!doctype html><html><head></head><body>J</body></html>',
              'labels.jsonl': '{"label": "detection"}\n', 'pipeline.json': '{"mode": "%s"}' % mode,
@@ -59,13 +61,13 @@ def write_judge(run, *, mode='paid', report_current=True, stale_input=False, leg
     inputs = {name: _sha(judge / name) for name in ('agents/agent-001.json', 'labels.jsonl', 'packages/agent-001.json',
                                                     'pipeline.json', 'run_level.json',
                                                     'units/agent-001/verify-b01.json')}
-    manifest = {'schema': 'gdm-judge-review-manifest/2', 'run_id': run.name, 'read_only': True,
+    manifest = {'schema': 'gdm-judge-review-manifest/3', 'run_id': run.name, 'read_only': True,
                 'inputs_sha256': inputs, 'pages': {'index.html': _sha(judge / 'review/index.html'),
                                                    'agents/agent-001.html': _sha(judge / 'review/agents/agent-001.html')}}
     (judge / 'review/manifest.json').write_text(json.dumps(manifest))
     manifest_sha = _sha(judge / 'review/manifest.json')
     (judge / 'report.json').write_text(json.dumps({
-        'schema': 'gdm-judge-report/2', 'mode': mode,
+        'schema': report_schema, 'mode': mode,
         'review_page': {'status': 'current', 'manifest_file_sha256': manifest_sha if report_current else '0' * 64}}))
     if stale_input:
         (judge / 'agents/agent-001.json').write_text('{"changed": true}')
@@ -131,7 +133,8 @@ class PrepareJudgeOutputsTests(unittest.TestCase):
             self.assertEqual(entries[0]['links']['Behavior judge'], 'judged-run/analysis/judge/report.html')
 
     def test_rehearsal_or_stale_outputs_refused(self):
-        cases = [{'mode': 'rehearsal'}, {'report_current': False}, {'stale_input': True}]
+        cases = [{'mode': 'rehearsal'}, {'report_current': False}, {'stale_input': True},
+                 {'report_schema': 'gdm-judge-report/2'}]  # a report of the superseded 12-dimension judge
         for judge in cases:
             with self.subTest(judge=judge), tempfile.TemporaryDirectory() as tmp:
                 make_run(Path(tmp) / 'runs', 'judged-run', judge=judge)
@@ -148,11 +151,12 @@ class PrepareJudgeOutputsTests(unittest.TestCase):
             (run / 'analysis/judge/review/agents/agent-099.html').write_text('<html></html>')
             with self.assertRaises(ValueError):
                 self.prepare(tmp, 'judged-run')
-        with tempfile.TemporaryDirectory() as tmp:  # a pre-read-only (spot-check) manifest
-            run = make_run(Path(tmp) / 'runs', 'judged-run', judge={})
-            (run / 'analysis/judge/review/manifest.json').write_text('{"schema": "gdm-judge-review-manifest/1"}')
-            with self.assertRaises(ValueError):
-                self.prepare(tmp, 'judged-run')
+        for schema in ('gdm-judge-review-manifest/1', 'gdm-judge-review-manifest/2'):  # spot-check / 12-dimension
+            with tempfile.TemporaryDirectory() as tmp:
+                run = make_run(Path(tmp) / 'runs', 'judged-run', judge={})
+                (run / 'analysis/judge/review/manifest.json').write_text(json.dumps({'schema': schema}))
+                with self.assertRaises(ValueError):
+                    self.prepare(tmp, 'judged-run')
 
     def test_section_without_judge_directory_refused_and_plain_runs_unchanged(self):
         with tempfile.TemporaryDirectory() as tmp:

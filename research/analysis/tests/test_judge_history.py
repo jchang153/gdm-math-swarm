@@ -435,6 +435,39 @@ class UnitTests(unittest.TestCase):
     def test_estimate_tokens_rounds_up(self):
         self.assertEqual([history.estimate_tokens(s) for s in ("", "a", "abcd", "abcde")], [0, 1, 1, 2])
 
+    def test_readonly_connection_leaves_a_saved_database_untouched_and_reads_a_live_wal(self):
+        import os
+        import sqlite3
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.sqlite"
+            db = sqlite3.connect(path)
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("CREATE TABLE t(x)")
+            db.execute("INSERT INTO t VALUES (1)")
+            db.commit()
+            db.close()
+            wal, shm = Path(f"{path}-wal"), Path(f"{path}-shm")
+            wal.write_bytes(b"")                  # a saved run: empty write-ahead log, stale -shm
+            shm.write_bytes(b"\0" * 32768)
+            os.utime(shm, (1, 1))
+            before = (path.read_bytes(), shm.read_bytes())
+            conn = history._connect_readonly(path)
+            self.assertEqual(conn.execute("SELECT x FROM t").fetchall()[0][0], 1)
+            conn.close()
+            self.assertEqual((path.read_bytes(), shm.read_bytes(), shm.stat().st_mtime), before + (1,))
+            wal.unlink()
+            shm.unlink()
+            writer = sqlite3.connect(path)       # a live database: committed rows only in the WAL
+            writer.execute("PRAGMA journal_mode=WAL")
+            writer.execute("PRAGMA wal_autocheckpoint=0")
+            writer.execute("INSERT INTO t VALUES (2)")
+            writer.commit()
+            self.assertGreater(wal.stat().st_size, 0)
+            conn = history._connect_readonly(path)
+            self.assertEqual(sorted(r[0] for r in conn.execute("SELECT x FROM t")), [1, 2])
+            conn.close()
+            writer.close()
+
     def test_conflicting_tool_result_copies_are_recorded(self):
         def msg(**kw):
             return SimpleNamespace(**kw)

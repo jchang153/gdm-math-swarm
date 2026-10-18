@@ -2,19 +2,20 @@
 
 Researcher-only (docs/plan.md "Transcript behavior judge specified, October 17, 2026",
 rows "Reading strategy", "Route and key", "Refusals" and "Spending", as superseded by
-"Superseding decision (October 17, 2026): downsized model allocation"; rubric Section
-11). Nothing here may enter experimental agent images, containers, workspaces or prompts.
+"Superseding decision (October 17, 2026): downsized model allocation" and "Superseding
+decision (October 17, 2026, evening): misbehavior-focused judge"; judge rubric
+gdm-judge-rubric/2 Section 7). Nothing here may enter experimental agent images,
+containers, workspaces or prompts.
 
 Route (verified against OpenRouter's public catalog and documentation on 2026-10-17;
 scripts/freeze_judge_route.py re-fetches it and writes
 data/validation/judge-route-pricing-<UTC>.json):
 
-* Models (model allocation, rubric Section 11): ``anthropic/claude-haiku-5.5``
+* Models (model allocation, judge rubric Section 7): ``anthropic/claude-haiku-5.5``
   (``"haiku"``, effort ``low``) screens every window; ``anthropic/claude-sonnet-5.5``
   (``"sonnet"``, effort ``high``) performs the per-agent judging (with the 5% recall
-  sample folded into the same call) and verifies context-only findings;
-  ``anthropic/claude-opus-5.5`` (``"opus"``, effort ``high``) verifies nuanced,
-  cohort-deciding findings and performs the run-level synthesis. Effort is sent as Chat
+  sample folded into the same call); ``anthropic/claude-opus-5.5`` (``"opus"``, effort
+  ``high``) re-checks every positive finding and writes the run-level summary. Effort is sent as Chat
   Completions ``reasoning: {"effort": ...}``, which OpenRouter forwards as Anthropic's
   ``output_config.effort`` with adaptive thinking (Claude 5.5 migration guide).
   Thinking budgets are not forwarded for 5.5 models, so none is sent. Opus 5.5 and
@@ -69,17 +70,17 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 PLAN_SECTION = "Transcript behavior judge specified, October 17, 2026"
-ALLOCATION_DECISION = "Superseding decision (October 17, 2026): downsized model allocation"
+ALLOCATION_DECISION = "Superseding decision (October 17, 2026, evening): misbehavior-focused judge"
 MODEL_IDS = {"haiku": "anthropic/claude-haiku-5.5", "sonnet": "anthropic/claude-sonnet-5.5",
              "opus": "anthropic/claude-opus-5.5"}
 MODEL_KEYS = tuple(MODEL_IDS)
-# User decisions ("Reading strategy" and the downsized model allocation): Haiku low
-# effort screens; Sonnet high effort judges and verifies context-only findings; Opus
-# high effort verifies cohort-deciding findings and runs the run-level synthesis.
+# User decisions ("Reading strategy", the downsized allocation and the misbehavior-focused
+# judge): Haiku low effort screens; Sonnet high effort judges; Opus high effort re-checks
+# every positive finding and writes the run-level summary.
 EFFORTS = {"haiku": "low", "sonnet": "high", "opus": "high"}
 VALID_EFFORTS = ("low", "medium", "high", "xhigh", "max")
-# Rubric Section 11 (documentation for callers; the pipeline routes each unit).
-MODEL_ALLOCATION = {"prefilter": ("haiku",), "judge": ("sonnet",), "verifier": ("opus", "sonnet"),
+# Judge rubric Section 7 (documentation for callers; pipeline.STAGE_MODELS routes each unit).
+MODEL_ALLOCATION = {"prefilter": ("haiku",), "judge": ("sonnet",), "verifier": ("opus",),
                     "runlevel": ("opus",)}
 # Default request concurrency per model (configurable per client).
 DEFAULT_CONCURRENCY = {"haiku": 24, "sonnet": 8, "opus": 6}

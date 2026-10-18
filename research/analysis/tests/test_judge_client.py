@@ -2,7 +2,8 @@
 
 No network, no model call, no credential: every request goes to FakeTransport, and
 ledgers are synthetic temporary files reproducing the authoritative lineage (the three
-audited pilot raises) plus the audited $5 -> $40 judge analysis raise. The three models
+audited pilot raises) plus both audited judge analysis raises ($5 -> $40 -> $50; the
+client accepts the ledger only after the second). The three models
 (haiku, sonnet, opus), per-request prompt caching of the system prompt, cache usage and
 cost recording, and the paid-only credentials_root are covered below; the real key
 loader is patched to fail, and fake paths are checked never to open any ``.env``.
@@ -37,8 +38,9 @@ SYSTEM = "You are a careful researcher-side judge."
 USER = "Window A07.w0001: the agent wrote a Lean proof."
 
 
-def make_ledger(folder, *, raise_analysis=True):
-    """Synthetic ledger with the authoritative lineage; optionally the applied judge raise."""
+def make_ledger(folder, *, judge_raises=3):
+    """Synthetic ledger with the authoritative lineage and the first ``judge_raises`` audited
+    judge raises applied (0: $5, 1: $40, 2: $50, 3: $100, the only state the client accepts)."""
     path = Path(folder) / "budget.sqlite"
     ledger = budget.BudgetLedger(path, {"pilot": budget.CACHE_REPEAT_CAP_USD, "analysis": 5, "compatibility": 2})
     ledger.settle(ledger.reserve("pilot", "old-run", 1), ".5")
@@ -46,8 +48,9 @@ def make_ledger(folder, *, raise_analysis=True):
         for previous, new in budget.JUDGE_ANALYSIS_PILOT_CAP_HISTORY:
             db.execute("INSERT INTO cap_changes (scope,previous_cap,new_cap,note) VALUES ('pilot',?,?,?)",
                        (budget.units(previous), budget.units(new), "historical approval fixture"))
-    if raise_analysis:
-        budget.raise_judge_analysis_cap(path, "test fixture approval")
+    for apply in (budget.raise_judge_analysis_cap, budget.raise_judge_analysis_second_cap,
+                  budget.raise_judge_analysis_third_cap)[:judge_raises]:
+        apply(path, "test fixture approval")
     return path
 
 
@@ -177,7 +180,7 @@ class SuccessAndArchiveTests(ClientCase):
                          ("grading_failed", "archive_failed_before_dispatch", 0))
         self.assertEqual(transport.requests, [])
         snap = analysis(self.ledger_path)
-        self.assertEqual((snap["remaining_usd"], snap["unbilled_error_requests"]), ("40", 1))
+        self.assertEqual((snap["remaining_usd"], snap["unbilled_error_requests"]), ("100", 1))
 
 
 class RefusalTests(ClientCase):
@@ -233,7 +236,7 @@ class FailureTests(ClientCase):
                 self.assertEqual(len(transport.requests), 1)
         snap = analysis(self.ledger_path)
         self.assertEqual((snap["remaining_usd"], snap["unbilled_error_requests"], snap["unresolved_requests"]),
-                         ("40", 4, 0))
+                         ("100", 4, 0))
 
     def test_http_5xx_and_408_keep_the_reservation(self):
         for status in (408, 500, 502, 503):
@@ -244,7 +247,7 @@ class FailureTests(ClientCase):
                 self.assertIsNone(result["cost_usd"])
         snap = analysis(self.ledger_path)
         self.assertEqual((snap["uncertain_requests"], snap["settled_requests"]), (4, 0))
-        self.assertEqual(Decimal(snap["held_usd"]) + Decimal(snap["remaining_usd"]), Decimal(40))
+        self.assertEqual(Decimal(snap["held_usd"]) + Decimal(snap["remaining_usd"]), Decimal(100))
         self.assertGreater(Decimal(snap["held_usd"]), 0)
 
     def test_transport_errors(self):
@@ -266,7 +269,7 @@ class FailureTests(ClientCase):
 
     def test_budget_denial_is_never_dispatched(self):
         budget.BudgetLedger(self.ledger_path, {"analysis": budget.JUDGE_ANALYSIS_CAP_USD}).reserve(
-            "analysis", "other-unit-in-flight", "39.99")
+            "analysis", "other-unit-in-flight", "99.99")
         transport = FakeTransport([fake_completion("{}")])
         result = self.run_one(self.client(transport), max_tokens=64000)
         self.assertEqual((result["status"], result["error"]["reason"], result["attempts"]),
@@ -318,7 +321,7 @@ class CredentialAndGateTests(ClientCase):
         client = self.client(transport, key_loader=lambda: FAKE_KEY, verify_limit=verify)
         ok = self.run_one(client, unit_id="k1")
         self.run_one(client, unit_id="k2")
-        self.assertEqual(verified, [(Decimal("40"), True)])  # unlimited-key exception, ledger remaining
+        self.assertEqual(verified, [(Decimal("100"), True)])  # unlimited-key exception, ledger remaining
         self.assertEqual(transport.requests[0]["headers"]["Authorization"], f"Bearer {FAKE_KEY}")
         self.assertNotIn(FAKE_KEY, archived_text(self.archive))
         self.assertIn(judge_client.REDACTION, archived_text(self.archive))
@@ -345,7 +348,7 @@ class CredentialAndGateTests(ClientCase):
     def test_analysis_scope_requires_existing_raised_ledger(self):
         folder = self.root / "unraised"
         folder.mkdir()
-        unraised = make_ledger(folder, raise_analysis=False)
+        unraised = make_ledger(folder, judge_raises=0)
         with self.assertRaises(ValueError):
             JudgeClient("opus", unraised, "analysis", self.archive, settings=settings(), http=FakeTransport())
         absent = self.root / "absent.sqlite"
@@ -355,6 +358,34 @@ class CredentialAndGateTests(ClientCase):
         with self.assertRaises(ValueError):  # unverified pricing refused even offline
             JudgeClient("opus", self.ledger_path, "analysis", self.archive,
                         settings=JudgeRouteSettings.defaults(), http=FakeTransport())
+
+    def test_analysis_scope_accepts_only_after_all_raises(self):
+        """The $40 and $50 ledgers are refused; the third audited raise ($50 -> $100) makes it acceptable."""
+        folder = self.root / "first-raise-only"
+        folder.mkdir()
+        path = make_ledger(folder, judge_raises=1)
+        ledger = budget.BudgetLedger(path)  # default caps open the $40 ledger unchanged
+        ledger.settle(ledger.reserve("analysis", "partial-run", "33"), "32.596031")
+        for model_key in ("haiku", "sonnet", "opus"):
+            with self.subTest(model_key=model_key), self.assertRaises(ValueError) as caught:
+                JudgeClient(model_key, path, "analysis", self.archive, settings=settings(), http=FakeTransport())
+            self.assertIn("analysis cap", str(caught.exception))
+        self.assertEqual((analysis(path)["cap_usd"], analysis(path)["remaining_usd"]), ("40", "7.403969"))
+        budget.raise_judge_analysis_second_cap(path, "test fixture approval")
+        with self.assertRaises(ValueError):  # $50: still one audited raise short
+            JudgeClient("opus", path, "analysis", self.archive, settings=settings(), http=FakeTransport())
+        budget.raise_judge_analysis_third_cap(path, "test fixture approval")
+        transport = FakeTransport([fake_completion("{}", cost=".01")])
+        client = JudgeClient("opus", path, "analysis", self.archive, settings=settings(), http=transport)
+        self.assertEqual(self.run_one(client)["status"], "ok")
+        snap = analysis(path)
+        self.assertEqual((snap["cap_usd"], snap["committed_usd"], snap["remaining_usd"]),
+                         ("100", "32.606031", "67.393969"))
+        # Tampering with the latest raise's binding is refused again.
+        with closing(sqlite3.connect(path)) as db, db:
+            db.execute("UPDATE cap_changes SET note='unbound' WHERE id=(SELECT MAX(id) FROM cap_changes)")
+        with self.assertRaises(ValueError):
+            JudgeClient("opus", path, "analysis", self.archive, settings=settings(), http=FakeTransport())
 
     def test_rehearsal_scope_needs_explicit_caps(self):
         path = self.root / "rehearsal.sqlite"
@@ -504,7 +535,7 @@ class ThreeModelTests(ClientCase):
         self.assertEqual(MODEL_IDS["sonnet"], "anthropic/claude-sonnet-5.5")
         self.assertEqual(EFFORTS, {"haiku": "low", "sonnet": "high", "opus": "high"})
         self.assertEqual(judge_route.MODEL_ALLOCATION["judge"], ("sonnet",))
-        self.assertEqual(judge_route.MODEL_ALLOCATION["verifier"], ("opus", "sonnet"))
+        self.assertEqual(judge_route.MODEL_ALLOCATION["verifier"], ("opus",))
         s = settings()
         self.assertEqual(s.reasoning("sonnet", "high"), {"effort": "high", "exclude": False})
         for key, effort in (("sonnet", "low"), ("haiku", "high"), ("opus", "medium")):
@@ -715,7 +746,7 @@ class CredentialsRootTests(ClientCase):
             client.http = FakeTransport([fake_completion("{}", model=MODEL_IDS["sonnet"])])  # never the network
             result = self.run_one(client, "sonnet")
         loader.assert_called_once_with(folder.resolve())
-        self.assertEqual(verified, [(True, Decimal("40"), True)])
+        self.assertEqual(verified, [(True, Decimal("100"), True)])
         self.assertEqual(result["status"], "ok")
         self.assertEqual(client.http.requests[0]["headers"]["Authorization"], f"Bearer {FAKE_KEY}")
         limit = json.loads((self.archive / "provider-limit-sonnet.json").read_text())

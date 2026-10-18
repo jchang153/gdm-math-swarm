@@ -3,11 +3,12 @@
 docs/plan.md "Transcript behavior judge specified, October 17, 2026" (with the
 "downsized model allocation" decision): OpenRouter with the main host key, provider
 pinned to Anthropic with no fallbacks, real-time requests, the shared ledger's
-``analysis`` scope enforcing the $40 allowance (the pilot's unlimited-key exception
-extends to this analysis), a refused request retried once and then ``ungraded`` (never
-a negative), and a judge model that never silently changes. One client serves one model:
-``"haiku"`` (screening), ``"sonnet"`` (per-agent judging, context-only verification) or
-``"opus"`` (cohort-deciding verification, run level); see route.MODEL_ALLOCATION.
+``analysis`` scope enforcing the $50 allowance (two audited raises, $5 -> $40 -> $50;
+the pilot's unlimited-key exception extends to this analysis), a refused request
+retried once and then ``ungraded`` (never a negative), and a judge model that never
+silently changes. One client serves one model:
+``"haiku"`` (screening), ``"sonnet"`` (per-agent judging) or ``"opus"`` (verification of
+every positive finding, run level); see route.MODEL_ALLOCATION.
 Paid judging stays gated: offline tests and the rehearsal inject ``FakeTransport``;
 the real HTTPS path exists only with ``paid_authorized=True``, which the orchestrator
 passes after the user confirms immediately before the first paid request.
@@ -317,8 +318,9 @@ class JudgeClient:
     the rehearsal pass ``FakeTransport``). ``http=None`` builds the real HTTPS
     transport and is refused unless ``paid_authorized=True``, ``scope="analysis"`` and
     the settings come from a verified freeze record. The ``analysis`` scope requires
-    the existing ledger with the applied audited judge raise
-    (``budget.judge_analysis_problems``); any other scope (offline rehearsal) needs
+    the existing ledger with both applied audited judge raises, the second ($40 -> $50,
+    misbehavior-focused judge) included (``budget.judge_analysis_problems``), and opens
+    it at ``budget.JUDGE_ANALYSIS_CAP_USD``; any other scope (offline rehearsal) needs
     explicit ``ledger_caps`` and a fake transport. ``max_concurrency`` defaults to
     ``route.DEFAULT_CONCURRENCY`` (haiku 24, sonnet 8, opus 6).
 
@@ -368,7 +370,7 @@ class JudgeClient:
                 raise RuntimeError("Paid judging requires settings from a fresh freeze record "
                                    "(JudgeRouteSettings.from_pricing_record)")
         if scope == ANALYSIS_SCOPE:
-            # Never create a replacement ledger, and require the applied audited raise.
+            # Never create a replacement ledger, and require both applied audited raises.
             problems = judge_analysis_problems(self.ledger_path)
             if problems:
                 raise ValueError("Judge analysis ledger refused: " + "; ".join(problems))
@@ -407,7 +409,7 @@ class JudgeClient:
 
         Without a key loader (fake transports) this does nothing. The limit check uses
         the approved unlimited-key exception (plan, Route and key): the ledger, not a
-        provider cap, enforces the $40 allowance. The report (never the key) is
+        provider cap, enforces the $50 allowance. The report (never the key) is
         archived as ``provider-limit-<model>.json``.
         """
         with self._prepare_lock:

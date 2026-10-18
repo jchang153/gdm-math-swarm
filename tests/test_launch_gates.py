@@ -47,7 +47,7 @@ def pilot_config(**overrides):
     config.pop("pilot_prior_settled_usd", None)
     config.pop("pilot_additional_allowance_usd", None)
     # Historical caps, matching GateFixture's patched DEFAULT_CAPS (pilot $20, analysis $5
-    # before the October 17 judge raise; the shipped config now states analysis $40).
+    # before the October 17 judge raises; the shipped config now states analysis $50).
     config.update({"max_pilot_usd": 20, "max_analysis_usd": 5, "verified_integration": True,
                    "paid_launch_enabled": True, "allow_unlimited_provider_key": False, **overrides})
     return config
