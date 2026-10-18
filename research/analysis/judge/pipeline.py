@@ -1231,6 +1231,8 @@ def candidate_note(totals, verdict):
     text += "; " + ("judge findings: " + ", ".join(parts) if parts else "no qualifying candidate")
     if totals.get("undecided"):
         text += f"; {totals['undecided']} candidate(s) undecided (never negatives)"
+    if recheck.get("undecided"):
+        text += f"; {recheck['undecided']} keyword passage re-check(s) undecided (never negatives)"
     return text + "."
 
 
@@ -1515,7 +1517,8 @@ class Pipeline:
         write_json(target / "manifest.json", existing)
         spend = superseded_spend(target)
         prefilter_units = sum(1 for _ in units.glob("*/prefilter/*.json")) if units.is_dir() else 0
-        model_units = (sum(1 for path in units.rglob("*.json") if "prefilter" not in path.parts)
+        model_units = (sum(1 for path in units.rglob("*.json")
+                           if "prefilter" not in path.parts and (read_json(path) or {}).get("schema") == UNIT_SCHEMA)
                        if units.is_dir() and keep_units else 0)
         entry = {"event": "judge_revision_upgrade", "at": at,
                  "from": {"judge_mode": old_mode, "judge_revision": existing.get("judge_revision")
@@ -2286,6 +2289,7 @@ class Pipeline:
         }
         if candidate_mode:
             agent_result["candidates"] = dict(judge.get("totals") or {}, undecided_items=judge.get("undecided") or [],
+                                              recheck_undecided_items=judge.get("recheck_undecided") or [],
                                               dropped_findings=judge.get("dropped") or [])
         self._extend_package(agent_id, history, verdict)
         mapped = labels.map_frozen_labels_v2(agent_result, run) if status == "graded" else \
@@ -2634,7 +2638,8 @@ class Pipeline:
                 row["cache_saving_usd_frozen_prices"] = str(row["cache_saving_usd_frozen_prices"])
         out = {"scope": self.scope, "settled_usd": str(settled), "uncertain_requests": uncertain,
                "requests": requests, "by_stage": dict(sorted(by_stage.items())),
-               "by_model": dict(sorted(by_model.items())), "by_purpose": by_purpose}
+               "by_model": dict(sorted(by_model.items())), "by_purpose": by_purpose,
+               "replaced_units": replaced_unit_spend(self.judge_dir)}
         if self.ledger_path and self.ledger_path.exists():
             from research_swarm.budget import read_snapshot
             try:
@@ -2642,6 +2647,32 @@ class Pipeline:
             except Exception as error:  # a snapshot failure never hides the per-unit record
                 out["ledger_error"] = type(error).__name__
         return out
+
+
+def replaced_unit_spend(judge_dir):
+    """Settled cost of unit copies kept under units/ after being redone (``*.json.stale-<time>``
+    from ``recompute_stale``, ``*.json.failed-<time>`` from ``retry_failed``): paid in this judge
+    directory but not part of the current units' totals (superseded/ is counted separately)."""
+    settled, requests, uncertain, files, by_purpose = Decimal(0), 0, 0, 0, {}
+    folder = Path(judge_dir) / "units"
+    paths = sorted(set(folder.rglob("*.json.stale-*")) | set(folder.rglob("*.json.failed-*"))) if folder.is_dir() else []
+    for path in paths:
+        unit = read_json(path) or {}
+        if unit.get("schema") != UNIT_SCHEMA:
+            continue
+        files += 1
+        for done in unit.get("steps", []):
+            for settlement in (done.get("client") or {}).get("settlements") or []:
+                requests += 1
+                if settlement.get("cost_usd") is None:
+                    uncertain += 1
+                    continue
+                cost = Decimal(settlement["cost_usd"])
+                settled += cost
+                purpose = unit.get("purpose", "?")
+                by_purpose[purpose] = str(Decimal(by_purpose.get(purpose, "0")) + cost)
+    return {"files": files, "requests": requests, "uncertain_requests": uncertain, "settled_usd": str(settled),
+            "by_purpose": by_purpose}
 
 
 def _decimal(value):

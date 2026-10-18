@@ -457,6 +457,8 @@ def summary_text(report):
                      f"candidates decided individually, {candidates.get('qualifying', 0)} qualifying"
                      + (f"; {recheck['candidates']} long candidate(s) re-checked on their keyword passages, "
                         f"{recheck.get('qualifying', 0)} qualifying there" if recheck.get("candidates") else "")
+                     + (f", {recheck['undecided']} re-check(s) undecided (listed, not negatives)"
+                        if recheck.get("undecided") else "")
                      + (f", {candidates['undecided']} undecided (listed, not negatives)" if candidates.get("undecided")
                         else "")
                      + (f", {candidates['dropped_findings']} decision(s) dropped by host validation"
@@ -542,10 +544,18 @@ def _spend_html(report):
     if hosts:
         rows.append(f"<tr><td>{esc(', '.join(hosts))}</td><td>host code, no model</td><td>0</td><td>$0</td></tr>")
     cost = report["cost_by_stage"]
+    replaced = (report.get("spend") or {}).get("replaced_units") or {}
+    extra = ""
+    if replaced.get("files"):
+        extra = (f"<p class=\"foot\">Also paid in this judge directory: ${esc(replaced.get('settled_usd'))} for "
+                 f"{replaced['files']} unit(s) later redone ({replaced.get('requests', 0)} request(s), kept as "
+                 "<code>*.stale-*</code>/<code>*.failed-*</code> copies under <code>units/</code>; not in the total "
+                 "above).</p>")
     return ("<div class=\"scroll\"><table><tr><th>Stage</th><th>Model</th><th>Requests</th><th>Settled cost</th></tr>"
             + "".join(rows) + "</table></div>"
             f"<p class=\"foot\">Total ${esc(cost['total_usd'] or 'not recorded')} (source {esc(cost['source'])}"
-            + (f"; uncertain requests {cost['uncertain_requests']}" if cost["uncertain_requests"] else "") + ").</p>")
+            + (f"; uncertain requests {cost['uncertain_requests']}" if cost["uncertain_requests"] else "") + ").</p>"
+            + extra)
 
 
 def render_report_html(report):
@@ -730,7 +740,7 @@ def build_report(run_dir, judge_dir=None, *, now=None, update_results=True):
                 f"archived to {upgrade.get('archived_to')} ({spend.get('requests', 0)} archived judge request(s), "
                 f"${spend.get('settled_usd', '0')} settled, not part of this pass's spend); the "
                 f"{upgrade.get('prefilter_units_kept', 0)} paid prefilter units were reused unchanged"
-                + (f", and {upgrade['model_units_kept']} candidate-mode model units were kept and reused wherever the "
+                + (f", and {upgrade['model_units_kept']} candidate-mode unit files were kept and reused wherever the "
                    "request was byte-identical" if upgrade.get("model_units_kept") else "") + ".")
     if mode != "paid":
         limitations.insert(0, f"Mode {mode}: these outputs are not real judge classifications.")

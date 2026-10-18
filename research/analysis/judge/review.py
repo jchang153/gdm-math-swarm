@@ -630,6 +630,11 @@ def open_items(results):
         if undecided:
             items.append({"agent_id": agent_id, "kind": "undecided candidates",
                           "detail": f"{len(undecided)}: {_short(undecided)} (no valid decision; not negatives)"})
+        rechecked = [u.get("item") for u in candidates.get("recheck_undecided_items") or [] if isinstance(u, dict)]
+        if rechecked:  # judge revision v2.3: keyword passage re-check without a valid decision
+            items.append({"agent_id": agent_id, "kind": "keyword passage re-check undecided",
+                          "detail": f"{len(rechecked)}: {_short(rechecked)} (re-check had no valid decision; "
+                                    "not negatives)"})
         failed = _dict(result.get("prefilter")).get("windows_sampled_failed") or []
         if candidates and failed:
             items.append({"agent_id": agent_id, "kind": "random-sample windows not judged",

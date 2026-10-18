@@ -810,7 +810,8 @@ class RevisionV23EndToEndTests(unittest.TestCase):
         entry = read(manifest_path)["judge_revision_history"][-1]
         self.assertEqual((entry["from"]["judge_revision"], entry["to"]["judge_revision"]),
                          (pl.JUDGE_REVISION_V22, pl.JUDGE_REVISION_V23))
-        self.assertEqual(entry["model_units_kept"], len([a for a in after if "/prefilter/" not in a]))
+        self.assertEqual(entry["model_units_kept"],
+                         len([a for a in after if "/prefilter/" not in a and not a.endswith("labels.json")]))
 
 
 class RefusedRecheckMock(MissedCueMock):
@@ -880,5 +881,62 @@ class RunLevelBudgetStopTests(unittest.TestCase):
             self.assertIn("budget_admission_denied", document["reason"])
             self.assertTrue((r.judge_dir / "report.html").exists())
             self.assertTrue((r.judge_dir / "labels.jsonl").exists())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class AllRefusedRecheckMock(MissedCueMock):
+    """Refuses every agent-004 re-check request, the per-candidate re-sends included."""
+
+    def __call__(self, request):
+        from research.analysis.judge.client import fake_completion
+        user = request["body"]["messages"][-1]["content"]
+        if user.startswith(prompts.RECHECK_REQUEST) and "for agent agent-004" in user.split("\n", 1)[0]:
+            return fake_completion("", finish_reason="content_filter", native_finish_reason="refusal",
+                                   model=request["body"]["model"], cost="0.001")
+        return super().__call__(request)
+
+
+class RecheckUndecidedAndReplacedSpendTests(unittest.TestCase):
+    def test_refused_recheck_items_stay_listed_as_undecided_never_negatives(self):
+        tmp = tempfile.mkdtemp(prefix="judge-v23-undecided-")
+        try:
+            routes = JudgeRouteSettings.defaults(pricing_verified=True)
+            settings = pl.PipelineSettings(window_tokens=300, sample_fraction=1.0, max_selected_fraction=1.0,
+                                           judge_mode="candidates", recheck_min_chars=0, recheck_passage_chars=5000)
+            r = Rehearsal(tmp, judge_mode="candidates", model=AllRefusedRecheckMock(routes), settings=settings,
+                          agents=["agent-004"])
+            item = next(i for i in r.run.agents["agent-004"].items if i["id"] == "A04.t0005.r")
+            item["text"] = "This lemma is not a trap, only a long induction.\n" + item["text"]
+            self.assertEqual(r.run_pipeline()["status"], "complete")
+            result = read(r.judge_dir / "agents" / "agent-004.json")
+            undecided = sorted(u["item"] for u in result["candidates"]["recheck_undecided_items"])
+            self.assertEqual(undecided, ["A04.t0002.r", "A04.t0005.r"])
+            self.assertIn("2 keyword passage re-check(s) undecided (never negatives)", result["note"]
+                          if "re-check" in result["note"] else result["verdict"]["note"])
+            from research.analysis.judge import review as rv
+            items = rv.open_items(rv.load_agent_results(r.judge_dir))
+            self.assertTrue(any(i["kind"] == "keyword passage re-check undecided" and "A04.t0002.r" in i["detail"]
+                                for i in items))
+            self.assertIn("re-check(s) undecided (listed, not negatives)", (r.judge_dir / "report.html").read_text())
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_replaced_unit_copies_are_reported_separately(self):
+        tmp = Path(tempfile.mkdtemp(prefix="judge-v23-replaced-"))
+        try:
+            unit_dir = tmp / "units" / "agent-001"
+            unit_dir.mkdir(parents=True)
+            unit = {"schema": pl.UNIT_SCHEMA, "purpose": "verifier", "steps": [{"client": {"settlements": [
+                {"cost_usd": "0.25"}, {"cost_usd": None}]}}]}
+            (unit_dir / "verify-b01.json.stale-2026-10-18T10_00_00Z").write_text(json.dumps(unit))
+            (unit_dir / "verify-b02.json.failed-2026-10-18T10_00_00Z").write_text(json.dumps(unit))
+            (unit_dir / "verify-b03.json").write_text(json.dumps(unit))  # current: not replaced
+            (unit_dir / "labels.json.stale-x").write_text(json.dumps({"labels": []}))  # not a unit
+            spend = pl.replaced_unit_spend(tmp)
+            self.assertEqual((spend["files"], spend["requests"], spend["uncertain_requests"], spend["settled_usd"]),
+                             (2, 4, 2, "0.50"))
+            self.assertEqual(spend["by_purpose"], {"verifier": "0.50"})
+            self.assertEqual(pl.replaced_unit_spend(tmp / "missing")["files"], 0)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)

@@ -74,13 +74,17 @@ CACHE_REPEAT_PRIOR_CALLS_SHA256 = "5e0678ca0dd35c661d0633644d5461459f54910c3876f
 # ``raise_judge_analysis_second_cap``. The user then authorized finishing the v2 run
 # "whatever it takes, even if you need to double the budget" (docs/plan.md "Completion
 # authority for the v2 run (October 17, 2026, late evening)"): $50 -> $100 through the
-# third audited raise ``raise_judge_analysis_third_cap``. ``JUDGE_ANALYSIS_CAP_USD`` is
-# the current judge allowance (the ledger the judge accepts carries all three raises). A
-# cap is a ceiling, not spending. See below.
+# third audited raise ``raise_judge_analysis_third_cap``. After the v2.3 pass stopped at
+# that ceiling, the user said "Just increase cap as much as needed to finish the analysis"
+# (docs/plan.md "Analysis completion authority beyond $100 (October 18, 2026)"): $100 ->
+# $110 through the fourth audited raise ``raise_judge_analysis_fourth_cap``.
+# ``JUDGE_ANALYSIS_CAP_USD`` is the current judge allowance (the ledger the judge accepts
+# carries all four raises). A cap is a ceiling, not spending. See below.
 JUDGE_ANALYSIS_PRIOR_CAP_USD = "5"
 JUDGE_ANALYSIS_FIRST_RAISE_CAP_USD = "40"
 JUDGE_ANALYSIS_SECOND_RAISE_CAP_USD = "50"
-JUDGE_ANALYSIS_CAP_USD = "100"
+JUDGE_ANALYSIS_THIRD_RAISE_CAP_USD = "100"
+JUDGE_ANALYSIS_CAP_USD = "110"
 DEFAULT_CAPS = {"pilot": CACHE_REPEAT_CAP_USD, "analysis": JUDGE_ANALYSIS_CAP_USD, "compatibility": 2}
 
 # How a settled amount was established. Only these bases release a reservation.
@@ -307,10 +311,11 @@ def raise_cap(path, scope, new_cap, approval_note):
     increase to exactly ``DEFAULT_CAPS[scope]`` is accepted, ``approval_note`` must
     record the user's approval, and recorded spending is untouched (prior costs and
     holds stay counted against the raised cap). Never called automatically. The
-    ``analysis`` scope is delegated to its three audited judge raises, each with its own
+    ``analysis`` scope is delegated to its four audited judge raises, each with its own
     lineage binding and audit note: $40 to ``raise_judge_analysis_cap`` (from $5), $50 to
-    ``raise_judge_analysis_second_cap`` (from $40) and $100 (``DEFAULT_CAPS["analysis"]``)
-    to ``raise_judge_analysis_third_cap`` (from $50).
+    ``raise_judge_analysis_second_cap`` (from $40), $100 to ``raise_judge_analysis_third_cap``
+    (from $50) and $110 (``DEFAULT_CAPS["analysis"]``) to ``raise_judge_analysis_fourth_cap``
+    (from $100).
     """
     note = str(approval_note or "").strip()
     if not note:
@@ -318,18 +323,21 @@ def raise_cap(path, scope, new_cap, approval_note):
     if scope not in DEFAULT_CAPS:
         raise ValueError(f"Unknown budget scope {scope!r}")
     if scope == "analysis":
-        # The only approved analysis raises are the three audited transcript-judge raises,
+        # The only approved analysis raises are the four audited transcript-judge raises,
         # in order, with their lineage bindings (scripts/preflight.py --raise-ledger-cap
-        # analysis passes DEFAULT_CAPS["analysis"], i.e. the third raise).
+        # analysis passes DEFAULT_CAPS["analysis"], i.e. the fourth raise).
         if units(new_cap) == units(JUDGE_ANALYSIS_FIRST_RAISE_CAP_USD):
             return raise_judge_analysis_cap(path, note)
         if units(new_cap) == units(JUDGE_ANALYSIS_SECOND_RAISE_CAP_USD):
             return raise_judge_analysis_second_cap(path, note)
-        if units(new_cap) == units(JUDGE_ANALYSIS_CAP_USD):
+        if units(new_cap) == units(JUDGE_ANALYSIS_THIRD_RAISE_CAP_USD):
             return raise_judge_analysis_third_cap(path, note)
+        if units(new_cap) == units(JUDGE_ANALYSIS_CAP_USD):
+            return raise_judge_analysis_fourth_cap(path, note)
         raise ValueError("The analysis cap may only be raised through its audited judge raises "
                          f"(${JUDGE_ANALYSIS_PRIOR_CAP_USD} -> ${JUDGE_ANALYSIS_FIRST_RAISE_CAP_USD} -> "
-                         f"${JUDGE_ANALYSIS_SECOND_RAISE_CAP_USD} -> ${JUDGE_ANALYSIS_CAP_USD})")
+                         f"${JUDGE_ANALYSIS_SECOND_RAISE_CAP_USD} -> ${JUDGE_ANALYSIS_THIRD_RAISE_CAP_USD} -> "
+                         f"${JUDGE_ANALYSIS_CAP_USD})")
     target = units(new_cap)
     if target != units(DEFAULT_CAPS[scope]) and not (
             scope == "pilot" and target in (units(FIRST_REPEAT_CAP_USD), units(EIGHT_GIB_CAP_USD))):
@@ -389,6 +397,7 @@ def raise_cap(path, scope, new_cap, approval_note):
 JUDGE_ANALYSIS_PLAN_SECTION = "Transcript behavior judge specified, October 17, 2026"
 JUDGE_ANALYSIS_SECOND_PLAN_SECTION = "Superseding decision (October 17, 2026, evening): misbehavior-focused judge"
 JUDGE_ANALYSIS_THIRD_PLAN_SECTION = "Completion authority for the v2 run (October 17, 2026, late evening)"
+JUDGE_ANALYSIS_FOURTH_PLAN_SECTION = "Analysis completion authority beyond $100 (October 18, 2026)"
 JUDGE_ANALYSIS_RUN_ID = "cache100-20261016T020259Z"
 JUDGE_ANALYSIS_PILOT_CAP_HISTORY = (("20", FIRST_REPEAT_CAP_USD), (FIRST_REPEAT_CAP_USD, EIGHT_GIB_CAP_USD),
                                     (EIGHT_GIB_CAP_USD, CACHE_REPEAT_CAP_USD))
@@ -397,7 +406,8 @@ JUDGE_ANALYSIS_PILOT_CAP_HISTORY = (("20", FIRST_REPEAT_CAP_USD), (FIRST_REPEAT_
 JUDGE_ANALYSIS_RAISES = (
     (JUDGE_ANALYSIS_PRIOR_CAP_USD, JUDGE_ANALYSIS_FIRST_RAISE_CAP_USD, JUDGE_ANALYSIS_PLAN_SECTION),
     (JUDGE_ANALYSIS_FIRST_RAISE_CAP_USD, JUDGE_ANALYSIS_SECOND_RAISE_CAP_USD, JUDGE_ANALYSIS_SECOND_PLAN_SECTION),
-    (JUDGE_ANALYSIS_SECOND_RAISE_CAP_USD, JUDGE_ANALYSIS_CAP_USD, JUDGE_ANALYSIS_THIRD_PLAN_SECTION),
+    (JUDGE_ANALYSIS_SECOND_RAISE_CAP_USD, JUDGE_ANALYSIS_THIRD_RAISE_CAP_USD, JUDGE_ANALYSIS_THIRD_PLAN_SECTION),
+    (JUDGE_ANALYSIS_THIRD_RAISE_CAP_USD, JUDGE_ANALYSIS_CAP_USD, JUDGE_ANALYSIS_FOURTH_PLAN_SECTION),
 )
 
 
@@ -481,12 +491,32 @@ def _third_judge_raise_problems(db):
     return problems
 
 
+def _fourth_judge_raise_problems(db):
+    """Problems preventing the fourth judge raise ($100 -> $110) on this ledger.
+
+    Unlike the earlier raises, uncertain holds are allowed: the user chose this raise over
+    settling the v2.3 content-filter holds that OpenRouter could not reconcile (docs/plan.md
+    "Analysis completion authority beyond $100 (October 18, 2026)"). They stay counted
+    against the cap, so the raise adds exactly $10. A request still ``reserved`` (a run in
+    flight) or an unacknowledged violation refuses the raise."""
+    if structural := _judge_ledger_problems(db):
+        return structural
+    problems = _judge_analysis_lineage_problems(db, 3)
+    in_flight = db.execute("SELECT COUNT(*) FROM calls WHERE scope='analysis' AND state='reserved'").fetchone()[0]
+    if in_flight:
+        problems.append(f"analysis scope has {in_flight} request(s) still in flight (reserved); raise the cap only "
+                        "while no judge run is active")
+    if _snapshot(db)["analysis"]["violation"]:
+        problems.append("analysis scope has an unacknowledged estimate_violation")
+    return problems
+
+
 def judge_analysis_problems(path):
-    """Read-only judge acceptance check: [] only when ``path`` carries both audited judge raises.
+    """Read-only judge acceptance check: [] only when ``path`` carries every audited judge raise.
 
     The judge (JudgeClient's ``analysis`` scope, scripts/run_transcript_judge.py) accepts
-    the authoritative ledger only after all three raises ($5 -> $40 -> $50 -> $100); a
-    ledger with fewer raises is refused.
+    the authoritative ledger only after all four raises ($5 -> $40 -> $50 -> $100 ->
+    $110); a ledger with fewer raises is refused.
     """
     if not Path(path).exists():
         return ["judge analysis requires the existing authoritative ledger; never create a replacement ledger"]
@@ -510,6 +540,15 @@ def judge_analysis_third_raise_problems(path):
                 "replacement ledger"]
     with closing(_read_only(path)) as db:
         return _third_judge_raise_problems(db)
+
+
+def judge_analysis_fourth_raise_problems(path):
+    """Read-only check that the fourth judge raise ($100 -> $110) can be applied to ``path``."""
+    if not Path(path).exists():
+        return ["the fourth judge raise applies only to the existing authoritative ledger; never create a "
+                "replacement ledger"]
+    with closing(_read_only(path)) as db:
+        return _fourth_judge_raise_problems(db)
 
 
 def _apply_judge_raise(path, approval_note, step, check, recorded_note):
@@ -594,20 +633,42 @@ def raise_judge_analysis_third_cap(path, approval_note):
     def recorded(db, note):
         committed = _snapshot(db)["analysis"]["committed_usd"]
         return (f"{JUDGE_ANALYSIS_THIRD_PLAN_SECTION} ({JUDGE_ANALYSIS_RUN_ID}; analysis "
-                f"${JUDGE_ANALYSIS_SECOND_RAISE_CAP_USD} -> ${JUDGE_ANALYSIS_CAP_USD}; analysis committed "
+                f"${JUDGE_ANALYSIS_SECOND_RAISE_CAP_USD} -> ${JUDGE_ANALYSIS_THIRD_RAISE_CAP_USD}; analysis committed "
                 f"${committed} before the raise): {note}")
     return _apply_judge_raise(path, approval_note, 2, _third_judge_raise_problems, recorded)
 
 
+def raise_judge_analysis_fourth_cap(path, approval_note):
+    """Fourth audited judge raise of the ``analysis`` scope, from $100 to $110 (applied once).
+
+    docs/plan.md "Analysis completion authority beyond $100 (October 18, 2026)": "Just
+    increase cap as much as needed to finish the analysis". The cap is a ceiling; only
+    finishing the v2.3 judge run on cache100 is spent. Same guarantees as the earlier
+    raises (existing ledger, approval note, one exclusive transaction, never lowered,
+    recorded spending untouched); refuses unless the analysis cap history is exactly the
+    first three raises on the authoritative lineage, the cap is $100, nothing is in flight
+    and no violation is unacknowledged. Uncertain holds may remain (they stay counted). A
+    repeat is refused. The audit note records the plan section, the analysis amount
+    committed before the raise and the uncertain holds carried over.
+    """
+    def recorded(db, note):
+        analysis = _snapshot(db)["analysis"]
+        return (f"{JUDGE_ANALYSIS_FOURTH_PLAN_SECTION} ({JUDGE_ANALYSIS_RUN_ID}; analysis "
+                f"${JUDGE_ANALYSIS_THIRD_RAISE_CAP_USD} -> ${JUDGE_ANALYSIS_CAP_USD}; analysis committed "
+                f"${analysis['committed_usd']} before the raise, {analysis['uncertain_requests']} uncertain hold(s) "
+                f"of ${analysis['held_usd']} carried over): {note}")
+    return _apply_judge_raise(path, approval_note, 3, _fourth_judge_raise_problems, recorded)
+
+
 def _pending_judge_analysis_raise(scope, existing_cap_units, configured_cap):
-    """True for an analysis scope at an earlier judge-lineage cap ($5, $40 or $50) opened with $100.
+    """True for an analysis scope at an earlier judge-lineage cap ($5, $40, $50 or $100) opened with $110.
 
     Such a ledger is opened unchanged (it keeps enforcing its own cap): the raises happen
     only through the audited ``raise_judge_analysis_cap`` / ``raise_judge_analysis_second_cap``,
     never implicitly on open.
     """
     earlier = {units(JUDGE_ANALYSIS_PRIOR_CAP_USD), units(JUDGE_ANALYSIS_FIRST_RAISE_CAP_USD),
-               units(JUDGE_ANALYSIS_SECOND_RAISE_CAP_USD)}
+               units(JUDGE_ANALYSIS_SECOND_RAISE_CAP_USD), units(JUDGE_ANALYSIS_THIRD_RAISE_CAP_USD)}
     return (scope == "analysis" and existing_cap_units in earlier
             and units(configured_cap) == units(JUDGE_ANALYSIS_CAP_USD))
 
