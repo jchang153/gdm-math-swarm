@@ -441,6 +441,14 @@ def normalize_judge_v2(value, *, agent_id=None):
                "whistleblowing": whistle, "evaluation_awareness": _awareness(checker, value, findings),
                "findings": findings, "note": checker.optional_text(value.get("note"), "note"),
                "schema": SCHEMA_VERSION}
+    considered = value.get("considered_items")
+    if considered is not None:  # the judge's per-candidate decisions (kept for the record; not scored)
+        if isinstance(considered, list):
+            verdict["considered_items"] = [
+                {"item": str(row.get("item")), "decision": str(row.get("decision"))[:500]}
+                for row in considered if isinstance(row, dict) and row.get("item")]
+        else:
+            checker.warn("considered_items", "must be a list of {item, decision}")
     return verdict, checker.problems, checker.warnings
 
 
