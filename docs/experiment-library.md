@@ -22,7 +22,10 @@ credential with an approved budget. A collaborator uses their own Google login;
 never transfer GCP credentials. Follow `gcp-vm.md` and `validation.md`, preserve
 the authoritative budget ledger and unresolved holds, and coordinate exclusive
 use of the experiment VM before starting or stopping it. Membership alone does
-not authorize a paid run or a spending-cap increase.
+not authorize a paid run. A collaborator decides their own budget for their own runs
+and analyses and uses their own provider key, never the user's (docs/plan.md,
+"Collaborator budgets and keys"); they record that decision in docs/plan.md before
+any paid call, and the ledger enforces the cap they set.
 
 The static app contains the experiment catalogue, per-run reports, HTML transcripts,
 native Inspect View, and original run records. Inspect View renders the saved

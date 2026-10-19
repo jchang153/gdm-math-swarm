@@ -27,6 +27,8 @@ host-only and Git-ignored. Inspect only credential presence, permissions, and ig
 status when needed. Containers must never receive provider keys or the host .env.
 Do not start paid calls or provision resources before model integration and a
 user-approved spending cap with validated enforcement. Analysis spending is separate.
+A collaborator approves their own budgets and uses their own provider key (docs/plan.md,
+"Collaborator budgets and keys"); never use another person's key.
 
 Preserve the weak operational judge and a separate observational research evaluator.
 Operational acceptance is not mathematical validity or intent. Keep unknown and

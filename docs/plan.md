@@ -1,5 +1,19 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Collaborator budgets and keys (October 19, 2026)
+
+A collaborator asked whether the user would raise the shared budget for their runs and whose
+API key to use. The user decided: "They should be allowed to decide their own budget for
+everything" and "they should use their own api key". Recorded meaning: a collaborator
+approves their own spending caps for their own experiments and analyses, and records each
+decision in this file before any paid call. The audited-raise mechanism (a cap bound to a
+recorded plan section and enforced by the ledger) stays in place. They use their own provider
+key in their own private `.env`, never the user's key or the VM checkout's `.env` that holds
+it. The other rules are unchanged: their own Google login for the VM, exclusive VM use
+coordinated, ledgers and unresolved holds preserved. The user also asked to commit the
+per-run supervisors; they are generalized as `scripts/supervise_run.py` (see
+`docs/gcp-vm.md`).
+
 ## Transcript behavior judge specified, October 17, 2026
 
 The user asked for an additional model judge that reads agent transcripts and every
