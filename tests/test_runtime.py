@@ -1373,6 +1373,22 @@ def _fake_sandbox_class():
     return OfflineSandbox
 
 
+class ReplaceModeInstructionCheckTests(unittest.TestCase):
+    def test_built_in_prompt_left_in_fails(self):
+        from importlib import import_module
+        if str(ROOT / "scripts") not in sys.path:
+            sys.path.insert(0, str(ROOT / "scripts"))
+        vr = import_module("validate_runtime")
+        replaced = {"agent_id": "agent-001", "claude_code_builtin_prompt_present": True, "tool_definitions": 17,
+                    "other_system_chars": 74 + 62}
+        self.assertTrue(vr.instructions_replaced([replaced], ["agent-001"]))
+        appended = {**replaced, "other_system_chars": 74 + 25_000}  # append mode's built-in prompt
+        self.assertFalse(vr.instructions_replaced([appended], ["agent-001"]))
+        self.assertFalse(vr.instructions_replaced([{**replaced, "claude_code_builtin_prompt_present": False}],
+                                                  ["agent-001"]))
+        self.assertFalse(vr.instructions_replaced([replaced], ["agent-001", "agent-002"]))
+
+
 def _fake_claude_code(prompt, tools, filter, env=None, cwd="/workspace", *, system_prompt_mode="replace",
                       auto_memory=True):
     """Stands in for the CLI: drives the production filter and bridged tools, with

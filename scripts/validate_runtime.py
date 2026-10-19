@@ -705,6 +705,19 @@ def compaction_bracket(entries, levels=COMPACTION_PROBE_LEVELS):
             "complete": served == list(levels)}
 
 
+# docs/prompts.md, "Current setting": in replace mode Claude Code 2.1.296 sends a 74-character
+# billing header and a 62-character identity line besides the conference prompt.
+REPLACE_MAX_OTHER_SYSTEM_CHARS = 500
+
+
+def instructions_replaced(main, agents):
+    """Every agent has an archived request with Claude Code's identity, tool definitions and
+    no more than the billing header and identity line besides its conference prompt."""
+    return all(any(i["agent_id"] == a and i["claude_code_builtin_prompt_present"] and i["tool_definitions"]
+                   and i["other_system_chars"] <= REPLACE_MAX_OTHER_SYSTEM_CHARS
+                   for i in main) for a in agents)
+
+
 def validation_config(args):
     return {"agent_image": args.image, "lean_image": args.lean_image, "compilation_timeout_seconds": 120,
             "judge_memory": args.judge_memory, "judge_cpus": 1, "judge_max_concurrent": args.judge_max_concurrent,
@@ -857,7 +870,10 @@ def build_checks(result):
                              "tool_definitions": len(data.get("tool_definitions", [])),
                              "appended_prompt_present": any(f"You are {data['agent_id']}," in b for b in blocks),
                              "claude_code_builtin_prompt_present": any("Claude Code" in b or "Claude Agent SDK" in b
-                                                                        for b in blocks)})
+                                                                        for b in blocks),
+                             # replace mode: only the billing header and identity line besides the prompt
+                             "other_system_chars": sum(len(b) for b in blocks
+                                                       if f"You are {data['agent_id']}," not in b)})
     main = [i for i in instructions if i["appended_prompt_present"]]
     offered = sorted({t for i in main for t in i["tools"]})
     disallowed_offered = [t for t in offered if t in DISALLOWED_TOOLS or t.split("__")[-1] in DISALLOWED_TOOLS]
@@ -993,9 +1009,10 @@ def build_checks(result):
             paths=sorted({p["path"] for p in snapshots}),
             transcript_modes=sorted({p.get("mode") for p in snapshots if p["path"].endswith(".jsonl")})),
         "effective_instructions_archived": check(
-            all(any(i["agent_id"] == a and i["claude_code_builtin_prompt_present"] and i["tool_definitions"]
-                    for i in main) for a in AGENTS),
-            archives=instructions, note="append mode: the conference prompt follows Claude Code's built-in prompt"),
+            instructions_replaced(main, AGENTS),
+            archives=instructions,
+            note="replace mode: besides the conference prompt only Claude Code's billing header and identity "
+                 f"line remain (at most {REPLACE_MAX_OTHER_SYSTEM_CHARS} characters; append would add thousands)"),
         "disallowed_tools_absent": check(
             bool(offered) and not disallowed_offered and any(t.startswith("mcp__conference__") for t in offered)
             and "a1-webfetch" in r["agent-001"] and "a1-agent" in r["agent-001"],
