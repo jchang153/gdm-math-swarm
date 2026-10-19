@@ -556,10 +556,10 @@ class PreflightTests(unittest.TestCase):
 
     def test_design_invariants(self):
         ok = lambda c, r: {"ready": True, "blockers": [], "evidence": {}, "ledger": {}}
-        blockers = self._preflight(self.base(agent_count=10, system_prompt_mode="replace", paid_launch_enabled=False),
+        blockers = self._preflight(self.base(agent_count=10, system_prompt_mode="append", paid_launch_enabled=False),
                                    ok)["blockers"]
         self.assertTrue(any("20 peers" in b for b in blockers))
-        self.assertTrue(any("append + auto-memory" in b for b in blockers))
+        self.assertTrue(any("replace + auto-memory" in b for b in blockers))
         self.assertIn("Paid launch is disabled", blockers)
         raising = lambda c, r: 1 / 0
         self.assertTrue(any("evaluation failed" in b for b in self._preflight(self.base(), raising)["blockers"]))
@@ -1373,7 +1373,7 @@ def _fake_sandbox_class():
     return OfflineSandbox
 
 
-def _fake_claude_code(prompt, tools, filter, env=None, cwd="/workspace", *, system_prompt_mode="append",
+def _fake_claude_code(prompt, tools, filter, env=None, cwd="/workspace", *, system_prompt_mode="replace",
                       auto_memory=True):
     """Stands in for the CLI: drives the production filter and bridged tools, with
     Claude Code's observed output-limit recovery (3 nudges, then the turn ends)."""

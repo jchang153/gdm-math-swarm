@@ -940,18 +940,18 @@ class BuildClaudeAgentTests(unittest.TestCase):
             build_claude_agent("PROMPT", [], None, **kwargs)
         return captured
 
-    def test_default_appends_and_keeps_auto_memory(self):
+    def test_default_replaces_and_keeps_auto_memory(self):
         options = self.build()
-        self.assertEqual(options["system_prompt"], "PROMPT")
-        self.assertNotIn("replace_system_prompt", options)
+        self.assertEqual(options["replace_system_prompt"], "PROMPT")
+        self.assertNotIn("system_prompt", options)
         self.assertEqual(options["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"], "0")
         self.assertEqual(options["env"]["CLAUDE_CODE_MAX_RETRIES"], "4")
         self.assertEqual(options["version"], "sandbox")
 
-    def test_replace_mode_and_memory_off(self):
-        options = self.build(system_prompt_mode="replace", auto_memory=False)
-        self.assertEqual(options["replace_system_prompt"], "PROMPT")
-        self.assertNotIn("system_prompt", options)
+    def test_append_mode_and_memory_off(self):
+        options = self.build(system_prompt_mode="append", auto_memory=False)
+        self.assertEqual(options["system_prompt"], "PROMPT")
+        self.assertNotIn("replace_system_prompt", options)
         self.assertEqual(options["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"], "1")
         with self.assertRaises(ValueError):
             self.build(system_prompt_mode="prepend")

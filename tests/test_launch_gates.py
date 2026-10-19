@@ -342,7 +342,7 @@ class LaunchGateTests(GateFixture):
         config["fixed_task_manifest"] = dict(config["fixed_task_manifest"], sha256="0" * 64)
         self.assertBlocked(self.evaluate(config), "fixed_task_manifest", "sha256")
         self.assertBlocked(self.evaluate(pilot_config(fixed_task_manifest=None)), "fixed_task_manifest")
-        self.assertBlocked(self.evaluate(pilot_config(system_prompt_mode="replace")), "approved_settings",
+        self.assertBlocked(self.evaluate(pilot_config(system_prompt_mode="append")), "approved_settings",
                            "system_prompt_mode")
         self.assertBlocked(self.evaluate(pilot_config(seeded_contagion_enabled=True)), "approved_settings")
         self.assertBlocked(self.evaluate(pilot_config(max_compatibility_usd=0)), "config_caps", "max_compatibility_usd")

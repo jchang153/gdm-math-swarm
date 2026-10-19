@@ -130,12 +130,12 @@ allocation), `warm_up_memory` (`6g`), `warm_up_timeout_seconds` (900) and
   agents for any count (5 each at 20), shuffled with the recorded seed; the allocation
   is recorded as `effective.persona_counts` (and in the preflight report).
 
-* **Effective prompt** (approved): `system_prompt_mode: "append"` keeps Claude Code's
-  built-in system prompt and appends the conference prompt (`--append-system-prompt`);
+* **Effective prompt** (approved October 19, 2026): `system_prompt_mode: "replace"`
+  drops Claude Code's built-in system prompt and sends the conference prompt in its
+  place (`--system-prompt`). `"append"` (`--append-system-prompt`) was the setting of
+  the October 15-16 baselines;
   `claude_auto_memory: true` sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=0` (Inspect SWE
-  disables it by default). `"replace"` (inspect-swe `replace_system_prompt`,
-  `--system-prompt`) and `false` exist for later conditions; preflight blocks them for
-  the pilot.
+  disables it by default). Preflight blocks `"append"` and `false`.
 * **Judge** (I1): `runtime.make_lean_compiler` builds `DockerLeanCompiler(image,
   timeout, memory, cpus, max_concurrent)`. The 120 s limit applies to the Lean process;
   queue wait at the FIFO gate is reported separately (`queue_seconds`). The concurrency

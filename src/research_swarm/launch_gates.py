@@ -75,7 +75,7 @@ _APPROVED_STATIC_SETTINGS = {
     "task_count": 14,                                          # Current pilot scope / Initial task sampling
     "max_run_seconds": 10800, "post_depletion_seconds": 600,    # Run duration and stopping
     "compilation_timeout_seconds": 120,                        # Compilation time limit
-    "system_prompt_mode": "append", "claude_auto_memory": True,  # Effective agent system prompt
+    "system_prompt_mode": "replace", "claude_auto_memory": True,  # Effective agent system prompt
     "general_internet_enabled": False,                         # Controlled baseline access
     "provider": "openrouter", "candidate_model_id": MODEL_ID,  # Model and intended API route
 }

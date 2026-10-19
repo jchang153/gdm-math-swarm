@@ -860,12 +860,13 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     return intercept
 
 
-def build_claude_agent(prompt, tools, filter, env=None, cwd="/workspace", *, system_prompt_mode="append",
+def build_claude_agent(prompt, tools, filter, env=None, cwd="/workspace", *, system_prompt_mode="replace",
                        auto_memory=True):
     """Genuine Claude Code (pinned image binary) with identity-bound bridged tools.
 
-    ``system_prompt_mode``: "append" (approved default: built-in prompt plus the
-    conference prompt) or "replace" (conference prompt only).
+    ``system_prompt_mode``: "replace" (approved default since October 19, 2026:
+    conference prompt only) or "append" (built-in prompt plus the conference prompt,
+    as in the four October 15-16 baseline runs).
     """
     if system_prompt_mode not in SYSTEM_PROMPT_MODES:
         raise ValueError(f"system_prompt_mode must be one of {SYSTEM_PROMPT_MODES}")

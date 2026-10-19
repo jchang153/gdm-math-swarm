@@ -709,7 +709,7 @@ def validation_config(args):
     return {"agent_image": args.image, "lean_image": args.lean_image, "compilation_timeout_seconds": 120,
             "judge_memory": args.judge_memory, "judge_cpus": 1, "judge_max_concurrent": args.judge_max_concurrent,
             "agent_memory": args.agent_memory, "agent_cpus": getattr(args, "agent_cpus", None),
-            "system_prompt_mode": "append", "claude_auto_memory": True}
+            "system_prompt_mode": "replace", "claude_auto_memory": True}
 
 
 async def run(args, stamp):

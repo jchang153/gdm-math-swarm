@@ -496,7 +496,7 @@ async def wait_for_in_flight(filter_state, grace, poll=IN_FLIGHT_POLL_SECONDS):
 
 
 def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, run_dir, record, clock,
-                system_prompt_mode="append", auto_memory=True, in_flight_grace=IN_FLIGHT_GRACE_SECONDS):
+                system_prompt_mode="replace", auto_memory=True, in_flight_grace=IN_FLIGHT_GRACE_SECONDS):
     """Solver running one genuine Claude Code peer inside its own sandbox.
 
     On ``clock.stop`` the filter admits nothing further and conference actions are
@@ -864,12 +864,12 @@ def preflight(config, repo_root):
     connections = _max_connections_blocker(config)
     if connections:
         blockers.append(connections)
-    mode = config.get("system_prompt_mode", "append")
+    mode = config.get("system_prompt_mode", "replace")
     if mode not in SYSTEM_PROMPT_MODES:
         blockers.append(f"system_prompt_mode must be one of {SYSTEM_PROMPT_MODES}")
-    elif mode != "append" or not config.get("claude_auto_memory", True):
-        # docs/plan.md "Effective agent system prompt": append + normal auto-memory.
-        blockers.append("Effective prompt settings differ from the approved append + auto-memory configuration")
+    elif mode != "replace" or not config.get("claude_auto_memory", True):
+        # docs/plan.md "Built-in system prompt removed": replace + normal auto-memory.
+        blockers.append("Effective prompt settings differ from the approved replace + auto-memory configuration")
     from .prompts import prompt_variant_problems
     blockers.extend(prompt_variant_problems(config))  # docs/prompts.md, "Prompt ablation variants"
     allocation = None
@@ -1235,7 +1235,7 @@ async def run_pilot(config, repo_root, conference_factory=None):
     dotenv = disable_inspect_dotenv()
     agent_count = int(config.get("agent_count", APPROVED_AGENT_COUNT))
     persona_seed = int(config.get("persona_seed", DEFAULT_PERSONA_SEED))
-    mode = config.get("system_prompt_mode", "append")
+    mode = config.get("system_prompt_mode", "replace")
     auto_memory = bool(config.get("claude_auto_memory", True))
     # Prompt ablation (docs/prompts.md, "Prompt ablation variants"); preflight's
     # prompt_variant gate has already refused an unknown value.

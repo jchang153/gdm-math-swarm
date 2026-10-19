@@ -700,7 +700,7 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path):
     persona = args.persona or runtime.assign_personas(
         runtime.APPROVED_AGENT_COUNT, int(config.get("persona_seed", runtime.DEFAULT_PERSONA_SEED)))[AGENT_ID]
     personas = {AGENT_ID: persona}
-    mode = config.get("system_prompt_mode", "append")
+    mode = config.get("system_prompt_mode", "replace")
     auto_memory = bool(config.get("claude_auto_memory", True))
     in_flight_grace = runtime.in_flight_grace_seconds(config)
     run_dir = (Path(args.runs_dir) / f"compat-{stamp}").resolve()

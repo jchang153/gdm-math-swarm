@@ -44,8 +44,9 @@ ASCII `'`, so ASCII was restored. Em dashes (U+2014) are reproduced as shown.
 `INITIAL_MESSAGE = "Begin your conference research."` (reconstructed). `runtime.py`
 imports it as each agent's single user message.
 
-This assembled text is not the agent's whole system prompt: it is appended to Claude
-Code's built-in system prompt. See "Effective harness prompt" below.
+Since October 19, 2026 this assembled text replaces Claude Code's built-in system
+prompt (`system_prompt_mode: "replace"`). Before that it was appended to it. Claude Code
+still adds some text of its own in both modes. See "Effective harness prompt" below.
 
 The paper says that each persona was "injected into each agent's base system prompt
 under a dedicated Persona:<Name> section". It does not publish the base system prompt,
@@ -408,6 +409,30 @@ output never appears in any result.
 
 ## Effective harness prompt (recorded confound)
 
+**Current setting (October 19, 2026): `replace`.** The user decided to remove Claude
+Code's built-in system prompt (docs/plan.md, "Built-in system prompt removed").
+`build_claude_agent` now passes the conference prompt as Inspect SWE
+`replace_system_prompt`, which Claude Code receives as `--system-prompt`. An unpaid
+local capture (Claude Code 2.1.296 pointed at a local server that only records requests)
+shows what the model still receives from Claude Code in `replace` mode:
+
+* System blocks: the billing header (74 characters), then a shorter identity line,
+  "You are a Claude agent, built on Anthropic's Claude Agent SDK." (62 characters), then
+  the conference prompt with nothing before or after it. The built-in harness, memory,
+  environment and context-management sections are gone.
+* The built-in tool definitions (`Bash`, `Read`, `Write`, `Skill`, `Workflow`, ...) are
+  unchanged.
+* Claude Code also adds reminders to the conversation, in both modes. The October 15
+  baseline log (agent-001) shows a git-attribution reminder in the first user message,
+  and from the second request on a separate system message of about 6,800 characters:
+  environment (working directory, platform), "You are powered by the model
+  deepseek/deepseek-v4.1-flash.", the list of Claude Code's built-in skills, the token
+  budget and the date. `InstructionArchive` records only the leading system blocks and
+  tools, so these reminders appear only in the Inspect log.
+
+The rest of this section describes the `append` arrangement used in the four runs of
+October 15-16, 2026.
+
 `inspect_adapter.build_claude_agent` passes the assembled prompt as Inspect SWE
 `claude_code(system_prompt=...)`, which Claude Code receives as
 `--append-system-prompt`. The agent's effective system prompt is therefore Claude
@@ -510,8 +535,9 @@ EOF
 ```
 
 **Runtime switches** (runtime workstream; `configs/pilot.json`):
-`system_prompt_mode` is `append` (default, the approved behavior) or `replace` (Inspect
-SWE `replace_system_prompt`, which would drop the built-in prompt). `claude_auto_memory`
+`system_prompt_mode` is `replace` (default and approved since October 19, 2026: Inspect
+SWE `replace_system_prompt`, which drops the built-in prompt) or `append` (the October
+15-16 baseline behavior). `claude_auto_memory`
 defaults to `true` (Claude Code's normal auto-memory, approved). Changing either changes
 the experimental condition and needs the user's approval first.
 

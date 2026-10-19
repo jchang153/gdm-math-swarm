@@ -36,7 +36,7 @@
   "execution": "asynchronous",
   "deployment": "local",
   "agent_harness": "claude_code",
-  "system_prompt_mode": "append",
+  "system_prompt_mode": "replace",
   "claude_auto_memory": true,
   "provider": "openrouter",
   "requested_model": "DeepSeek v4.1",
