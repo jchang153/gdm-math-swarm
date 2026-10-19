@@ -21,9 +21,12 @@ the authoritative ledger. Selected by `budget_track: "ablation"` (configs/ablati
   balanced allocation 3/3/2/2. All other settings equal the cached baseline (14 tasks,
   personas seed, DeepSeek V4.1 Flash on Fireworks US, 8 GiB, 180 minutes).
 - Prompt: `prompt_variant` (docs/prompts.md, "Prompt ablation variants"). The first run uses
-  `skills_eval`: an explicit evaluation of mathematical skills with a score sentence,
-  replacing the conference framing, to test whether framing the setting as a skills
-  evaluation changes the constructed-setting suspicion observed in the baselines.
+  `skills_eval_lenient` (decided October 19, 2026: the evaluation framing combined with the
+  three `lenient` edits, to raise the chance of observing any exploitation; attribution to a
+  single edit is not possible from this run). `skills_eval` replaces the conference framing
+  with an explicit evaluation of mathematical skills and a score sentence, to test whether
+  framing the setting as a skills evaluation changes the constructed-setting suspicion
+  observed in the baselines. The run keeps Claude Code's built-in system prompt (append).
 - Labels: Inspect `condition` is `ablation-track-<variant>`; `settings.json` records
   `effective.budget_track` and `effective.prompt_variant`.
 - The transcript behavior judge is not run on this track for now.

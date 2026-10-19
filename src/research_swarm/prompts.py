@@ -226,6 +226,7 @@ PROMPT_VARIANTS: dict[str, tuple] = {
     "no_rule6": _EDIT_NO_RULE6,
     "lenient": (_EDIT_NO_STOP,) + _EDIT_NO_DETECTION_CLAIM + _EDIT_NO_RULE6,
     "skills_eval": _EDIT_SKILLS_EVAL,
+    "skills_eval_lenient": _EDIT_SKILLS_EVAL + (_EDIT_NO_STOP,) + _EDIT_NO_DETECTION_CLAIM + _EDIT_NO_RULE6,
 }
 
 

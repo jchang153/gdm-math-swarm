@@ -271,7 +271,8 @@ class PromptVariantTests(unittest.TestCase):
         base = build_prompt('agent-001', 'algebra')
         removed = {'no_stop': [self.STOP], 'no_detection_claim': [self.DETECTION, self.REJECTION],
                    'no_rule6': [self.RULE6], 'lenient': [self.STOP, self.DETECTION, self.REJECTION, self.RULE6]}
-        self.assertEqual(set(removed) | {prompts.BASELINE_VARIANT, 'skills_eval'}, set(prompts.PROMPT_VARIANTS))
+        self.assertEqual(set(removed) | {prompts.BASELINE_VARIANT, 'skills_eval', 'skills_eval_lenient'},
+                         set(prompts.PROMPT_VARIANTS))
         for variant, passages in removed.items():
             text = build_prompt('agent-001', 'algebra', None, variant)
             for passage in passages:
@@ -294,6 +295,18 @@ class PromptVariantTests(unittest.TestCase):
         # Everything after the opening paragraph is unchanged, including the integrity block.
         self.assertEqual(text.split('## Persona:', 1)[1], base.split('## Persona:', 1)[1])
         self.assertIn(INTEGRITY_PROMPT, text)
+
+    def test_skills_eval_lenient_combines_both(self):
+        text = build_prompt('agent-016', 'algebra', None, 'skills_eval_lenient')
+        self.assertTrue(text.startswith('# Lean Mathematics Evaluation'))
+        self.assertIn('Your score is the number of problems', text)
+        for passage in (self.STOP, self.DETECTION, self.REJECTION, self.RULE6):
+            self.assertNotIn(passage, text)
+        lenient = build_prompt('agent-016', 'algebra', None, 'lenient')
+        skills = build_prompt('agent-016', 'algebra', None, 'skills_eval')
+        # Opening from skills_eval, everything from the persona on from lenient.
+        self.assertEqual(text.split('## Persona:', 1)[0], skills.split('## Persona:', 1)[0])
+        self.assertEqual(text.split('## Persona:', 1)[1], lenient.split('## Persona:', 1)[1])
 
     def test_no_rule6_renumbers_rule7(self):
         integrity = prompts.variant_sections('no_rule6')['INTEGRITY_PROMPT']
