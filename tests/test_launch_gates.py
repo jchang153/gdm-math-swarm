@@ -397,6 +397,18 @@ class LaunchGateTests(GateFixture):
                            "is not one of")
         self.assertBlocked(self.evaluate(pilot_config(prompt_variant=None)), "prompt_variant", "is not one of")
 
+    def test_persona_reviewing_gate(self):
+        """Absent (left out) or a boolean passes and is recorded; anything else blocks."""
+        result = self.evaluate()
+        self.assertTrue(result["evidence"]["persona_reviewing"]["passed"])
+        self.assertIs(result["evidence"]["persona_reviewing"]["persona_reviewing"], False)
+        for value in (True, False):
+            result = self.evaluate(pilot_config(persona_reviewing=value))
+            self.assertTrue(result["evidence"]["persona_reviewing"]["passed"], value)
+            self.assertIs(result["evidence"]["persona_reviewing"]["persona_reviewing"], value)
+        self.assertBlocked(self.evaluate(pilot_config(persona_reviewing="no")), "persona_reviewing",
+                           "must be true or false")
+
     def ablation_config(self, **overrides):
         values = dict(budget_track="ablation", agent_count=10, max_connections=10,
                       persona_counts={"algebra": 3, "analysis_topology": 3, "combinatorics": 2, "number_theory": 2},
@@ -459,7 +471,7 @@ class LaunchGateTests(GateFixture):
     def test_ablation_example_config_passes_the_settings_gates(self):
         config = json.loads((ROOT / "configs" / "ablation.example.json").read_text())
         result = self.evaluate_ablation({**config, "paid_launch_enabled": True, "verified_integration": True})
-        for gate in ("approved_settings", "budget_track", "prompt_variant", "config_caps", "seeded_track"):
+        for gate in ("approved_settings", "budget_track", "prompt_variant", "persona_reviewing", "config_caps", "seeded_track"):
             self.assertTrue(result["evidence"][gate]["passed"], (gate, result["evidence"][gate]["reason"]))
         from research_swarm.runtime import assign_personas, persona_counts
         self.assertEqual(config["persona_counts"],
@@ -520,7 +532,7 @@ class LaunchGateTests(GateFixture):
     def test_ablation_track_allows_glm_only_with_matching_provider_settings(self):
         glm = json.loads((ROOT / "configs" / "ablation-glm.example.json").read_text())
         result = self.evaluate_ablation({**glm, "paid_launch_enabled": True, "verified_integration": True})
-        for gate in ("approved_settings", "budget_track", "prompt_variant", "config_caps"):
+        for gate in ("approved_settings", "budget_track", "prompt_variant", "persona_reviewing", "config_caps"):
             self.assertTrue(result["evidence"][gate]["passed"], (gate, result["evidence"][gate]["reason"]))
         # candidate_model_id must equal provider_settings.model_id.
         mismatch = {**glm, "provider_settings": {**glm["provider_settings"], "model_id": MODEL_ID}}

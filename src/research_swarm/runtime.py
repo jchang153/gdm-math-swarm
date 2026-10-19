@@ -870,8 +870,9 @@ def preflight(config, repo_root):
     elif mode != "replace" or not config.get("claude_auto_memory", True):
         # docs/plan.md "Built-in system prompt removed": replace + normal auto-memory.
         blockers.append("Effective prompt settings differ from the approved replace + auto-memory configuration")
-    from .prompts import prompt_variant_problems
+    from .prompts import persona_reviewing_problems, prompt_variant_problems
     blockers.extend(prompt_variant_problems(config))  # docs/prompts.md, "Prompt ablation variants"
+    blockers.extend(persona_reviewing_problems(config))  # docs/prompts.md, "Persona reviewing lines"
     allocation = None
     try:
         allocation = persona_counts(assign_personas(int(config.get("agent_count", APPROVED_AGENT_COUNT)),
@@ -1229,7 +1230,7 @@ async def run_pilot(config, repo_root, conference_factory=None):
     from inspect_ai import eval_async
     from .inspect_adapter import (InstructionArchive, budget_filter, claude_code_env, credentials_in_environment,
                                   disable_inspect_dotenv)
-    from .prompts import BASELINE_VARIANT, INITIAL_MESSAGE, build_prompt
+    from .prompts import BASELINE_VARIANT, INITIAL_MESSAGE, PERSONA_REVIEWING_DEFAULT, PERSONA_REVIEWING_KEY, build_prompt
     from .tools import TOOL_DEFINITIONS
     # Before anything Inspect runs: only secrets.load_openrouter_key may read the host .env.
     dotenv = disable_inspect_dotenv()
@@ -1240,6 +1241,7 @@ async def run_pilot(config, repo_root, conference_factory=None):
     # Prompt ablation (docs/prompts.md, "Prompt ablation variants"); preflight's
     # prompt_variant gate has already refused an unknown value.
     variant = config.get("prompt_variant", BASELINE_VARIANT)
+    reviewing = config.get(PERSONA_REVIEWING_KEY, PERSONA_REVIEWING_DEFAULT)  # checked by preflight
     in_flight_grace = in_flight_grace_seconds(config)
     images = pin_images(config)
     check_pinned_against_preflight(images, report)
@@ -1280,6 +1282,7 @@ async def run_pilot(config, repo_root, conference_factory=None):
                                                                 ("memory", "memory"), ("cpus", "cpus"),
                                                                 ("max_concurrent", "max_concurrent"))},
             "lean_warm_up": warm_up, "system_prompt_mode": mode, "prompt_variant": variant,
+            "persona_reviewing": reviewing,
             "claude_auto_memory": auto_memory,
             "prompt_cache_normalization": TOKEN_COUNTER_NORMALIZATION_VERSION,
             "claude_code_env": claude_code_env(auto_memory), "ledger_path": str(ledger_file), "budget_scope": "pilot",
@@ -1296,14 +1299,14 @@ async def run_pilot(config, repo_root, conference_factory=None):
         clock = RunClock(barrier)
         archive = InstructionArchive(run_dir / "instructions", record)
         solver = peer_solver(conference=conference, definitions=TOOL_DEFINITIONS, personas=personas,
-                             prompt_for=lambda a, p: build_prompt(a, p, listing, variant),
+                             prompt_for=lambda a, p: build_prompt(a, p, listing, variant, reviewing),
                              filter_for=lambda a: budget_filter(a, ledger, settings, barrier, record, "pilot", archive,
                                                                 clock.stop),
                              run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,
                              auto_memory=auto_memory, in_flight_grace=in_flight_grace)
         task = build_task(agent_ids=agent_ids, files=agent_files(task_files), solver=solver, compose=compose,
                           metadata={"condition": condition_label(variant, is_ablation(config)), "prompt_variant": variant,
-                                    "personas": personas, "persona_seed": persona_seed},
+                                    "persona_reviewing": reviewing, "personas": personas, "persona_seed": persona_seed},
                           initial_message=INITIAL_MESSAGE)
         return await supervise(eval_async(task, model=model, **eval_options(agent_count, run_dir, config)),
                                clock, conference, record, config)

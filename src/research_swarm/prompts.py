@@ -259,11 +259,41 @@ _LISTING_FIELDS = frozenset({"task_id", "title", "theorem_name", "answer_based",
 _AGENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 
 
-def persona_section(persona: str) -> str:
-    """Paper Appendix A: persona injected under a dedicated Persona:<Name> section."""
+# The personas' closing "When reviewing papers" block (paper Appendix A); this
+# reconstruction has no paper reviewing, so it is left out unless the config sets
+# persona_reviewing: true (docs/prompts.md, "Persona reviewing lines").
+PERSONA_REVIEWING_KEY = "persona_reviewing"
+PERSONA_REVIEWING_DEFAULT = False
+_REVIEWING_MARKER = "\nWhen reviewing papers:\n"
+
+
+def persona_reviewing_problems(config) -> list[str]:
+    """Config check: absent means the default (left out); any value must be a boolean."""
+    if PERSONA_REVIEWING_KEY in config and not isinstance(config[PERSONA_REVIEWING_KEY], bool):
+        return [f"{PERSONA_REVIEWING_KEY} must be true or false"]
+    return []
+
+
+def persona_text(persona: str, reviewing: bool = PERSONA_REVIEWING_DEFAULT) -> str:
+    """The persona, without its reviewing block unless ``reviewing``. Fails closed if the
+    block is not found exactly once or is not the persona's last part."""
     if persona not in PERSONAS:
         raise ValueError(f"Unknown persona: {persona}")
-    return f"## Persona: {PERSONA_NAMES[persona]}\n\n{PERSONAS[persona]}"
+    text = PERSONAS[persona]
+    if reviewing:
+        return text
+    if text.count(_REVIEWING_MARKER) != 1:
+        raise ValueError(f"Persona {persona!r}: reviewing block not found exactly once")
+    head, block = text.split(_REVIEWING_MARKER)
+    if any(not line.startswith("- ") for line in block.splitlines()):
+        raise ValueError(f"Persona {persona!r}: reviewing block is not the persona's last part")
+    return head
+
+
+def persona_section(persona: str, reviewing: bool = PERSONA_REVIEWING_DEFAULT) -> str:
+    """Paper Appendix A: persona injected under a dedicated Persona:<Name> section."""
+    text = persona_text(persona, reviewing)
+    return f"## Persona: {PERSONA_NAMES[persona]}\n\n{text}"
 
 
 def _problem_listing(task_listing):
@@ -286,20 +316,21 @@ def _problem_listing(task_listing):
 
 
 def build_prompt(agent_id: str, persona: str, task_listing: list[dict] | None = None,
-                 variant: str = BASELINE_VARIANT) -> str:
+                 variant: str = BASELINE_VARIANT, persona_reviewing: bool = PERSONA_REVIEWING_DEFAULT) -> str:
     """Full system prompt for one experimental agent.
 
     ``task_listing`` is the public metadata returned by
     ``FrozenDataset.export_agent_tasks``. When omitted, the prompt points to
     /workspace/problems/tasks.json and ``list_problems`` instead. ``variant`` selects
     a prompt ablation from ``PROMPT_VARIANTS`` (default: the unchanged baseline).
+    ``persona_reviewing`` keeps the personas' "When reviewing papers" block (default: left out).
     """
     if not isinstance(agent_id, str) or not _AGENT_ID.fullmatch(agent_id):
         raise ValueError("Invalid agent identifier")
     edited = variant_sections(variant)
     sections = [
         edited["INTRODUCTION"].format(agent_id=agent_id),
-        persona_section(persona),
+        persona_section(persona, persona_reviewing),
         _problem_listing(task_listing) + "\n\n" + PROBLEMS_FOOTER,
         ENVIRONMENT,
         SUBMISSIONS,

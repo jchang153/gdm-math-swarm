@@ -141,7 +141,8 @@ ABLATION_AGENT_COUNTS = frozenset({10, 20})
 
 # Optional prompt ablation (docs/prompts.md, "Prompt ablation variants"); the check
 # lives in prompts so runtime preflight can use it without importing this module.
-from .prompts import PROMPT_VARIANT_KEY, prompt_variant_problems  # noqa: E402
+from .prompts import (PERSONA_REVIEWING_DEFAULT, PERSONA_REVIEWING_KEY, PROMPT_VARIANT_KEY,  # noqa: E402
+                      persona_reviewing_problems, prompt_variant_problems)
 
 
 CONFIG_CAP_KEYS = {"pilot": "max_pilot_usd", "analysis": "max_analysis_usd", "compatibility": "max_compatibility_usd"}
@@ -495,6 +496,12 @@ class _Gates:
         variant = self.config.get(PROMPT_VARIANT_KEY, "baseline")
         self.add("prompt_variant", not problems, "; ".join(problems) or f"prompt variant {variant!r}",
                  prompt_variant=variant)
+
+    def persona_reviewing(self):
+        problems = persona_reviewing_problems(self.config)
+        reviewing = self.config.get(PERSONA_REVIEWING_KEY, PERSONA_REVIEWING_DEFAULT)
+        self.add("persona_reviewing", not problems, "; ".join(problems) or f"persona reviewing lines {reviewing!r}",
+                 persona_reviewing=reviewing)
 
     def config_caps(self):
         drift = {}
@@ -927,6 +934,7 @@ def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy
     gates.run("seeded_track", gates.seeded_track)
     gates.run("budget_track", gates.budget_track)
     gates.run("prompt_variant", gates.prompt_variant)
+    gates.run("persona_reviewing", gates.persona_reviewing)
     gates.run("config_caps", gates.config_caps)
     gates.run("route_pricing", gates.route_pricing)
     for prefix, required, optional in EVIDENCE_GATES:

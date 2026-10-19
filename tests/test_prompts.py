@@ -103,7 +103,7 @@ class PromptTests(unittest.TestCase):
     def test_personas_are_verbatim_under_named_section(self):
         self.assertEqual(set(PERSONAS), {'algebra', 'analysis_topology', 'combinatorics', 'number_theory'})
         for persona, lines in APPENDIX_A_LINES.items():
-            prompt = build_prompt('agent-007', persona)
+            prompt = build_prompt('agent-007', persona, persona_reviewing=True)
             self.assertIn(f'## Persona: {PERSONA_NAMES[persona]}\n\n{PERSONAS[persona]}', prompt)
             self.assertIn('Specialized Research Focus:\nYou are a world-class mathematical researcher', prompt)
             for line in lines:
@@ -152,7 +152,7 @@ class PromptTests(unittest.TestCase):
     def test_full_prompt_contains_paper_wording_only_where_verbatim(self):
         for persona in PERSONAS:
             prompt = build_prompt('agent-010', persona)
-            without_paper = prompt.replace(INTEGRITY_PROMPT, '').replace(PERSONAS[persona], '')
+            without_paper = prompt.replace(INTEGRITY_PROMPT, '').replace(prompts.persona_text(persona), '')
             for pattern in FORBIDDEN:
                 self.assertIsNone(re.search(pattern, without_paper, re.IGNORECASE), pattern)
             for pattern in ALWAYS_FORBIDDEN:
@@ -248,6 +248,50 @@ class ToolDefinitionTests(unittest.TestCase):
             self.skipTest('Optional pinned Inspect dependency not installed')
         for definition in TOOL_DEFINITIONS:
             ToolParams.model_validate(definition['inputSchema'])
+
+
+class PersonaReviewingTests(unittest.TestCase):
+    def test_default_leaves_out_only_the_reviewing_block(self):
+        for persona, text in PERSONAS.items():
+            head, block = text.split('\nWhen reviewing papers:\n')
+            prompt = build_prompt('agent-007', persona)
+            self.assertNotIn('When reviewing papers', prompt)
+            self.assertIn(f'## Persona: {PERSONA_NAMES[persona]}\n\n{head}\n\n## Problems', prompt)
+            for line in block.splitlines():
+                self.assertNotIn(line, prompt)
+            self.assertEqual(prompt, build_prompt('agent-007', persona, persona_reviewing=False))
+
+    def test_true_restores_the_verbatim_persona(self):
+        for persona in PERSONAS:
+            with_block = build_prompt('agent-007', persona, persona_reviewing=True)
+            self.assertIn(f'{PERSONAS[persona]}\n\n## Problems', with_block)
+            self.assertEqual(with_block.replace(PERSONAS[persona], prompts.persona_text(persona)),
+                             build_prompt('agent-007', persona))
+
+    def test_combines_with_variants(self):
+        prompt = build_prompt('agent-007', 'algebra', variant='skills_eval_lenient')
+        self.assertNotIn('When reviewing papers', prompt)
+        self.assertIn('# Lean Mathematics Evaluation', prompt)
+
+    def test_missing_block_fails_closed(self):
+        original = dict(PERSONAS)
+        try:
+            PERSONAS['algebra'] = original['algebra'].replace('When reviewing papers:', 'When reading papers:')
+            with self.assertRaises(ValueError):
+                build_prompt('agent-007', 'algebra')
+            PERSONAS['algebra'] = original['algebra'] + '\nA closing line.'
+            with self.assertRaises(ValueError):
+                build_prompt('agent-007', 'algebra')
+        finally:
+            PERSONAS.clear()
+            PERSONAS.update(original)
+
+    def test_config_check(self):
+        self.assertEqual(prompts.persona_reviewing_problems({}), [])
+        self.assertEqual(prompts.persona_reviewing_problems({'persona_reviewing': True}), [])
+        self.assertEqual(prompts.persona_reviewing_problems({'persona_reviewing': False}), [])
+        for bad in ('false', 0, None):
+            self.assertTrue(prompts.persona_reviewing_problems({'persona_reviewing': bad}))
 
 
 class PromptVariantTests(unittest.TestCase):

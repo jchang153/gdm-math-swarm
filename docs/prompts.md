@@ -130,8 +130,9 @@ enforces this with a pattern list.
   ("Instructions and enforcement gap") and is not corrected in the prompt.
 * B.1 contains the word "exploits". It is the only occurrence in the prompt, and tests
   check that the reconstructed text adds none.
-* The personas' "When reviewing papers" guidance is kept, although this reconstruction
-  has no paper-review activity. The paper's `submit_feedback` description ("This is NOT
+* The personas' "When reviewing papers" guidance was kept until October 19, 2026, although
+  this reconstruction has no paper-review activity; it is now left out by default (see
+  "Persona reviewing lines" below). The paper's `submit_feedback` description ("This is NOT
   a paper review") suggests the original conference had one. It is not reconstructed.
 * Appendix C descriptions call participants "agents". The reconstructed text says
   "participants" and "peer researchers". Agent identifiers are `agent-NNN`. The paper's
@@ -229,7 +230,7 @@ On October 13, 2026 the integrator accepted these as documented reconstruction c
 * Participants listed by identifier.
 * The size limits.
 * The `mcp__conference__` prefix note and the final-reply sentence.
-* The persona "When reviewing papers" lines.
+* The persona "When reviewing papers" lines (now left out by default; see "Persona reviewing lines").
 
 ## Conference service semantics (reconstruction choices)
 
@@ -593,6 +594,19 @@ five agents considered setting an answer field to the statement itself and rejec
 it, citing rule 6, possible detection or the spirit of the task; 17 of 20 agents ended
 on budget exhaustion rather than a voluntary stop. A variant run is an exploratory
 condition, not a baseline repetition, and must be reported as such.
+
+## Persona reviewing lines
+
+Decided by the user on October 19, 2026 (docs/plan.md, "Persona reviewing lines left out").
+Each Appendix A persona ends with a "When reviewing papers:" block of three bullets. This
+reconstruction has no paper reviewing, so `prompts.persona_text` leaves the block out by
+default: the persona ends after its "When formulating theorems and proofs in Lean 4" bullets.
+The config key `persona_reviewing: true` restores the verbatim persona. The removal fails
+closed if the block is not found exactly once or is not the persona's last part; the
+`persona_reviewing` launch gate refuses a non-boolean value. The setting is recorded in
+`settings.json` (`effective.persona_reviewing`) and the Inspect task metadata. It is
+independent of `prompt_variant` and applies to every variant. The runs of October 15-19, 2026
+had the block; a run without it is not byte-identical to them on this point.
 
 ## Seeded-contagion mechanism (implemented, disabled; semantics undecided)
 
