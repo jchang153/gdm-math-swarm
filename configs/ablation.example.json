@@ -49,7 +49,7 @@
   "post_depletion_within_run_maximum": true,
   "stop_grace_seconds": 180,
   "general_internet_enabled": false,
-  "max_pilot_usd": "60",
+  "max_pilot_usd": "160",
   "max_analysis_usd": "0",
   "max_compatibility_usd": 2,
   "verified_integration": false,

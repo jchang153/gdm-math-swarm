@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from research_swarm import launch_gates  # noqa: E402
 from research_swarm.budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, caps_for, is_ablation,  # noqa: E402
-                                   ledger_path_for, raise_cap, read_snapshot)
+                                   ledger_path_for, raise_ablation_cap, raise_cap, read_snapshot)
 
 # What each allowance is for (docs/plan.md "Approved spending limits" and "Live
 # compatibility check"); every scope is outside the others.
@@ -107,7 +107,7 @@ def render_spending(spending):
     return lines
 
 
-def apply_cap_raise(ledger_path, scope, note, approved, out=print, caps=None):
+def apply_cap_raise(ledger_path, scope, note, approved, out=print, caps=None, raiser=None):
     """Explicit cap raise to the approved value; 0 when applied, 2 when refused or not approved."""
     snapshot = read_snapshot(ledger_path) or {}
     current = snapshot.get(scope)
@@ -123,7 +123,8 @@ def apply_cap_raise(ledger_path, scope, note, approved, out=print, caps=None):
         out("Not raised: requires --approval-note TEXT recording the user's approval and --i-have-user-approval.")
         return 2
     try:
-        result = raise_cap(ledger_path, scope, approved_cap, note)
+        result = (raiser(ledger_path, scope, note) if raiser is not None and raiser is not raise_cap
+                  else raise_cap(ledger_path, scope, approved_cap, note))
     except ValueError as ex:
         out(f"Not raised: {ex}")
         return 2
@@ -171,7 +172,8 @@ def main(argv=None):
         # The ablation track raises its own ledger to its own approved caps (budget.caps_for).
         path = ledger_path_for(config, ROOT) if is_ablation(config) else DEFAULT_LEDGER_PATH(ROOT)
         code = apply_cap_raise(path, args.raise_ledger_cap, args.approval_note,
-                               args.i_have_user_approval, caps=caps_for(config))
+                               args.i_have_user_approval, caps=caps_for(config),
+                               raiser=raise_ablation_cap if is_ablation(config) else raise_cap)
         if code:
             return code
     report = collect(config, ROOT)

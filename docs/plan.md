@@ -30,6 +30,14 @@ the authoritative ledger. Selected by `budget_track: "ablation"` (configs/ablati
 - Labels: Inspect `condition` is `ablation-track-<variant>`; `settings.json` records
   `effective.budget_track` and `effective.prompt_variant`.
 - The transcript behavior judge is not run on this track for now.
+- Models (October 19, 2026): `provider.ABLATION_MODEL_IDS` = DeepSeek V4.1 Flash and GLM 5.3
+  (`z-ai/glm-5.3` on the model maker's own route `z-ai/fp8`, reservation prices equal to its
+  published $1.40/$4.40 per million prompt/completion tokens; configs/ablation-glm.example.json).
+  `candidate_model_id` must equal `provider_settings.model_id`; the baseline stays pinned to
+  DeepSeek. A GLM run needs its own route freeze and compatibility check (Claude Code bridge
+  with GLM reasoning), both under the ablation ledger.
+- Caps (October 19, 2026): pilot $60 for the first run; raised to $160 (+$100) for the GLM
+  run, applied with the audited cap raise only after the first run ended.
 
 ## Transcript behavior judge specified, October 17, 2026
 

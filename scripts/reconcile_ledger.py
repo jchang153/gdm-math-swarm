@@ -216,8 +216,13 @@ def settle_manual(ledger, planned, note, *, allow_reserved=False):
 def ledger_caps(path):
     """Caps to open ``path`` with: the ablation track's own ledger keeps its own caps
     (docs/plan.md, "Prompt ablation track"); every other ledger the approved DEFAULT_CAPS."""
-    from research_swarm.budget import ABLATION_CAPS, ABLATION_LEDGER_RELATIVE
-    return dict(ABLATION_CAPS) if Path(path).name == ABLATION_LEDGER_RELATIVE.name else None
+    from research_swarm.budget import ABLATION_CAPS, ABLATION_LEDGER_RELATIVE, read_snapshot
+    if Path(path).name != ABLATION_LEDGER_RELATIVE.name:
+        return None
+    # Reconciliation never changes caps: open the ledger at the caps it has (before or
+    # after an audited raise), falling back to ABLATION_CAPS for a scope it lacks.
+    snapshot = read_snapshot(path) or {}
+    return {scope: snapshot[scope]["cap_usd"] if scope in snapshot else cap for scope, cap in ABLATION_CAPS.items()}
 
 
 def write_audit(ledger_path, ledger, entries, **extra):

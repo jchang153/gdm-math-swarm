@@ -400,7 +400,7 @@ class LaunchGateTests(GateFixture):
     def ablation_config(self, **overrides):
         values = dict(budget_track="ablation", agent_count=10, max_connections=10,
                       persona_counts={"algebra": 3, "analysis_topology": 3, "combinatorics": 2, "number_theory": 2},
-                      max_pilot_usd="60", max_analysis_usd="0", max_compatibility_usd=2,
+                      max_pilot_usd="160", max_analysis_usd="0", max_compatibility_usd=2,
                       allow_unlimited_provider_key=False)
         return pilot_config(**{**values, **overrides})
 
@@ -414,7 +414,7 @@ class LaunchGateTests(GateFixture):
         result = self.evaluate_ablation()
         for gate in ("approved_settings", "budget_track", "config_caps"):
             self.assertTrue(result["evidence"][gate]["passed"], (gate, result["evidence"][gate]["reason"]))
-        self.assertEqual(result["ledger"]["default_caps"], {"pilot": "60", "analysis": "0", "compatibility": "2"})
+        self.assertEqual(result["ledger"]["default_caps"], {"pilot": "160", "analysis": "0", "compatibility": "2"})
         self.assertTrue(self.evaluate_ablation(self.ablation_config(agent_count=20, max_connections=20))["evidence"]
                         ["approved_settings"]["passed"])
         self.assertBlocked(self.evaluate_ablation(self.ablation_config(agent_count=15, max_connections=15)),
@@ -426,7 +426,7 @@ class LaunchGateTests(GateFixture):
         self.assertBlocked(self.evaluate_ablation(self.ablation_config(allow_unlimited_provider_key=True,
                                                                        unlimited_provider_key_approval=" ")),
                            "approved_settings", "requires a nonempty unlimited_provider_key_approval note")
-        self.assertBlocked(self.evaluate_ablation(self.ablation_config(max_pilot_usd="100")), "config_caps", "max_pilot_usd")
+        self.assertBlocked(self.evaluate_ablation(self.ablation_config(max_pilot_usd="60")), "config_caps", "max_pilot_usd")
         self.assertBlocked(self.evaluate(pilot_config(budget_track="other")), "budget_track", "is not 'ablation'")
         # Without the track, 10 agents stay refused.
         self.assertBlocked(self.evaluate(pilot_config(agent_count=10, max_connections=10)),
@@ -444,7 +444,7 @@ class LaunchGateTests(GateFixture):
         other = self.tmp / "other" / "budget.sqlite"
         BudgetLedger(other, {"pilot": 100, "analysis": 0, "compatibility": 2})
         result = self.evaluate_ablation(ledger_path=other)
-        self.assertBlocked(result, "ledger", "differs from the approved $60")
+        self.assertBlocked(result, "ledger", "differs from the approved $160")
         # The ablation track never reserves against the baseline ledger.
         result = self.evaluate_ablation(ledger_path=budget.DEFAULT_LEDGER_PATH(ROOT))
         self.assertBlocked(result, "ledger", "must not use the baseline ledger")
@@ -512,9 +512,62 @@ class LaunchGateTests(GateFixture):
         path = self.tmp / "state" / "ablation-budget.sqlite"
         ledger = BudgetLedger(path, budget.ABLATION_CAPS)
         ledger.reserve("pilot", "agent-001", "0.5")
-        self.assertEqual(reconcile.ledger_caps(path), budget.ABLATION_CAPS)
+        self.assertEqual({k: str(v) for k, v in reconcile.ledger_caps(path).items()},
+                         {k: str(v) for k, v in budget.ABLATION_CAPS.items()})
         self.assertIsNone(reconcile.ledger_caps(self.tmp / "state" / "budget.sqlite"))
         BudgetLedger(path, caps=reconcile.ledger_caps(path))  # opens without a cap mismatch
+
+    def test_ablation_track_allows_glm_only_with_matching_provider_settings(self):
+        glm = json.loads((ROOT / "configs" / "ablation-glm.example.json").read_text())
+        result = self.evaluate_ablation({**glm, "paid_launch_enabled": True, "verified_integration": True})
+        for gate in ("approved_settings", "budget_track", "prompt_variant", "config_caps"):
+            self.assertTrue(result["evidence"][gate]["passed"], (gate, result["evidence"][gate]["reason"]))
+        # candidate_model_id must equal provider_settings.model_id.
+        mismatch = {**glm, "provider_settings": {**glm["provider_settings"], "model_id": MODEL_ID}}
+        self.assertBlocked(self.evaluate_ablation(mismatch), "approved_settings", "candidate_model_id")
+        self.assertBlocked(self.evaluate_ablation({**glm, "candidate_model_id": "openai/gpt-6.1",
+                                                   "provider_settings": {**glm["provider_settings"],
+                                                                         "model_id": "openai/gpt-6.1"}}),
+                           "approved_settings", "candidate_model_id")
+        # The baseline stays pinned to DeepSeek, also through provider_settings.
+        self.assertBlocked(self.evaluate(pilot_config(candidate_model_id="z-ai/glm-5.3")),
+                           "approved_settings", "candidate_model_id")
+        base = pilot_config()
+        sneaky = pilot_config(provider_route="z-ai/fp8",
+                              provider_settings={**base.get("provider_settings", {}), "model_id": "z-ai/glm-5.3"})
+        self.assertBlocked(self.evaluate(sneaky), "approved_settings", "provider_settings.model_id")
+        self.assertTrue(self.evaluate()["evidence"]["approved_settings"]["passed"])
+
+    def test_ablation_cap_raise_is_audited_and_ablation_only(self):
+        from research_swarm import budget
+        path = self.tmp / "state" / "ablation-budget.sqlite"
+        ledger = BudgetLedger(path, {**budget.ABLATION_CAPS, "pilot": "60"})
+        ledger.settle(ledger.reserve("pilot", "agent-001", "1"), "0.4", "provider_reported_cost")
+        held = ledger.reserve("pilot", "agent-002", "1")
+        with self.assertRaises(ValueError):  # a request still in flight
+            budget.raise_ablation_cap(path, "pilot", "user approved +$100")
+        ledger.settle(held, "0.1", "provider_reported_cost")
+        with self.assertRaises(ValueError):
+            budget.raise_ablation_cap(path, "pilot", " ")
+        with self.assertRaises(ValueError):
+            budget.raise_ablation_cap(self.tmp / "state" / "budget.sqlite", "pilot", "x")
+        result = budget.raise_ablation_cap(path, "pilot", "user approved +$100")
+        self.assertEqual((result["previous_cap_usd"], result["new_cap_usd"]), ("60", "160"))
+        snapshot = read_snapshot(path)["pilot"]
+        self.assertEqual((snapshot["cap_usd"], snapshot["settled_usd"]), ("160", "0.5"))
+        self.assertEqual([c["note"] for c in cap_changes(path)], ["user approved +$100"])
+        with self.assertRaises(ValueError):  # never twice
+            budget.raise_ablation_cap(path, "pilot", "again")
+        BudgetLedger(path, budget.ABLATION_CAPS)  # opens at the new caps
+
+    def test_reconcile_opens_an_unraised_ablation_ledger(self):
+        from research_swarm import budget
+        reconcile = load_script("reconcile_ledger")
+        path = self.tmp / "state" / "ablation-budget.sqlite"
+        BudgetLedger(path, {**budget.ABLATION_CAPS, "pilot": "60"})
+        caps = reconcile.ledger_caps(path)
+        self.assertEqual(caps["pilot"], "60")
+        BudgetLedger(path, caps=caps)
 
     def test_seeded_configuration_blocks_the_pilot(self):
         """S3: any seeded configuration, enabled or not, blocks the approved spontaneous pilot."""

@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_CEILING
 
 MODEL_ID = "deepseek/deepseek-v4.1-flash"
+# Models the prompt ablation track may run (docs/plan.md, "Prompt ablation track"). The
+# baseline stays pinned to MODEL_ID by the launch gates (approved candidate_model_id).
+GLM_MODEL_ID = "z-ai/glm-5.3"
+ABLATION_MODEL_IDS = (MODEL_ID, GLM_MODEL_ID)
 
 # Chat-template and provider framing allowance added to the byte bound below.
 FRAMING_TOKEN_ALLOWANCE = 8192
@@ -22,7 +26,7 @@ class ProviderSettings:
     reasoning_effort: str = "high"
 
     def request_options(self):
-        if self.model_id != MODEL_ID or not self.provider_route:
+        if self.model_id not in ABLATION_MODEL_IDS or not self.provider_route:
             raise ValueError("The approved model and explicit provider route are required")
         return {"provider":{"only":[self.provider_route],"allow_fallbacks":False,"require_parameters":True},
                 "reasoning":{"effort":self.reasoning_effort,"exclude":False},

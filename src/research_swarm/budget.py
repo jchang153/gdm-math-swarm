@@ -136,7 +136,10 @@ ABLATION_BUDGET_TRACK = "ablation"
 ABLATION_LEDGER_RELATIVE = Path("state") / "ablation-budget.sqlite"
 # Cumulative caps of the ablation ledger. A later run needs an audited raise (raise_cap),
 # exactly as on the baseline ledger; no paid analysis on this track.
-ABLATION_CAPS = {"pilot": "60", "analysis": "0", "compatibility": 2}
+# History: pilot $60 for the first run (skills_eval_lenient, DeepSeek); raised to $160 on
+# 2026-10-19 for the GLM 5.3 run (+$100, the user's decision). Raise with
+# scripts/preflight.py --config <ablation config> --raise-ledger-cap pilot after that run.
+ABLATION_CAPS = {"pilot": "160", "analysis": "0", "compatibility": 2}
 
 
 def budget_track_problems(config) -> list[str]:
@@ -425,6 +428,41 @@ def raise_cap(path, scope, new_cap, approval_note):
             problems = _cache_repeat_prior_problems(db, after_raise=False)
             if problems:
                 raise ValueError("; ".join(problems))
+        db.execute("UPDATE scopes SET cap=? WHERE name=?", (target, scope))
+        db.execute("INSERT INTO cap_changes (scope,previous_cap,new_cap,note) VALUES (?,?,?,?)",
+                   (scope, row[0], target, note))
+    return {"scope": scope, "previous_cap_usd": usd(row[0]), "new_cap_usd": usd(target), "note": note}
+
+
+def raise_ablation_cap(path, scope, approval_note):
+    """Audited raise of the ablation track's own ledger (docs/plan.md, "Prompt ablation
+    track") to ``ABLATION_CAPS[scope]``. Only a file named like ABLATION_LEDGER_RELATIVE,
+    only upwards, only with no in-flight or unresolved requests and no violation; recorded
+    spending is kept and an audit row is written. Never touches the baseline ledger."""
+    note = str(approval_note or "").strip()
+    if not note:
+        raise ValueError("A cap raise requires a note recording the user's approval")
+    path = Path(path)
+    if path.name != ABLATION_LEDGER_RELATIVE.name:
+        raise ValueError(f"{path} is not an ablation ledger ({ABLATION_LEDGER_RELATIVE.name})")
+    if scope != "pilot":
+        raise ValueError("Only the ablation pilot scope has an approved raise")
+    if not path.exists():
+        raise ValueError(f"No ledger at {path}; a new ablation ledger is created with ABLATION_CAPS")
+    target = units(ABLATION_CAPS[scope])
+    with closing(sqlite3.connect(str(path), timeout=30)) as db, db:
+        db.execute("PRAGMA busy_timeout=30000")
+        db.execute("BEGIN EXCLUSIVE")
+        db.execute(_CAP_CHANGES)
+        row = db.execute("SELECT cap FROM scopes WHERE name=?", (scope,)).fetchone()
+        if row is None:
+            raise ValueError(f"Ledger has no {scope} scope")
+        if row[0] >= target:
+            raise ValueError(f"{scope} cap is already {usd(row[0])}; caps are never lowered or reset")
+        data = _snapshot(db)[scope]
+        if data["unresolved_requests"] or data.get("in_flight_requests") or data["violation"]:
+            raise ValueError("The ablation raise needs no in-flight or unresolved requests and no violation "
+                             "(the previous run must have ended and been reconciled)")
         db.execute("UPDATE scopes SET cap=? WHERE name=?", (target, scope))
         db.execute("INSERT INTO cap_changes (scope,previous_cap,new_cap,note) VALUES (?,?,?,?)",
                    (scope, row[0], target, note))

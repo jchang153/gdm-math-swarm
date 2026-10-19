@@ -54,7 +54,8 @@ from .budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, INITIAL_PILOT_SETTLED_US
                      CACHE_REPEAT_PRIOR_COMMITTED_USD, CACHE_REPEAT_PRIOR_CALLS_SHA256, cache_repeat_prior_problems,
                      LEGACY_LEDGER_RELATIVE, UNRESOLVED_STATES, list_requests,
                      read_snapshot, budget_track_problems, caps_for, is_ablation, ledger_path_for)
-from .provider import CONFIG_OVERRIDABLE, MODEL_ID, frozen_fields, settings_from_config, validate_catalog
+from .provider import (ABLATION_MODEL_IDS, CONFIG_OVERRIDABLE, MODEL_ID, frozen_fields, settings_from_config,
+                       validate_catalog)
 from .provider_limit import TOLERANCE_USD as LIMIT_TOLERANCE_USD, assess as assess_provider_limit
 
 PILOT_SUBSET = "data/pilot_subset.json"
@@ -442,6 +443,24 @@ class _Gates:
             approved.pop("agent_count")
             if self.config.get("agent_count") not in ABLATION_AGENT_COUNTS or type(self.config.get("agent_count")) is not int:
                 approved["agent_count"] = sorted(ABLATION_AGENT_COUNTS)
+            # ...and any model in ABLATION_MODEL_IDS, as long as the provider settings agree.
+            approved.pop("candidate_model_id")
+            model = self.config.get("candidate_model_id")
+            try:
+                configured = settings_from_config(self.config).model_id
+            except ValueError:
+                configured = None
+            if model not in ABLATION_MODEL_IDS or configured != model:
+                approved["candidate_model_id"] = f"one of {list(ABLATION_MODEL_IDS)}, equal to provider_settings.model_id"
+        if not is_ablation(self.config):
+            # The provider settings decide the model actually called: on the baseline they
+            # must name the pinned MODEL_ID as well (not only candidate_model_id).
+            try:
+                configured = settings_from_config(self.config).model_id
+            except ValueError:
+                configured = None
+            if configured != MODEL_ID:
+                approved["provider_settings.model_id"] = MODEL_ID
         drift = {k: {"config": self.config.get(k), "approved": v} for k, v in approved.items()
                  if self.config.get(k) != v or type(self.config.get(k)) is not type(v)}
         problems = ["config differs from approved plan values: " + ", ".join(sorted(drift))] if drift else []

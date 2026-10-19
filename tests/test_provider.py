@@ -82,3 +82,13 @@ class ProviderTests(unittest.TestCase):
         validate_catalog(catalog,ProviderSettings())
         catalog["data"]["endpoints"][0]["max_completion_tokens"]=8192
         with self.assertRaises(ValueError):validate_catalog(catalog,ProviderSettings())
+
+
+class AblationModelTests(unittest.TestCase):
+    def test_request_options_allow_only_the_ablation_models(self):
+        from research_swarm.provider import ABLATION_MODEL_IDS, GLM_MODEL_ID
+        self.assertEqual(ABLATION_MODEL_IDS, (MODEL_ID, GLM_MODEL_ID))
+        options = ProviderSettings(model_id=GLM_MODEL_ID, provider_route="z-ai/fp8").request_options()
+        self.assertEqual(options["provider"], {"only": ["z-ai/fp8"], "allow_fallbacks": False, "require_parameters": True})
+        with self.assertRaises(ValueError):
+            ProviderSettings(model_id="openai/gpt-6.1").request_options()
