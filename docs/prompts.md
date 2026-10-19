@@ -420,14 +420,18 @@ shows what the model still receives from Claude Code in `replace` mode:
   "You are a Claude agent, built on Anthropic's Claude Agent SDK." (62 characters), then
   the conference prompt with nothing before or after it. The built-in harness, memory,
   environment and context-management sections are gone.
-* The built-in tool definitions (`Bash`, `Read`, `Write`, `Skill`, `Workflow`, ...) are
-  unchanged.
+* Built-in tools (since October 19, 2026; docs/plan.md, "Unneeded built-in tools
+  removed"): only `Bash`, `Read`, `Write` and `Edit` remain, with Claude Code's own
+  descriptions, next to the twelve conference tools. Every other built-in is in
+  `inspect_adapter.DISALLOWED_TOOLS`. Blocking `Skill` also removes the list of Claude
+  Code's built-in skills from the reminders (confirmed in the local capture).
 * Claude Code also adds reminders to the conversation, in both modes. The October 15
   baseline log (agent-001) shows a git-attribution reminder in the first user message,
   and from the second request on a separate system message of about 6,800 characters:
   environment (working directory, platform), "You are powered by the model
   deepseek/deepseek-v4.1-flash.", the list of Claude Code's built-in skills, the token
-  budget and the date. `InstructionArchive` records only the leading system blocks and
+  budget and the date. With `Skill` blocked, the skills list (about 6,000 characters)
+  is no longer sent. `InstructionArchive` records only the leading system blocks and
   tools, so these reminders appear only in the Inspect log.
 
 The rest of this section describes the `append` arrangement used in the four runs of

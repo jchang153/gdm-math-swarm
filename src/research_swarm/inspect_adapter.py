@@ -68,8 +68,15 @@ OPENAI_SDK_VERSION = "3.29.0"
 CLAUDE_CODE_VERSION = "2.1.296"
 
 # Built-in Claude Code tools removed from the model's tool list. "Task" was the
-# nested-agent tool name before it was renamed "Agent"; both are listed.
-DISALLOWED_TOOLS = ("Agent", "Task", "WebSearch", "WebFetch")
+# nested-agent tool name before it was renamed "Agent"; both are listed. Since
+# October 19, 2026 every built-in except Bash, Read, Write and Edit is removed
+# (docs/plan.md, "Unneeded built-in tools removed"). The Task* to-do tools did not
+# appear in the 2.1.296 container captures; they are listed in case they appear.
+DISALLOWED_TOOLS = ("Agent", "Task", "WebSearch", "WebFetch",
+                    "Workflow", "CronCreate", "CronDelete", "CronList", "ScheduleWakeup",
+                    "SendMessage", "ListAgents", "TaskStop", "TaskCreate", "TaskGet", "TaskList",
+                    "TaskUpdate", "Skill", "NotebookEdit", "EnterWorktree", "ExitWorktree",
+                    "ReportFindings")
 
 BASH_TIMEOUT_MS = 120_000
 
