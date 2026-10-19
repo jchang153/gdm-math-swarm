@@ -706,14 +706,27 @@ def compaction_bracket(entries, levels=COMPACTION_PROBE_LEVELS):
 
 
 # docs/prompts.md, "Current setting": in replace mode Claude Code 2.1.296 sends a 74-character
-# billing header and a 62-character identity line besides the conference prompt.
+# billing header and a 62-character identity line besides the conference prompt; append mode
+# adds about 5,700 characters of built-in prompt in front of it.
 REPLACE_MAX_OTHER_SYSTEM_CHARS = 500
+
+
+def other_system_chars(blocks, prompt):
+    """System text besides the exact conference prompt (prefixes and suffixes in its own block
+    count too); None when the prompt is unknown or not found contiguously in one block."""
+    if not prompt:
+        return None
+    for i, block in enumerate(blocks):
+        if prompt in block:
+            return sum(len(b) for j, b in enumerate(blocks) if j != i) + len(block) - len(prompt)
+    return None
 
 
 def instructions_replaced(main, agents):
     """Every agent has an archived request with Claude Code's identity, tool definitions and
     no more than the billing header and identity line besides its conference prompt."""
     return all(any(i["agent_id"] == a and i["claude_code_builtin_prompt_present"] and i["tool_definitions"]
+                   and i["other_system_chars"] is not None
                    and i["other_system_chars"] <= REPLACE_MAX_OTHER_SYSTEM_CHARS
                    for i in main) for a in agents)
 
@@ -861,6 +874,7 @@ def build_checks(result):
     r = {a: samples.get(a, {}).get("tool_results", {}) for a in AGENTS}
     exits = {e["agent_id"]: e["payload"] for e in kinds["agent_exit"]}
     steps = {a: [x.get("step") or x.get("kind") for x in scripted.log.get(a, [])] for a in AGENTS}
+    prompts = {p.stem: p.read_text() for p in (run_dir / "prompts").glob("*.txt")}  # written by peer_solver
     instructions = []
     for path in sorted((run_dir / "instructions").glob("*.json")):
         data = json.loads(path.read_text())
@@ -871,9 +885,7 @@ def build_checks(result):
                              "appended_prompt_present": any(f"You are {data['agent_id']}," in b for b in blocks),
                              "claude_code_builtin_prompt_present": any("Claude Code" in b or "Claude Agent SDK" in b
                                                                         for b in blocks),
-                             # replace mode: only the billing header and identity line besides the prompt
-                             "other_system_chars": sum(len(b) for b in blocks
-                                                       if f"You are {data['agent_id']}," not in b)})
+                             "other_system_chars": other_system_chars(blocks, prompts.get(data["agent_id"]))})
     main = [i for i in instructions if i["appended_prompt_present"]]
     offered = sorted({t for i in main for t in i["tools"]})
     disallowed_offered = [t for t in offered if t in DISALLOWED_TOOLS or t.split("__")[-1] in DISALLOWED_TOOLS]

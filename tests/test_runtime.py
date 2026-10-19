@@ -1387,6 +1387,27 @@ class ReplaceModeInstructionCheckTests(unittest.TestCase):
         self.assertFalse(vr.instructions_replaced([{**replaced, "claude_code_builtin_prompt_present": False}],
                                                   ["agent-001"]))
         self.assertFalse(vr.instructions_replaced([replaced], ["agent-001", "agent-002"]))
+        self.assertFalse(vr.instructions_replaced([{**replaced, "other_system_chars": None}], ["agent-001"]))
+
+    def test_committed_append_captures_fail_and_replace_layout_passes(self):
+        from importlib import import_module
+        if str(ROOT / "scripts") not in sys.path:
+            sys.path.insert(0, str(ROOT / "scripts"))
+        vr = import_module("validate_runtime")
+        captures = sorted((ROOT / "research" / "effective-instructions" / "validation-runtime-20261015T021631Z")
+                          .glob("agent-*.json"))
+        self.assertTrue(captures)
+        for path in captures:
+            data = json.loads(path.read_text())
+            blocks, agent = data["system_blocks"], data["agent_id"]
+            start = blocks[-1].index(f"You are {agent},")
+            start = blocks[-1].rindex("# Lean Research Conference", 0, start)
+            prompt = blocks[-1][start:]  # the archived conference prompt, after the built-in prefix
+            other = vr.other_system_chars(blocks, prompt)
+            self.assertGreater(other, vr.REPLACE_MAX_OTHER_SYSTEM_CHARS, path.name)  # append mode fails
+            replace_layout = ["x" * 74, "You are a Claude agent, built on Anthropic's Claude Agent SDK.", prompt]
+            self.assertEqual(vr.other_system_chars(replace_layout, prompt), 74 + 62)
+            self.assertIsNone(vr.other_system_chars(replace_layout, prompt + "missing"))
 
 
 def _fake_claude_code(prompt, tools, filter, env=None, cwd="/workspace", *, system_prompt_mode="replace",
