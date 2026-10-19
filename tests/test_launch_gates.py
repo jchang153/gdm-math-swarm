@@ -410,7 +410,7 @@ class LaunchGateTests(GateFixture):
                                      legacy_ledger_path=self.legacy, now=NOW, image_id=lambda tag: self.images.get(tag))
 
     def test_ablation_track_settings(self):
-        """Ablation track: 10 or 20 agents, its own caps, no unlimited key; the baseline is unchanged."""
+        """Ablation track: 10 or 20 agents, its own caps, the unlimited-key waiver only with a note."""
         result = self.evaluate_ablation()
         for gate in ("approved_settings", "budget_track", "config_caps"):
             self.assertTrue(result["evidence"][gate]["passed"], (gate, result["evidence"][gate]["reason"]))
@@ -419,9 +419,13 @@ class LaunchGateTests(GateFixture):
                         ["approved_settings"]["passed"])
         self.assertBlocked(self.evaluate_ablation(self.ablation_config(agent_count=15, max_connections=15)),
                            "approved_settings", "agent_count")
+        # The unlimited-key waiver (the ledger alone caps spending) is allowed with an approval note.
+        self.assertTrue(self.evaluate_ablation(self.ablation_config(allow_unlimited_provider_key=True,
+                                                                    unlimited_provider_key_approval="user ok"))
+                        ["evidence"]["approved_settings"]["passed"])
         self.assertBlocked(self.evaluate_ablation(self.ablation_config(allow_unlimited_provider_key=True,
-                                                              unlimited_provider_key_approval="x")),
-                           "approved_settings", "must be false on the ablation track")
+                                                                       unlimited_provider_key_approval=" ")),
+                           "approved_settings", "requires a nonempty unlimited_provider_key_approval note")
         self.assertBlocked(self.evaluate_ablation(self.ablation_config(max_pilot_usd="100")), "config_caps", "max_pilot_usd")
         self.assertBlocked(self.evaluate(pilot_config(budget_track="other")), "budget_track", "is not 'ablation'")
         # Without the track, 10 agents stay refused.

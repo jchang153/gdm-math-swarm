@@ -10,10 +10,13 @@ the authoritative ledger. Selected by `budget_track: "ablation"` (configs/ablati
   analysis $0, compatibility $2). No binding to baseline runs; unresolved holds, violations or
   a differing cap block the launch; a later raise is an audited `budget.raise_cap` after a
   recorded decision (`scripts/preflight.py --config ... --raise-ledger-cap`).
-- Provider key: the collaborator's own key with a provider-side limit within the $60 cap;
-  `allow_unlimited_provider_key` must be false (the unlimited-key exception covers only the
-  baseline owner's key). The compatibility gate needs a compatibility check whose requests
-  are in the ablation ledger.
+- Provider key: the collaborator's own key. Amended October 19, 2026 at the collaborator's
+  request: the unlimited-key waiver (`allow_unlimited_provider_key: true` with a nonempty
+  `unlimited_provider_key_approval` note) is allowed on this track too, so the key's
+  provider-side limit need not track the ledger; the ablation ledger's caps remain the only
+  and mandatory spending stop. With the waiver off, the key's remaining limit must stay
+  within the scope's remaining allowance as before. The compatibility gate needs a
+  compatibility check whose requests are in the ablation ledger.
 - Population: 10 or 20 agents (`launch_gates.ABLATION_AGENT_COUNTS`); 10 agents use the
   balanced allocation 3/3/2/2. All other settings equal the cached baseline (14 tasks,
   personas seed, DeepSeek V4.1 Flash on Fireworks US, 8 GiB, 180 minutes).

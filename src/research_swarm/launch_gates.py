@@ -457,10 +457,6 @@ class _Gates:
             approval = self.config.get("unlimited_provider_key_approval")
             if not isinstance(approval, str) or not approval.strip():
                 problems.append("allow_unlimited_provider_key requires a nonempty unlimited_provider_key_approval note")
-        if is_ablation(self.config) and unlimited is not False:
-            # The unlimited-key exception was approved for the baseline owner's key only; the
-            # ablation track uses its own key with a provider-side limit within its cap.
-            problems.append("allow_unlimited_provider_key must be false on the ablation track")
         self.add("approved_settings", not problems, "; ".join(problems) or
                  "config matches approved plan values (max_connections equals agent_count)", drift=drift,
                  max_connections=self.config.get(MAX_CONNECTIONS_KEY), agent_count=self.config.get("agent_count"))
