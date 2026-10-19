@@ -483,3 +483,21 @@ full-history exports regenerated locally on October 18 were not uploaded (24 loc
 skipped), because republishing them would need its own decision. The before-inventory,
 original copies, plan, receipt and hosted verification are in the ignored
 `runs/phase-b/judge-publication-cache100-20261016T020259Z/attempt-1/` directory.
+
+The full-history transcript exports (regenerated October 18 with the judge's reconstruction
+across compactions) replaced the earlier final-history exports of all four runs with the
+transcripts scope of `scripts/maintain_hf_run.py`, in four sequential verified updates
+from base revision `b9649a2ef2370541a9f2ba73a25954583658c885`. Final revisions were
+`eefcc938f4bedd874ac41ff82746d368227bd309` (pilot),
+`63c1b15cae9a5bb9e65a22535a58251c30d0131e` (baseline100),
+`7bcaa6f6f7437585bfa5b573b36b886147d7e1fb` (baseline8g100) and
+`6d0f9475a5496f59a3648005c320cee42bdf45ff` (cache100). Each update replaced exactly the run's
+22 transcript files and their archive-manifest digests: 23 uploads, 10,142 files preserved
+unchanged, `.gitattributes` unchanged, catalogue unchanged, no LFS. Every new page is below the
+9.5 MiB guard; the largest is cache100 `agent-018.html` at 9,594,135 bytes. Hosted checks with a
+signed session returned HTTP 200 inline, with no attachment disposition, for each run's
+transcript index and two agent pages (including the largest). The authored content was intact
+apart from HF's injected creator-metadata script, and every page showed the full-history view.
+These are SDK/HTTP checks, not interactive browser tests. Before-inventories, original copies,
+plans, receipts and hosted checks are in the ignored
+`runs/phase-b/transcripts-publication-RUN/attempt-1/` directories.
