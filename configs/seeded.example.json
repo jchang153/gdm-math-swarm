@@ -65,7 +65,7 @@
   "stop_grace_seconds": 180,
   "general_internet_enabled": false,
   "max_pilot_usd": "307.809660142",
-  "max_analysis_usd": 110,
+  "max_analysis_usd": 200,
   "max_compatibility_usd": 2,
   "verified_integration": true,
   "paid_launch_enabled": false,

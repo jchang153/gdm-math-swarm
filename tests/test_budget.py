@@ -169,12 +169,12 @@ class BudgetTests(unittest.TestCase):
         self.historical_caps.stop()
         with tempfile.TemporaryDirectory() as folder:
             snap=BudgetLedger(Path(folder)/"cost.sqlite").snapshot()
-            self.assertEqual({k:v["cap_usd"] for k,v in snap.items()},{"pilot":"307.809660142","analysis":"110","compatibility":"2"})
+            self.assertEqual({k:v["cap_usd"] for k,v in snap.items()},{"pilot":"307.809660142","analysis":"200","compatibility":"2"})
             # October 17-18, 2026: the transcript judge's analysis allowance, $5 -> $40 -> $50 -> $100
-            # -> $110 through four audited raises (the evening decision added $10; the late-evening
-            # completion authority allowed up to double; on October 18 the user asked to increase
-            # the cap as much as needed to finish).
-            self.assertEqual(DEFAULT_CAPS,{"pilot":"307.809660142","analysis":"110","compatibility":2})
+            # -> $110 -> $200 through five audited raises (the evening decision added $10; the
+            # late-evening completion authority allowed up to double; on October 18 the user asked to
+            # increase the cap as much as needed to finish; on October 19 the overall cap became $200).
+            self.assertEqual(DEFAULT_CAPS,{"pilot":"307.809660142","analysis":"200","compatibility":2})
     def test_default_ledger_path_outside_runs(self):
         path=DEFAULT_LEDGER_PATH(Path("/repo"))
         self.assertEqual(path,Path("/repo/state/budget.sqlite"))
@@ -458,14 +458,15 @@ class JudgeAnalysisBudgetTests(JudgeLedgerFixture):
         with self.assertRaises(ValueError):
             raise_cap(replacement, "analysis", 40, "approved")
         self.assertEqual(read_snapshot(replacement)["analysis"]["cap_usd"], "5")
-        # A fresh ledger with today's DEFAULT_CAPS has $110 but no audit rows and no
+        # A fresh ledger with today's DEFAULT_CAPS has $200 but no audit rows and no
         # lineage: the judge refuses it and no raise can apply.
         fresh = self.folder / "fresh.sqlite"
         BudgetLedger(fresh)
-        self.assertEqual(read_snapshot(fresh)["analysis"]["cap_usd"], "110")
+        self.assertEqual(read_snapshot(fresh)["analysis"]["cap_usd"], "200")
         self.assertTrue(budget.judge_analysis_problems(fresh))
         for apply in (budget.raise_judge_analysis_cap, budget.raise_judge_analysis_second_cap,
-                      budget.raise_judge_analysis_third_cap, budget.raise_judge_analysis_fourth_cap):
+                      budget.raise_judge_analysis_third_cap, budget.raise_judge_analysis_fourth_cap,
+                      budget.raise_judge_analysis_fifth_cap):
             with self.subTest(apply=apply.__name__), self.assertRaises(ValueError):
                 apply(fresh, "approved")
         self.assertEqual(self.analysis_changes(fresh), [])
@@ -548,9 +549,16 @@ class JudgeAnalysisBudgetTests(JudgeLedgerFixture):
         self.assertTrue(result["note"].startswith(budget.JUDGE_ANALYSIS_THIRD_PLAN_SECTION))
         self.assertTrue(budget.judge_analysis_problems(self.path))  # the judge needs the fourth raise
         self.assertEqual(budget.judge_analysis_fourth_raise_problems(self.path), [])
-        result = raise_cap(self.path, "analysis", budget.JUDGE_ANALYSIS_CAP_USD, "User: increase as needed")
+        with self.assertRaises(ValueError):  # $200 needs the $110 step first
+            raise_cap(self.path, "analysis", budget.JUDGE_ANALYSIS_CAP_USD, "approved")
+        result = raise_cap(self.path, "analysis", budget.JUDGE_ANALYSIS_FOURTH_RAISE_CAP_USD, "User: increase as needed")
         self.assertEqual((result["previous_cap_usd"], result["new_cap_usd"]), ("100", "110"))
         self.assertTrue(result["note"].startswith(budget.JUDGE_ANALYSIS_FOURTH_PLAN_SECTION))
+        self.assertTrue(budget.judge_analysis_problems(self.path))  # the judge needs the fifth raise
+        self.assertEqual(budget.judge_analysis_fifth_raise_problems(self.path), [])
+        result = raise_cap(self.path, "analysis", budget.JUDGE_ANALYSIS_CAP_USD, "User: overall cap $200")
+        self.assertEqual((result["previous_cap_usd"], result["new_cap_usd"]), ("110", "200"))
+        self.assertTrue(result["note"].startswith(budget.JUDGE_ANALYSIS_FIFTH_PLAN_SECTION))
         self.assertEqual(budget.judge_analysis_problems(self.path), [])
 
 
@@ -724,7 +732,8 @@ class JudgeAnalysisSecondRaiseTests(JudgeLedgerFixture):
         self.assertEqual((snap["cap_usd"], snap["committed_usd"], snap["uncertain_requests"], snap["cap_raises"]),
                          ("110", before["committed_usd"], 1, 4))
         self.assertEqual(Decimal(snap["remaining_usd"]), Decimal(before["remaining_usd"]) + 10)
-        self.assertEqual(budget.judge_analysis_problems(self.path), [])
+        self.assertTrue(budget.judge_analysis_problems(self.path))  # the judge now needs the fifth raise
+        self.assertEqual(budget.judge_analysis_fifth_raise_problems(self.path), [])
         self.assertEqual(self.analysis_changes(), [("5", "40"), ("40", "50"), ("50", "100"), ("100", "110")])
         for apply in (lambda: budget.raise_judge_analysis_fourth_cap(self.path, "again"),
                       lambda: raise_cap(self.path, "analysis", 110, "again"),
@@ -736,6 +745,41 @@ class JudgeAnalysisSecondRaiseTests(JudgeLedgerFixture):
             judge.reserve("analysis", "rerun", str(Decimal(snap["remaining_usd"]) + Decimal("0.000000001")))
         with self.assertRaises(ValueError):  # never reopened at an earlier cap
             BudgetLedger(self.path, {"analysis": budget.JUDGE_ANALYSIS_THIRD_RAISE_CAP_USD})
+
+    def test_fifth_raise_needs_the_fourth_keeps_holds_and_adds_exactly_ninety(self):
+        budget = self.budget
+        self.assertTrue(budget.judge_analysis_fifth_raise_problems(self.path))  # still at $40
+        with self.assertRaises(ValueError):
+            budget.raise_judge_analysis_fifth_cap(self.path, "approved")
+        budget.raise_judge_analysis_second_cap(self.path, "User selected the $10 raise in chat")
+        budget.raise_judge_analysis_third_cap(self.path, "User authorized up to double the budget")
+        ledger = BudgetLedger(self.path)
+        ledger.settle(ledger.reserve("analysis", "judge-opus:verifier:refused", "1.05054"), None)  # uncertain
+        self.assertTrue(budget.judge_analysis_fifth_raise_problems(self.path))  # needs the fourth first
+        budget.raise_judge_analysis_fourth_cap(self.path, "Just increase cap as much as needed")
+        before = read_snapshot(self.path)["analysis"]
+        original = self.path.read_bytes()
+        BudgetLedger(self.path).reserve("analysis", "running", ".1")  # in flight refuses the raise
+        self.assertTrue(budget.judge_analysis_fifth_raise_problems(self.path))
+        with self.assertRaises(ValueError):
+            budget.raise_judge_analysis_fifth_cap(self.path, "approved")
+        self.path.write_bytes(original)
+        with self.assertRaises(ValueError):
+            budget.raise_judge_analysis_fifth_cap(self.path, " ")  # an approval note is required
+        result = budget.raise_judge_analysis_fifth_cap(self.path, "overall analysis cap can be $200")
+        self.assertEqual((result["previous_cap_usd"], result["new_cap_usd"]), ("110", "200"))
+        self.assertTrue(result["note"].startswith(budget.JUDGE_ANALYSIS_FIFTH_PLAN_SECTION))
+        self.assertIn("1 uncertain hold(s) of $1.05054 carried over", result["note"])
+        snap = read_snapshot(self.path)["analysis"]
+        self.assertEqual((snap["cap_usd"], snap["committed_usd"], snap["uncertain_requests"], snap["cap_raises"]),
+                         ("200", before["committed_usd"], 1, 5))
+        self.assertEqual(Decimal(snap["remaining_usd"]), Decimal(before["remaining_usd"]) + 90)
+        self.assertEqual(budget.judge_analysis_problems(self.path), [])
+        for apply in (lambda: budget.raise_judge_analysis_fifth_cap(self.path, "again"),
+                      lambda: raise_cap(self.path, "analysis", 200, "again"),
+                      lambda: raise_cap(self.path, "analysis", 110, "again")):
+            with self.assertRaises(ValueError):
+                apply()
 
     def test_refuses_unresolved_holds_or_violations(self):
         budget = self.budget
@@ -848,7 +892,7 @@ class JudgeAnalysisSecondRaiseTests(JudgeLedgerFixture):
         preflight = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(preflight)
         lines = []
-        # The CLI raises to DEFAULT_CAPS["analysis"] ($110): refused on a ledger without the earlier raises.
+        # The CLI raises to DEFAULT_CAPS["analysis"] ($200): refused on a ledger without the earlier raises.
         untouched = self.folder / "untouched.sqlite"
         BudgetLedger(untouched, self.caps)
         self._insert_pilot_history(untouched)
@@ -857,15 +901,16 @@ class JudgeAnalysisSecondRaiseTests(JudgeLedgerFixture):
         self.assertEqual(read_snapshot(untouched)["analysis"]["cap_usd"], "5")
         self.assertEqual(preflight.apply_cap_raise(self.path, "analysis", "approved", False, out=lines.append), 2)
         self.assertEqual(read_snapshot(self.path)["analysis"]["cap_usd"], "40")
-        with redirect_stdout(io.StringIO()):  # $40: the CLI's $110 target needs the $50 and $100 steps first
+        with redirect_stdout(io.StringIO()):  # $40: the CLI's $200 target needs the earlier steps first
             self.assertEqual(preflight.apply_cap_raise(self.path, "analysis", "approved", True, out=lines.append), 2)
         self.budget.raise_judge_analysis_second_cap(self.path, "User selected the $10 raise in chat")
         with redirect_stdout(io.StringIO()):
             self.assertEqual(preflight.apply_cap_raise(self.path, "analysis", "approved", True, out=lines.append), 2)
         self.budget.raise_judge_analysis_third_cap(self.path, "User authorized up to double the budget")
+        self.budget.raise_judge_analysis_fourth_cap(self.path, "Just increase cap as much as needed")
         with redirect_stdout(io.StringIO()):
             code = preflight.apply_cap_raise(self.path, "analysis", "User approved in chat", True, out=lines.append)
         self.assertEqual(code, 0, lines)
         self.assertEqual(self.budget.judge_analysis_problems(self.path), [])
-        self.assertTrue(cap_changes(self.path)[-1]["note"].startswith(self.budget.JUDGE_ANALYSIS_FOURTH_PLAN_SECTION))
+        self.assertTrue(cap_changes(self.path)[-1]["note"].startswith(self.budget.JUDGE_ANALYSIS_FIFTH_PLAN_SECTION))
         self.assertEqual(preflight.apply_cap_raise(self.path, "analysis", "again", True, out=lines.append), 2)
