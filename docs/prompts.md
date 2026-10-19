@@ -422,7 +422,7 @@ shows what the model still receives from Claude Code in `replace` mode:
   the conference prompt with nothing before or after it. The built-in harness, memory,
   environment and context-management sections are gone.
 * Built-in tools (since October 19, 2026; docs/plan.md, "Unneeded built-in tools
-  removed"): only `Bash`, `Read`, `Write` and `Edit` remain, with Claude Code's own
+  removed"): only `Bash`, `Read`, `Write`, `Edit` and `TaskStop` remain, with Claude Code's own
   descriptions, next to the twelve conference tools. Every other built-in is in
   `inspect_adapter.DISALLOWED_TOOLS`. Blocking `Skill` also removes the list of Claude
   Code's built-in skills from the reminders (confirmed in the local capture).

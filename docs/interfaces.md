@@ -319,7 +319,7 @@ docs/prompts.md.
   system_prompt_mode="replace", auto_memory=True)` runs genuine Claude Code
   (`version="sandbox"`, `effort="high"`, `permission_mode="bypassPermissions"`,
   `disallowed_tools = inspect_adapter.DISALLOWED_TOOLS`: every built-in except `Bash`, `Read`,
-  `Write` and `Edit`, since October 19, 2026), no refusal or error
+  `Write`, `Edit` and `TaskStop`, since October 19, 2026), no refusal or error
   retries). `claude_code_env(auto_memory)` sets `BASH_DEFAULT_TIMEOUT_MS` and
   `BASH_MAX_TIMEOUT_MS` to 120000, `CLAUDE_CODE_MAX_RETRIES=4`, `API_TIMEOUT_MS=1800000`,
   `CLAUDE_CODE_DISABLE_AUTO_MEMORY=0` (approved), and disables telemetry, updates and

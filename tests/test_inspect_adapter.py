@@ -598,7 +598,7 @@ class ClaudeCodeConfigurationTests(unittest.TestCase):
         self.assertEqual(CLAUDE_CODE_ENV["BASH_DEFAULT_TIMEOUT_MS"], "120000")
         for name in ("Agent", "Task", "WebSearch", "WebFetch", "Workflow", "SendMessage", "Skill"):
             self.assertIn(name, DISALLOWED_TOOLS)
-        for name in ("Bash", "Read", "Write", "Edit"):  # the built-ins agents keep
+        for name in ("Bash", "Read", "Write", "Edit", "TaskStop"):  # the built-ins agents keep
             self.assertNotIn(name, DISALLOWED_TOOLS)
         self.assertFalse(any("KEY" in k or "TOKEN" in k for k in CLAUDE_CODE_ENV))
 
