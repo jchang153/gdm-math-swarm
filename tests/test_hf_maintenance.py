@@ -668,5 +668,437 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(self.receipt()['status'], 'uploading; catalogue may be pending')
 
 
+TRANSCRIPTS = ['agent-001.html', 'agent-002.html', 'agent-003.html', 'index.html']
+MANIFEST = 'archive-manifest.json'
+LFS_STORED = r'transcript\(s\) stored as LFS'
+
+
+def one_file_batches(items):
+    """Commit every upload separately, so an interruption can fall between transcripts."""
+    return ([item] for item in items)
+
+
+class TranscriptMaintenanceTests(unittest.TestCase):
+    """--scope transcripts: only existing RUN/transcripts/ files and their manifest digests change."""
+    prepare, records, receipt, edit_bundle, edit_remote, restart, assert_no_maintenance_commit = (
+        MaintenanceTests.prepare, MaintenanceTests.records, MaintenanceTests.receipt, MaintenanceTests.edit_bundle,
+        MaintenanceTests.edit_remote, MaintenanceTests.restart, MaintenanceTests.assert_no_maintenance_commit)
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.runs = self.root / 'runs'
+        self.viewer = make_viewer(self.root)
+        make_run(self.runs, OTHER)
+        run = make_run(self.runs, RUN, judge={})  # judge outputs already published, as for cache100
+        for name in TRANSCRIPTS:
+            (run / 'transcripts' / name).write_text(f'<!doctype html><html><head></head><body>final {name}</body></html>')
+        self.hub = Hub(self.root)
+        publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
+                operation=operation)
+        # After publication: full-history exports for three pages (agent-003 unchanged by the
+        # exporter) and local report changes that do not alter the catalogue entry.
+        for name in TRANSCRIPTS[:2] + TRANSCRIPTS[3:]:
+            (run / 'transcripts' / name).write_text(
+                f'<!doctype html><html><head></head><body>full history {name} {"m" * 200}</body></html>')
+        (run / 'results.html').write_text('<!doctype html><html><h1>R, edited locally</h1></html>')
+        results = json.loads((run / 'results.json').read_text())
+        (run / 'results.json').write_text(json.dumps({**results, 'local_note': 'not for upload'}))
+        self.bundle = self.prepare('maintenance', RUN)
+        self.judge_edit = RUN + '/analysis/judge/labels.jsonl'
+        self.edit_bundle({self.judge_edit: b'{"label": "rebuilt locally"}\n'})
+        self.published = dict(self.hub.files)
+        self.base = self.hub.sha
+        self.publish_commits = len(self.hub.commits)
+        self.replaced = [RUN + '/transcripts/' + n for n in TRANSCRIPTS if n != 'agent-003.html']
+        self.identical = [RUN + '/transcripts/agent-003.html']
+
+    def maintain(self, commit=False, attempt='attempt-1', **kwargs):
+        if commit:
+            kwargs.setdefault('backup_dir', self.records(attempt))
+            kwargs.setdefault('receipt', self.records(attempt) / 'receipt.json')
+        return maintain_run(self.bundle, self.hub, self.hub.download, run=RUN, commit=commit,
+                            operation=operation, scope='transcripts', **kwargs)
+
+    def new_bundle(self, label):
+        self.bundle = self.prepare(label, RUN)
+        return self.bundle
+
+    def assert_final_state(self):
+        final = self.hub.files
+        self.assertEqual(set(final), set(self.published))  # nothing added or removed
+        for name, data in self.published.items():
+            if name in self.replaced:
+                self.assertEqual(final[name], (self.bundle / name).read_bytes(), name)
+            elif name != MANIFEST:  # catalogue, .gitattributes, reports, judge files, agent-003
+                self.assertEqual(final[name], data, name)
+        old, new = (json.loads(x[MANIFEST]) for x in (self.published, final))
+        self.assertEqual({k: v for k, v in new.items() if k not in ('files', 'total_bytes')},
+                         {k: v for k, v in old.items() if k not in ('files', 'total_bytes')})
+        self.assertEqual(set(new['files']), set(old['files']))
+        self.assertEqual({n for n in new['files'] if new['files'][n] != old['files'][n]}, set(self.replaced))
+        for name in self.replaced:
+            self.assertEqual(new['files'][name], digest(final[name]))
+        self.assertEqual(new['total_bytes'], sum(x['bytes'] for x in new['files'].values()))
+
+    def test_dry_run_plan(self):
+        result = self.maintain()
+        self.assertEqual((result['scope'], result['committed']), ('transcripts', False))
+        self.assert_no_maintenance_commit()
+        self.assertFalse((self.root / 'records').exists())
+        self.assertEqual((result['replaced'], result['to_replace']), (self.replaced, self.replaced))
+        self.assertEqual((result['added'], result['to_add']), ([], []))
+        self.assertEqual(result['replaced_sizes'], [
+            {'path': n, 'old_bytes': len(self.published[n]), 'new_bytes': len((self.bundle / n).read_bytes())}
+            for n in self.replaced])
+        self.assertEqual(result['replacement_identical'], self.identical)  # left unchanged by the exporter
+        self.assertEqual((result['already_applied'], result['resume_required']), ([], False))
+        self.assertEqual(result['transcripts'], {'files': 4, 'file_sets_equal': True, 'largest_new_bytes': max(
+            len((self.bundle / RUN / 'transcripts' / n).read_bytes()) for n in TRANSCRIPTS),
+            'lfs_safe_limit_bytes': int(9.5 * 1024 * 1024)})
+        self.assertIs(result['catalogue_unchanged'], True)
+        self.assertEqual(result['catalogue'], {'files': [], 'entry_diff': {}, 'other_entries_unchanged': 1})
+        manifest = result['archive_manifest']
+        self.assertEqual((manifest['changed_digests'], manifest['upload']), (self.replaced, True))
+        self.assertEqual(manifest['total_bytes_after'] - manifest['total_bytes_before'],
+                         sum(r['new_bytes'] - r['old_bytes'] for r in result['replaced_sizes']))
+        skipped = result['skipped_local_differences']
+        self.assertEqual({r['path']: r['reason'] for r in skipped['names']}, {
+            RUN + '/results.html': 'differs_from_remote', RUN + '/results.json': 'differs_from_remote',
+            self.judge_edit: 'differs_from_remote'})
+        self.assertEqual(skipped['by_area'], {'results.html': 1, 'results.json': 1, 'analysis': 1})
+        self.assertEqual(result['uploads'], 4)
+        self.assertNotIn('judge_already_present', result)
+
+    def test_commit_replaces_only_transcripts_and_verifies(self):
+        result = self.maintain(commit=True)
+        self.assertTrue(result['committed'])
+        self.assert_final_state()
+        commits = self.hub.commits[self.publish_commits:]
+        self.assertEqual(commits[-1]['paths'], [MANIFEST])  # the manifest last
+        self.assertEqual({p for c in commits[:-1] for p in c['paths']}, set(self.replaced))
+        self.assertTrue(all(c['message'].endswith('regenerated transcript exports') for c in commits))
+        receipt = self.receipt()
+        self.assertEqual((receipt['status'], receipt['scope'], receipt['final_revision']),
+                         ('verified', 'transcripts', self.hub.sha))
+        self.assertEqual(receipt['verification'], {
+            'against_revision': self.base, 'final_files': len(self.published), 'uploaded_files': 4,
+            'replaced_files': 4, 'added_files': 0, 'verified_planned_files': 5,
+            'verified_preserved_files': len(self.published) - 5, 'gitattributes': 'unchanged',
+            'catalogue': 'unchanged'})
+        backup = self.records()
+        inventory = json.loads((backup / 'before-inventory.json').read_text())
+        self.assertEqual((inventory['scope'], inventory['revision'], inventory['origin_revision']),
+                         ('transcripts', self.base, self.base))
+        self.assertEqual(set(inventory['files']), set(self.published))
+        saved = sorted(self.replaced + [MANIFEST, '.gitattributes'])
+        self.assertEqual(receipt['backups'], saved)
+        self.assertEqual(sorted(p.relative_to(backup / 'original').as_posix()
+                                for p in (backup / 'original').rglob('*') if p.is_file()), saved)
+        for name in saved:
+            self.assertEqual((backup / 'original' / name).read_bytes(), self.published[name], name)
+        plan = json.loads((backup / 'plan.json').read_text())
+        self.assertEqual((plan['scope'], plan['committed'], plan['replaced']), ('transcripts', False, self.replaced))
+
+    def test_transcript_file_sets_must_match(self):
+        extra = RUN + '/transcripts/agent-004.html'
+        cases = {'extra local file': ('extra', r'only in the bundle \[.*agent-004\.html.*\], only published \[\]'),
+                 'missing local file': ('missing', r"only in the bundle \[\], only published \['" + RUN
+                                        + r'/transcripts/agent-003\.html'),
+                 'extra published file': ('remote', r"only in the bundle \[\], only published \['" + extra)}
+        for label, (kind, message) in cases.items():
+            with self.subTest(label):
+                self.restart(label)
+                self.new_bundle(label.replace(' ', '-'))
+                if kind == 'extra':
+                    self.edit_bundle({extra: b'<!doctype html><html><body>new page</body></html>'})
+                elif kind == 'missing':
+                    gone = RUN + '/transcripts/agent-003.html'
+                    (self.bundle / gone).unlink()
+                    self.edit_bundle({}, lambda m: m['files'].pop(gone))
+                else:
+                    self.edit_remote({extra: b'published only'})
+                for commit in (False, True):
+                    with self.assertRaisesRegex(ValueError, 'transcript file sets .* differ.*' + message):
+                        self.maintain(commit=commit, attempt=label)
+                self.assertEqual(len(self.hub.commits), self.publish_commits)
+                self.assertFalse(self.records(label).exists())
+
+    def test_catalogue_entry_change_refused(self):
+        catalogue = json.loads((self.bundle / 'experiments.json').read_text())
+        catalogue['experiments'][0]['track'] = 'edited'
+        self.edit_bundle({'experiments.json': json.dumps(catalogue, indent=2).encode()})
+        for commit in (False, True):
+            with self.assertRaisesRegex(ValueError, "catalogue entry for cache-run differs.*never changes the "
+                                                    'catalogue.*"track"'):
+                self.maintain(commit=commit)
+        self.assert_no_maintenance_commit()
+        self.assertFalse(self.records().exists())
+
+    def test_lfs_storage_or_attribute_change_fails_verification(self):
+        def broaden(hub):
+            if MANIFEST in hub.commits[-1]['paths']:
+                hub.files['.gitattributes'] += b'*.json' + RULE + b'\n'
+        cases = {'transcript stored as LFS': (
+                     lambda hub: setattr(hub, 'lfs_upload', lambda name, data: '/packages/' in name
+                                         or name.endswith('agent-002.html')),
+                     LFS_STORED + '.*' + RUN + '/transcripts/agent-002.html'),
+                 'gitattributes changed': (lambda hub: setattr(hub, 'after_commit', broaden),
+                                           r'\.gitattributes changed relative to the original revision ' + self.base)}
+        for label, (setup, message) in cases.items():
+            with self.subTest(label):
+                self.restart(label)
+                setup(self.hub)
+                with self.assertRaisesRegex(ValueError, message):
+                    self.maintain(commit=True, attempt=label)
+                self.assertTrue(self.receipt(label)['status'].startswith('failed: ValueError'))
+
+    def test_unplanned_final_state_fails_verification(self):
+        cases = {'catalogue page changed': (lambda hub: hub.files.__setitem__('index.html', b'regenerated'),
+                                            'Unrelated remote file changed: index.html'),
+                 'report changed': (lambda hub: hub.files.__setitem__(RUN + '/results.html', b'local report'),
+                                    'Unrelated remote file changed: ' + RUN + '/results.html'),
+                 'file added': (lambda hub: hub.files.__setitem__(RUN + '/transcripts/agent-004.html', b'x'),
+                                'inventory changed unexpectedly'),
+                 'transcript bytes differ': (lambda hub: hub.files.__setitem__(self.replaced[0], b'other'),
+                                             'hash mismatch after maintenance: ' + self.replaced[0])}
+        for label, (change, message) in cases.items():
+            with self.subTest(label):
+                self.restart(label)
+                def hook(hub, change=change):
+                    if MANIFEST in hub.commits[-1]['paths']:
+                        change(hub)
+                self.hub.after_commit = hook
+                with self.assertRaisesRegex(ValueError, message):
+                    self.maintain(commit=True, attempt=label)
+
+    def test_fresh_commit_refused_on_partly_applied_state(self):
+        # One transcript already equals the bundle while the manifest still records its old digest.
+        first = self.replaced[0]
+        self.edit_remote({first: (self.bundle / first).read_bytes()})
+        plan = self.maintain()
+        self.assertEqual((plan['already_applied'], plan['resume_required']), ([first], True))
+        self.assertEqual(plan['replacement_identical'], [first] + self.identical)  # agent-003 is no sign
+        commits = len(self.hub.commits)
+        with self.assertRaisesRegex(ValueError, 'already partly applied.*differ from the record.*--resume-from'):
+            self.maintain(commit=True)
+        self.assertEqual(len(self.hub.commits), commits)
+        self.assertFalse(self.records().exists())
+
+    def test_interrupted_attempt_resumes_against_original(self):
+        with patch.object(maintain_hf_run, 'batches', one_file_batches):
+            self.hub.fail_after = self.publish_commits + 1  # after the first transcript
+            with self.assertRaisesRegex(RuntimeError, 'interruption'):
+                self.maintain(commit=True)
+            self.hub.fail_after = None
+            self.assertEqual((self.receipt()['committed_batches'], self.receipt()['status']), (1, 'failed: RuntimeError'))
+            first = self.replaced[0]
+            self.assertEqual(self.hub.files[first], (self.bundle / first).read_bytes())
+            self.assertEqual(self.hub.files[MANIFEST], self.published[MANIFEST])
+            fresh = self.maintain()
+            self.assertEqual((fresh['already_applied'], fresh['resume_required']), ([first], True))
+            with self.assertRaisesRegex(ValueError, 'already partly applied'):
+                self.maintain(commit=True, attempt='attempt-2')
+            self.assertFalse(self.records('attempt-2').exists())
+            with self.assertRaisesRegex(ValueError, 'belong to the transcripts scope, not the judge scope'):
+                maintain_run(self.bundle, self.hub, self.hub.download, run=RUN, resume_from=self.records())
+            plan = self.maintain(resume_from=self.records())
+            self.assertEqual((plan['origin_revision'], plan['resume_required']), (self.base, False))
+            self.assertNotEqual(plan['base_revision'], self.base)
+            self.assertEqual((plan['replaced'], plan['to_replace']), (self.replaced, self.replaced[1:]))
+            self.assertEqual(plan['replacement_identical'], [first] + self.identical)
+            self.assertEqual(plan['archive_manifest']['changed_digests'], self.replaced)
+            result = self.maintain(commit=True, attempt='attempt-2', resume_from=self.records())
+        self.assertEqual((result['status'], result['committed'], result['committed_batches']), ('verified', True, 3))
+        self.assert_final_state()
+        receipt = self.receipt('attempt-2')
+        self.assertEqual((receipt['origin_revision'], receipt['resume_from']), (self.base, str(self.records())))
+        self.assertEqual((receipt['verification']['against_revision'], receipt['verification']['replaced_files']),
+                         (self.base, 4))
+        for name in self.replaced:  # the first attempt's backups keep the true originals
+            self.assertEqual((self.records() / 'original' / name).read_bytes(), self.published[name])
+        # Fully applied: nothing to upload; a fresh commit makes no commit and points to --resume-from,
+        # which verifies the result against the original state without committing.
+        commits = len(self.hub.commits)
+        done = self.maintain()
+        self.assertEqual((done['uploads'], done['to_replace'], done['already_applied'], done['resume_required']),
+                         (0, [], [], False))
+        self.assertFalse(done['archive_manifest']['upload'])
+        self.assertEqual(done['archive_manifest']['changed_digests'], [])  # relative to this revision's manifest
+        with self.assertRaisesRegex(ValueError, 'Nothing to upload.*--resume-from'):
+            self.maintain(commit=True, attempt='attempt-3')
+        self.assertFalse(self.records('attempt-3').exists())
+        again = self.maintain(commit=True, attempt='attempt-4', resume_from=self.records())
+        self.assertEqual((again['uploads'], again['committed'], again['status'], len(self.hub.commits)),
+                         (0, False, 'verified', commits))
+        self.assertEqual(again['replaced'], self.replaced)
+
+    def interrupt_after_first_transcript(self):
+        """Attempt-1 commits only the first transcript (one file per batch) and is interrupted."""
+        with patch.object(maintain_hf_run, 'batches', one_file_batches):
+            self.hub.fail_after = self.publish_commits + 1
+            with self.assertRaisesRegex(RuntimeError, 'interruption'):
+                self.maintain(commit=True)
+        self.hub.fail_after = None
+        self.assertEqual(self.hub.files[self.replaced[0]], (self.bundle / self.replaced[0]).read_bytes())
+        self.assertEqual(self.hub.files[MANIFEST], self.published[MANIFEST])
+
+    def test_lfs_transcript_left_by_failed_attempt_refused_before_any_write(self):
+        # Attempt-1 uploads every transcript and the manifest; HF stores agent-002 as LFS and
+        # appends an exact rule, so the final verification fails.
+        agent = RUN + '/transcripts/agent-002.html'
+        def store_as_lfs(hub):
+            if MANIFEST in hub.commits[-1]['paths']:
+                hub.files['.gitattributes'] += agent.encode() + RULE + b'\n'
+        self.hub.after_commit = store_as_lfs
+        with self.assertRaisesRegex(ValueError, LFS_STORED + '.*' + agent):
+            self.maintain(commit=True)
+        self.hub.after_commit = None
+        self.assertTrue(Hub.tracked(self.hub.files, agent))
+        commits = len(self.hub.commits)
+        # Neither the dry run nor a fresh commit after re-exporting a smaller page looks clean or
+        # ends verified with the transcript still in LFS; the resume is refused too.
+        with self.assertRaisesRegex(ValueError, LFS_STORED + '.*' + agent):
+            self.maintain()
+        (self.runs / RUN / 'transcripts' / 'agent-002.html').write_text(
+            '<!doctype html><html><head></head><body>shrunk</body></html>')
+        self.new_bundle('shrunk')
+        for options in ({}, {'commit': True}, {'commit': True, 'resume_from': self.records()}):
+            with self.subTest(**{k: str(v) for k, v in options.items()}):
+                with self.assertRaisesRegex(ValueError, LFS_STORED + '.*' + agent):
+                    self.maintain(attempt='attempt-2', **options)
+        self.assertEqual(len(self.hub.commits), commits)
+        self.assertFalse(self.records('attempt-2').exists())
+        self.assertTrue(Hub.tracked(self.hub.files, agent))
+
+    def test_lfs_rule_naming_a_transcript_refused_before_any_write(self):
+        # A rule without a slash matches the basename at any depth in git (the fake Hub does not
+        # model that, so the published page is still listed as a regular file).
+        agent = RUN + '/transcripts/agent-001.html'
+        self.edit_remote({'.gitattributes': self.published['.gitattributes'] + b'agent-001.html' + RULE + b'\n'})
+        self.assertFalse(Hub.tracked(self.hub.files, agent))
+        for commit in (False, True):
+            with self.assertRaisesRegex(ValueError, r'LFS rule\(s\) in \.gitattributes .* match.*' + agent):
+                self.maintain(commit=commit)
+        self.assert_no_maintenance_commit()
+        self.assertFalse(self.records().exists())
+
+    def test_transcript_at_lfs_threshold_refused_before_any_write(self):
+        limit = int(9.5 * 1024 * 1024)
+        self.hub.lfs_upload = lambda name, data: '/packages/' in name or len(data) >= 10_000_000
+        agent = RUN + '/transcripts/agent-002.html'
+        (self.runs / RUN / 'transcripts' / 'agent-002.html').write_text(
+            '<!doctype html><html><head></head><body>' + 'm' * limit + '</body></html>')
+        self.new_bundle('large')
+        size = len((self.bundle / agent).read_bytes())
+        self.assertLess(size, 10_000_000)  # below HF's threshold, but too close to it
+        for commit in (False, True):
+            with self.assertRaisesRegex(ValueError, f'at or above {limit} bytes.*{agent} \\({size} bytes\\)'):
+                self.maintain(commit=commit)
+        self.assert_no_maintenance_commit()
+        self.assertFalse(self.records().exists())
+        with patch.object(maintain_hf_run, 'LFS_SAFE_BYTES', size):
+            with self.assertRaisesRegex(ValueError, f'at or above {size} bytes'):
+                self.maintain()
+        with patch.object(maintain_hf_run, 'LFS_SAFE_BYTES', size + 1):
+            plan = self.maintain()
+        self.assertEqual((plan['transcripts']['largest_new_bytes'], plan['transcripts']['lfs_safe_limit_bytes']),
+                         (size, size + 1))
+
+    def test_lfs_storage_stops_before_the_manifest(self):
+        agent = self.replaced[0]
+        self.hub.lfs_upload = lambda name, data: '/packages/' in name or name == agent
+        with patch.object(maintain_hf_run, 'batches', one_file_batches):
+            with self.assertRaisesRegex(ValueError, LFS_STORED + '.*' + agent):
+                self.maintain(commit=True)
+        self.assertEqual(len(self.hub.commits), self.publish_commits + 1)  # no other transcript, no manifest
+        self.assertEqual(self.hub.files[MANIFEST], self.published[MANIFEST])
+        receipt = self.receipt()
+        self.assertEqual(receipt['committed_batches'], 1)
+        self.assertTrue(receipt['status'].startswith('failed: ValueError: Published transcript(s) stored as LFS'))
+        # The state stays detectably partly applied: every later attempt is refused before any write.
+        commits = len(self.hub.commits)
+        for options in ({}, {'commit': True}, {'commit': True, 'resume_from': self.records()}):
+            with self.subTest(**{k: str(v) for k, v in options.items()}):
+                with self.assertRaisesRegex(ValueError, LFS_STORED + '.*' + agent):
+                    self.maintain(attempt='attempt-2', **options)
+        self.assertEqual(len(self.hub.commits), commits)
+        self.assertFalse(self.records('attempt-2').exists())
+
+    def test_partly_applied_state_detected_after_the_bundle_changes(self):
+        self.interrupt_after_first_transcript()
+        first = self.replaced[0]
+        # The exporter is rerun with different output and the bundle re-prepared.
+        (self.runs / RUN / 'transcripts' / 'agent-001.html').write_text(
+            '<!doctype html><html><head></head><body>exported again</body></html>')
+        self.new_bundle('exported-again')
+        self.assertNotEqual(self.hub.files[first], (self.bundle / first).read_bytes())
+        plan = self.maintain()
+        self.assertEqual((plan['already_applied'], plan['resume_required']), ([first], True))
+        self.assertEqual(plan['replacement_identical'], self.identical)
+        commits = len(self.hub.commits)
+        with self.assertRaisesRegex(ValueError, 'already partly applied.*differ from the record.*--resume-from'):
+            self.maintain(commit=True, attempt='attempt-2')
+        self.assertEqual(len(self.hub.commits), commits)
+        self.assertFalse(self.records('attempt-2').exists())
+        result = self.maintain(commit=True, attempt='attempt-3', resume_from=self.records())
+        self.assertEqual((result['status'], result['origin_revision']), ('verified', self.base))
+        self.assertEqual(result['verification']['against_revision'], self.base)
+        self.assert_final_state()
+
+    def test_resume_records_must_hold_matching_transcript_originals(self):
+        self.interrupt_after_first_transcript()
+        agent = RUN + '/transcripts/agent-002.html'  # replaced by the plan, not yet uploaded
+        cases = {'edited': lambda path: path.write_bytes(b'tampered'), 'missing': lambda path: path.unlink()}
+        for label, edit in cases.items():
+            with self.subTest(label):
+                copy = self.root / 'records' / ('copy-' + label)
+                shutil.copytree(self.records(), copy)
+                edit(copy / 'original' / agent)
+                for commit in (False, True):
+                    with self.assertRaisesRegex(ValueError, 'Original backup missing or not matching the '
+                                                            'before-inventory: ' + agent):
+                        self.maintain(commit=commit, attempt='resume-' + label, resume_from=copy)
+                self.assertFalse(self.records('resume-' + label).exists())
+        self.assertEqual(self.maintain(resume_from=self.records())['origin_revision'], self.base)
+
+    def test_replaced_transcript_without_manifest_record_refused(self):
+        agent = self.replaced[0]
+        manifest = json.loads(self.published[MANIFEST])
+        del manifest['files'][agent]
+        manifest['total_bytes'] = sum(x['bytes'] for x in manifest['files'].values())
+        self.edit_remote({MANIFEST: json.dumps(manifest, indent=2).encode()})
+        self.assertIn(agent, self.hub.files)
+        for commit in (False, True):
+            with self.assertRaisesRegex(ValueError, r'has no record of replaced transcript\(s\).*' + agent):
+                self.maintain(commit=commit)
+        self.assert_no_maintenance_commit()
+        self.assertFalse(self.records().exists())
+
+    def test_judge_records_are_not_a_transcripts_resume_source(self):
+        legacy = self.root / 'records' / 'judge-attempt-1'
+        legacy.mkdir(parents=True)
+        (legacy / 'before-inventory.json').write_text(json.dumps({
+            'operation': 'maintain-run', 'repo': maintain_hf_run.DEFAULT_REPO, 'run': RUN, 'revision': self.base,
+            'origin_revision': self.base, 'resume_from': None, 'files': {}}))  # written before scopes existed
+        with self.assertRaisesRegex(ValueError, 'belong to the judge scope, not the transcripts scope'):
+            self.maintain(resume_from=legacy)
+
+    def test_cli_scope(self):
+        calls = []
+        fake_hub = SimpleNamespace(HfApi=lambda: 'api', CommitOperationAdd=operation, hf_hub_download='download')
+        def record(*args, **kwargs):
+            calls.append(kwargs['scope'])
+            return {}
+        with patch.dict(sys.modules, {'huggingface_hub': fake_hub}), \
+                patch.object(maintain_hf_run, 'maintain_run', record), patch('builtins.print'):
+            main(['--maintain-run', RUN, '--bundle', str(self.bundle), '--scope', 'transcripts'])
+            main(['--maintain-run', RUN, '--bundle', str(self.bundle)])
+        self.assertEqual(calls, ['transcripts', 'judge'])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            main(['--maintain-run', RUN, '--bundle', str(self.bundle), '--scope', 'results'])
+
+
 if __name__ == '__main__':
     unittest.main()
