@@ -213,6 +213,13 @@ def settle_manual(ledger, planned, note, *, allow_reserved=False):
     return entries
 
 
+def ledger_caps(path):
+    """Caps to open ``path`` with: the ablation track's own ledger keeps its own caps
+    (docs/plan.md, "Prompt ablation track"); every other ledger the approved DEFAULT_CAPS."""
+    from research_swarm.budget import ABLATION_CAPS, ABLATION_LEDGER_RELATIVE
+    return dict(ABLATION_CAPS) if Path(path).name == ABLATION_LEDGER_RELATIVE.name else None
+
+
 def write_audit(ledger_path, ledger, entries, **extra):
     now = datetime.datetime.now(datetime.timezone.utc)
     audit = {"kind": "ledger_reconciliation", "created_at": now.isoformat(), "ledger": str(ledger_path),
@@ -274,7 +281,7 @@ def main(argv=None):
         if not args.i_have_user_approval:
             print("Dry run: manual settlements not applied (needs --i-have-user-approval). Ledger unchanged.")
             return 0
-        ledger = BudgetLedger(args.ledger)  # the ledger exists: every planned hold was listed from it
+        ledger = BudgetLedger(args.ledger, caps=ledger_caps(args.ledger))  # the ledger exists: every planned hold was listed from it
         entries = settle_manual(ledger, planned, args.note.strip(), allow_reserved=args.include_stale_reserved)
         path = write_audit(args.ledger, ledger, entries, mode="manual", note=args.note.strip())
         print(json.dumps({"audit": str(path), "outcomes": {e["request_id"]: e["outcome"] for e in entries}}, indent=2))
@@ -287,7 +294,7 @@ def main(argv=None):
         return 0
     from research_swarm.secrets import load_openrouter_key
     key = load_openrouter_key(args.credentials_root)
-    ledger = BudgetLedger(args.ledger)
+    ledger = BudgetLedger(args.ledger, caps=ledger_caps(args.ledger))
     models = tuple(args.expect_model or (MODEL_ID,))
     entries = reconcile_requests(ledger, requests, generation_ids, lambda gid: fetch_generation(gid, key),
                                  model_id=models, allow_reserved=args.include_stale_reserved)

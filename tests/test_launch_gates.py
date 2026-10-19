@@ -397,6 +397,121 @@ class LaunchGateTests(GateFixture):
                            "is not one of")
         self.assertBlocked(self.evaluate(pilot_config(prompt_variant=None)), "prompt_variant", "is not one of")
 
+    def ablation_config(self, **overrides):
+        values = dict(budget_track="ablation", agent_count=10, max_connections=10,
+                      persona_counts={"algebra": 3, "analysis_topology": 3, "combinatorics": 2, "number_theory": 2},
+                      max_pilot_usd="60", max_analysis_usd="0", max_compatibility_usd=2,
+                      allow_unlimited_provider_key=False)
+        return pilot_config(**{**values, **overrides})
+
+    def evaluate_ablation(self, config=None, ledger_path=None):
+        return launch_gates.evaluate(config or self.ablation_config(), ROOT, validation_dir=self.validation,
+                                     ledger_path=ledger_path or self.tmp / "ablation" / "ablation-budget.sqlite",
+                                     legacy_ledger_path=self.legacy, now=NOW, image_id=lambda tag: self.images.get(tag))
+
+    def test_ablation_track_settings(self):
+        """Ablation track: 10 or 20 agents, its own caps, no unlimited key; the baseline is unchanged."""
+        result = self.evaluate_ablation()
+        for gate in ("approved_settings", "budget_track", "config_caps"):
+            self.assertTrue(result["evidence"][gate]["passed"], (gate, result["evidence"][gate]["reason"]))
+        self.assertEqual(result["ledger"]["default_caps"], {"pilot": "60", "analysis": "0", "compatibility": "2"})
+        self.assertTrue(self.evaluate_ablation(self.ablation_config(agent_count=20, max_connections=20))["evidence"]
+                        ["approved_settings"]["passed"])
+        self.assertBlocked(self.evaluate_ablation(self.ablation_config(agent_count=15, max_connections=15)),
+                           "approved_settings", "agent_count")
+        self.assertBlocked(self.evaluate_ablation(self.ablation_config(allow_unlimited_provider_key=True,
+                                                              unlimited_provider_key_approval="x")),
+                           "approved_settings", "must be false on the ablation track")
+        self.assertBlocked(self.evaluate_ablation(self.ablation_config(max_pilot_usd="100")), "config_caps", "max_pilot_usd")
+        self.assertBlocked(self.evaluate(pilot_config(budget_track="other")), "budget_track", "is not 'ablation'")
+        # Without the track, 10 agents stay refused.
+        self.assertBlocked(self.evaluate(pilot_config(agent_count=10, max_connections=10)),
+                           "approved_settings", "agent_count")
+
+    def test_ablation_track_uses_its_own_ledger(self):
+        from research_swarm import budget
+        self.assertEqual(budget.ledger_path_for(self.ablation_config(), ROOT), ROOT / "state" / "ablation-budget.sqlite")
+        self.assertEqual(budget.ledger_path_for(pilot_config(), ROOT), budget.DEFAULT_LEDGER_PATH(ROOT))
+        self.assertEqual(budget.caps_for(pilot_config()), budget.DEFAULT_CAPS)
+        # A fresh ablation ledger starts at the ablation caps and passes; one with other caps does not.
+        own = self.tmp / "ablation" / "ablation-budget.sqlite"
+        BudgetLedger(own, budget.ABLATION_CAPS)
+        self.assertTrue(self.evaluate_ablation(ledger_path=own)["evidence"]["ledger"]["passed"])
+        other = self.tmp / "other" / "budget.sqlite"
+        BudgetLedger(other, {"pilot": 100, "analysis": 0, "compatibility": 2})
+        result = self.evaluate_ablation(ledger_path=other)
+        self.assertBlocked(result, "ledger", "differs from the approved $60")
+        # The ablation track never reserves against the baseline ledger.
+        result = self.evaluate_ablation(ledger_path=budget.DEFAULT_LEDGER_PATH(ROOT))
+        self.assertBlocked(result, "ledger", "must not use the baseline ledger")
+
+    def test_ablation_ledger_holds_block(self):
+        from research_swarm import budget
+        own = self.tmp / "ablation" / "ablation-budget.sqlite"
+        ledger = BudgetLedger(own, budget.ABLATION_CAPS)
+        ledger.reserve("pilot", "agent-001", "0.5")  # left in flight
+        self.assertBlocked(self.evaluate_ablation(ledger_path=own), "ledger", "unresolved pilot hold")
+
+    def test_ablation_example_config_passes_the_settings_gates(self):
+        config = json.loads((ROOT / "configs" / "ablation.example.json").read_text())
+        result = self.evaluate_ablation({**config, "paid_launch_enabled": True, "verified_integration": True})
+        for gate in ("approved_settings", "budget_track", "prompt_variant", "config_caps", "seeded_track"):
+            self.assertTrue(result["evidence"][gate]["passed"], (gate, result["evidence"][gate]["reason"]))
+        from research_swarm.runtime import assign_personas, persona_counts
+        self.assertEqual(config["persona_counts"],
+                         persona_counts(assign_personas(config["agent_count"], config["persona_seed"])))
+        self.assertFalse(config["paid_launch_enabled"])
+
+    def test_invalid_budget_track_never_selects_a_ledger(self):
+        from research_swarm import budget
+        bad = pilot_config(budget_track="ablations")
+        for helper in (lambda: budget.ledger_path_for(bad, ROOT), lambda: budget.caps_for(bad)):
+            with self.assertRaises(ValueError):
+                helper()
+        result = launch_gates.evaluate(bad, ROOT, validation_dir=self.validation, legacy_ledger_path=self.legacy,
+                                       now=NOW, image_id=lambda tag: self.images.get(tag))
+        self.assertBlocked(result, "budget_track", "is not 'ablation'")
+        self.assertEqual(result["ledger"]["path"], "state/invalid-budget-track.sqlite")
+        self.assertFalse((ROOT / "state" / "invalid-budget-track.sqlite").exists())
+
+    def test_compat_check_refuses_an_invalid_track_before_opening_a_ledger(self):
+        compat = load_script("compat_check")
+        config = self.tmp / "bad.json"
+        config.write_text(json.dumps(pilot_config(budget_track="ablations")))
+        ledger = self.tmp / "never" / "budget.sqlite"
+        with mock.patch.object(compat, "ledger_path_for", side_effect=compat.ledger_path_for) as chosen, \
+                redirect_stdout(io.StringIO()) as out:
+            code = compat.main(["--i-have-user-approval", "--config", str(config)],
+                               gates=lambda c: self.fail("gates must not run"),
+                               environment=lambda c: self.fail("environment must not run"))
+        self.assertEqual(code, 2)
+        self.assertIn("is not 'ablation'", out.getvalue())
+        self.assertFalse(ledger.exists())
+        self.assertIn("budget_track", compat.REQUIRED_GATES)
+
+    def test_paid_judging_refuses_ablation_runs(self):
+        from research_swarm import budget
+        run = self.tmp / "ablation-run"
+        run.mkdir()
+        (run / "settings.json").write_text(json.dumps({"config": {"budget_track": "ablation"},
+                                                       "effective": {"budget_track": "ablation"}}))
+        self.assertEqual(budget.run_budget_track(run), "ablation")
+        (run / "settings.json").write_text(json.dumps({"config": {}, "effective": {"budget_track": "baseline"}}))
+        self.assertEqual(budget.run_budget_track(run), "baseline")
+        self.assertEqual(budget.run_budget_track(self.tmp / "missing"), "unknown")
+        source = (ROOT / "scripts" / "run_transcript_judge.py").read_text()
+        self.assertIn('if track != "baseline":', source)
+
+    def test_reconcile_opens_the_ablation_ledger_with_its_caps(self):
+        from research_swarm import budget
+        reconcile = load_script("reconcile_ledger")
+        path = self.tmp / "state" / "ablation-budget.sqlite"
+        ledger = BudgetLedger(path, budget.ABLATION_CAPS)
+        ledger.reserve("pilot", "agent-001", "0.5")
+        self.assertEqual(reconcile.ledger_caps(path), budget.ABLATION_CAPS)
+        self.assertIsNone(reconcile.ledger_caps(self.tmp / "state" / "budget.sqlite"))
+        BudgetLedger(path, caps=reconcile.ledger_caps(path))  # opens without a cap mismatch
+
     def test_seeded_configuration_blocks_the_pilot(self):
         """S3: any seeded configuration, enabled or not, blocks the approved spontaneous pilot."""
         self.assertTrue(self.evaluate()["evidence"]["seeded_track"]["passed"])

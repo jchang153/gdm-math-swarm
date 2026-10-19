@@ -127,6 +127,62 @@ def DEFAULT_LEDGER_PATH(repo_root) -> Path:  # noqa: N802 (agreed interface name
     return Path(repo_root) / "state" / "budget.sqlite"
 
 
+# Ablation budget track (docs/plan.md, "Prompt ablation track"): exploratory runs with
+# their own ledger file, their own caps and their own provider key, never mixed into the
+# authoritative baseline ledger above. Without ``budget_track`` in the config, nothing
+# here applies and every baseline path is unchanged.
+BUDGET_TRACK_KEY = "budget_track"
+ABLATION_BUDGET_TRACK = "ablation"
+ABLATION_LEDGER_RELATIVE = Path("state") / "ablation-budget.sqlite"
+# Cumulative caps of the ablation ledger. A later run needs an audited raise (raise_cap),
+# exactly as on the baseline ledger; no paid analysis on this track.
+ABLATION_CAPS = {"pilot": "60", "analysis": "0", "compatibility": 2}
+
+
+def budget_track_problems(config) -> list[str]:
+    """Config check: absent means the baseline ledger; the only other value is ``ablation``."""
+    if BUDGET_TRACK_KEY not in config:
+        return []
+    if config[BUDGET_TRACK_KEY] != ABLATION_BUDGET_TRACK:
+        return [f"{BUDGET_TRACK_KEY} {config[BUDGET_TRACK_KEY]!r} is not {ABLATION_BUDGET_TRACK!r} (omit it for the "
+                "baseline ledger)"]
+    return []
+
+
+def is_ablation(config) -> bool:
+    return (config or {}).get(BUDGET_TRACK_KEY) == ABLATION_BUDGET_TRACK
+
+
+def _checked_track(config):
+    problems = budget_track_problems(config or {})
+    if problems:  # never fall back to the baseline ledger on a typo
+        raise ValueError("; ".join(problems))
+    return is_ablation(config)
+
+
+def ledger_path_for(config, repo_root) -> Path:
+    """The ledger a run with ``config`` reserves against; raises on an invalid track."""
+    return Path(repo_root) / ABLATION_LEDGER_RELATIVE if _checked_track(config) else DEFAULT_LEDGER_PATH(repo_root)
+
+
+def caps_for(config) -> dict:
+    """The approved caps for ``config``'s ledger; raises on an invalid track."""
+    return dict(ABLATION_CAPS) if _checked_track(config) else dict(DEFAULT_CAPS)
+
+
+def run_budget_track(run_dir) -> str:
+    """The budget track a saved run recorded ("ablation" or "baseline"); "unknown" when its
+    settings.json is missing or unreadable."""
+    import json
+    try:
+        data = json.loads((Path(run_dir) / "settings.json").read_text())
+    except (OSError, ValueError):
+        return "unknown"
+    effective = (data.get("effective") or {}).get(BUDGET_TRACK_KEY)
+    configured = (data.get("config") or {}).get(BUDGET_TRACK_KEY)
+    return "ablation" if ABLATION_BUDGET_TRACK in (effective, configured) else "baseline"
+
+
 class BudgetExceeded(RuntimeError):
     pass
 

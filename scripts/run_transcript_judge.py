@@ -416,6 +416,12 @@ def _main(argv=None):
             return refuse("choose --dry-run-estimate, --mock, or a paid run with --i-have-user-approval")
         if not sys.stdin.isatty():
             return refuse("a paid run needs an interactive terminal for the typed confirmation")
+        from research_swarm.budget import run_budget_track
+        track = run_budget_track(run_dir)
+        if track != "baseline":
+            # docs/plan.md "Prompt ablation track": no paid judging on that track (analysis cap $0),
+            # and never charged to the baseline ledger.
+            return refuse(f"{run_dir.name} is on budget track {track!r}; paid judging is only for baseline runs")
         ledger = (args.ledger or DEFAULT_LEDGER_PATH(ROOT)).resolve()
         problems = judge_analysis_problems(ledger)
         if problems:

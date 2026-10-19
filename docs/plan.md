@@ -1,5 +1,30 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Prompt ablation track, October 19, 2026
+
+Exploratory prompt ablations run by a collaborator with their own budget and their own provider
+key, as agreed with the repository owner. They are not baseline repetitions and never touch
+the authoritative ledger. Selected by `budget_track: "ablation"` (configs/ablation.example.json):
+
+- Ledger: `state/ablation-budget.sqlite`, created with `budget.ABLATION_CAPS` (pilot $60,
+  analysis $0, compatibility $2). No binding to baseline runs; unresolved holds, violations or
+  a differing cap block the launch; a later raise is an audited `budget.raise_cap` after a
+  recorded decision (`scripts/preflight.py --config ... --raise-ledger-cap`).
+- Provider key: the collaborator's own key with a provider-side limit within the $60 cap;
+  `allow_unlimited_provider_key` must be false (the unlimited-key exception covers only the
+  baseline owner's key). The compatibility gate needs a compatibility check whose requests
+  are in the ablation ledger.
+- Population: 10 or 20 agents (`launch_gates.ABLATION_AGENT_COUNTS`); 10 agents use the
+  balanced allocation 3/3/2/2. All other settings equal the cached baseline (14 tasks,
+  personas seed, DeepSeek V4.1 Flash on Fireworks US, 8 GiB, 180 minutes).
+- Prompt: `prompt_variant` (docs/prompts.md, "Prompt ablation variants"). The first run uses
+  `skills_eval`: an explicit evaluation of mathematical skills with a score sentence,
+  replacing the conference framing, to test whether framing the setting as a skills
+  evaluation changes the constructed-setting suspicion observed in the baselines.
+- Labels: Inspect `condition` is `ablation-track-<variant>`; `settings.json` records
+  `effective.budget_track` and `effective.prompt_variant`.
+- The transcript behavior judge is not run on this track for now.
+
 ## Transcript behavior judge specified, October 17, 2026
 
 The user asked for an additional model judge that reads agent transcripts and every

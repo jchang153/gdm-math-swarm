@@ -400,8 +400,11 @@ class Snapshotter:
             await asyncio.sleep(interval)
 
 
-def condition_label(variant: str) -> str:
-    """Inspect ``condition`` metadata: only the unchanged prompt is the baseline condition."""
+def condition_label(variant: str, ablation_track: bool = False) -> str:
+    """Inspect ``condition`` metadata: only the unchanged prompt on the baseline track is
+    the baseline condition; every ablation-track run is labelled as such."""
+    if ablation_track:
+        return f"ablation-track-{variant}"
     return "baseline-spontaneous" if variant == "baseline" else f"prompt-ablation-{variant}"
 
 
@@ -840,7 +843,13 @@ def preflight(config, repo_root):
     """
     from .inspect_adapter import SYSTEM_PROMPT_MODES, installed_versions
     blockers = []
-    if config.get("agent_count") != APPROVED_AGENT_COUNT:
+    from .budget import budget_track_problems, is_ablation
+    blockers.extend(budget_track_problems(config))
+    if is_ablation(config):
+        from .launch_gates import ABLATION_AGENT_COUNTS
+        if config.get("agent_count") not in ABLATION_AGENT_COUNTS or type(config.get("agent_count")) is not int:
+            blockers.append(f"The ablation track allows {sorted(ABLATION_AGENT_COUNTS)} peers")
+    elif config.get("agent_count") != APPROVED_AGENT_COUNT:
         blockers.append(f"Pilot requires {APPROVED_AGENT_COUNT} peers (a population change needs user agreement)")
     if config.get("track") != "spontaneous" or config.get("seeded_contagion_enabled") or config.get("mitigations_enabled"):
         blockers.append("Initial pilot must be spontaneous baseline")
@@ -1020,13 +1029,11 @@ def queue_observer(run_dir, record=None):
     return make_queue_observer(run_evaluations_dir(run_dir))
 
 
-def ledger_path(repo_root):
-    """Authoritative cross-run ledger (I4: <repo>/state/budget.sqlite)."""
-    try:
-        from .budget import DEFAULT_LEDGER_PATH
-        return Path(DEFAULT_LEDGER_PATH(repo_root))
-    except ImportError:
-        return Path(repo_root) / "state" / "budget.sqlite"
+def ledger_path(repo_root, config=None):
+    """Authoritative cross-run ledger (I4: <repo>/state/budget.sqlite), or the ablation
+    track's own ledger when ``config`` selects it (budget.ledger_path_for)."""
+    from .budget import ledger_path_for
+    return Path(ledger_path_for(config or {}, repo_root))
 
 
 def default_conference_factory(repo_root, observer=None, compiler=None):
@@ -1241,8 +1248,9 @@ async def run_pilot(config, repo_root, conference_factory=None):
     record = make_recorder(run_dir / "runtime.jsonl")
     record("inspect_dotenv_disabled", None, dotenv)
     record("images_pinned", None, images)
-    ledger_file = ledger_path(repo_root)
-    ledger = BudgetLedger(ledger_file)
+    from .budget import caps_for, is_ablation
+    ledger_file = ledger_path(repo_root, config)
+    ledger = BudgetLedger(ledger_file, caps=caps_for(config))
     # Pricing and compatibility evidence were checked by launch_gates above, against
     # the same settings_from_config object (route-pricing gate compares frozen_fields).
     settings = settings_from_config(config, pricing_verified=True, live_compatibility_verified=True)
@@ -1275,6 +1283,7 @@ async def run_pilot(config, repo_root, conference_factory=None):
             "claude_auto_memory": auto_memory,
             "prompt_cache_normalization": TOKEN_COUNTER_NORMALIZATION_VERSION,
             "claude_code_env": claude_code_env(auto_memory), "ledger_path": str(ledger_file), "budget_scope": "pilot",
+            "budget_track": "ablation" if is_ablation(config) else "baseline",
             "evaluator_observer": None if observer is None else "queue",
             "fixed_task_manifest": config.get("fixed_task_manifest"), "inspect_dotenv": dotenv,
             "provider_limit": provider_limit, "in_flight_grace_seconds": in_flight_grace,
@@ -1293,7 +1302,7 @@ async def run_pilot(config, repo_root, conference_factory=None):
                              run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,
                              auto_memory=auto_memory, in_flight_grace=in_flight_grace)
         task = build_task(agent_ids=agent_ids, files=agent_files(task_files), solver=solver, compose=compose,
-                          metadata={"condition": condition_label(variant), "prompt_variant": variant,
+                          metadata={"condition": condition_label(variant, is_ablation(config)), "prompt_variant": variant,
                                     "personas": personas, "persona_seed": persona_seed},
                           initial_message=INITIAL_MESSAGE)
         return await supervise(eval_async(task, model=model, **eval_options(agent_count, run_dir, config)),

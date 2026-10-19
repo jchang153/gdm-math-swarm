@@ -98,7 +98,8 @@ sys.path.insert(0, str(ROOT / "src"))
 os.environ.setdefault("INSPECT_DISPLAY", "plain")  # eval_async has no display argument
 
 from research_swarm import runtime  # noqa: E402
-from research_swarm.budget import DEFAULT_CAPS, DEFAULT_LEDGER_PATH, BudgetLedger, list_requests  # noqa: E402
+from research_swarm.budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, BudgetLedger, caps_for,  # noqa: E402
+                                   ledger_path_for, list_requests)
 from research_swarm.inspect_adapter import _rejected_without_generation, classify_generate_error  # noqa: E402
 from research_swarm.provider import frozen_fields, settings_from_config  # noqa: E402
 
@@ -115,8 +116,8 @@ DEFAULT_MAX_MINUTES = 10
 DEFAULT_MIN_REMAINING_USD = "0.50"
 CONFERENCE_PREFIX = "mcp__conference__"
 # Launch gates (research_swarm.launch_gates.evaluate) that must pass before any paid call.
-REQUIRED_GATES = ("fixed_task_manifest", "frozen_dataset", "approved_settings", "config_caps", "route_pricing",
-                  "credential_presence", "runtime-e2e", "runtime-isolation")
+REQUIRED_GATES = ("fixed_task_manifest", "frozen_dataset", "approved_settings", "budget_track", "config_caps",
+                  "route_pricing", "credential_presence", "runtime-e2e", "runtime-isolation")
 # Shared interface with launch_gates' ``compatibility`` gate: every name below is a
 # required check in the evidence; the optional ones are informational.
 REQUIRED_CHECKS = ("tool_call_parsed", "conference_tool_call", "reasoning_replay_accepted", "provider_cost_reported",
@@ -848,16 +849,21 @@ def main(argv=None, *, ask=input, gates=None, environment=None, run=None, ledger
     except ValueError as ex:
         print(f"Refusing: provider settings in {args.config} are invalid ({ex}). Nothing was spent.")
         return 2
-    path = Path(ledger_file) if ledger_file else DEFAULT_LEDGER_PATH(ROOT)
+    try:
+        path = Path(ledger_file) if ledger_file else ledger_path_for(config, ROOT)  # ablation track: its own ledger
+        caps = caps_for(config)
+    except ValueError as ex:
+        print(f"Refusing: {ex}. Nothing was spent and no ledger was opened.")
+        return 2
     problems, ledger, snapshot = [], None, None
     try:
-        ledger = BudgetLedger(path)  # creates the scopes with DEFAULT_CAPS; refuses a differing existing cap
+        ledger = BudgetLedger(path, caps=caps)  # creates the approved scopes; refuses a differing cap
         snapshot = ledger.snapshot()
     except ValueError as ex:  # e.g. a ledger created while the compatibility cap was $0
         problems.append(f"ledger {rel(path)}: {ex} (an approved cap change is applied with scripts/preflight.py "
                         "--raise-ledger-cap, never by resetting the ledger)")
     if ledger is not None:
-        problems += ledger_problems(snapshot, min_remaining)
+        problems += ledger_problems(snapshot, min_remaining, caps=caps)
     problems += gate_problems((gates or evaluate_gates)(config))
     env_problems, images = (environment or environment_check)(config)
     problems += env_problems

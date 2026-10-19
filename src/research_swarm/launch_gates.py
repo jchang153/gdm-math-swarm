@@ -53,7 +53,7 @@ from .budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, INITIAL_PILOT_SETTLED_US
                      CACHE_REPEAT_CAP_USD, CACHE_REPEAT_PRIOR_SETTLED_USD, CACHE_REPEAT_PRIOR_HELD_USD,
                      CACHE_REPEAT_PRIOR_COMMITTED_USD, CACHE_REPEAT_PRIOR_CALLS_SHA256, cache_repeat_prior_problems,
                      LEGACY_LEDGER_RELATIVE, UNRESOLVED_STATES, list_requests,
-                     read_snapshot)
+                     read_snapshot, budget_track_problems, caps_for, is_ablation, ledger_path_for)
 from .provider import CONFIG_OVERRIDABLE, MODEL_ID, frozen_fields, settings_from_config, validate_catalog
 from .provider_limit import TOLERANCE_USD as LIMIT_TOLERANCE_USD, assess as assess_provider_limit
 
@@ -133,6 +133,10 @@ def seeded_config_problems(config):
                         "runs spontaneous discovery only and must carry none, enabled or not")
     return problems
 
+
+# Populations allowed on the prompt ablation track (budget_track "ablation"); the
+# baseline stays at runtime.APPROVED_AGENT_COUNT.
+ABLATION_AGENT_COUNTS = frozenset({10, 20})
 
 # Optional prompt ablation (docs/prompts.md, "Prompt ablation variants"); the check
 # lives in prompts so runtime preflight can use it without importing this module.
@@ -433,6 +437,11 @@ class _Gates:
 
     def approved_settings(self):
         approved = approved_settings()
+        if is_ablation(self.config):
+            # Prompt ablation track (docs/plan.md): smaller populations are allowed.
+            approved.pop("agent_count")
+            if self.config.get("agent_count") not in ABLATION_AGENT_COUNTS or type(self.config.get("agent_count")) is not int:
+                approved["agent_count"] = sorted(ABLATION_AGENT_COUNTS)
         drift = {k: {"config": self.config.get(k), "approved": v} for k, v in approved.items()
                  if self.config.get(k) != v or type(self.config.get(k)) is not type(v)}
         problems = ["config differs from approved plan values: " + ", ".join(sorted(drift))] if drift else []
@@ -448,6 +457,10 @@ class _Gates:
             approval = self.config.get("unlimited_provider_key_approval")
             if not isinstance(approval, str) or not approval.strip():
                 problems.append("allow_unlimited_provider_key requires a nonempty unlimited_provider_key_approval note")
+        if is_ablation(self.config) and unlimited is not False:
+            # The unlimited-key exception was approved for the baseline owner's key only; the
+            # ablation track uses its own key with a provider-side limit within its cap.
+            problems.append("allow_unlimited_provider_key must be false on the ablation track")
         self.add("approved_settings", not problems, "; ".join(problems) or
                  "config matches approved plan values (max_connections equals agent_count)", drift=drift,
                  max_connections=self.config.get(MAX_CONNECTIONS_KEY), agent_count=self.config.get("agent_count"))
@@ -457,6 +470,11 @@ class _Gates:
         self.add("seeded_track", not problems, "; ".join(problems) or
                  "spontaneous track; no seeded-contagion configuration present")
 
+    def budget_track(self):
+        problems = budget_track_problems(self.config)
+        track = self.config.get("budget_track", "baseline")
+        self.add("budget_track", not problems, "; ".join(problems) or f"budget track {track!r}", budget_track=track)
+
     def prompt_variant(self):
         problems = prompt_variant_problems(self.config)
         variant = self.config.get(PROMPT_VARIANT_KEY, "baseline")
@@ -465,12 +483,13 @@ class _Gates:
 
     def config_caps(self):
         drift = {}
+        caps = caps_for(self.config)
         for scope, key in CONFIG_CAP_KEYS.items():
             value = self.config.get(key)
-            if value is None or Decimal(str(value)) != Decimal(str(DEFAULT_CAPS[scope])):
-                drift[key] = {"config": value, "ledger_default": DEFAULT_CAPS[scope]}
-        self.add("config_caps", not drift, "config caps differ from budget.DEFAULT_CAPS: " + ", ".join(sorted(drift))
-                 if drift else "config caps equal DEFAULT_CAPS (" + ", ".join(f"{k} ${v}" for k, v in DEFAULT_CAPS.items()) + ")", drift=drift)
+            if value is None or Decimal(str(value)) != Decimal(str(caps[scope])):
+                drift[key] = {"config": value, "ledger_default": caps[scope]}
+        self.add("config_caps", not drift, "config caps differ from the approved ledger caps: " + ", ".join(sorted(drift))
+                 if drift else "config caps equal the approved ledger caps (" + ", ".join(f"{k} ${v}" for k, v in caps.items()) + ")", drift=drift)
 
     def route_pricing(self):
         path, record = newest_evidence(self.validation, "route-pricing")
@@ -614,7 +633,7 @@ class _Gates:
         checked = record.get("settings") if isinstance(record.get("settings"), dict) else {}
         if {k: v for k, v in checked.items() if k in CONFIG_OVERRIDABLE} != frozen_fields(settings):
             problems.append("checked settings differ from the ProviderSettings run_pilot will build")
-        cap = Decimal(str(DEFAULT_CAPS["compatibility"]))
+        cap = Decimal(str(caps_for(self.config)["compatibility"]))
         try:
             spent = Decimal(str(record.get("spent_usd")))
             if not spent.is_finite() or spent < 0:
@@ -704,7 +723,7 @@ class _Gates:
             problems.append("provider-side limit requirements not met: " + ", ".join(
                 k for k, v in (record.get("checks") or {}).items() if not v.get("passed", True)))
         assessment = assess_provider_limit(
-            record, pilot_remaining if pilot_remaining is not None else DEFAULT_CAPS["pilot"], self.now,
+            record, pilot_remaining if pilot_remaining is not None else caps_for(self.config)["pilot"], self.now,
             **({"allow_unlimited": True} if allow_unlimited else {}))
         failed = [name for name, check in assessment["checks"].items() if check.get("passed") is not True]
         if not assessment["all_required_passed"]:
@@ -742,6 +761,8 @@ class _Gates:
                  checks=assessment["checks"])
 
     def ledger(self, ledger_path, legacy):
+        if is_ablation(self.config):
+            return self.ablation_ledger(ledger_path)
         snapshot = read_snapshot(ledger_path)
         problems = []
         if legacy.exists():
@@ -815,6 +836,36 @@ class _Gates:
             path=self.rel(ledger_path), exists=snapshot is not None, pilot_remaining_usd=remaining)
         return snapshot, remaining
 
+    def ablation_ledger(self, ledger_path):
+        """The ablation track's own ledger: approved caps, no holds or violations, money left.
+        It is never the baseline ledger and carries no binding to baseline runs."""
+        snapshot = read_snapshot(ledger_path)
+        caps = caps_for(self.config)
+        problems = []
+        if Path(ledger_path).resolve() == DEFAULT_LEDGER_PATH(self.repo).resolve():
+            problems.append("the ablation track must not use the baseline ledger")
+        for scope, data in (snapshot or {}).items():
+            if scope in caps and Decimal(data["cap_usd"]) != Decimal(str(caps[scope])):
+                problems.append(f"ablation ledger {scope} cap {data['cap_usd']} differs from the approved "
+                                f"${caps[scope]} (a raise is audited: budget.raise_cap)")
+        pilot = (snapshot or {}).get("pilot")
+        if pilot:
+            if pilot["unresolved_requests"]:
+                problems.append(f"{pilot['unresolved_requests']} unresolved pilot hold(s) in the ablation ledger; "
+                                "reconcile first (scripts/reconcile_ledger.py --ledger ...)")
+            if pilot["violation"]:
+                problems.append("ablation pilot scope has an unacknowledged estimate_violation")
+            if Decimal(pilot["remaining_usd"]) <= 0:
+                problems.append("no remaining pilot allowance in the ablation ledger")
+        remaining = pilot["remaining_usd"] if pilot else str(caps["pilot"])
+        self.add("ledger", not problems, "; ".join(problems) or (
+            f"no ablation ledger yet; it will be created with caps {caps}" if snapshot is None else
+            "ablation ledger: approved caps, no holds, in-flight calls or violations"),
+            ledger_path if snapshot is not None else None,
+            path=self.rel(ledger_path), exists=snapshot is not None, pilot_remaining_usd=remaining,
+            budget_track="ablation")
+        return snapshot, remaining
+
     def credentials(self):
         from .secrets import credential_status
         status = credential_status(self.repo)
@@ -847,12 +898,19 @@ def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy
     """
     now = now or datetime.datetime.now(datetime.timezone.utc)
     gates = _Gates(repo_root, config, validation_dir, now, image_id or docker_image_id)
-    ledger_path = Path(ledger_path) if ledger_path else DEFAULT_LEDGER_PATH(gates.repo)
+    if ledger_path:
+        ledger_path = Path(ledger_path)
+    elif budget_track_problems(config):
+        # Invalid track: the budget_track gate blocks; read (never create) no real ledger.
+        ledger_path = gates.repo / "state" / "invalid-budget-track.sqlite"
+    else:
+        ledger_path = ledger_path_for(config, gates.repo)
     legacy = Path(legacy_ledger_path) if legacy_ledger_path else gates.repo / LEGACY_LEDGER_RELATIVE
     gates.run("fixed_task_manifest", gates.task_manifest)
     gates.run("frozen_dataset", gates.frozen_dataset)
     gates.run("approved_settings", gates.approved_settings)
     gates.run("seeded_track", gates.seeded_track)
+    gates.run("budget_track", gates.budget_track)
     gates.run("prompt_variant", gates.prompt_variant)
     gates.run("config_caps", gates.config_caps)
     gates.run("route_pricing", gates.route_pricing)
@@ -870,5 +928,7 @@ def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy
     blockers = [f"{name}: {result['reason']}" for name, result in gates.results.items() if not result["passed"]]
     return {"ready": not blockers, "blockers": blockers, "evidence": gates.results,
             "ledger": {"path": gates.rel(ledger_path), "exists": state["snapshot"] is not None,
-                       "snapshot": state["snapshot"], "default_caps": {k: str(v) for k, v in DEFAULT_CAPS.items()}},
+                       "snapshot": state["snapshot"],
+                       "default_caps": {} if budget_track_problems(config) else
+                       {k: str(v) for k, v in caps_for(config).items()}},
             "images": gates.images, "checked_at": now.isoformat(), "credentials_read": False, "network_calls": 0}

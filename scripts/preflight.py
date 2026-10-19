@@ -31,7 +31,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from research_swarm import launch_gates  # noqa: E402
-from research_swarm.budget import DEFAULT_CAPS, DEFAULT_LEDGER_PATH, raise_cap, read_snapshot  # noqa: E402
+from research_swarm.budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, caps_for, is_ablation,  # noqa: E402
+                                   ledger_path_for, raise_cap, read_snapshot)
 
 # What each allowance is for (docs/plan.md "Approved spending limits" and "Live
 # compatibility check"); every scope is outside the others.
@@ -45,20 +46,28 @@ SCOPE_NOTES = {
 DUPLICATE_RUNTIME_BLOCKERS = {"Paid launch is disabled": "paid_launch_enabled:"}
 
 
-def spending_checkpoint(repo_root, ledger_path=None):
+def spending_checkpoint(repo_root, ledger_path=None, caps=None):
     """Prior costs, unresolved holds and remaining allowance per scope (read-only)."""
     path = Path(ledger_path) if ledger_path else DEFAULT_LEDGER_PATH(repo_root)
+    caps = caps or DEFAULT_CAPS
     snapshot = read_snapshot(path) or {}
     scopes = {}
-    for scope in [*DEFAULT_CAPS, *sorted(set(snapshot) - set(DEFAULT_CAPS))]:
+    for scope in [*caps, *sorted(set(snapshot) - set(caps))]:
         data = snapshot.get(scope)
         if data is None:  # ledger not created yet (or scope added on first open): nothing spent
-            cap = str(DEFAULT_CAPS[scope])
+            cap = str(caps[scope])
             data = {"cap_usd": cap, "settled_usd": "0", "held_usd": "0", "committed_usd": "0", "remaining_usd": cap,
                     "unresolved_requests": 0, "violation": False}
         scopes[scope] = {k: data[k] for k in ("cap_usd", "settled_usd", "held_usd", "committed_usd", "remaining_usd",
                                               "unresolved_requests", "violation")}
     return {"ledger": str(path), "ledger_exists": bool(snapshot), "scopes": scopes}
+
+
+def spending_for(config, repo_root, ledger_path=None):
+    try:
+        return spending_checkpoint(repo_root, ledger_path or ledger_path_for(config, repo_root), caps_for(config))
+    except ValueError as ex:  # invalid budget_track: the budget_track gate blocks; report nothing as spent
+        return {"ledger": None, "ledger_exists": False, "scopes": {}, "error": str(ex)}
 
 
 def collect(config, repo_root, ledger_path=None):
@@ -74,7 +83,8 @@ def collect(config, repo_root, ledger_path=None):
                                 and any(g.startswith(DUPLICATE_RUNTIME_BLOCKERS[b]) for g in gates["blockers"]))]
     blockers = list(dict.fromkeys([*gates["blockers"], *runtime_blockers]))
     return {"ready": not blockers, "blockers": blockers, "launch_gates": gates, "runtime_preflight": runtime_report,
-            "spending": spending_checkpoint(repo_root, ledger_path), "credentials_read": False, "paid_calls_made": 0}
+            "spending": spending_for(config, repo_root, ledger_path),
+            "credentials_read": False, "paid_calls_made": 0}
 
 
 def money(value):
@@ -97,11 +107,11 @@ def render_spending(spending):
     return lines
 
 
-def apply_cap_raise(ledger_path, scope, note, approved, out=print):
+def apply_cap_raise(ledger_path, scope, note, approved, out=print, caps=None):
     """Explicit cap raise to the approved value; 0 when applied, 2 when refused or not approved."""
     snapshot = read_snapshot(ledger_path) or {}
     current = snapshot.get(scope)
-    approved_cap = DEFAULT_CAPS.get(scope)
+    approved_cap = (caps or DEFAULT_CAPS).get(scope)
     if current is None or approved_cap is None:
         out(f"Not raised: ledger {ledger_path} has no {scope} scope to raise "
             "(a new ledger starts at the approved caps).")
@@ -151,12 +161,20 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.approval_note and not args.raise_ledger_cap:
         parser.error("--approval-note is only used with --raise-ledger-cap")
+    config = json.loads(args.config.read_text())
     if args.raise_ledger_cap:
-        code = apply_cap_raise(DEFAULT_LEDGER_PATH(ROOT), args.raise_ledger_cap, args.approval_note,
-                               args.i_have_user_approval)
+        try:
+            caps_for(config)
+        except ValueError as ex:
+            print(f"Not raised: {ex}")
+            return 2
+        # The ablation track raises its own ledger to its own approved caps (budget.caps_for).
+        path = ledger_path_for(config, ROOT) if is_ablation(config) else DEFAULT_LEDGER_PATH(ROOT)
+        code = apply_cap_raise(path, args.raise_ledger_cap, args.approval_note,
+                               args.i_have_user_approval, caps=caps_for(config))
         if code:
             return code
-    report = collect(json.loads(args.config.read_text()), ROOT)
+    report = collect(config, ROOT)
     print(json.dumps(report, indent=2, default=str) if args.json else render(report))
     return 0 if report["ready"] else 1
 

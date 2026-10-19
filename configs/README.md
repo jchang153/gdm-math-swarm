@@ -25,6 +25,7 @@ Changing a key that the launch gates compare (`launch_gates.approved_settings()`
 | `execution`, `deployment`, `agent_harness` | `asynchronous`, `local`, `claude_code` | *Labels* recording the approved design. |
 | `system_prompt_mode` | `append` | `append` keeps Claude Code's built-in prompt and appends the conference prompt (`--append-system-prompt`). `replace` would replace it. The plan approves `append`. Gate. |
 | `claude_auto_memory` | `true` | Keeps Claude Code's normal auto-memory, as the plan approves. Gate. |
+| `budget_track` | absent | Optional. `ablation` selects the prompt ablation track (docs/plan.md, "Prompt ablation track"): its own ledger `state/ablation-budget.sqlite` with `budget.ABLATION_CAPS` (pilot $60, analysis $0, compatibility $2), no binding to baseline runs, 10 or 20 agents (`launch_gates.ABLATION_AGENT_COUNTS`), and `allow_unlimited_provider_key` false (its own provider key). Absent keeps the baseline ledger and every baseline gate. Runs are labelled `ablation-track-<variant>`. Gate (`budget_track`). |
 | `prompt_variant` | absent | Optional prompt ablation from `prompts.PROMPT_VARIANTS` (`baseline`, `no_stop`, `no_detection_claim`, `no_rule6`, `lenient`). Absent or `baseline` keeps the prompt byte-identical. Recorded in `settings.json` and the task metadata. Not part of the paper reconstruction; see docs/prompts.md, "Prompt ablation variants". Gate (`prompt_variant`: refuses unknown values). |
 | `general_internet_enabled` | `false` | Agent containers have no network. Gate. |
 
