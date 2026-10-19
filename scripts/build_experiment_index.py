@@ -76,7 +76,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
         tasks = f'{e["distinct_verified_tasks"]} / {e["task_count"] or "?"}'
         errors = e['agent_exits'].get('error', 0)
         rows.append('<tr><td><strong>' + esc(e['date']) + '</strong><br><small>' + esc(e['run']) + '</small></td>'
-                    '<td>' + esc(e['track']) + ('' if e['prompt_variant'] == 'baseline' else ' · prompt: ' + esc(e['prompt_variant']))
+                    '<td>' + esc(e['track']) + ('' if e.get('prompt_variant', 'baseline') == 'baseline' else ' · prompt: ' + esc(e['prompt_variant']))
                     + '<br><small>' + esc(e['model']) + '<br>' + esc(e['provider_route']) + '</small></td>'
                     f'<td>{e["agents"]}</td><td>{duration}</td><td>${Decimal(e["pilot_spent_usd"]):.2f}</td>'
                     f'<td>{tasks}</td><td>{errors}</td><td>{links}</td></tr>')
