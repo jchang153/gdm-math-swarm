@@ -317,7 +317,7 @@ pointer was garbage: heap corruption, not a stack overflow). It sent no request:
 written within a second of the fault and no request record exists, so the faulting thread was the
 only worker thread then running, the asyncio default-executor thread rebuilding the first agent's
 history (`asyncio.to_thread(build_run)`), where inspect_ai's sample reader runs an event loop of its
-own (`anyio.run`) in that thread beside the main event loop. 33 mock reproductions on the same VM
+own (`anyio.run`) in that thread beside the main event loop. 41 mock reproductions on the same VM
 (threaded HTTPS requests to a local TLS server, faulthandler on) did not fault again, so the exact
 C-level corruption is not identified; the fix removes that code path:
 
