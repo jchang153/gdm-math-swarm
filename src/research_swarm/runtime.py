@@ -532,6 +532,7 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
     from inspect_ai.solver import solver
     from inspect_ai.util import sandbox
     from .inspect_adapter import build_claude_agent, conference_tools
+    from .reasoning_bridge import agent_transport_scope
     import anyio
     run_dir = Path(run_dir)
 
@@ -626,32 +627,35 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
                             "grace_seconds": in_flight_grace})
                 group.cancel_scope.cancel()
 
-            try:
-                async with anyio.create_task_group() as group:
-                    group.start_soon(run_agent)
-                    group.start_soon(watch_stop)
-                    group.start_soon(snapshots.run, sbox)
-            finally:
-                with anyio.CancelScope(shield=True):
-                    try:
-                        with anyio.fail_after(120):
-                            await snapshots.poll(sbox, final=True)  # final observed versions
-                    except Exception as ex:
-                        record("snapshot_error", agent_id, {"stage": "final", "type": type(ex).__name__})
-                    inference = dict(getattr(gen_filter, "state", None) or {})
-                    if outcome["status"] is None:
-                        # Cancelled without an outcome: by the run stop (a request refused
-                        # after it), by a budget refusal (see exit_status) or otherwise.
-                        outcome["status"] = f"stopped:{clock.reason}" if clock.stop.is_set() else "interrupted"
-                    if outcome["status"] != "harness_completed":
-                        state.messages = agent_state.messages
-                    record("agent_exit", agent_id, {
-                        "status": exit_status(outcome["status"], inference),
-                        "harness_status": outcome["status"],
-                        "harness_after_stop": outcome["harness_after_stop"],
-                        "final_output": inference.get("last_output_kind"),
-                        "error": None if outcome["error"] is None else repr(outcome["error"])[:2000],
-                        "inference": inference})
+            # One reasoning-transport key for all of this agent's bridges, so a resumed
+            # session can replay its own signed reasoning (reasoning_bridge).
+            with agent_transport_scope():
+                try:
+                    async with anyio.create_task_group() as group:
+                        group.start_soon(run_agent)
+                        group.start_soon(watch_stop)
+                        group.start_soon(snapshots.run, sbox)
+                finally:
+                    with anyio.CancelScope(shield=True):
+                        try:
+                            with anyio.fail_after(120):
+                                await snapshots.poll(sbox, final=True)  # final observed versions
+                        except Exception as ex:
+                            record("snapshot_error", agent_id, {"stage": "final", "type": type(ex).__name__})
+                        inference = dict(getattr(gen_filter, "state", None) or {})
+                        if outcome["status"] is None:
+                            # Cancelled without an outcome: by the run stop (a request refused
+                            # after it), by a budget refusal (see exit_status) or otherwise.
+                            outcome["status"] = f"stopped:{clock.reason}" if clock.stop.is_set() else "interrupted"
+                        if outcome["status"] != "harness_completed":
+                            state.messages = agent_state.messages
+                        record("agent_exit", agent_id, {
+                            "status": exit_status(outcome["status"], inference),
+                            "harness_status": outcome["status"],
+                            "harness_after_stop": outcome["harness_after_stop"],
+                            "final_output": inference.get("last_output_kind"),
+                            "error": None if outcome["error"] is None else repr(outcome["error"])[:2000],
+                            "inference": inference})
             if outcome["error"] is not None:
                 raise outcome["error"]
             return state

@@ -99,6 +99,30 @@ class ReasoningBridgeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(BridgePolicyError, "Invalid or foreign"):
             await self.replay(blocks, bridge=SimpleNamespace())
 
+    async def test_resumed_session_bridge_replays_own_reasoning_within_agent_scope(self):
+        """A resumed Claude Code session gets a new AgentBridge (runtime auto_restart); inside one
+        agent_transport_scope it shares the agent's key, so the agent's own blocks replay."""
+        import anyio
+        with transport.agent_transport_scope():
+            blocks = await self.blocks(bridge=SimpleNamespace())
+            replayed = {}
+
+            async def resumed_bridge_service():  # as run_model_service: a task started inside
+                replayed["messages"] = await self.replay(blocks, bridge=SimpleNamespace())
+            async with anyio.create_task_group() as group:
+                group.start_soon(resumed_bridge_service)
+        self.assertEqual(replayed["messages"][0].content, self.message.content)
+
+    async def test_agent_scopes_do_not_share_keys(self):
+        from inspect_ai.agent._bridge._errors import BridgePolicyError
+        with transport.agent_transport_scope():
+            blocks = await self.blocks(bridge=SimpleNamespace())
+        with transport.agent_transport_scope():
+            with self.assertRaisesRegex(BridgePolicyError, "Invalid or foreign"):
+                await self.replay(blocks, bridge=SimpleNamespace())
+        with self.assertRaisesRegex(BridgePolicyError, "Invalid or foreign"):
+            await self.replay(blocks, bridge=SimpleNamespace())
+
     async def test_compaction_omission_does_not_reconstruct_reasoning(self):
         from research_swarm.inspect_adapter import replayed_reasoning_blocks
         blocks = await self.blocks()

@@ -1900,11 +1900,13 @@ class AutoRestartTests(unittest.IsolatedAsyncioTestCase):
         events = []
         record = lambda kind, agent, payload: events.append((kind, agent, payload))  # noqa: E731
         clock = RunClock(StartBarrier(1, record))
-        calls = []
+        calls, keys = [], []
 
         def fake_agent(prompt, tools, filter, **kwargs):
             async def agent(state):
+                from research_swarm import reasoning_bridge
                 calls.append([m.text for m in state.messages])
+                keys.append(reasoning_bridge._AGENT_KEY.get())
                 if len(calls) == 3:
                     clock.request_stop("max_run_seconds", record)
                     await anyio.sleep_forever()
@@ -1933,6 +1935,9 @@ class AutoRestartTests(unittest.IsolatedAsyncioTestCase):
                 record=record, clock=clock, auto_restart=True)
             await asyncio.wait_for(solver(state, None), 10)
         self.assertEqual(len(calls), 3)
+        # every session of the agent signs reasoning with one key (resumed sessions replay it)
+        self.assertIsNotNone(keys[0])
+        self.assertEqual(len(set(keys)), 1)
         self.assertEqual(calls[0], ["Begin."])
         self.assertEqual(calls[1], ["Begin.", runtime.CONTINUE_MESSAGE])
         self.assertEqual(calls[2], ["Begin.", runtime.CONTINUE_MESSAGE, runtime.CONTINUE_MESSAGE])
