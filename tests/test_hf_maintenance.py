@@ -1097,7 +1097,214 @@ class TranscriptMaintenanceTests(unittest.TestCase):
             main(['--maintain-run', RUN, '--bundle', str(self.bundle)])
         self.assertEqual(calls, ['transcripts', 'judge'])
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            main(['--maintain-run', RUN, '--bundle', str(self.bundle), '--scope', 'results'])
+            main(['--maintain-run', RUN, '--bundle', str(self.bundle), '--scope', 'reports'])
+
+
+
+class EvaluatorMaintenanceTests(unittest.TestCase):
+    """--scope evaluator: reports, RUN/evaluations/ records, changed existing conference pages and the
+    run's catalogue entry change; nothing else, no LFS and no deletions."""
+    prepare, records, receipt, edit_bundle, edit_remote, restart, assert_no_maintenance_commit = (
+        MaintenanceTests.prepare, MaintenanceTests.records, MaintenanceTests.receipt, MaintenanceTests.edit_bundle,
+        MaintenanceTests.edit_remote, MaintenanceTests.restart, MaintenanceTests.assert_no_maintenance_commit)
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.runs = self.root / 'runs'
+        self.viewer = make_viewer(self.root)
+        make_run(self.runs, OTHER)
+        run = make_run(self.runs, RUN)
+        (run / 'evaluations').mkdir()
+        (run / 'evaluations/queue.jsonl').write_text('{"submission": "sub-1"}\n')
+        (run / 'conference-view/file-1.html').write_text('<!doctype html><html><head></head><body>f</body></html>')
+        self.hub = Hub(self.root)
+        publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
+                operation=operation)
+        # After publication: evaluator records, a rebuilt conference index with verdicts, a report with
+        # one verified task, and a regenerated transcript (skipped by this scope).
+        (run / 'evaluations/evaluations.jsonl').write_text('{"validity": "genuine"}\n')
+        (run / 'evaluations/summary.json').write_text('{"by_validity": {"genuine": 1}}')
+        (run / 'conference-view/index.html').write_text('<!doctype html><html><head></head><body>verdicts</body></html>')
+        results = json.loads((run / 'results.json').read_text())
+        results['verified_submissions'] = [{'submission': 's', 'agent': 'agent-001', 'task': 'T',
+                                            'operational_outcome': 'accepted', 'independent_validity': 'genuine'}]
+        (run / 'results.json').write_text(json.dumps(results))
+        (run / 'results.html').write_text('<!doctype html><html><h1>R, evaluated</h1></html>')
+        (run / 'transcripts/index.html').write_text('<!doctype html><html><body>newer exporter</body></html>')
+        self.bundle = self.prepare('maintenance', RUN)
+        self.published = dict(self.hub.files)
+        self.base = self.hub.sha
+        self.publish_commits = len(self.hub.commits)
+        self.replaced = [RUN + '/results.html', RUN + '/results.json', RUN + '/conference-view/index.html']
+        self.added = [RUN + '/evaluations/evaluations.jsonl', RUN + '/evaluations/summary.json']
+
+    def maintain(self, commit=False, attempt='attempt-1', **kwargs):
+        if commit:
+            kwargs.setdefault('backup_dir', self.records(attempt))
+            kwargs.setdefault('receipt', self.records(attempt) / 'receipt.json')
+        return maintain_run(self.bundle, self.hub, self.hub.download, run=RUN, commit=commit,
+                            operation=operation, scope='evaluator', **kwargs)
+
+    def assert_final_state(self):
+        final = self.hub.files
+        self.assertEqual(set(final), set(self.published) | set(self.added))
+        for name, data in self.published.items():
+            if name not in set(self.replaced) | set(CATALOGUE):
+                self.assertEqual(final[name], data, name)  # includes .gitattributes and the transcripts
+        for name in self.replaced + self.added:
+            self.assertEqual(final[name], (self.bundle / name).read_bytes(), name)
+        old, new = json.loads(self.published['experiments.json']), json.loads(final['experiments.json'])
+        self.assertEqual([e for e in new['experiments'] if e['run'] != RUN],
+                         [e for e in old['experiments'] if e['run'] != RUN])
+        self.assertEqual([e['distinct_verified_tasks'] for e in new['experiments'] if e['run'] == RUN], [1])
+        manifest = json.loads(final[MANIFEST])
+        for name, info in manifest['files'].items():
+            self.assertEqual(digest(final[name]), info, name)
+        self.assertEqual(set(manifest['files']), set(json.loads(self.published[MANIFEST])['files']) | set(self.added))
+
+    def test_dry_run_plan(self):
+        result = self.maintain()
+        self.assertEqual((result['scope'], result['committed']), ('evaluator', False))
+        self.assert_no_maintenance_commit()
+        self.assertFalse((self.root / 'records').exists())
+        self.assertEqual((result['replaced'], result['added'], result['to_add']), (self.replaced, self.added, self.added))
+        self.assertEqual(sorted(result['to_replace']), sorted(self.replaced))
+        self.assertIn(RUN + '/evaluations/queue.jsonl', result['replacement_identical'])
+        self.assertIn(RUN + '/conference-view/file-1.html', result['replacement_identical'])
+        self.assertEqual((result['already_applied'], result['resume_required']), ([], False))
+        self.assertEqual(result['evaluator']['conference_view'], {'files': 2, 'file_sets_equal': True, 'replaced': 1})
+        self.assertEqual(result['catalogue']['files'], CATALOGUE)
+        self.assertEqual(result['catalogue']['entry_diff'], {'distinct_verified_tasks': {'old': 0, 'new': 1}})
+        self.assertEqual(result['archive_manifest']['changed_digests'],
+                         sorted(self.replaced + self.added + ['experiments.json', 'index.html']))
+        skipped = result['skipped_local_differences']
+        self.assertEqual({r['path']: r['reason'] for r in skipped['names']},
+                         {RUN + '/transcripts/index.html': 'differs_from_remote'})
+        self.assertEqual(result['uploads'], 5 + 3)
+
+    def test_commit_publishes_results_evaluations_and_conference_and_verifies(self):
+        result = self.maintain(commit=True)
+        self.assertTrue(result['committed'])
+        self.assert_final_state()
+        commits = self.hub.commits[self.publish_commits:]
+        self.assertEqual(sorted(commits[-1]['paths']), sorted(CATALOGUE))  # catalogue and manifest last
+        self.assertEqual({p for c in commits[:-1] for p in c['paths']}, set(self.replaced + self.added))
+        self.assertTrue(all(c['message'].endswith('results and independent evaluator outputs') for c in commits))
+        receipt = self.receipt()
+        self.assertEqual((receipt['status'], receipt['scope']), ('verified', 'evaluator'))
+        self.assertEqual(receipt['verification']['gitattributes'], 'unchanged')
+        self.assertEqual(receipt['verification']['added_files'], 2)
+        saved = sorted([*self.replaced, 'experiments.json', 'index.html', MANIFEST, '.gitattributes'])
+        self.assertEqual(receipt['backups'], saved)
+        for name in saved:
+            self.assertEqual((self.records() / 'original' / name).read_bytes(), self.published[name], name)
+        with self.assertRaisesRegex(ValueError, 'Nothing to upload'):
+            self.maintain(commit=True, attempt='attempt-2')
+
+    def test_conference_file_sets_must_match(self):
+        extra = RUN + '/conference-view/file-2.html'
+        self.edit_bundle({extra: b'<!doctype html><html><body>new</body></html>'})
+        with self.assertRaisesRegex(ValueError, 'conference-view file sets.*file-2.html'):
+            self.maintain()
+        self.assert_no_maintenance_commit()
+
+    def test_stale_published_evaluator_record_refused(self):
+        self.edit_remote({RUN + '/evaluations/old.jsonl': b'{}\n'})
+        with self.assertRaisesRegex(ValueError, 'evaluator record.*not in the bundle.*old.jsonl'):
+            self.maintain()
+
+    def test_lfs_rule_naming_a_planned_upload_refused_before_any_write(self):
+        self.edit_remote({'.gitattributes': self.published['.gitattributes'] + b'*.jsonl' + RULE + b'\n'})
+        with self.assertRaisesRegex(ValueError, 'LFS rule.*evaluations.jsonl'):
+            self.maintain(commit=True)
+        self.assert_no_maintenance_commit()
+
+    def test_interrupted_attempt_resumes_against_original(self):
+        with patch.object(maintain_hf_run, 'batches', one_file_batches):
+            self.hub.fail_after = self.publish_commits + 1
+            with self.assertRaisesRegex(RuntimeError, 'interruption'):
+                self.maintain(commit=True)
+            self.hub.fail_after = None
+            fresh = self.maintain()
+            self.assertTrue(fresh['resume_required'])
+            with self.assertRaisesRegex(ValueError, 'already partly applied'):
+                self.maintain(commit=True, attempt='attempt-2')
+            with self.assertRaisesRegex(ValueError, 'belong to the evaluator scope, not the judge scope'):
+                maintain_run(self.bundle, self.hub, self.hub.download, run=RUN, resume_from=self.records())
+            result = self.maintain(commit=True, attempt='attempt-3', resume_from=self.records())
+        self.assertEqual((result['status'], result['origin_revision']), ('verified', self.base))
+        self.assertEqual((result['replaced'], result['added']), (self.replaced, self.added))
+        self.assert_final_state()
+
+    def test_cli_scope(self):
+        calls = []
+        fake_hub = SimpleNamespace(HfApi=lambda: 'api', CommitOperationAdd=operation, hf_hub_download='download')
+        def record(*args, **kwargs):
+            calls.append(kwargs['scope'])
+            return {}
+        with patch.dict(sys.modules, {'huggingface_hub': fake_hub}), \
+                patch.object(maintain_hf_run, 'maintain_run', record), patch('builtins.print'):
+            main(['--maintain-run', RUN, '--bundle', str(self.bundle), '--scope', 'evaluator'])
+        self.assertEqual(calls, ['evaluator'])
+
+
+class ResultsMaintenanceTests(unittest.TestCase):
+    """--scope results: only the run's results.html/results.json and its catalogue entry change, even
+    when the bundle also holds newer evaluator records, conference pages or transcripts."""
+    prepare, records, receipt, edit_remote, assert_no_maintenance_commit = (
+        MaintenanceTests.prepare, MaintenanceTests.records, MaintenanceTests.receipt, MaintenanceTests.edit_remote,
+        MaintenanceTests.assert_no_maintenance_commit)
+
+    def setUp(self):
+        EvaluatorMaintenanceTests.setUp(self)
+        self.replaced = [RUN + '/results.html', RUN + '/results.json']
+        self.added = []
+
+    def maintain(self, commit=False, attempt='attempt-1', **kwargs):
+        if commit:
+            kwargs.setdefault('backup_dir', self.records(attempt))
+            kwargs.setdefault('receipt', self.records(attempt) / 'receipt.json')
+        return maintain_run(self.bundle, self.hub, self.hub.download, run=RUN, commit=commit,
+                            operation=operation, scope='results', **kwargs)
+
+    def test_dry_run_plan_and_commit_replace_only_reports(self):
+        plan = self.maintain()
+        self.assertEqual((plan['scope'], plan['replaced'], plan['added'], plan['to_add']),
+                         ('results', self.replaced, [], []))
+        self.assertEqual(sorted(plan['to_replace']), sorted(self.replaced))
+        self.assertEqual(plan['catalogue']['entry_diff'], {'distinct_verified_tasks': {'old': 0, 'new': 1}})
+        self.assertEqual(plan['archive_manifest']['changed_digests'],
+                         sorted(self.replaced + ['experiments.json', 'index.html']))
+        skipped = {r['path'] for r in plan['skipped_local_differences']['names']}
+        self.assertTrue({RUN + '/conference-view/index.html', RUN + '/transcripts/index.html',
+                         RUN + '/evaluations/evaluations.jsonl'} <= skipped)
+        self.assert_no_maintenance_commit()
+        result = self.maintain(commit=True)
+        self.assertEqual(result['status'], 'verified')
+        final = self.hub.files
+        self.assertEqual(set(final), set(self.published))
+        for name, data in self.published.items():
+            if name in self.replaced:
+                self.assertEqual(final[name], (self.bundle / name).read_bytes(), name)
+            elif name not in CATALOGUE:
+                self.assertEqual(final[name], data, name)
+        old, new = json.loads(self.published['experiments.json']), json.loads(final['experiments.json'])
+        self.assertEqual([e for e in new['experiments'] if e['run'] != RUN],
+                         [e for e in old['experiments'] if e['run'] != RUN])
+        manifest = json.loads(final[MANIFEST])
+        for name, info in manifest['files'].items():
+            self.assertEqual(digest(final[name]), info, name)
+        commits = self.hub.commits[self.publish_commits:]
+        self.assertTrue(all(c['message'].endswith('regenerated results report') for c in commits))
+        self.assertEqual(self.receipt()['verification']['gitattributes'], 'unchanged')
+
+    def test_lfs_rule_naming_a_report_refused_before_any_write(self):
+        self.edit_remote({'.gitattributes': self.published['.gitattributes'] + b'*.html' + RULE + b'\n'})
+        with self.assertRaisesRegex(ValueError, 'LFS rule.*results.html'):
+            self.maintain(commit=True)
+        self.assert_no_maintenance_commit()
 
 
 
