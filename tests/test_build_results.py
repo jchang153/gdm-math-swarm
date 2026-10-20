@@ -127,13 +127,17 @@ class BuildResultsTest(unittest.TestCase):
         self.assertIn('<h2>Researcher notes</h2>', page)
         self.assertIn('General &lt;note&gt;', page)
 
-    def test_judge_summary_is_labelled_and_marked(self):
+    def test_judge_outputs_only_linked(self):
         run = make_run(self.tmp.name, judge=True)
         data, page = generate(run)
-        self.assertEqual(data['behavior_judge']['label'], 'model-generated post-hoc judging')
-        self.assertEqual(data['behavior_judge']['links'], {'report_html': 'analysis/judge/report.html',
-                                                           'report_json': 'analysis/judge/report.json'})
-        self.assertEqual(page.count('<!-- behavior-judge:start -->'), 1)
+        self.assertEqual(data['behavior_judge'], {'status': 'completed', 'report': 'analysis/judge/report.html'})
+        self.assertIn('Behavior judge: see <a href="analysis/judge/report.html">analysis/judge/report.html</a>', page)
+        self.assertNotIn('behavior-judge:start', page)
+        self.assertNotIn('no_misbehavior', page)
+
+    def test_money_never_uses_exponent_notation(self):
+        self.assertEqual(build_results.usd(20_000_000_000), '20')
+        self.assertEqual(build_results.dec(build_results.Decimal('100.000')), '100')
 
     def test_refuses_overwrite_and_mismatched_evaluation(self):
         run = make_run(self.tmp.name)

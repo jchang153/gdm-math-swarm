@@ -65,9 +65,13 @@ requests, exits and restarts, spending and tokens, submissions per task and agen
 outcomes, and links to the existing record views (transcripts, conference view with board, DMs, library
 and private files, timeline, Inspect View and logs). It never summarizes those contents. The proof
 checker section is filled only from `evaluations/` (verdicts and reasons as recorded, bound by
-submission, task and source hash) and the behavior judge section only from `analysis/judge/report.json`
-(counts and links, labelled model-generated post-hoc judging); otherwise the page states "Proof checker:
-not run" / "Behavior judge: not run" and accepted submissions are `not_evaluated`. Flags:
+submission, task and source hash); otherwise the page states "Proof checker: not run" and accepted
+submissions are `not_evaluated`. By user decision (October 20, 2026) behavior-judge findings and fields
+stay out of `results.json`/`results.html`: they live only in the judge's own pages
+(`analysis/judge/report.html` and the evidence browser, linked from the catalogue's "Behavior judge"
+column). The report carries a single status line, "Behavior judge: see analysis/judge/report.html"
+(`behavior_judge: {"status": "completed", "report": ...}`) or "Behavior judge: not run". Amounts are
+written without exponent notation. Flags:
 `--ledger LEDGER.sqlite` (a consistent ledger copy; exact run-only spending by this run's admitted request
 IDs, otherwise derived from `runtime.jsonl` with uncertain holds still counted as held),
 `--key-usage-log LOG.jsonl`, `--caveat TEXT` and `--caveat-for SUBJECT TEXT` (the only free text, stored
@@ -160,9 +164,10 @@ category levels plus the full run-level record; `review/agents/<agent>.html` exi
 agents with at least one judge finding (verified, refuted or unverified, each labelled) and
 shows the verifier's verdict and model and the full evidence passages. It has no form
 controls, scripts or browser storage. `review/manifest.json` (schema
-`gdm-judge-review-manifest/3`) records the SHA-256 of every input and page. The report adds a
-marked section to `results.html`, a `behavior_judge` key to `results.json` (including the model
-allocation and cost per stage), and the index builder links `analysis/judge/report.html`.
+`gdm-judge-review-manifest/3`) records the SHA-256 of every input and page. The judge's report
+module can add a marked section to `results.html` and a `behavior_judge` key to `results.json`; reports
+regenerated with `scripts/build_results.py` replace those with a single status and link line (user
+decision, October 20, 2026), and the index builder links `analysis/judge/report.html`.
 
 Rule applied by `prepare_hf_library.py`: judge outputs are published only from a `paid`
 run whose evidence browser and report still match the judge outputs. It refuses
@@ -370,6 +375,17 @@ The plan's `evaluator` block gives the evaluator record count, how many are adde
 page count with `file_sets_equal: true` and how many pages are replaced, and the largest upload
 against `lfs_safe_limit_bytes`. Backups under `original/` hold both reports, every replaced page or
 record, the catalogue, the manifest and `.gitattributes`.
+
+`--scope results` replaces only a published run's `results.html` and `results.json`, for example
+reports regenerated with `scripts/build_results.py --overwrite`, and regenerates the catalogue
+(only this run's entry may change; review `catalogue.entry_diff` in the plan, which should be empty
+when only the report layout changes). It is the evaluator scope without evaluator records or
+conference pages: no LFS, `.gitattributes` unchanged, guarded batches with the catalogue and
+manifest last, resume and verification as above; every other local difference is skipped. Keep the
+previous reports locally (for example as `results.legacy.json`/`results.legacy.html`; they are not
+published) and prepare a single-run bundle as for the other scopes, then run
+`python scripts/maintain_hf_run.py --scope results --maintain-run "$RUN_ID" --bundle "$BUNDLE"` (plan)
+and the same with `--commit --backup-dir "$OUT/attempt-1" --receipt "$OUT/attempt-1/maintenance-receipt.json"`.
 
 ## Uploading and preserving other collaborators' experiments
 

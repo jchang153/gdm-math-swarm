@@ -12,9 +12,12 @@ Inputs (read-only): RUN/settings.json (condition), RUN/runtime.jsonl (clock, sto
 per-agent requests, exits and restarts, settlement and token usage),
 RUN/conference/state.sqlite (opened read-only: every submission with its time and outcome),
 RUN/budget-final.json (ledger snapshot), and, only when present, RUN/evaluations/
-(proof checker) and RUN/analysis/judge/report.json (behavior judge), plus the files named by
---ledger and --key-usage-log. Without those outputs the report states "Proof checker: not
-run" / "Behavior judge: not run" and every accepted submission is "not_evaluated".
+(proof checker) and the existence of RUN/analysis/judge/report.json, plus the files named by
+--ledger and --key-usage-log. Without evaluator records the report states "Proof checker: not
+run" and every accepted submission is "not_evaluated". Behavior-judge findings and fields stay
+out of results.*: they live only in the judge's own pages (analysis/judge/report.html and its
+evidence browser, linked separately from the catalogue); the report carries only a status and
+link line ("Behavior judge: see analysis/judge/report.html" or "Behavior judge: not run").
 
 Publication steps (docs/experiment-library.md):
 
@@ -46,7 +49,7 @@ import sys
 NANO = Decimal('1e-9')
 ACCEPTED = ('accepted', 'accepted_after_close')
 SCOPES = ('pilot', 'compatibility', 'analysis')
-JUDGE_START, JUDGE_END = '<!-- behavior-judge:start -->', '<!-- behavior-judge:end -->'
+JUDGE_REPORT = 'analysis/judge/report.html'
 STYLE = ('body{max-width:1100px;margin:40px auto;padding:0 22px;font:16px system-ui;line-height:1.55}'
          'table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:9px;border-bottom:1px solid #ddd;'
          'overflow-wrap:anywhere}a{color:#155eaa}small{color:#596579}')
@@ -59,11 +62,11 @@ esc = html.escape
 
 def usd(nano):
     """Ledger integers are nano-dollars."""
-    return str((Decimal(nano) * NANO).normalize()) if nano else '0'
+    return format((Decimal(nano) * NANO).normalize(), 'f') if nano else '0'  # never exponent notation
 
 
 def dec(value):
-    return str(value.normalize()) if value else '0'
+    return format(value.normalize(), 'f') if value else '0'
 
 
 def utc(timestamp):
@@ -262,26 +265,14 @@ def evaluate(run, accepted):
 
 
 def judge_summary(run):
-    """Counts and links from analysis/judge/report.json only."""
+    """Status and link only: judge findings and fields stay in the judge's own pages."""
     path = run / 'analysis' / 'judge' / 'report.json'
     if not path.exists():
         return None
     report = json.loads(regular(path).read_text(encoding='utf-8'))
     if report.get('run_id') not in (None, run.name):
         raise ValueError(f'analysis/judge/report.json belongs to run {report.get("run_id")!r}')
-    counts = report.get('counts') or {}
-    projection = report.get('paper_projection') or {}
-    links = {'report_html': 'analysis/judge/report.html', 'report_json': 'analysis/judge/report.json',
-             'evidence_browser': 'analysis/judge/review/index.html'}
-    return {'status': 'completed', 'source': 'analysis/judge/report.json',
-            'label': 'model-generated post-hoc judging', 'schema': report.get('schema'), 'mode': report.get('mode'),
-            'judge_revision': report.get('judge_revision'),
-            'rubric_version': (report.get('rubric') or {}).get('judge_rubric_version'),
-            'counts': {k: counts.get(k) for k in ('agents', 'graded', 'ungraded', 'grading_failed', 'open_items')},
-            'cohorts': counts.get('cohorts'), 'flags': counts.get('flags'),
-            'paper_projection': {'denominator': projection.get('denominator'), 'cohorts': projection.get('cohorts')},
-            'analysis_spend_usd': (report.get('cost_by_stage') or {}).get('total_usd'),
-            'links': {k: v for k, v in links.items() if (run / v).exists()}}
+    return {'status': 'completed', 'report': JUDGE_REPORT}
 
 
 def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_reason=None, stop_utc=None,
@@ -427,8 +418,8 @@ def render(results, title):
             + [(f'Validation record {i + 1}', f'{v["path"]} (SHA-256 {v["sha256"]})')
                for i, v in enumerate(ev['validation_records'])]),
             '<p>' + ' · '.join(f'<a href="{esc(p, quote=True)}">{esc(p)}</a>' for p in ev['records']) + '</p>']
-    if judge['status'] == 'not_run':
-        body.append('<p>Behavior judge: not run</p>')
+    body.append('<p>Behavior judge: not run</p>' if judge['status'] == 'not_run' else
+                f'<p>Behavior judge: see <a href="{esc(judge["report"], quote=True)}">{esc(judge["report"])}</a></p>')
     body.append('<h2>Accounting</h2>')
     body.append(table([(esc(s), money(b['settled_usd']), money(b['held_usd']), esc(value(b['unresolved_requests'])),
                         esc(value(b['settled_requests'])), money(b['cap_usd']), money(b.get('remaining_usd')),
@@ -455,17 +446,6 @@ def render(results, title):
             '<li>' + (f'<strong>{esc(n["subject"])}</strong>: ' if n.get('subject') else '') + esc(n['text']) + '</li>'
             for n in results['researcher_notes']) + '</ul>')
     body.append('<h2>Records</h2><p>' + ' · '.join(f'<a href="{href}">{label}</a>' for label, href in LINKS) + '</p>')
-    if judge['status'] != 'not_run':
-        links = ' · '.join(f'<a href="{esc(v, quote=True)}">{esc(k.replace("_", " "))}</a>'
-                           for k, v in judge['links'].items())
-        body.append(JUDGE_START + '<section id="behavior-judge"><h2>Behavior judge <small>(model-generated post-hoc '
-                    f'judging; source: {esc(judge["source"])})</small></h2>' + facts([
-                        ('Mode', judge['mode']), ('Rubric', judge['rubric_version']),
-                        ('Judge revision', judge['judge_revision']), ('Agents', judge['counts']),
-                        ('Cohorts', judge['cohorts']), ('Flags', judge['flags']),
-                        ('Paper projection', judge['paper_projection']),
-                        ('Analysis spend', money(judge['analysis_spend_usd']))])
-                    + f'<p>{links}</p></section>' + JUDGE_END)
     return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" '
             f'content="width=device-width,initial-scale=1"><title>{esc(title or results["run"] + " results")}</title>'
             f'<style>{STYLE}</style>' + ''.join(body) + '</html>\n')

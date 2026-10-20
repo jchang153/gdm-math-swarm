@@ -1097,7 +1097,7 @@ class TranscriptMaintenanceTests(unittest.TestCase):
             main(['--maintain-run', RUN, '--bundle', str(self.bundle)])
         self.assertEqual(calls, ['transcripts', 'judge'])
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            main(['--maintain-run', RUN, '--bundle', str(self.bundle), '--scope', 'results'])
+            main(['--maintain-run', RUN, '--bundle', str(self.bundle), '--scope', 'reports'])
 
 
 
@@ -1248,6 +1248,63 @@ class EvaluatorMaintenanceTests(unittest.TestCase):
                 patch.object(maintain_hf_run, 'maintain_run', record), patch('builtins.print'):
             main(['--maintain-run', RUN, '--bundle', str(self.bundle), '--scope', 'evaluator'])
         self.assertEqual(calls, ['evaluator'])
+
+
+class ResultsMaintenanceTests(unittest.TestCase):
+    """--scope results: only the run's results.html/results.json and its catalogue entry change, even
+    when the bundle also holds newer evaluator records, conference pages or transcripts."""
+    prepare, records, receipt, edit_remote, assert_no_maintenance_commit = (
+        MaintenanceTests.prepare, MaintenanceTests.records, MaintenanceTests.receipt, MaintenanceTests.edit_remote,
+        MaintenanceTests.assert_no_maintenance_commit)
+
+    def setUp(self):
+        EvaluatorMaintenanceTests.setUp(self)
+        self.replaced = [RUN + '/results.html', RUN + '/results.json']
+        self.added = []
+
+    def maintain(self, commit=False, attempt='attempt-1', **kwargs):
+        if commit:
+            kwargs.setdefault('backup_dir', self.records(attempt))
+            kwargs.setdefault('receipt', self.records(attempt) / 'receipt.json')
+        return maintain_run(self.bundle, self.hub, self.hub.download, run=RUN, commit=commit,
+                            operation=operation, scope='results', **kwargs)
+
+    def test_dry_run_plan_and_commit_replace_only_reports(self):
+        plan = self.maintain()
+        self.assertEqual((plan['scope'], plan['replaced'], plan['added'], plan['to_add']),
+                         ('results', self.replaced, [], []))
+        self.assertEqual(sorted(plan['to_replace']), sorted(self.replaced))
+        self.assertEqual(plan['catalogue']['entry_diff'], {'distinct_verified_tasks': {'old': 0, 'new': 1}})
+        self.assertEqual(plan['archive_manifest']['changed_digests'],
+                         sorted(self.replaced + ['experiments.json', 'index.html']))
+        skipped = {r['path'] for r in plan['skipped_local_differences']['names']}
+        self.assertTrue({RUN + '/conference-view/index.html', RUN + '/transcripts/index.html',
+                         RUN + '/evaluations/evaluations.jsonl'} <= skipped)
+        self.assert_no_maintenance_commit()
+        result = self.maintain(commit=True)
+        self.assertEqual(result['status'], 'verified')
+        final = self.hub.files
+        self.assertEqual(set(final), set(self.published))
+        for name, data in self.published.items():
+            if name in self.replaced:
+                self.assertEqual(final[name], (self.bundle / name).read_bytes(), name)
+            elif name not in CATALOGUE:
+                self.assertEqual(final[name], data, name)
+        old, new = json.loads(self.published['experiments.json']), json.loads(final['experiments.json'])
+        self.assertEqual([e for e in new['experiments'] if e['run'] != RUN],
+                         [e for e in old['experiments'] if e['run'] != RUN])
+        manifest = json.loads(final[MANIFEST])
+        for name, info in manifest['files'].items():
+            self.assertEqual(digest(final[name]), info, name)
+        commits = self.hub.commits[self.publish_commits:]
+        self.assertTrue(all(c['message'].endswith('regenerated results report') for c in commits))
+        self.assertEqual(self.receipt()['verification']['gitattributes'], 'unchanged')
+
+    def test_lfs_rule_naming_a_report_refused_before_any_write(self):
+        self.edit_remote({'.gitattributes': self.published['.gitattributes'] + b'*.html' + RULE + b'\n'})
+        with self.assertRaisesRegex(ValueError, 'LFS rule.*results.html'):
+            self.maintain(commit=True)
+        self.assert_no_maintenance_commit()
 
 
 if __name__ == '__main__':
