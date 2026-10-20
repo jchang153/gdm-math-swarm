@@ -496,6 +496,88 @@ class MockEndToEndTests(unittest.TestCase):
         self.assertTrue(list(path.parent.glob("A02.w0001.json.stale-*")))
 
 
+class ThreadedMockTransport(FakeTransport):
+    """The paid path's threading with the mock model: each request is answered in a thread of
+    ``client.UrllibTransport``'s own bounded pool (as ``UrllibTransport.post`` sends it), after a
+    short random latency."""
+
+    def __init__(self, responder, workers):
+        super().__init__(responder=responder)
+        import threading
+        from research.analysis.judge.client import UrllibTransport
+        self.owner = UrllibTransport(max_workers=workers)
+        self.lock = threading.Lock()
+        self.active = self.peak = 0
+        self.thread_names = set()
+
+    async def post(self, url, headers, body, timeout):
+        import random
+        import threading
+        import time
+        request = {"url": url, "headers": dict(headers), "body": json.loads(body), "bytes": len(body),
+                   "timeout": timeout}
+        self.requests.append(request)
+
+        def work():
+            with self.lock:
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+                self.thread_names.add(threading.current_thread().name)
+            try:
+                time.sleep(random.uniform(0.001, 0.02))
+                return self.responder(request)
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+        return await asyncio.get_running_loop().run_in_executor(self.owner._pool(), work)
+
+
+class HighConcurrencyTests(unittest.TestCase):
+    """Regression (judge speed fix, October 20, 2026): a paid run at --agent-concurrency 10
+    --haiku-concurrency 48 --sonnet-concurrency 32 --opus-concurrency 16 died with a segmentation
+    fault in a worker thread while agents' histories were being rebuilt in asyncio worker threads (each
+    rebuild runs inspect_ai's reader on an event loop of its own) beside the HTTP threads. Histories are
+    now prebuilt (history.HistoryCache) and served from memory on the event loop thread, and requests
+    are sent from each transport's own bounded pool; the new defaults (48/32/16, 20 agents) run the
+    candidate pipeline to completion with threaded requests."""
+
+    def test_default_concurrency_with_threaded_requests_and_prebuilt_histories(self):
+        import threading
+        from research.analysis.judge.history import HistoryCache
+        defaults = pl.PipelineSettings()
+        settings = dataclasses.replace(defaults, window_tokens=300, sample_fraction=1.0, max_selected_fraction=1.0,
+                                       judge_mode="candidates")
+        for attempt in range(3):
+            with self.subTest(attempt=attempt), tempfile.TemporaryDirectory() as tmp:
+                r = Rehearsal(tmp, settings=settings, judge_mode="candidates")
+                r.transport = ThreadedMockTransport(r.model, workers=sum(settings.concurrency(k) for k in pl.MODEL_KEYS))
+                cache = HistoryCache(r.run_dir, {agent: r.run for agent in r.agents})
+                loaded_on = []
+                original = cache.__class__.__call__
+
+                class Recording(HistoryCache):
+                    def __call__(self, agent_id):
+                        loaded_on.append(threading.current_thread() is threading.main_thread())
+                        return original(self, agent_id)
+
+                cache.__class__ = Recording
+                pipeline = r.pipeline()
+                pipeline.use_histories(cache)
+                try:
+                    summary = asyncio.run(pipeline.run())
+                finally:
+                    r.transport.owner.close()
+                self.assertEqual(summary["status"], "complete", summary.get("errors"))
+                self.assertEqual(len(loaded_on), len(r.agents))
+                self.assertTrue(all(loaded_on), "histories must be served on the event loop thread")
+                self.assertEqual(cache.runs, {}, "each agent's history is released once judged")
+                self.assertTrue(r.transport.thread_names)
+                self.assertTrue(all(name.startswith("judge-http") for name in r.transport.thread_names))
+                self.assertGreater(r.transport.peak, 1)
+                self.assertGreater(len(r.transport.requests), len(r.agents))
+
+
 class VersionGateTests(unittest.TestCase):
     def test_judge_dir_from_the_twelve_dimension_pipeline_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -858,7 +940,8 @@ class HelperTests(unittest.TestCase):
         for gone in ("verifier_batch", "verifier_token_cap", "verifier_context"):
             self.assertFalse(hasattr(defaults, gone), gone)
         self.assertEqual((defaults.haiku_concurrency, defaults.sonnet_concurrency, defaults.opus_concurrency),
-                         (24, 16, 8))
+                         (48, 32, 16))
+        self.assertEqual(defaults.agent_concurrency, 20)
         # Each agent verifies its evaluation-awareness findings one at a time, so enough agents run at once
         # to fill the Opus slots; Sonnet slots fill from several candidate requests per agent.
         self.assertGreaterEqual(defaults.agent_concurrency, defaults.opus_concurrency)

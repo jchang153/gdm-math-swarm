@@ -382,7 +382,9 @@ class CommandLineTests(unittest.TestCase):
         index = {agent: (self.run_dir / "inspect" / "synthetic.eval", agent, 1) for agent in AGENTS}
         patches = [mock.patch("research.analysis.judge.history.sample_index", return_value=index),
                    mock.patch("research.analysis.judge.history.build_run",
-                              lambda run_dir, agents=None, **kwargs: self.run)]
+                              lambda run_dir, agents=None, **kwargs: self.run),
+                   # Rebuild in this process (worker processes would not see the patched build_run).
+                   mock.patch("research.analysis.judge.history.default_history_workers", return_value=1)]
         with contextlib.ExitStack() as stack:
             for patch in patches:
                 stack.enter_context(patch)

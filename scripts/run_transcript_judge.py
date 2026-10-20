@@ -134,11 +134,14 @@ def parse_args(argv=None):
                              "full (default 10000)")
     parser.add_argument("--verifier-neighbor-chars", type=int, default=1500,
                         help="characters of the records just before and after each cited record (default 1500)")
-    parser.add_argument("--haiku-concurrency", type=int, default=24)
-    parser.add_argument("--sonnet-concurrency", type=int, default=16)
-    parser.add_argument("--opus-concurrency", type=int, default=8)
-    parser.add_argument("--agent-concurrency", type=int, default=8,
-                        help="agents processed at once (each holds its rebuilt history in memory)")
+    parser.add_argument("--haiku-concurrency", type=int, default=48)
+    parser.add_argument("--sonnet-concurrency", type=int, default=32)
+    parser.add_argument("--opus-concurrency", type=int, default=16)
+    parser.add_argument("--agent-concurrency", type=int, default=20,
+                        help="agents processed at once (default 20; every history is prebuilt before the run)")
+    parser.add_argument("--history-workers", type=int, default=None,
+                        help="worker processes rebuilding agent histories in parallel before judging (default: "
+                             "one per agent, at most the CPUs, 16 and one per 6 GB of memory; 1 rebuilds in this process)")
     parser.add_argument("--max-selected-fraction", type=float, default=0.20,
                         help="hold an agent before its judge call when the prefilter selected more than this share "
                              "of its item tokens (default 0.20; 1 disables)")
@@ -628,15 +631,20 @@ def _main(argv=None):
             reason = str(error).splitlines()[0].split(". ")[0].replace(str(judge_dir / "manifest.json") + " ", "")
             note, planned_dir = (f"a judging run would refuse {judge_dir} (its manifest {reason[:240]}); planned as "
                                  "for a new --output-dir"), None
-        from research.analysis.judge.history import sample_index
+        from research.analysis.judge.history import HistoryCache, sample_index
         all_agents = sorted(sample_index(run_dir))
+        unknown = sorted(set(agents or ()) - set(all_agents))
+        if unknown:
+            return refuse("No such agent in the run: " + ", ".join(unknown))
+        histories = HistoryCache.build(run_dir, sorted(agents) if agents else all_agents,
+                                       workers=args.history_workers, log=log)
         planner = est.InvocationPlanner(planned_dir, settings, routes, stage=args.stage, retry_failed=args.retry_failed,
                                         recompute_stale=args.recompute_stale, all_agents=all_agents)
         result = pl.estimate_run(run_dir, settings, routes, agents=agents, fractions=fractions, log=log,
                                  judge_dir=judge_dir if (judge_dir / "manifest.json").exists() else None,
                                  cap_usd=Decimal(str(DEFAULT_CAPS["analysis"])),
                                  remaining_usd=(analysis or {}).get("remaining_usd"), on_agent=planner.add,
-                                 agents_in_run=len(all_agents))
+                                 agents_in_run=len(all_agents), loader=histories)
         invocation = planner.finish(agents=sorted(agents) if agents else all_agents)
         limit = est.invocation_run_limit(invocation)
         result["ledger_analysis"] = analysis
@@ -708,6 +716,16 @@ def _main(argv=None):
         run_limit = RunLimit(limit["limit_usd"], source=limit["source"], estimate=None, factor=None,
                              floor_usd=None, basis=limit["basis"], standing_approval=standing)
         pipeline.run_limit = run_limit
+    # Every agent's history is rebuilt once, in parallel worker processes, before any request and before
+    # the event loop starts (never in a thread beside the HTTP threads); the pipeline reads it from memory.
+    from research.analysis.judge.history import HistoryCache, sample_index
+    if all_agents is None:
+        all_agents = sorted(sample_index(run_dir))
+    unknown = sorted(set(agents or ()) - set(all_agents))
+    if unknown:
+        return refuse("No such agent in the run: " + ", ".join(unknown))
+    pipeline.use_histories(HistoryCache.build(run_dir, sorted(agents) if agents else all_agents,
+                                              workers=args.history_workers, log=log))
     if args.mock:
         from research.analysis.judge.history import agent_code
         chosen = agents or all_agents
@@ -764,4 +782,6 @@ def _main(argv=None):
 
 
 if __name__ == "__main__":
+    import faulthandler
+    faulthandler.enable()  # a native crash (e.g. a segmentation fault) prints every thread's traceback
     sys.exit(main())

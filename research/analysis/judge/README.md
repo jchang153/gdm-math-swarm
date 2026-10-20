@@ -28,8 +28,8 @@ tool results or the conference library.
 | verify | Claude Opus 5.5 (high) | one finding | each cited record in full up to 10,000 characters, else windows around the cited occurrences of the quotes plus its edges; the results of cited acts; excerpts of the neighbouring records | 6,000 |
 | runlevel | Claude Opus 5.5 (high) | the run's verified findings | the verified records, exposure graph and delivery of cited communications | 8,000 |
 
-Output limits include thinking. Concurrency: Haiku 24, Sonnet 16, Opus 8 requests at once, 8
-agents at once. Deterministic host code computes exposure, chronology, evaluator authority,
+Output limits include thinking. Concurrency: Haiku 48, Sonnet 32, Opus 16 requests at once, 20
+agents at once (judge speed fix, October 20, 2026; see "Speed and the high-concurrency crash"). Deterministic host code computes exposure, chronology, evaluator authority,
 accusation accuracy, cohorts, the frozen-label mapping and the statement-defect footnote.
 
 ### 1. History and screening (Haiku)
@@ -308,10 +308,57 @@ of the reservation is unchanged.
   stay undecided or unverified, never negatives; holds are not released early (a refused request
   settles at its reported cost).
 
+### Speed and the high-concurrency crash (judge speed fix, October 20, 2026)
+
+A paid run started with `--agent-concurrency 10 --haiku-concurrency 48 --sonnet-concurrency 32
+--opus-concurrency 16` died at once with a segmentation fault in a worker thread (`dmesg`: in
+`libpython3.10.so.1.0` at `visit_decref`, the garbage collector reading the type of an object whose
+pointer was garbage: heap corruption, not a stack overflow). It sent no request: its manifest was
+written within a second of the fault and no request record exists, so the faulting thread was the
+only worker thread then running, the asyncio default-executor thread rebuilding the first agent's
+history (`asyncio.to_thread(build_run)`), where inspect_ai's sample reader runs an event loop of its
+own (`anyio.run`) in that thread beside the main event loop. 33 mock reproductions on the same VM
+(threaded HTTPS requests to a local TLS server, faulthandler on) did not fault again, so the exact
+C-level corruption is not identified; the fix removes that code path:
+
+* Every agent's history is rebuilt before any request and before the event loop starts, in parallel
+  worker processes (`history.build_runs`, `spawn` start method; `--history-workers`, default one per
+  agent, at most the CPUs, 16 and one per 6 GB of memory: a 37 MB sample peaks at 4.6 GB), and the
+  pipeline reads it from memory on the event loop thread (`history.HistoryCache`; each agent's
+  history is released once judged). The judging process now runs no thread besides the HTTP ones.
+* Each client sends from its own bounded thread pool (`client.UrllibTransport(max_workers=
+  max_concurrency)`, threads `judge-http-*`) with one verified TLS context; before, every request
+  queued in asyncio's shared default executor (at most min(32, CPUs + 4) threads), which also capped
+  the effective concurrency of all three models together at 32.
+* `scripts/run_transcript_judge.py` enables `faulthandler`: a native crash prints every thread's
+  Python traceback.
+* Defaults: Haiku 48, Sonnet 32, Opus 16 requests and 20 agents at once.
+* Smaller Sonnet reservations (owner approved): a Sonnet request reserves 12,000 output tokens
+  (`route.RESERVATION_OUTPUT_TOKENS`; `JudgeRouteSettings.reserved_output_tokens`) instead of its
+  48,000-token max_tokens (still sent), so 32 Sonnet requests hold about $11 rather than $22 in flight
+  against the run limit. The largest Sonnet completion measured on the gemini10 paid run was 3,181
+  tokens, and the prompt bound (UTF-8 bytes plus framing at the highest price) leaves further slack.
+  Haiku and Opus keep their full max_tokens (at most $0.04 a request to gain; their outputs reaching
+  the limit are anticipated paths). A request billed above its reservation is an `estimate_violation`
+  as before: in particular a Sonnet output that runs to its 48,000-token limit stops the run cleanly
+  until a researcher acknowledges the violation. The request archive records `reserved_output_tokens`.
+
+Measured on the gemini10 paid run (defaults of that time, 24/16/8, 8 agents; VM, 23:05:15 to 23:08:08):
+histories rebuilt serially in the pipeline (48 s; agents started 0 to 76 s apart), Haiku prefilter
+283 requests (latency p50 5.7 s, p90 11 s, max 73 s), Sonnet 24 candidate, 4 repair and 11 sample
+requests (p50 12 s), Opus 22 verifications (p50 6.5 s) and the run level (11 s): 173 s, after a
+5.5-minute pre-run estimate (since removed). With the fix, a mock run of the same transcripts on the
+VM with threaded HTTPS requests at 2 to 12 s latency took 152 s end to end (45 s of history rebuilding
+while other load ran, then 107 s for 283 Haiku, 134 Sonnet and 128 Opus mock requests); a paid run of
+that size is projected at about 3 to 4 minutes (the Haiku tail and the per-agent Sonnet, repair and
+Opus chains, about 2.5 minutes, plus history rebuilding and the report).
+
 ### Concurrency and HTTP 429 (item 10)
 
-Sonnet 16 and Opus 8 requests at once (`route.DEFAULT_CONCURRENCY`, `--sonnet-concurrency`,
-`--opus-concurrency`); Haiku 24 and 8 agents at once are unchanged. An HTTP 429 (rate limited,
+Item 10 set Sonnet 16 and Opus 8 requests at once (Haiku 24, 8 agents); the judge speed fix
+(below) raised the defaults to Haiku 48, Sonnet 32, Opus 16 and 20 agents (`route.DEFAULT_CONCURRENCY`,
+`PipelineSettings`, `--haiku-concurrency`, `--sonnet-concurrency`, `--opus-concurrency`,
+`--agent-concurrency`). An HTTP 429 (rate limited,
 never processed) settles `unbilled_error` at 0 and is resent with a fresh reservation after
 `client.rate_limit_delay`: the response's `Retry-After` (seconds or an HTTP date) when given, else
 2 s doubling per 429, at most 300 s, plus up to 25% jitter, awaited outside the concurrency slot; at
@@ -615,8 +662,9 @@ least $1); `--judge-mode {candidates|package}` (candidates), `--candidate-batch-
 (4,000), `--verifier-edge-chars` (1,000), `--verifier-full-chars` (10,000),
 `--verifier-neighbor-chars` (1,500); `--window-tokens` (24,000), `--neighbors {k|turn}` (1, package
 mode), `--package-token-cap` (350,000, package mode); `--sample-fraction` (0.05) and
-`--sample-seed`; `--max-selected-fraction` (0.20; 1 disables); `--haiku-concurrency` (24),
-`--sonnet-concurrency` (16), `--opus-concurrency` (8), `--agent-concurrency` (8);
+`--sample-seed`; `--max-selected-fraction` (0.20; 1 disables); `--haiku-concurrency` (48),
+`--sonnet-concurrency` (32), `--opus-concurrency` (16), `--agent-concurrency` (20); `--history-workers`
+(processes rebuilding histories; default one per agent, at most the CPUs, 16 and one per 6 GB);
 `--no-prompt-cache`; `--credentials-root` (paid only); `--retry-failed`, `--recompute-stale`;
 `--rescore-cached` (recompute the host stages from cached units only: no model calls, no
 credentials, no run limit; refused when a unit is missing); `--no-label-check`;

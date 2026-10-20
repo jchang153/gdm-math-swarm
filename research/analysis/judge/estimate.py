@@ -608,7 +608,9 @@ class InvocationPlanner:
             model, limit_key, _ = STAGES[request["stage"]]
             amount = pl._reservation(self.route_settings.route(model), request["tokens"], settings.max_tokens[limit_key],
                                      framing, cache=settings.prompt_cache and model != "haiku",
-                                     body_bytes=request.get("bytes"))
+                                     body_bytes=request.get("bytes"),
+                                     output_tokens=pl.reserved_output_tokens(self.route_settings, model,
+                                                                             settings.max_tokens[limit_key]))
             largest[model] = max(largest.get(model, Decimal(0)), amount)
         central = priced["central"]["expected_usd"]
         return {"schema": INVOCATION_SCHEMA, "created_at": _now(), "stage": self.stage, "judge_mode": settings.judge_mode,

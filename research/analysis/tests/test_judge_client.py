@@ -13,6 +13,7 @@ loader is patched to fail, and fake paths are checked never to open any ``.env``
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime
 import json
 import sqlite3
@@ -310,6 +311,36 @@ class FailureTests(ClientCase):
         self.assertEqual(result["settlements"][0]["state"], "estimate_violation")
         self.assertTrue(analysis(self.ledger_path)["violation"])
         second = self.run_one(self.client(FakeTransport([fake_completion("{}")])), unit_id="next")
+        self.assertEqual(second["error"]["reason"], "budget_admission_denied")
+
+    def test_sonnet_reserves_its_output_allowance_and_an_overrun_is_a_violation(self):
+        """Judge speed fix: a Sonnet request reserves 12,000 output tokens (not its 48,000 max_tokens) and is
+        still sent with max_tokens 48,000. Within the reservation it settles normally; an output that runs
+        past it (e.g. to the 48,000-token limit) settles at its reported cost as an estimate_violation that
+        blocks further admissions, exactly as before."""
+        sonnet = MODEL_IDS["sonnet"]
+        transport = FakeTransport([fake_completion("{}", cost="0.05", model=sonnet)])
+        client = self.client(transport, "sonnet")
+        result = self.run_one(client, "sonnet", max_tokens=48000)
+        body = transport.requests[0]["body"]
+        self.assertEqual(body["max_tokens"], 48000)
+        record = json.loads(next(Path(p) for p in result["raw_paths"] if p.endswith(".request.json")).read_text())
+        self.assertEqual(record["reserved_output_tokens"], 12000)
+        data = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+        reserved = Decimal(record["reserved_usd"])
+        self.assertEqual(reserved, settings().reservation("sonnet", data, 48000, cache_system=True))
+        full = settings(reservation_output_tokens=()).reservation("sonnet", data, 48000, cache_system=True)
+        self.assertEqual(full - reserved, 36000 * Decimal("0.00001"))
+        self.assertEqual(result["settlements"][0]["state"], "settled")
+        # Billed for the full 48,000 output tokens: above the reservation.
+        overrun = str(reserved + Decimal("0.2"))
+        result = self.run_one(self.client(FakeTransport([fake_completion("{}", cost=overrun, model=sonnet)]), "sonnet"),
+                              "sonnet", max_tokens=48000, unit_id="long")
+        self.assertEqual(result["settlements"][0]["state"], "estimate_violation")
+        self.assertEqual(result["cost_usd"], overrun)
+        self.assertTrue(analysis(self.ledger_path)["violation"])
+        second = self.run_one(self.client(FakeTransport([fake_completion("{}", model=sonnet)]), "sonnet"), "sonnet",
+                              unit_id="next")
         self.assertEqual(second["error"]["reason"], "budget_admission_denied")
 
     def test_route_mismatch_is_grading_failed_but_settled(self):
@@ -706,10 +737,20 @@ class RouteTests(unittest.TestCase):
         # Prompt caching: cache writes (1.25x) bound every prompt token; no read discount.
         self.assertEqual(s.reservation("opus", large, 48000, cache_system=True),
                          Decimal(108192) * Decimal("0.000005") + 48000 * Decimal("0.00002"))
+        # Sonnet reserves its output allowance (12,000 tokens; route.RESERVATION_OUTPUT_TOKENS), never more
+        # than max_tokens; Haiku and Opus reserve their full max_tokens.
         self.assertEqual(s.reservation("sonnet", large, 48000, cache_system=True),
-                         Decimal(108192) * Decimal("0.0000025") + 48000 * Decimal("0.00001"))
+                         Decimal(108192) * Decimal("0.0000025") + 12000 * Decimal("0.00001"))
         self.assertEqual(s.reservation("sonnet", large, 48000),
+                         Decimal(108192) * Decimal("0.000002") + 12000 * Decimal("0.00001"))
+        self.assertEqual(s.reservation("sonnet", large, 5000),
+                         Decimal(108192) * Decimal("0.000002") + 5000 * Decimal("0.00001"))
+        self.assertEqual([s.reserved_output_tokens(k, 48000) for k in ("haiku", "sonnet", "opus")],
+                         [48000, 12000, 48000])
+        full = dataclasses.replace(s, reservation_output_tokens=())
+        self.assertEqual(full.reservation("sonnet", large, 48000),
                          Decimal(108192) * Decimal("0.000002") + 48000 * Decimal("0.00001"))
+        self.assertNotEqual(full.sha256(), s.sha256())  # the allowance is part of the recorded route settings
         # Haiku above 100K: the override tier's cache-write price bounds the prompt.
         self.assertEqual(s.reservation("haiku", large, 16000, cache_system=True),
                          Decimal(108192) * Decimal("0.000000625") + 16000 * Decimal("0.0000025"))
@@ -810,7 +851,7 @@ class ThreeModelTests(ClientCase):
         for key, effort in (("sonnet", "low"), ("haiku", "high"), ("opus", "medium")):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 s.reasoning(key, effort)
-        for key, expected in (("haiku", 24), ("sonnet", 16), ("opus", 8)):  # judge revision v3, item 10
+        for key, expected in (("haiku", 48), ("sonnet", 32), ("opus", 16)):  # judge speed fix
             client = self.client(FakeTransport(), key)
             self.assertEqual(client.max_concurrency, expected)
         with self.assertRaises(ValueError):

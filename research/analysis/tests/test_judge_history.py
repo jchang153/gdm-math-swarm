@@ -238,6 +238,26 @@ class SyntheticRunTests(unittest.TestCase):
     def ids(self, history_=None):
         return [i["id"] for i in (history_ or self.a1).items]
 
+    def test_parallel_rebuild_matches_serial(self):
+        """build_runs rebuilds each agent in its own spawned worker process; the histories (and the
+        pipeline's history digest) equal a serial build_run, and HistoryCache serves them in memory."""
+        from research.analysis.judge.pipeline import history_digest
+        agents = ["agent-001", "agent-002"]
+        cache = history.HistoryCache.build(self.run_dir, agents, workers=2)
+        self.assertTrue(cache.in_memory)
+        for agent in agents:
+            run = cache(agent)
+            self.assertEqual(list(run.agents), [agent])
+            self.assertEqual(history_digest(run.agents[agent]), history_digest(self.built.agents[agent]))
+            self.assertEqual([i["id"] for i in run.agents[agent].items],
+                             [i["id"] for i in self.built.agents[agent].items])
+        cache.release("agent-001")
+        self.assertNotIn("agent-001", cache.runs)
+        cpus = __import__("os").cpu_count() or 1
+        self.assertEqual(history.default_history_workers(3, memory_bytes=64 * 1024 ** 3), min(3, cpus))
+        self.assertEqual(history.default_history_workers(40, memory_bytes=12 * 1024 ** 3), min(2, cpus))
+        self.assertEqual(history.default_history_workers(5, memory_bytes=1024 ** 3), 1)
+
     def test_item_shape_matches_interface(self):
         keys = {"id", "agent_id", "kind", "channel", "turn", "time", "time_bounds", "text", "authored_by_agent",
                 "visible_to_agent", "meta"}

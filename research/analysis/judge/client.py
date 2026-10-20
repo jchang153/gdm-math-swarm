@@ -176,12 +176,38 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class UrllibTransport:
-    """Real HTTPS POST (stdlib), run in a worker thread; no proxies, no redirects."""
-    def __init__(self):
-        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+    """Real HTTPS POST (stdlib), run in a worker thread; no proxies, no redirects.
+
+    Each transport owns a bounded thread pool of ``max_workers`` threads (the client's
+    ``max_concurrency``: a request admitted by the client's semaphore always has a thread, never
+    queued behind other clients' requests in asyncio's shared default executor, which holds at most
+    min(32, CPUs + 4) threads) and one verified TLS context shared by its connections (created
+    once, not per request)."""
+    def __init__(self, max_workers=8):
+        if isinstance(max_workers, bool) or not isinstance(max_workers, int) or max_workers < 1:
+            raise ValueError("max_workers must be a positive integer")
+        self.max_workers = max_workers
+        self._context = ssl.create_default_context()
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                                   urllib.request.HTTPSHandler(context=self._context), _NoRedirect())
+        self._executor = None
+        self._executor_lock = threading.Lock()
+
+    def _pool(self):
+        with self._executor_lock:
+            if self._executor is None:
+                from concurrent.futures import ThreadPoolExecutor
+                self._executor = ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix="judge-http")
+            return self._executor
+
+    def close(self):
+        with self._executor_lock:
+            executor, self._executor = self._executor, None
+        if executor is not None:
+            executor.shutdown(wait=True)
 
     async def post(self, url, headers, body, timeout):
-        return await asyncio.to_thread(self._post, url, headers, body, timeout)
+        return await asyncio.get_running_loop().run_in_executor(self._pool(), self._post, url, headers, body, timeout)
 
     def _post(self, url, headers, body, timeout):
         if not str(url).startswith("https://"):
@@ -592,7 +618,7 @@ class JudgeClient:
         self.ledger = BudgetLedger(self.ledger_path, caps)
         self.run_limit = run_limit
         self._limit_tokens = {}             # ledger request id -> RunLimit token
-        self.http = UrllibTransport() if self._paid else http
+        self.http = UrllibTransport(max_workers=max_concurrency) if self._paid else http
         self._key_loader = key_loader
         self._verify_limit = verify_limit
         self._key = None
@@ -914,8 +940,10 @@ class JudgeClient:
                     "schema": ARCHIVE_SCHEMA, "kind": "request", "created_at": _now(), "unit_id": unit_id,
                     "purpose": purpose, "attempt": attempt, "model_key": self.model_key, "scope": self.scope,
                     "ledger_request_id": request_id, "reserved_usd": str(reservation),
-                    "reservation_basis": ("prompt bound at max(prompt, cache write, cache read) price; no cache "
-                                          "discount assumed") if cache_system else "prompt bound at prompt price",
+                    "reservation_basis": (("prompt bound at max(prompt, cache write, cache read) price; no cache "
+                                           "discount assumed") if cache_system else "prompt bound at prompt price")
+                                         + "; output at the model's reservation allowance (at most max_tokens)",
+                    "reserved_output_tokens": self.settings.reserved_output_tokens(self.model_key, max_tokens),
                     "cache_system": bool(cache_system),
                     "cache_control": dict(CACHE_CONTROL) if cache_system else None,
                     "prompt_token_bound": self.settings.prompt_token_bound(self.model_key, data),

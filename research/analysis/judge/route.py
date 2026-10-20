@@ -87,7 +87,7 @@ MODEL_ALLOCATION = {"prefilter": ("haiku",), "judge": ("sonnet",), "verifier": (
                     "runlevel": ("opus",)}
 # Default request concurrency per model (configurable per client). Judge revision v3 (docs/plan.md,
 # "Behavior judge iteration specified, October 19, 2026", item 10): Sonnet 16 and Opus 8.
-DEFAULT_CONCURRENCY = {"haiku": 24, "sonnet": 16, "opus": 8}
+DEFAULT_CONCURRENCY = {"haiku": 48, "sonnet": 32, "opus": 16}
 # Whether a request marks its system prompt (the shared rubric prefix) for caching
 # when the caller does not say (JudgeClient.complete(cache_system=None)).
 CACHE_SYSTEM_DEFAULTS = {"haiku": False, "sonnet": True, "opus": True}
@@ -116,6 +116,19 @@ FRAMING_TOKEN_ALLOWANCE = 8192
 # maximum so one reservation stays small relative to the analysis allowance and to an
 # invocation's run limit (judge revision v3, item 7).
 MAX_TOKENS_CEILING = 64000
+# Output tokens (thinking + reply) a request's ledger reservation assumes, at most its max_tokens
+# (judge speed fix, October 20, 2026, owner approved: smaller in-flight holds). Sonnet only: its
+# 48,000-token output limit made two thirds of each Sonnet reservation ($0.48 of ~$0.70), so 32 Sonnet
+# requests in flight held ~$22 of a $50 run limit. 12,000 is the largest Sonnet completion measured
+# over the gemini10 paid run (3,181 tokens, reasoning included, 39 units) times ~3.8; the prompt stays
+# bounded by its UTF-8 bytes plus framing at the highest price it can reach (measured Sonnet tokens per
+# byte <= 0.53), which leaves roughly another 10,000 output tokens of slack per typical request. Haiku
+# (16,000) and Opus (6,000 / 8,000) keep their full max_tokens: reducing them saves at most $0.04 per
+# request, and their outputs reaching the limit are anticipated paths. A request is still sent with
+# its full max_tokens and settles at its reported cost; one billed above its reservation (e.g. a Sonnet
+# output that runs to its 48,000-token limit) is recorded by the ledger as an estimate_violation
+# (unchanged: new admissions in the scope stop cleanly until a researcher acknowledges it).
+RESERVATION_OUTPUT_TOKENS = (("sonnet", 12000),)
 # Advisory per-purpose defaults for callers (the client takes max_tokens per call); judge revision v3
 # (item 5): verifier 6,000 and run level 8,000 (pipeline.DEFAULT_MAX_TOKENS binds them).
 DEFAULT_MAX_TOKENS = {"prefilter": 16000, "judge": 48000, "verifier": 6000, "runlevel": 8000}
@@ -203,6 +216,8 @@ class JudgeRouteSettings:
     prompt_cache: bool | None = None
     framing_token_allowance: int = FRAMING_TOKEN_ALLOWANCE
     max_tokens_ceiling: int = MAX_TOKENS_CEILING
+    # ((model key, output tokens a reservation assumes), ...); a key not listed reserves max_tokens.
+    reservation_output_tokens: tuple = RESERVATION_OUTPUT_TOKENS
     request_timeout_s: float = REQUEST_TIMEOUT_SECONDS
     endpoint_url: str = CHAT_COMPLETIONS_URL
     pricing_verified: bool = False
@@ -333,7 +348,13 @@ class JudgeRouteSettings:
         # what the caller said (fail safe: only ever raises the reservation).
         prompt, completion = self.price_bounds(key, bound, cache_system=bool(cache_system)
                                                or _marks_cache(serialized_body))
-        return Decimal(bound) * prompt + Decimal(max_tokens) * completion
+        return Decimal(bound) * prompt + Decimal(self.reserved_output_tokens(key, max_tokens)) * completion
+
+    def reserved_output_tokens(self, key, max_tokens):
+        """Output tokens the reservation of a request with ``max_tokens`` assumes: the model's
+        ``reservation_output_tokens`` allowance, never more than ``max_tokens``."""
+        allowance = dict(self.reservation_output_tokens or ()).get(key)
+        return int(max_tokens) if allowance is None else min(int(max_tokens), int(allowance))
 
     def check_max_tokens(self, key, max_tokens):
         if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens <= 0:

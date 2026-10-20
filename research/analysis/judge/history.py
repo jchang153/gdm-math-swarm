@@ -1255,6 +1255,81 @@ def build_run(run_dir, *, agents=None, include_files=True):
     return run
 
 
+def _build_one(run_dir, agent_id):
+    """Worker of ``build_runs``: one agent's RunHistory (pickled back to the parent)."""
+    return agent_id, build_run(run_dir, agents=[agent_id])
+
+
+HISTORY_WORKER_BYTES = 6 * 1024 ** 3   # peak memory of one worker: ~4.6 GB for a 37 MB Inspect sample
+HISTORY_WORKERS_MAX = 16
+
+
+def default_history_workers(count, memory_bytes=None):
+    """Processes for ``build_runs``: one per agent, at most the CPUs, at most HISTORY_WORKERS_MAX
+    and at most one per HISTORY_WORKER_BYTES of physical memory (each worker parses and validates
+    one whole Inspect sample: about 4.6 GB at peak for a 37 MB sample)."""
+    import os
+    if memory_bytes is None:
+        try:
+            memory_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        except (AttributeError, ValueError, OSError):
+            memory_bytes = HISTORY_WORKER_BYTES
+    return max(1, min(int(count), os.cpu_count() or 1, HISTORY_WORKERS_MAX, int(memory_bytes // HISTORY_WORKER_BYTES)))
+
+
+def build_runs(run_dir, agents, *, workers=None, log=None):
+    """``{agent_id: build_run(run_dir, agents=[agent_id])}`` for every agent, rebuilt in parallel
+    worker processes (reading and validating an Inspect sample takes tens of seconds per agent and
+    is CPU bound). Processes use the ``spawn`` start method: no thread or lock state of the parent
+    is inherited, and nothing here starts a thread in the parent. ``workers=1`` (or one agent)
+    rebuilds in this process."""
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    log = log or (lambda message: None)
+    agents = [str(a) for a in agents]
+    workers = default_history_workers(len(agents)) if workers is None else max(1, int(workers))
+    if workers == 1 or len(agents) <= 1:
+        out = {}
+        for agent in agents:
+            out[agent] = build_run(run_dir, agents=[agent])
+            log(f"history {agent} rebuilt")
+        return out
+    out = {}
+    with ProcessPoolExecutor(max_workers=min(workers, len(agents)),
+                             mp_context=multiprocessing.get_context("spawn")) as pool:
+        futures = [pool.submit(_build_one, str(run_dir), agent) for agent in agents]
+        for future in as_completed(futures):
+            agent, run = future.result()
+            out[agent] = run
+            log(f"history {agent} rebuilt")
+    return {agent: out[agent] for agent in agents}
+
+
+class HistoryCache:
+    """Each agent's rebuilt RunHistory, built once per invocation (``build_runs``) and shared by the
+    invocation estimate and the pipeline (``loader(agent_id)``). ``release(agent_id)`` drops one
+    once the pipeline no longer needs it. A cached history is returned without a thread
+    (``in_memory``); an agent not prebuilt is rebuilt here on demand."""
+    in_memory = True
+
+    def __init__(self, run_dir, runs=None):
+        self.run_dir = run_dir
+        self.runs = dict(runs or {})
+
+    @classmethod
+    def build(cls, run_dir, agents, *, workers=None, log=None):
+        return cls(run_dir, build_runs(run_dir, agents, workers=workers, log=log))
+
+    def __call__(self, agent_id):
+        run = self.runs.get(agent_id)
+        if run is None:
+            run = self.runs[agent_id] = build_run(self.run_dir, agents=[agent_id])
+        return run
+
+    def release(self, agent_id):
+        self.runs.pop(agent_id, None)
+
+
 def summarize(run, target_tokens=6000):
     """Per-agent statistics table (turns, items, tokens by kind, windows), JSON-ready."""
     from .windows import make_windows

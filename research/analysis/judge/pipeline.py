@@ -21,8 +21,9 @@ run-level summary.
 Stages (``STAGES``; ``--stage S`` runs every stage up to and including S):
 
 1. ``history``   per agent: ``history.build_run(run_dir, agents=[agent])`` (offline, one
-                 Inspect sample at a time) and ``windows.make_windows`` (~24,000-token
-                 windows). A digest of the rebuilt record binds every cached unit to it.
+                 Inspect sample per agent; the CLI prebuilds every agent in parallel worker
+                 processes before the event loop starts, ``history.HistoryCache``) and
+                 ``windows.make_windows`` (~24,000-token windows). A digest of the rebuilt record binds every cached unit to it.
 2. ``prefilter`` Haiku screens every window (``prompts.prefilter_messages_v2``, narrow: only
                  items touching cheating, bypass sharing, concerns about bypasses or rule
                  violations, integrity boycotts and evaluation awareness; one repair, then
@@ -341,11 +342,13 @@ class PipelineSettings:
     verifier_neighbor_chars: int = prompts.VERIFIER_NEIGHBOR_CHARS
     max_tokens: dict = field(default_factory=lambda: dict(DEFAULT_MAX_TOKENS))
     prompt_cache: bool = True
-    # Judge revision v3 (item 10): Sonnet 16 and Opus 8 requests at once (Haiku and agents unchanged).
-    haiku_concurrency: int = 24
-    sonnet_concurrency: int = 16
-    opus_concurrency: int = 8
-    agent_concurrency: int = 8
+    # Haiku 48, Sonnet 32 and Opus 16 requests at once and 20 agents at once (judge speed fix, October
+    # 20, 2026; revision v3 item 10 had 24/16/8 and 8 agents). Histories are prebuilt in worker processes
+    # (history.HistoryCache) and each client sends from its own bounded thread pool.
+    haiku_concurrency: int = 48
+    sonnet_concurrency: int = 32
+    opus_concurrency: int = 16
+    agent_concurrency: int = 20
     # Safety guard (plan, partial paid run: Haiku selected 50-65% under the previous rubric): an
     # agent whose selected and forced items exceed this share of its item tokens is held before
     # its judge call. 1.0 disables the guard.
@@ -1752,6 +1755,10 @@ class Pipeline:
     def unit_dir(self, agent_id):
         return self.judge_dir / "units" / agent_id
 
+    def use_histories(self, loader):
+        """Load agent histories through ``loader`` (e.g. a prebuilt ``history.HistoryCache``)."""
+        self._loader = loader
+
     def _build_history(self, agent_id):
         from .history import build_run
         with self._build_lock:
@@ -2237,7 +2244,18 @@ class Pipeline:
 
     # -- per agent ----------------------------------------------------------
     async def process_agent(self, agent_id):
-        run = await asyncio.to_thread(self._loader, agent_id)
+        if getattr(self._loader, "in_memory", False):
+            run = self._loader(agent_id)  # prebuilt (history.HistoryCache): no worker thread
+        else:
+            run = await asyncio.to_thread(self._loader, agent_id)
+        try:
+            return await self._process_agent(agent_id, run)
+        finally:
+            release = getattr(self._loader, "release", None)
+            if release is not None:
+                release(agent_id)  # the agent's history is no longer needed
+
+    async def _process_agent(self, agent_id, run):
         history = _get(run, "agents")[agent_id]
         summary = self.history_stage(agent_id, history)
         if not self.reached("prefilter"):
@@ -3852,17 +3870,26 @@ def _cache_saving(route, system_tokens, calls, assumptions):
     return tokens * (Decimal(str(calls)) * prompt - Decimal(str(writes)) * write - Decimal(str(calls - writes)) * read)
 
 
-def _reservation(route, prompt_tokens, max_tokens, framing, *, cache=False, body_bytes=None):
+def _reservation(route, prompt_tokens, max_tokens, framing, *, cache=False, body_bytes=None, output_tokens=None):
     """Ledger reservation of a request of ``prompt_tokens`` estimated tokens: the UTF-8 byte
     bound (``body_bytes`` when the request was rendered, else ~4 bytes per estimated token) plus
     framing, capped at the context, priced at the highest tier it can reach (cache writes when
-    caching; never a cache discount)."""
+    caching; never a cache discount), plus ``output_tokens`` (``reserved_output_tokens``; default
+    ``max_tokens``) at the completion price."""
+    if output_tokens is None:
+        output_tokens = max_tokens
     size = int(body_bytes) if body_bytes is not None else int(prompt_tokens) * 4
     bound = min(size + int(framing), int(route.context_length))
     tiers = [t for t in route.tiers if int(t.min_prompt_tokens) <= bound] or list(route.tiers[:1])
     prompt = max(max(Decimal(t.prompt), Decimal(t.cache_write or t.prompt) if cache else Decimal(0)) for t in tiers)
     completion = max(Decimal(t.completion) for t in tiers)
-    return Decimal(bound) * prompt + Decimal(int(max_tokens)) * completion
+    return Decimal(bound) * prompt + Decimal(int(output_tokens)) * completion
+
+
+def reserved_output_tokens(route_settings, key, max_tokens):
+    """``JudgeRouteSettings.reserved_output_tokens`` (``max_tokens`` for settings without it)."""
+    method = getattr(route_settings, "reserved_output_tokens", None)
+    return int(max_tokens) if method is None else method(key, max_tokens)
 
 
 def allocate_findings(total, weights):
@@ -4029,7 +4056,10 @@ def project_costs_candidates(per_agent, settings, route_settings, assumptions, c
                "opus": largest_verifier}
     purpose = {"haiku": "prefilter", "sonnet": "judge", "opus": "verifier"}
     reservations = {key: _reservation(routes[key], largest[key], settings.max_tokens[purpose[key]], framing,
-                                      cache=settings.prompt_cache and key != "haiku") for key in MODEL_KEYS}
+                                      cache=settings.prompt_cache and key != "haiku",
+                                      output_tokens=reserved_output_tokens(route_settings, key,
+                                                                           settings.max_tokens[purpose[key]]))
+                    for key in MODEL_KEYS}
     out["largest_request_tokens"] = largest
     out["largest_reservation_usd"] = {k: str(round(v, 2)) for k, v in reservations.items()}
     out["in_flight_reservation_ceiling_usd"] = {k: str(round(v * settings.concurrency(k), 2))
@@ -4155,7 +4185,10 @@ def project_costs(per_agent, settings, route_settings, assumptions, cap_usd=Deci
                             for t in r["verifier_requests_if_flagged"]), default=0)}
     purpose = {"haiku": "prefilter", "sonnet": "judge", "opus": "verifier"}
     reservations = {key: _reservation(routes[key], largest[key], settings.max_tokens[purpose[key]], framing,
-                                      cache=settings.prompt_cache and key != "haiku") for key in MODEL_KEYS}
+                                      cache=settings.prompt_cache and key != "haiku",
+                                      output_tokens=reserved_output_tokens(route_settings, key,
+                                                                           settings.max_tokens[purpose[key]]))
+                    for key in MODEL_KEYS}
     out["largest_request_tokens"] = largest
     out["largest_reservation_usd"] = {k: str(round(v, 2)) for k, v in reservations.items()}
     out["in_flight_reservation_ceiling_usd"] = {k: str(round(v * settings.concurrency(k), 2))

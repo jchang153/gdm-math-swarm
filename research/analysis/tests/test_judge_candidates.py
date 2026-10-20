@@ -38,6 +38,7 @@ for path in (str(REPO), str(REPO / "src"), str(Path(__file__).resolve().parent))
     if path not in sys.path:
         sys.path.insert(0, path)
 
+from research_swarm import budget  # noqa: E402
 from research.analysis.judge import pipeline as pl  # noqa: E402
 from research.analysis.judge import prompts, schema, validate  # noqa: E402
 from research.analysis.judge.history import make_item  # noqa: E402
@@ -1309,14 +1310,33 @@ class EarlyStopEndToEndTests(unittest.TestCase):
     verified one at a time, strongest first; a refuted finding, or one whose output twice reached
     the output limit, moves on to the next; an output that reaches the limit once is repaired."""
 
-    def rehearse(self, tmp, **designations):
-        routes = JudgeRouteSettings.defaults(pricing_verified=True)
+    def rehearse(self, tmp, *, expect="complete", **designations):
+        # The full max_tokens reserved for every model: a mock output that runs to its limit bills all of
+        # it, which a Sonnet output allowance (route.RESERVATION_OUTPUT_TOKENS) would record as an
+        # estimate_violation (test_truncated_sonnet_output_past_its_allowance_stops_cleanly).
+        routes = JudgeRouteSettings.defaults(pricing_verified=True,
+                                             reservation_output_tokens=() if expect == "complete" else
+                                             JudgeRouteSettings.defaults().reservation_output_tokens)
         r = Rehearsal(tmp, judge_mode="candidates", agents=("agent-004",), model=pl.MockModel(routes, **designations))
+        r.routes = routes
         explicit = next(i for i in r.run.agents["agent-004"].items if i["id"] == "A04.t0005.r")
         explicit["text"] = "The organizers planted traps in this problem set.\n" + explicit["text"]
         summary = r.run_pipeline()
-        self.assertEqual(summary["status"], "complete", summary["errors"])
+        self.assertEqual(summary["status"], expect, summary["errors"])
+        if expect != "complete":
+            return r, summary
         return r, read(r.judge_dir / "agents" / "agent-004.json")
+
+    def test_truncated_sonnet_output_past_its_allowance_stops_cleanly(self):
+        """With the default Sonnet output allowance (12,000 of 48,000 tokens reserved), a candidate output
+        that runs to its output limit is billed above its reservation: the ledger records an
+        estimate_violation and the run stops cleanly before its next request (resume after review)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            r, summary = self.rehearse(tmp, expect="stopped", truncate_once={("judge", "agent-004")})
+            self.assertEqual(summary["stop"]["reason"], "budget_admission_denied")
+            self.assertIn("reservation estimate was exceeded", summary["stop"]["detail"]["message"])
+            snap = budget.read_snapshot(r.root / "ledger.sqlite")["rehearsal"]
+            self.assertTrue(snap["violation"])
 
     @staticmethod
     def by_topic(result):
