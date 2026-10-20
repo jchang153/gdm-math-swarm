@@ -3,12 +3,17 @@
 docs/plan.md "Transcript behavior judge specified, October 17, 2026" (with the
 "downsized model allocation" decision): OpenRouter with the main host key, provider
 pinned to Anthropic with no fallbacks, real-time requests, the shared ledger's
-``analysis`` scope enforcing the $50 allowance (two audited raises, $5 -> $40 -> $50;
-the pilot's unlimited-key exception extends to this analysis), a refused request
-retried once and then ``ungraded`` (never a negative), and a judge model that never
-silently changes. One client serves one model:
-``"haiku"`` (screening), ``"sonnet"`` (per-agent judging) or ``"opus"`` (verification of
-every positive finding, run level); see route.MODEL_ALLOCATION.
+``analysis`` scope enforcing the analysis allowance (``budget.JUDGE_ANALYSIS_CAP_USD``, $200
+after the five audited raises $5 -> $40 -> $50 -> $100 -> $110 -> $200; the pilot's
+unlimited-key exception extends to this analysis), a refused request retried once and then
+``ungraded`` (never a negative), and a judge model that never silently changes. One client
+serves one model:
+``"haiku"`` (screening), ``"sonnet"`` (per-agent judging) or ``"opus"`` (verification, one
+finding per request, and the run level); see route.MODEL_ALLOCATION. Judge revision v3
+(docs/plan.md, "Behavior judge iteration specified, October 19, 2026", items 6, 7 and 10): a
+multi-item request is never resent after a refusal (``refusal_retry=False``), the provider's
+refusal message is recorded, an HTTP 429 is resent with growing delays, and a ``RunLimit``
+holds one judging invocation to its own limit beside the ledger's cap.
 Paid judging stays gated: offline tests and the rehearsal inject ``FakeTransport``;
 the real HTTPS path exists only with ``paid_authorized=True``, which the orchestrator
 passes after the user confirms immediately before the first paid request.
@@ -36,7 +41,12 @@ Per request (``complete``), under an ``asyncio.Semaphore(max_concurrency)``:
 1. Build the exact body (system + user messages, ``max_tokens``, ``reasoning.effort``,
    provider pin, optional ``response_format``) and reserve its conservative cost
    (``JudgeRouteSettings.reservation``) in the ledger scope. A denial is never
-   dispatched (``grading_failed``, reason ``budget_admission_denied``).
+   dispatched (``grading_failed``, reason ``budget_admission_denied``). With a
+   ``RunLimit`` (judge revision v3, item 7: the invocation's own limit, 2x its central
+   estimate unless overridden), the same reservation must first fit under that limit
+   together with the invocation's committed spend (its in-flight holds, settled costs and
+   uncertain holds); otherwise nothing is reserved or sent (``grading_failed``, reason
+   ``run_limit``). The limit follows every settlement.
 2. Archive the request (no credential: the Authorization header is never written)
    before dispatch. If that write fails the hold is released as ``unbilled_error``.
 3. Send. Archive the raw response bytes and metadata BEFORE parsing. If that write
@@ -49,9 +59,21 @@ Per request (``complete``), under an ``asyncio.Semaphore(max_concurrency)``:
 5. Classify: refusal (``finish_reason == "content_filter"``, ``native_finish_reason``
    ``refusal``/``content_filter``, a non-empty ``message.refusal``, or an error with
    ``error_type`` ``refusal``/``content_policy_violation``/flagged input) is retried
-   exactly once with a fresh reservation, then ``ungraded``. Truncation at
-   ``max_tokens`` is ``ungraded`` (exceeding limits, rubric Section 7). API and
-   infrastructure failures, and a response served by anything other than the pinned
+   exactly once with a fresh reservation, then ``ungraded`` (``refused_twice``). A caller
+   sending several items in one request passes ``refusal_retry=False`` (judge revision v3,
+   docs/plan.md, "Behavior judge iteration specified, October 19, 2026", item 6): the
+   identical request is then never resent, the result is ``ungraded`` with reason
+   ``refused_once`` and the caller splits the items into single-item requests. The
+   provider's refusal message (``message.refusal``, or the error message of an error-shaped
+   refusal) is kept per refused attempt in ``refusal_details``; the request text is never
+   altered to get past a filter. Truncation at ``max_tokens`` is ``ungraded`` with reason
+   ``max_tokens`` and the truncated text (the pipeline treats it as a malformed output:
+   one repair). An HTTP 429 (rate limited: rejected before any processing, so unbilled)
+   settles ``unbilled_error`` at 0 and is resent after a growing delay (``Retry-After``
+   when the response gives one, else ``RATE_LIMIT_BASE_DELAY_S`` doubling, capped at
+   ``RATE_LIMIT_MAX_DELAY_S``), each time with a fresh reservation, for at most
+   ``RATE_LIMIT_ATTEMPTS`` requests in all; then ``grading_failed`` (``http_429``). API
+   and infrastructure failures, and a response served by anything other than the pinned
    Anthropic standard tier, are ``grading_failed``. There are no other automatic paid
    retries.
 
@@ -69,8 +91,10 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import email.utils
 import hashlib
 import json
+import random
 import re
 import socket
 import sqlite3
@@ -97,6 +121,16 @@ ARCHIVE_SCHEMA = "judge-client-archive/v1"
 REDACTION = "[REDACTED-CREDENTIAL]"
 # Pilot semantics (inspect_adapter._UNCERTAIN_4XX): 408 may follow generation.
 _UNCERTAIN_4XX = frozenset({408})
+# HTTP 429 (rate limited; never processed, so unbilled): resent with growing delays (judge
+# revision v3, item 10). At most RATE_LIMIT_ATTEMPTS requests are sent while the answer is 429;
+# the delay is the response's Retry-After when given, else the base doubling per 429, never
+# above the cap, plus up to RATE_LIMIT_JITTER of itself so concurrent requests spread out.
+RATE_LIMITED = 429
+RATE_LIMIT_ATTEMPTS = 5
+RATE_LIMIT_BASE_DELAY_S = 2.0
+RATE_LIMIT_MAX_DELAY_S = 300.0
+RATE_LIMIT_JITTER = 0.25
+REFUSAL_MESSAGE_CHARS = 1000
 _REFUSAL_ERROR_TYPES = frozenset({"refusal", "content_policy_violation"})
 _REFUSAL_FINISH = frozenset({"content_filter", "refusal"})
 # Response headers kept in the archive (never cookies or anything credential-like).
@@ -271,7 +305,8 @@ def fake_http_error(status, *, error_type=None, message="error", metadata=None, 
 # Client
 
 def _empty_result(cache_system=False):
-    return {"status": None, "text": None, "attempts": 0, "refusals": 0, "usage": {}, "cost_usd": None,
+    return {"status": None, "text": None, "attempts": 0, "refusals": 0, "refusal_details": [], "rate_limited": 0,
+            "rate_limit_delays_s": [], "admission_waits": 0, "usage": {}, "cost_usd": None,
             "request_ids": [], "raw_paths": [], "finish_reason": None, "reasoning": None, "error": None,
             "generation_ids": [], "provider": None, "model": None, "service_tier": None, "settlements": [],
             "cache": {"system_marked": bool(cache_system), "ttl": CACHE_TTL if cache_system else None,
@@ -290,9 +325,158 @@ def _decimal_or_none(value):
     return number if number.is_finite() else None
 
 
+def retry_after_seconds(value, now=None):
+    """Seconds asked for by an HTTP ``Retry-After`` header (delta-seconds or an HTTP date),
+    else None (absent, unparseable or negative)."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    try:
+        seconds = float(text)
+    except ValueError:
+        try:
+            moment = email.utils.parsedate_to_datetime(text)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
+        if moment is None:
+            return None
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=datetime.timezone.utc)
+        seconds = max(0.0, (moment - (now or datetime.datetime.now(datetime.timezone.utc))).total_seconds())
+    if seconds != seconds or seconds < 0 or seconds == float("inf"):  # NaN, negative or infinite
+        return None
+    return seconds
+
+
+def rate_limit_delay(rate_limited, retry_after=None, jitter=0.0):
+    """Delay before resending a request that got its ``rate_limited``-th HTTP 429: the
+    response's Retry-After when given, else ``RATE_LIMIT_BASE_DELAY_S`` doubling per 429;
+    never above ``RATE_LIMIT_MAX_DELAY_S``; ``jitter`` in [0, 1) adds up to
+    ``RATE_LIMIT_JITTER`` of the delay."""
+    base = retry_after if retry_after is not None else RATE_LIMIT_BASE_DELAY_S * 2 ** max(0, rate_limited - 1)
+    base = min(float(base), RATE_LIMIT_MAX_DELAY_S)
+    return min(base * (1 + RATE_LIMIT_JITTER * max(0.0, min(float(jitter), 1.0))), RATE_LIMIT_MAX_DELAY_S)
+
+
+RUN_LIMIT_REASON = "run_limit"
+RUN_LIMIT_SCHEMA = "gdm-judge-run-limit/1"
+
+
+class RunLimit:
+    """One judging invocation's own spending limit (judge revision v3, docs/plan.md, "Behavior
+    judge iteration specified, October 19, 2026", item 7), shared by the invocation's clients.
+
+    The invocation's committed spend is what its own requests hold or cost: the reservation of
+    every request still in flight, the settled cost of every settled request (0 for an unbilled
+    one) and the full reservation of every request whose billing is uncertain (as the ledger
+    keeps it until ``reconcile()``). ``admit`` refuses a request whose reservation would push the
+    committed spend past ``limit_usd``; the client then answers ``grading_failed`` with reason
+    ``run_limit`` without touching the ledger or the network, and the pipeline treats it like a
+    ledger denial (waits while other requests are in flight, else stops cleanly). The ledger's
+    own cap still applies to every admitted request. ``estimate`` (the invocation estimate that
+    set the limit), ``source`` (``estimate``: 2x the central estimate, or ``override``:
+    ``--run-limit``) and ``basis`` (what set an estimated limit: ``factor``, ``largest_reservation``
+    when the largest single reservation needed more room, or ``floor``) are recorded with the
+    totals (``record()``)."""
+
+    def __init__(self, limit_usd, *, source="estimate", estimate=None, factor=None, floor_usd=None, basis=None):
+        limit = _decimal_or_none(limit_usd)
+        if limit is None or limit <= 0:
+            raise ValueError("run limit must be a positive amount in USD")
+        self.limit = limit
+        self.source = source
+        self.estimate = estimate
+        self.factor = factor
+        self.floor = _decimal_or_none(floor_usd)
+        self.basis = basis
+        self.created_at = _now()
+        self._lock = threading.Lock()
+        self._held = {}                  # token -> (reserved USD, purpose, model key)
+        self._uncertain = Decimal(0)
+        self._settled = Decimal(0)
+        self._next = 0
+        self.requests = 0                # admitted requests (each attempt is one request)
+        self.denied = 0
+        self.first_denial = None
+        self.peak_committed = Decimal(0)
+        self.by_purpose = {}
+
+    def committed(self):
+        with self._lock:
+            return self._committed()
+
+    def _committed(self):
+        return sum((held for held, _, _ in self._held.values()), Decimal(0)) + self._uncertain + self._settled
+
+    def _row(self, purpose, model):
+        return self.by_purpose.setdefault(purpose or "?", {"model_key": model, "requests": 0, "settled_usd": Decimal(0),
+                                                           "uncertain_usd": Decimal(0)})
+
+    def admit(self, amount, *, purpose=None, model=None, label=None):
+        """A token when ``amount`` (the request's ledger reservation) fits under the limit
+        together with the committed spend, else None (the denial is counted)."""
+        amount = _decimal_or_none(amount) or Decimal(0)
+        with self._lock:
+            committed = self._committed()
+            if committed + amount > self.limit:
+                self.denied += 1
+                if self.first_denial is None:
+                    self.first_denial = {"at": _now(), "label": label, "reserved_usd": str(amount),
+                                         "committed_usd": str(committed), "limit_usd": str(self.limit)}
+                return None
+            self._next += 1
+            token = self._next
+            self._held[token] = (amount, purpose, model)
+            self.requests += 1
+            self._row(purpose, model)["requests"] += 1
+            self.peak_committed = max(self.peak_committed, committed + amount)
+            return token
+
+    def settle(self, token, cost, *, uncertain=False):
+        """Replace the hold of ``token`` by its settled ``cost``; an uncertain request keeps its
+        full reservation committed. Unknown tokens are ignored."""
+        with self._lock:
+            entry = self._held.pop(token, None)
+            if entry is None:
+                return
+            held, purpose, model = entry
+            row = self._row(purpose, model)
+            if uncertain:
+                self._uncertain += held
+                row["uncertain_usd"] += held
+                return
+            cost = _decimal_or_none(cost) or Decimal(0)
+            self._settled += cost
+            row["settled_usd"] += cost
+
+    def release(self, token):
+        """A request that was never dispatched (the ledger refused it or its archive failed):
+        nothing was spent."""
+        self.settle(token, Decimal(0))
+
+    def denial_detail(self, amount):
+        with self._lock:
+            return {"run_limit_usd": str(self.limit), "committed_usd": str(self._committed()),
+                    "reserved_usd": str(_decimal_or_none(amount) or Decimal(0))}
+
+    def record(self):
+        """The limit, how it was set and this invocation's own totals (JSON-ready)."""
+        with self._lock:
+            held = sum((h for h, _, _ in self._held.values()), Decimal(0))
+            return {"schema": RUN_LIMIT_SCHEMA, "limit_usd": str(self.limit), "source": self.source,
+                    "basis": self.basis, "factor": None if self.factor is None else str(self.factor),
+                    "floor_usd": None if self.floor is None else str(self.floor), "created_at": self.created_at,
+                    "estimate": self.estimate, "committed_usd": str(self._committed()),
+                    "peak_committed_usd": str(self.peak_committed), "settled_usd": str(self._settled),
+                    "uncertain_usd": str(self._uncertain), "in_flight_usd": str(held), "requests": self.requests,
+                    "denied": self.denied, "first_denial": self.first_denial,
+                    "by_purpose": {k: dict(v, settled_usd=str(v["settled_usd"]), uncertain_usd=str(v["uncertain_usd"]))
+                                   for k, v in sorted(self.by_purpose.items())}}
+
+
 @dataclass
 class _Outcome:
-    kind: str                     # ok | refusal | ungraded | grading_failed | budget_denied
+    kind: str                     # ok | refusal | rate_limited | ungraded | grading_failed | budget_denied
     reason: str | None = None
     text: str | None = None
     reasoning: str | None = None
@@ -318,11 +502,16 @@ class JudgeClient:
     the rehearsal pass ``FakeTransport``). ``http=None`` builds the real HTTPS
     transport and is refused unless ``paid_authorized=True``, ``scope="analysis"`` and
     the settings come from a verified freeze record. The ``analysis`` scope requires
-    the existing ledger with both applied audited judge raises, the second ($40 -> $50,
-    misbehavior-focused judge) included (``budget.judge_analysis_problems``), and opens
-    it at ``budget.JUDGE_ANALYSIS_CAP_USD``; any other scope (offline rehearsal) needs
+    the existing ledger with every applied audited judge raise (``budget.judge_analysis_problems``:
+    all five, the last $110 -> $200 bound to docs/plan.md, "Behavior judge iteration specified,
+    October 19, 2026"), and opens it at ``budget.JUDGE_ANALYSIS_CAP_USD``; any other scope (offline rehearsal) needs
     explicit ``ledger_caps`` and a fake transport. ``max_concurrency`` defaults to
-    ``route.DEFAULT_CONCURRENCY`` (haiku 24, sonnet 8, opus 6).
+    ``route.DEFAULT_CONCURRENCY`` (haiku 24, sonnet 16, opus 8; judge revision v3, item 10).
+    The delay before resending a rate-limited (HTTP 429) request is awaited outside the
+    concurrency semaphore through ``self.sleep`` (``asyncio.sleep``; tests replace it).
+    ``run_limit`` (a ``RunLimit`` shared by the invocation's three clients; judge revision v3,
+    item 7) refuses any request whose reservation would push the invocation's committed spend
+    past its limit (reason ``run_limit``); the ledger's cap applies independently.
 
     ``credentials_root`` (paid path only; ``repo_root`` is an accepted alias): the
     directory whose private ``.env`` holds the host key, default this checkout's root.
@@ -331,9 +520,11 @@ class JudgeClient:
     """
     def __init__(self, model_key, ledger_path, scope=ANALYSIS_SCOPE, archive_dir=None, settings=None, http=None,
                  max_concurrency=None, *, paid_authorized=False, ledger_caps=None, key_loader=None, verify_limit=None,
-                 credentials_root=None, repo_root=None):
+                 credentials_root=None, repo_root=None, run_limit=None):
         if model_key not in MODEL_KEYS:
             raise ValueError(f"Unknown judge model {model_key!r}; expected one of {MODEL_KEYS}")
+        if run_limit is not None and not isinstance(run_limit, RunLimit):
+            raise ValueError("run_limit must be a RunLimit (shared by the invocation's clients) or None")
         if archive_dir is None:
             raise ValueError("archive_dir is required (raw requests/responses are archived before parsing)")
         if max_concurrency is None:
@@ -394,6 +585,8 @@ class JudgeClient:
                 from research_swarm.secrets import load_openrouter_key
                 return load_openrouter_key(root)
         self.ledger = BudgetLedger(self.ledger_path, caps)
+        self.run_limit = run_limit
+        self._limit_tokens = {}             # ledger request id -> RunLimit token
         self.http = UrllibTransport() if self._paid else http
         self._key_loader = key_loader
         self._verify_limit = verify_limit
@@ -402,6 +595,8 @@ class JudgeClient:
         self._prepare_lock = threading.Lock()
         self._semaphores = {}
         self.limit_report = None
+        self.sleep = asyncio.sleep          # HTTP 429 back-off (outside the semaphore)
+        self.jitter = random.random         # spreads the back-off of concurrent requests
 
     # -- paid-path preparation ----------------------------------------------
     def prepare(self):
@@ -409,7 +604,7 @@ class JudgeClient:
 
         Without a key loader (fake transports) this does nothing. The limit check uses
         the approved unlimited-key exception (plan, Route and key): the ledger, not a
-        provider cap, enforces the $50 allowance. The report (never the key) is
+        provider cap, enforces the analysis allowance. The report (never the key) is
         archived as ``provider-limit-<model>.json``.
         """
         with self._prepare_lock:
@@ -437,42 +632,76 @@ class JudgeClient:
 
     # -- public API ---------------------------------------------------------
     async def complete(self, *, system, user, purpose, unit_id, max_tokens, effort, response_format=None,
-                       cache_system=None):
+                       cache_system=None, refusal_retry=True, admission_wait=None):
         """One judged unit -> ClientResult dict (see module docstring for semantics).
 
         ``cache_system``: mark the system prompt (the shared rubric prefix) for
         Anthropic prompt caching; ``None`` uses the model default
         (``JudgeRouteSettings.cache_system_default``: Sonnet and Opus on, Haiku off).
-        An empty system prompt is never marked.
+        An empty system prompt is never marked. ``refusal_retry`` (default True): resend a
+        refused request once; False for a request holding several items, which is then
+        never resent identically (``refused_once``; the caller splits it).
+        ``admission_wait`` (optional ``async f(reason) -> bool``; judge revision v3, items 6 and
+        7): when the one permitted retry of a refused request is denied admission (by the ledger
+        or the run limit), the client awaits it and asks for admission of that same retry again
+        while it returns True (the caller waits for its other in-flight requests to settle;
+        nothing was sent, so this is not an extra paid attempt); False returns the denial
+        (``grading_failed`` with ``refusals`` 1, which the caller records so that only the retry
+        is sent later).
 
         Keys: ``status`` (ok | ungraded | grading_failed), ``text`` (final visible
         reply, None unless ok/truncated), ``attempts`` (requests dispatched),
-        ``refusals``, ``usage`` (summed token counts, including ``cached_tokens`` and
-        ``cache_write_tokens``, plus ``per_attempt``), ``cost_usd`` (sum of settled
-        costs, None while any attempt is uncertain), ``request_ids`` (ledger ids),
-        ``raw_paths`` (archive files), and additionally ``finish_reason``,
-        ``reasoning`` (summarized reasoning text), ``error`` (``{"reason", ...}`` or
-        None), ``generation_ids``, ``provider``, ``model``, ``service_tier``,
-        ``settlements`` (per request: state, cost, basis) and ``cache``
+        ``refusals``, ``refusal_details`` (per refused attempt: ``attempt``, ``signal``
+        and the provider's ``message``), ``rate_limited`` (HTTP 429 answers, each settled
+        unbilled at 0) and ``rate_limit_delays_s``, ``admission_waits`` (times the refusal retry
+        was asked for again after ``admission_wait``), ``usage`` (summed token counts,
+        including ``cached_tokens`` and ``cache_write_tokens``, plus ``per_attempt``),
+        ``cost_usd`` (sum of settled costs, None while any attempt is uncertain),
+        ``request_ids`` (ledger ids), ``raw_paths`` (archive files), and additionally
+        ``finish_reason``, ``reasoning`` (summarized reasoning text), ``error``
+        (``{"reason", ...}`` or None), ``generation_ids``, ``provider``, ``model``,
+        ``service_tier``, ``settlements`` (per request: state, cost, basis) and ``cache``
         (``system_marked``, ``ttl``, ``read_tokens``, ``write_tokens``, frozen-price
         ``cache_read_usd``/``cache_write_usd``/``priced_total_usd``/``saving_usd``,
         ``reported_cache_discount_usd`` and ``per_attempt``).
         """
         cache_system = self._validate_call(system, user, purpose, unit_id, max_tokens, effort, response_format,
                                            cache_system)
+        if not isinstance(refusal_retry, bool):
+            raise ValueError("refusal_retry must be True or False")
         if not self._prepared:
             await asyncio.to_thread(self.prepare)
         result = _empty_result(cache_system)
-        for attempt in (1, 2):
+        refusals_allowed = 1 if refusal_retry else 0
+        attempt = 0
+        while True:
+            attempt += 1
             outcome = await self._attempt(system, user, purpose, unit_id, max_tokens, effort, response_format,
                                           attempt, cache_system)
             self._merge(result, outcome)
-            if outcome.kind == "refusal":
+            if outcome.kind == "rate_limited":
+                # Rejected before any processing (settled unbilled at 0): wait, then resend
+                # with a fresh reservation, at most RATE_LIMIT_ATTEMPTS requests in all.
+                result["rate_limited"] += 1
+                if result["rate_limited"] < RATE_LIMIT_ATTEMPTS:
+                    delay = rate_limit_delay(result["rate_limited"], (outcome.detail or {}).get("retry_after_s"),
+                                             self.jitter())
+                    result["rate_limit_delays_s"].append(round(delay, 3))
+                    await self.sleep(delay)
+                    continue
+                result["status"] = "grading_failed"
+                result["error"] = {"reason": outcome.reason, **(outcome.detail or {}),
+                                   "rate_limited": result["rate_limited"]}
+                result["text"] = None
+            elif outcome.kind == "refusal":
                 result["refusals"] += 1
-                if attempt == 1:
-                    continue  # the one permitted retry (plan, Refusals)
+                result["refusal_details"].append(self._refusal_detail(attempt, outcome))
+                if result["refusals"] <= refusals_allowed:
+                    continue  # the one permitted retry of a single-item request (plan, Refusals)
                 result["status"] = "ungraded"
-                result["error"] = {"reason": "refused_twice", "last": outcome.reason}
+                result["error"] = {"reason": "refused_twice" if result["refusals"] > 1 else "refused_once",
+                                   "last": outcome.reason, "message": result["refusal_details"][-1].get("message"),
+                                   "retried": result["refusals"] > 1}
                 result["text"] = None
             elif outcome.kind == "ok":
                 result["status"] = "ok"
@@ -481,6 +710,12 @@ class JudgeClient:
                 result["status"] = "ungraded"
                 result["error"] = {"reason": outcome.reason, **(outcome.detail or {})}
             else:  # grading_failed / budget_denied: never retried automatically
+                if outcome.kind == "budget_denied" and result["refusals"] and admission_wait is not None \
+                        and await admission_wait(outcome.reason):
+                    # The one permitted retry of a refused request was not admitted: nothing was
+                    # sent, and the caller saw room free up. Ask for admission of that retry again.
+                    result["admission_waits"] += 1
+                    continue
                 result["status"] = "grading_failed"
                 result["error"] = {"reason": outcome.reason, **(outcome.detail or {})}
                 result["text"] = None
@@ -489,6 +724,18 @@ class JudgeClient:
         return result
 
     # -- internals ------------------------------------------------------------
+    def _refusal_detail(self, attempt, outcome):
+        """What one refused attempt recorded: the refusal signal and the provider's message
+        (``message.refusal``, or an error-shaped refusal's message), credential-scrubbed."""
+        detail = outcome.detail or {}
+        message = detail.get("refusal") or detail.get("message")
+        out = {"attempt": attempt, "signal": outcome.reason,
+               "message": self._scrub_text(str(message))[:REFUSAL_MESSAGE_CHARS] if message else None}
+        for key in ("native_finish_reason", "http_status", "error_type"):
+            if detail.get(key) is not None:
+                out[key] = detail[key]
+        return out
+
     def _validate_call(self, system, user, purpose, unit_id, max_tokens, effort, response_format,
                        cache_system=None):
         """Validate one call; returns the effective ``cache_system``."""
@@ -568,16 +815,33 @@ class JudgeClient:
         return str(path)
 
     def _settle(self, request_id, cost, basis):
-        """Synchronous (never half-observed under cancellation); returns the settlement record."""
-        if basis == "unbilled_error":
-            self.ledger.settle(request_id, 0, "unbilled_error")
-            return {"request_id": request_id, "state": "settled", "cost_usd": "0", "basis": "unbilled_error"}
-        if cost is None:
-            self.ledger.settle(request_id, None)
-            return {"request_id": request_id, "state": "uncertain", "cost_usd": None, "basis": None}
-        self.ledger.settle(request_id, cost, basis)
-        state = next((r["state"] for r in self._request_state(request_id)), "settled")
-        return {"request_id": request_id, "state": state, "cost_usd": str(cost), "basis": basis}
+        """Synchronous (never half-observed under cancellation); returns the settlement record.
+        The invocation's run limit (``RunLimit``) follows the same settlement: the settled cost
+        replaces the hold, an uncertain request keeps its reservation committed. If the ledger
+        fails to record the settlement (for example a locked database), the ledger still holds
+        the reservation, so the run limit keeps it committed as uncertain and the error
+        propagates."""
+        token = self._limit_tokens.pop(request_id, None)
+        try:
+            if basis == "unbilled_error":
+                self.ledger.settle(request_id, 0, "unbilled_error")
+                if token is not None:
+                    self.run_limit.settle(token, Decimal(0))
+                return {"request_id": request_id, "state": "settled", "cost_usd": "0", "basis": "unbilled_error"}
+            if cost is None:
+                self.ledger.settle(request_id, None)
+                if token is not None:
+                    self.run_limit.settle(token, None, uncertain=True)
+                return {"request_id": request_id, "state": "uncertain", "cost_usd": None, "basis": None}
+            self.ledger.settle(request_id, cost, basis)
+            if token is not None:
+                self.run_limit.settle(token, cost)
+            state = next((r["state"] for r in self._request_state(request_id)), "settled")
+            return {"request_id": request_id, "state": state, "cost_usd": str(cost), "basis": basis}
+        except BaseException:
+            if token is not None:
+                self.run_limit.settle(token, None, uncertain=True)  # a no-op once the hold was replaced
+            raise
 
     def _request_state(self, request_id):
         with closing(self.ledger.connect()) as db:
@@ -612,15 +876,32 @@ class JudgeClient:
             data = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             reservation = self.settings.reservation(self.model_key, data, max_tokens, cache_system=cache_system)
             label = f"judge-{self.model_key}:{purpose}:{unit_id}"[:200]
+            token = None
+            if self.run_limit is not None:
+                # This invocation's own limit (judge revision v3, item 7), checked before the ledger.
+                token = self.run_limit.admit(reservation, purpose=purpose, model=self.model_key, label=label)
+                if token is None:
+                    detail = self.run_limit.denial_detail(reservation)
+                    message = (f"run limit: reserving ${reservation} would take this invocation's committed spend "
+                               f"(${detail['committed_usd']}) past its run limit ${detail['run_limit_usd']}")
+                    path = self._denial_record(unit_id, purpose, attempt, reservation, message, kind="run_limit_denied")
+                    return _Outcome("budget_denied", RUN_LIMIT_REASON, paths=[path], dispatched=False,
+                                    detail=dict(detail, message=message))
             try:
                 request_id = self.ledger.reserve(self.scope, label, reservation)
             except BudgetExceeded as ex:
+                if token is not None:
+                    self.run_limit.release(token)
                 path = self._denial_record(unit_id, purpose, attempt, reservation, ex)
                 return _Outcome("budget_denied", "budget_admission_denied", paths=[path], dispatched=False,
                                 detail={"reserved_usd": str(reservation), "message": str(ex)[:300]})
             except (sqlite3.Error, ValueError) as ex:
+                if token is not None:
+                    self.run_limit.release(token)
                 return _Outcome("grading_failed", "budget_ledger_unavailable", dispatched=False,
                                 detail={"error": type(ex).__name__, "message": str(ex)[:300]})
+            if token is not None:
+                self._limit_tokens[request_id] = token
             stem = self._stem(unit_id, purpose, attempt, request_id)
             headers = {"Content-Type": "application/json"}
             try:
@@ -689,10 +970,10 @@ class JudgeClient:
             outcome.request_id = request_id
             return outcome
 
-    def _denial_record(self, unit_id, purpose, attempt, reservation, ex):
+    def _denial_record(self, unit_id, purpose, attempt, reservation, ex, kind="budget_denied"):
         stem = self._stem(unit_id, purpose, attempt, uuid.uuid4().hex)  # 8 hex chars + ".denied.json"
         return self._write_json(stem.with_name(stem.name + ".denied.json"), {
-            "schema": ARCHIVE_SCHEMA, "kind": "budget_denied", "created_at": _now(), "unit_id": unit_id,
+            "schema": ARCHIVE_SCHEMA, "kind": kind, "created_at": _now(), "unit_id": unit_id,
             "purpose": purpose, "attempt": attempt, "scope": self.scope, "reserved_usd": str(reservation),
             "message": str(ex)[:300]})
 
@@ -711,6 +992,15 @@ class JudgeClient:
         if status != 200:
             error = (payload or {}).get("error") if isinstance(payload, dict) else None
             error_type, flagged = self._error_kind(error)
+            if status == RATE_LIMITED:
+                # Rate limited before any processing: exactly 0, resent after a delay (complete()).
+                settlement = self._settle(request_id, 0, "unbilled_error")
+                headers = {str(k).lower(): v for k, v in (response.headers or {}).items()}
+                return _Outcome("rate_limited", f"http_{status}", settlement=settlement,
+                                detail={"http_status": status, "error_type": error_type,
+                                        "message": str((error or {}).get("message") or "")[:300]
+                                        if isinstance(error, dict) else None,
+                                        "retry_after_s": retry_after_seconds(headers.get("retry-after"))})
             if 400 <= status < 500 and status not in _UNCERTAIN_4XX:
                 # Rejected before generation (pilot semantics): exactly 0.
                 settlement = self._settle(request_id, 0, "unbilled_error")

@@ -5,7 +5,9 @@ ledgers are synthetic temporary files reproducing the authoritative lineage (the
 audited pilot raises) plus both audited judge analysis raises ($5 -> $40 -> $50; the
 client accepts the ledger only after the second). The three models
 (haiku, sonnet, opus), per-request prompt caching of the system prompt, cache usage and
-cost recording, and the paid-only credentials_root are covered below; the real key
+cost recording, and the paid-only credentials_root are covered below, with judge revision v3's
+multi-item refusals (never resent identically; the provider's message recorded) and HTTP 429
+back-off (unbilled, growing delays honoring Retry-After, bounded attempts); the real key
 loader is patched to fail, and fake paths are checked never to open any ``.env``.
 """
 from __future__ import annotations
@@ -204,8 +206,30 @@ class RefusalTests(ClientCase):
         result = self.run_one(self.client(transport))
         self.assertEqual((result["status"], result["attempts"], result["refusals"], result["text"]),
                          ("ungraded", 2, 2, None))
-        self.assertEqual(result["error"]["reason"], "refused_twice")
+        self.assertEqual((result["error"]["reason"], result["error"]["message"], result["error"]["retried"]),
+                         ("refused_twice", "declined", True))
         self.assertEqual(len(transport.requests), 2)  # exactly one retry
+        # The provider's message (message.refusal) is kept per refused attempt.
+        self.assertEqual([(d["attempt"], d["signal"], d["message"]) for d in result["refusal_details"]],
+                         [(1, "native_refusal", None), (2, "message_refusal", "declined")])
+
+    def test_multi_item_refusal_is_never_resent_identically(self):
+        # Judge revision v3, item 6: a request of several items is not retried; the caller splits it.
+        message = ("This request was blocked as it seems to violate Anthropic's Terms of Service restrictions on "
+                   "reverse engineering or duplicating model outputs.")
+        transport = FakeTransport([fake_completion("", finish_reason="content_filter", native_finish_reason="refusal",
+                                                   refusal=message, cost=".40"),
+                                   fake_completion('{"ok": true}', cost=".003")])
+        result = self.run_one(self.client(transport), refusal_retry=False)
+        self.assertEqual((result["status"], result["attempts"], result["refusals"], result["error"]["reason"]),
+                         ("ungraded", 1, 1, "refused_once"))
+        self.assertEqual(len(transport.requests), 1)
+        self.assertEqual((result["error"]["message"], result["error"]["retried"]), (message, False))
+        self.assertEqual(result["refusal_details"][0]["native_finish_reason"], "refusal")
+        self.assertEqual(result["cost_usd"], "0.40")  # the refused request's hold settles as billed
+        self.assertEqual(Decimal(analysis(self.ledger_path)["committed_usd"]), Decimal("0.40"))
+        with self.assertRaises(ValueError):
+            self.run_one(self.client(transport), refusal_retry="no")
 
     def test_error_shaped_refusals(self):
         # 403 refusal before acceptance (unbilled), then a refusal error inside a 200 body
@@ -228,7 +252,7 @@ class RefusalTests(ClientCase):
 
 class FailureTests(ClientCase):
     def test_http_4xx_settles_unbilled_without_retry(self):
-        for status in (400, 401, 402, 429):
+        for status in (400, 401, 402):
             with self.subTest(status=status):
                 transport = FakeTransport([fake_http_error(status)])
                 result = self.run_one(self.client(transport), unit_id=f"u{status}")
@@ -238,7 +262,7 @@ class FailureTests(ClientCase):
                 self.assertEqual(len(transport.requests), 1)
         snap = analysis(self.ledger_path)
         self.assertEqual((snap["remaining_usd"], snap["unbilled_error_requests"], snap["unresolved_requests"]),
-                         ("200", 4, 0))
+                         ("200", 3, 0))
 
     def test_http_5xx_and_408_keep_the_reservation(self):
         for status in (408, 500, 502, 503):
@@ -309,6 +333,242 @@ class FailureTests(ClientCase):
                          ("ungraded", "max_tokens", '{"partial'))
         self.assertEqual((errored["status"], errored["error"]["reason"]), ("grading_failed", "provider_error_in_choice"))
         self.assertEqual(len(transport.requests), 2)  # neither retried
+
+
+class RateLimitTests(ClientCase):
+    """Judge revision v3, item 10: an HTTP 429 (never processed, so unbilled) is resent after a
+    growing delay instead of failing; every 429 attempt settles unbilled at 0."""
+
+    def client(self, transport, model_key="opus", **kwargs):
+        client = super().client(transport, model_key, **kwargs)
+        self.delays = []
+
+        async def sleep(delay):
+            # The back-off is awaited outside the concurrency semaphore: no slot is held.
+            self.assertFalse(client._semaphore().locked())
+            self.delays.append(delay)
+        client.sleep, client.jitter = sleep, lambda: 0.0
+        return client
+
+    def test_429_is_resent_with_growing_delays_then_ok(self):
+        transport = FakeTransport([fake_http_error(429, message="rate limited"), fake_http_error(429),
+                                   fake_completion('{"ok": true}', cost=".004")])
+        result = self.run_one(self.client(transport, max_concurrency=1))
+        self.assertEqual((result["status"], result["attempts"], result["rate_limited"], result["text"]),
+                         ("ok", 3, 2, '{"ok": true}'))
+        self.assertEqual(self.delays, [judge_client.RATE_LIMIT_BASE_DELAY_S, 2 * judge_client.RATE_LIMIT_BASE_DELAY_S])
+        self.assertEqual(result["rate_limit_delays_s"], self.delays)
+        self.assertEqual([(s["state"], s["basis"], s["cost_usd"]) for s in result["settlements"]],
+                         [("settled", "unbilled_error", "0"), ("settled", "unbilled_error", "0"),
+                          ("settled", "provider_reported_cost", "0.004")])
+        self.assertEqual(result["cost_usd"], "0.004")
+        self.assertEqual(len(set(result["request_ids"])), 3)  # a fresh reservation for every attempt
+        snap = analysis(self.ledger_path)
+        self.assertEqual((snap["committed_usd"], snap["unbilled_error_requests"], snap["unresolved_requests"],
+                          snap["in_flight_requests"]), ("0.004", 2, 0, 0))
+
+    def test_retry_after_is_honored_and_attempts_are_bounded(self):
+        responses = [judge_client.TransportResponse(429, b'{"error": {"code": 429, "message": "slow down"}}',
+                                                    {"Retry-After": "7"})]
+        responses += [fake_http_error(429) for _ in range(judge_client.RATE_LIMIT_ATTEMPTS - 1)]
+        transport = FakeTransport(responses + [fake_completion("{}")])
+        result = self.run_one(self.client(transport))
+        self.assertEqual((result["status"], result["error"]["reason"], result["error"]["rate_limited"]),
+                         ("grading_failed", "http_429", judge_client.RATE_LIMIT_ATTEMPTS))
+        self.assertEqual((result["attempts"], len(transport.requests), result["cost_usd"]),
+                         (judge_client.RATE_LIMIT_ATTEMPTS, judge_client.RATE_LIMIT_ATTEMPTS, "0"))
+        self.assertEqual(self.delays, [7.0, 4.0, 8.0, 16.0])  # Retry-After first, then the doubling base
+        snap = analysis(self.ledger_path)
+        self.assertEqual((snap["remaining_usd"], snap["unbilled_error_requests"], snap["unresolved_requests"]),
+                         ("200", judge_client.RATE_LIMIT_ATTEMPTS, 0))
+
+    def test_429_resend_not_admitted_leaves_no_hold(self):
+        budget.BudgetLedger(self.ledger_path, {"analysis": budget.JUDGE_ANALYSIS_CAP_USD}).reserve(
+            "analysis", "other-unit-in-flight", "199.70")
+        transport = FakeTransport([fake_http_error(429), fake_completion("{}")])
+        client = self.client(transport)
+        original = client._attempt_inner
+        calls = []
+
+        async def attempt(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 2:  # the other unit's hold grew meanwhile: the resend is not admitted
+                budget.BudgetLedger(self.ledger_path, {"analysis": budget.JUDGE_ANALYSIS_CAP_USD}).reserve(
+                    "analysis", "third-unit", "0.29")
+            return await original(*args, **kwargs)
+        client._attempt_inner = attempt
+        result = self.run_one(client, max_tokens=1000)
+        self.assertEqual((result["status"], result["error"]["reason"], result["attempts"], result["rate_limited"]),
+                         ("grading_failed", "budget_admission_denied", 1, 1))
+        self.assertEqual(len(transport.requests), 1)
+        snap = analysis(self.ledger_path)
+        self.assertEqual((snap["unbilled_error_requests"], snap["unresolved_requests"]), (1, 2))  # the two others
+
+    def test_retry_after_parsing_and_delays(self):
+        now = datetime.datetime(2026, 10, 19, 12, 0, 0, tzinfo=datetime.timezone.utc)
+        self.assertEqual(judge_client.retry_after_seconds("12"), 12.0)
+        self.assertEqual(judge_client.retry_after_seconds("Mon, 19 Oct 2026 12:00:30 GMT", now=now), 30.0)
+        self.assertEqual(judge_client.retry_after_seconds("Mon, 19 Oct 2026 11:00:00 GMT", now=now), 0.0)
+        for bad in (None, "", "soon", "-3", "nan"):
+            self.assertIsNone(judge_client.retry_after_seconds(bad), bad)
+        delay = judge_client.rate_limit_delay
+        self.assertEqual([delay(n) for n in (1, 2, 3, 4)], [2.0, 4.0, 8.0, 16.0])
+        self.assertEqual(delay(1, retry_after=7.5), 7.5)
+        self.assertEqual(delay(30), judge_client.RATE_LIMIT_MAX_DELAY_S)
+        self.assertEqual(delay(1, retry_after=10 ** 6), judge_client.RATE_LIMIT_MAX_DELAY_S)
+        self.assertEqual(delay(1, jitter=1.0), 2.0 * (1 + judge_client.RATE_LIMIT_JITTER))
+
+
+class RunLimitTests(ClientCase):
+    """Judge revision v3, item 7: an invocation's own run limit (``RunLimit``, shared by its
+    clients) refuses a request whose reservation would push the invocation's committed spend (its
+    in-flight holds, settled costs and uncertain holds) past the limit, before the ledger and the
+    network; settlements replace the holds; the ledger cap still applies."""
+
+    def reservation(self, client, max_tokens=8000):
+        body = client.body(SYSTEM, USER, max_tokens, EFFORTS[client.model_key],
+                           cache_system=client.cache_system_for(SYSTEM))
+        data = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return client.settings.reservation(client.model_key, data, max_tokens,
+                                           cache_system=client.cache_system_for(SYSTEM))
+
+    def test_accounting_of_holds_settlements_and_uncertain_requests(self):
+        limit = judge_client.RunLimit("1.00", source="estimate", factor="2", floor_usd="1")
+        first = limit.admit("0.60", purpose="judge_candidates", model="sonnet")
+        self.assertIsNotNone(first)
+        self.assertIsNone(limit.admit("0.50", purpose="verifier", model="opus", label="v"))  # 0.60 held
+        self.assertEqual((limit.denied, limit.first_denial["committed_usd"]), (1, "0.60"))
+        limit.settle(first, "0.10")
+        second = limit.admit("0.50", purpose="verifier", model="opus")
+        self.assertEqual(limit.committed(), Decimal("0.60"))
+        limit.settle(second, None, uncertain=True)  # billing unknown: the whole hold stays committed
+        self.assertEqual(limit.committed(), Decimal("0.60"))
+        third = limit.admit("0.40", purpose="prefilter", model="haiku")
+        self.assertEqual(limit.committed(), Decimal("1.00"))  # exactly at the limit is admitted
+        limit.release(third)  # never dispatched
+        record = limit.record()
+        self.assertEqual((record["limit_usd"], record["settled_usd"], record["uncertain_usd"], record["committed_usd"],
+                          record["requests"], record["denied"], record["source"]),
+                         ("1.00", "0.10", "0.50", "0.60", 3, 1, "estimate"))
+        self.assertEqual(record["by_purpose"]["verifier"]["uncertain_usd"], "0.50")
+        self.assertEqual(record["peak_committed_usd"], "1.00")
+        for bad in ("0", "-1", None, "x"):
+            with self.assertRaises(ValueError):
+                judge_client.RunLimit(bad)
+        with self.assertRaises(ValueError):
+            self.client(FakeTransport([]), run_limit="5")
+
+    def test_request_past_the_limit_is_never_reserved_or_sent(self):
+        transport = FakeTransport([fake_completion("{}")])
+        probe = self.client(FakeTransport([]))
+        limit = judge_client.RunLimit(self.reservation(probe) - Decimal("0.0001"))
+        result = self.run_one(self.client(transport, run_limit=limit))
+        self.assertEqual((result["status"], result["error"]["reason"], result["attempts"]),
+                         ("grading_failed", judge_client.RUN_LIMIT_REASON, 0))
+        self.assertEqual(transport.requests, [])
+        self.assertEqual(Decimal(result["error"]["run_limit_usd"]), limit.limit)
+        snap = analysis(self.ledger_path)
+        self.assertEqual((snap["committed_usd"], snap["unresolved_requests"], snap["settled_requests"]), ("0", 0, 0))
+        denied = [json.loads(p.read_text()) for p in self.archive.rglob("*.denied.json")]
+        self.assertEqual([d["kind"] for d in denied], ["run_limit_denied"])
+        self.assertEqual((limit.denied, limit.requests), (1, 0))
+
+    def test_settled_costs_replace_holds_across_resends(self):
+        limit = judge_client.RunLimit("5")
+        client = self.client(FakeTransport([fake_http_error(429), fake_completion("", refusal="no", cost=".02"),
+                                            fake_completion('{"ok": 1}', cost=".03")]), run_limit=limit)
+
+        async def sleep(delay):
+            return None
+        client.sleep, client.jitter = sleep, lambda: 0.0
+        result = self.run_one(client)
+        self.assertEqual((result["status"], result["attempts"], result["rate_limited"], result["refusals"]),
+                         ("ok", 3, 1, 1))
+        record = limit.record()
+        # Every attempt took its own admission; the 429 settled at 0, the refusal and the answer as billed.
+        self.assertEqual((record["requests"], record["settled_usd"], record["in_flight_usd"], record["committed_usd"]),
+                         (3, "0.05", "0", "0.05"))
+        self.assertEqual(record["by_purpose"]["judge"], {"model_key": "opus", "requests": 3, "settled_usd": "0.05",
+                                                        "uncertain_usd": "0"})
+
+    def test_uncertain_billing_keeps_the_whole_reservation_committed(self):
+        # Finding 19 of the v3 review: a dispatched request whose billing is uncertain (timeout, 5xx)
+        # keeps its full reservation in the invocation's committed spend, as the ledger keeps it, so a
+        # later request that no longer fits is refused.
+        probe = self.client(FakeTransport([]))
+        one = self.reservation(probe)
+        for answer in (TransportError("uncertain", "timeout"), fake_http_error(502)):
+            limit = judge_client.RunLimit(one * 2 - Decimal("0.0001"))
+            client = self.client(FakeTransport([answer, fake_completion("{}")]), run_limit=limit)
+            result = self.run_one(client)
+            self.assertEqual((result["status"], result["cost_usd"]), ("grading_failed", None))
+            record = limit.record()
+            self.assertEqual((Decimal(record["uncertain_usd"]), Decimal(record["committed_usd"]),
+                              Decimal(record["in_flight_usd"]), record["settled_usd"]), (one, one, Decimal(0), "0"))
+            self.assertEqual(record["by_purpose"]["judge"]["uncertain_usd"], str(one))
+            denied = self.run_one(client, unit_id="next")  # one more hold would pass the limit
+            self.assertEqual((denied["status"], denied["error"]["reason"], denied["attempts"]),
+                             ("grading_failed", judge_client.RUN_LIMIT_REASON, 0))
+
+    def test_a_failed_ledger_settlement_keeps_the_run_limit_hold_as_uncertain(self):
+        # The ledger still holds a reservation it failed to settle (a locked database): the run limit
+        # keeps it committed as uncertain (not in flight) and the error propagates.
+        probe = self.client(FakeTransport([]))
+        one = self.reservation(probe)
+        limit = judge_client.RunLimit("5")
+        client = self.client(FakeTransport([fake_completion("{}", cost=".01")]), run_limit=limit)
+        with mock.patch.object(client.ledger, "settle", side_effect=sqlite3.OperationalError("database is locked")):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.run_one(client)
+        record = limit.record()
+        self.assertEqual((Decimal(record["uncertain_usd"]), Decimal(record["in_flight_usd"])), (one, Decimal(0)))
+
+    def test_a_denied_refusal_retry_asks_again_after_the_admission_wait(self):
+        # Findings 1, 12 and 17 of the v3 review: the one retry of a refused single-item request, denied
+        # by the run limit, is asked for again when the caller's admission_wait reports room (another
+        # request settled); False returns the denial with the refusal recorded.
+        probe = self.client(FakeTransport([]))
+        one = self.reservation(probe)
+        refused = fake_completion("", refusal="declined", cost=".001")
+        limit = judge_client.RunLimit(2 * one + Decimal("0.0005"))
+        other = limit.admit(one, purpose="verifier", model="opus")  # another request of the run in flight
+        waits = []
+
+        async def wait(reason):
+            waits.append(reason)
+            limit.settle(other, "0.001")  # it settles while this one waits
+            return True
+        transport = FakeTransport([refused, fake_completion('{"ok": 1}', cost=".002")])
+        result = self.run_one(self.client(transport, run_limit=limit), admission_wait=wait)
+        self.assertEqual((result["status"], result["attempts"], result["refusals"], result["admission_waits"]),
+                         ("ok", 2, 1, 1))
+        self.assertEqual((waits, len(transport.requests), limit.denied), ([judge_client.RUN_LIMIT_REASON], 2, 1))
+
+        async def give_up(reason):
+            return False
+        limit = judge_client.RunLimit(one + Decimal("0.0005"))
+        transport = FakeTransport([refused])
+        result = self.run_one(self.client(transport, run_limit=limit), admission_wait=give_up)
+        self.assertEqual((result["status"], result["error"]["reason"], result["refusals"], len(transport.requests)),
+                         ("grading_failed", judge_client.RUN_LIMIT_REASON, 1, 1))
+
+    def test_refusal_retry_past_the_limit_and_ledger_denial_release(self):
+        probe = self.client(FakeTransport([]))
+        one = self.reservation(probe)
+        # The refused attempt settles at its billed cost; the retry's hold no longer fits.
+        limit = judge_client.RunLimit(one + Decimal("0.01"))
+        transport = FakeTransport([fake_completion("", refusal="declined", cost=str(one)), fake_completion("{}")])
+        result = self.run_one(self.client(transport, run_limit=limit))
+        self.assertEqual((result["status"], result["error"]["reason"], result["refusals"], len(transport.requests)),
+                         ("grading_failed", judge_client.RUN_LIMIT_REASON, 1, 1))
+        # A ledger denial releases the run-limit hold (nothing was sent).
+        remaining = Decimal(analysis(self.ledger_path)["remaining_usd"])
+        budget.BudgetLedger(self.ledger_path, {"analysis": budget.JUDGE_ANALYSIS_CAP_USD}).reserve(
+            "analysis", "other-unit-in-flight", str(remaining - Decimal("0.01")))
+        other = judge_client.RunLimit("50")
+        denied = self.run_one(self.client(FakeTransport([fake_completion("{}")]), run_limit=other), unit_id="next")
+        self.assertEqual(denied["error"]["reason"], "budget_admission_denied")
+        self.assertEqual((other.committed(), other.record()["requests"]), (Decimal(0), 1))
 
 
 class CredentialAndGateTests(ClientCase):
@@ -550,7 +810,7 @@ class ThreeModelTests(ClientCase):
         for key, effort in (("sonnet", "low"), ("haiku", "high"), ("opus", "medium")):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 s.reasoning(key, effort)
-        for key, expected in (("haiku", 24), ("sonnet", 8), ("opus", 6)):
+        for key, expected in (("haiku", 24), ("sonnet", 16), ("opus", 8)):  # judge revision v3, item 10
             client = self.client(FakeTransport(), key)
             self.assertEqual(client.max_concurrency, expected)
         with self.assertRaises(ValueError):

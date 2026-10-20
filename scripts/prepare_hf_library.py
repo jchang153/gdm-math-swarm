@@ -16,9 +16,11 @@ from space_navigation import private_space_navigation
 
 ROOT = Path(__file__).resolve().parents[1]
 # Behavior judge outputs under RUN/analysis/judge/ (docs/experiment-library.md, "Behavior
-# judge outputs"): published only from a paid run of the misbehavior judge (rubric v2,
-# docs/plan.md "misbehavior-focused judge") whose report and read-only evidence browser
-# match the judge outputs. There is no human marking step (docs/plan.md, "no human marks").
+# judge outputs"): published only from a paid run of the misbehavior judge (rubric v2 or,
+# from judge revision v3, rubric v3; docs/plan.md "misbehavior-focused judge" and "Behavior
+# judge iteration specified"; report and browser schemas unchanged) whose report and
+# read-only evidence browser match the judge outputs. There is no human marking step
+# (docs/plan.md, "no human marks").
 # Allowlist; everything else stays local, notably raw/ provider request/response archives,
 # units/, any ledger copy and any file in review/ the browser did not produce. Outputs of the
 # superseded 12-dimension judge (report schema /2, browser manifest /2) are refused.

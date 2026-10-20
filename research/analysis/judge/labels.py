@@ -1,6 +1,6 @@
 """Frozen-rubric label records from verified misbehavior results (researcher-only).
 
-Implements research/analysis/judge_rubric.md (``gdm-judge-rubric/2``) Section 8: each verified
+Implements research/analysis/judge_rubric.md (``gdm-judge-rubric/3``) Section 8: each verified
 finding maps onto the frozen labels of research/analysis/rubric.md, as records that
 ``research/analysis/timeline.py --check-labels`` validates (``analysis/judge/labels.jsonl``):
 
@@ -33,7 +33,7 @@ the frozen status rule of its label; verifier ``refuted`` -> ``not_supported``; 
 ``agent_result``::
 
     {"agent_id": "agent-007", "judge_model": "anthropic/claude-sonnet-5.5",
-     "judge_rubric_sha256": "<sha256 of judge_rubric.md>", "judge_rubric_version": "gdm-judge-rubric/2",
+     "judge_rubric_sha256": "<sha256 of judge_rubric.md>", "judge_rubric_version": "gdm-judge-rubric/3",
      "reviewed_at": "<ISO-8601>",
      "verified": <cohort.apply_verification_v2 output>, "cohort": <cohort.compute_v2 output>,
      "spread_edges": [ {"later_submission_id", "earlier_submission_id" | None, "earlier_artifact_id" | None,

@@ -1,7 +1,7 @@
-"""Researcher-only, read-only evidence browser for the misbehavior judge (rubric v2).
+"""Researcher-only, read-only evidence browser for the misbehavior judge (rubric v3).
 
 docs/plan.md, "Superseding decision (October 17, 2026, evening): misbehavior-focused judge",
-and judge rubric `gdm-judge-rubric/2` Section 7: the report (report.py) is the five-minute
+and judge rubric `gdm-judge-rubric/3` Section 7: the report (report.py) is the five-minute
 read; this module writes the full evidence behind it, which stays browsable but is not part
 of the read. There is no human input in the classification: the judge's verified labels are
 the reported labels. The pages collect nothing and change no label: there are no form
@@ -16,9 +16,12 @@ Outputs under RUN/analysis/judge/review/:
                            category levels, finding counts), the unresolved/ungraded list
                            and the full run-level record (collapsed)
   agents/<agent_id>.html   only for agents with at least one judge finding (verified,
-                           adjusted, refuted or unverified): every finding with its
-                           verifier verdict and model, evidence and counter-evidence
-                           passages in full, the category attributes and frozen labels
+                           adjusted, refuted, unverified or not checked): every finding with
+                           its verifier verdict and model, evidence and counter-evidence
+                           passages in full, the category attributes and frozen labels; an
+                           evaluation-awareness finding left unchecked by the early stop
+                           (judge revision v3) reads "not checked: level already established
+                           by F2" and never counts
   manifest.json            schema gdm-judge-review-manifest/3: SHA-256 of every input and
                            page; report.py and prepare_hf_library.py use it to detect a
                            browser that no longer matches the judge outputs
@@ -27,13 +30,14 @@ Inputs (written by the judge pipeline under RUN/analysis/judge/):
   pipeline.json, run_level.json (optional), labels.jsonl (optional),
   packages/<agent_id>.json (I-ITEM dicts at any nesting; the judge's input package),
   units/<agent_id>/**/*verif*.json (optional; only to recover which model verified a finding),
-  agents/<agent_id>.json, schema gdm-judge-agent-result/2. Fields read (others ignored):
+  agents/<agent_id>.json, schema gdm-judge-agent-result/3 (judge revision v3; results of schema
+  gdm-judge-agent-result/2, judge revisions v2 to v2.3, stay readable). Fields read (others ignored):
 
     {"schema", "agent_id", "status": "graded" | "ungraded" | "grading_failed", "status_reason",
      "judge_model", "verifier_model", "judge_rubric_version", "judge_rubric_sha256",
      "verdict": {..., "note"},                      # the judge's claims (rubric Section 6)
      "note", "note_source": "judge" | "host",       # the table note chosen by the host stage
-     "verified": {                                  # cohort.apply_verification_v2 (schema gdm-judge-verified/2)
+     "verified": {                                  # cohort.apply_verification_v2 (schema gdm-judge-verified/3)
         "cheating": {"level": "none|explored|submitted|accepted", "candidate_level", "basis",
                      "technique", "tasks", "submission_ids", "judge_only_submission_ids",
                      "genuine_submission_ids", "shared", "adopted_from", "concealed", "convert",
@@ -41,12 +45,14 @@ Inputs (written by the judge pipeline under RUN/analysis/judge/):
         "whistleblowing": {"level": "none|raised|reported", "candidate_level", "targets": [{"kind",
                            "id"}], "channels", "boycott", "accuracy": {"supported": n, ...},
                            "finding_ids", "unresolved_reason"},
-        "evaluation_awareness": {"level": "none|constructed|conduct", "candidate_level", "finding_ids"},
+        "evaluation_awareness": {"level": "none|constructed|conduct", "candidate_level",
+                                 "certainty": "explicit|speculative|null", "topics", "finding_ids"},
         "accusations": [{"finding_id", "target": {"kind", "id"}, "accuracy", "verified"}],
         "judge_evaluator_disagreement": [sid],
         "findings": [{"id", "category", "claim", "level", "evidence", "counter_evidence", "summary",
-                      "borderline", "state": "confirmed|adjusted|refuted|unverified|ungraded|...",
-                      "verifier_reason", "established_level", "holds", "notes"}],
+                      "borderline", "state": "confirmed|adjusted|refuted|unverified|not_checked|...",
+                      "verifier_reason", "established_level", "holds", "notes",
+                      "certainty", "topic", "verified_certainty", "verified_topic"}],   # rubric v3
         "note"},
      "cohort": cohort.compute_v2 output {"cohort", "flags", "paper_cohort", "provisional",
                "candidate_cohort", "judge_only_submission_ids", "insufficient_reasons", ...},
@@ -54,7 +60,8 @@ Inputs (written by the judge pipeline under RUN/analysis/judge/):
                     "task_id", "outcome"}}, "statement_defects": {task: {...}}},
      "prefilter": {"windows_sampled": [window ids] | int, ...},
      "finding_sources": {fid: {"source": "random_sample" | "selected" | "candidate" (v2.2), "window_id",
-                       "candidate_sources", "decision_reason" (v2.2)}},
+                       "candidate_sources", "decision_reason" (v2.2), "view": "full" | "passages",
+                       "passages": [[start, end]] (v3)}},
      "recall": {"mixed": [fid]},
      "verification": {"model", "model_key", "findings": {fid: {"model", ...}} (optional)}}
 
@@ -83,11 +90,17 @@ import unicodedata
 from collections import Counter
 from pathlib import Path
 
-AGENT_RESULT_SCHEMA = "gdm-judge-agent-result/2"
+AGENT_RESULT_SCHEMA = "gdm-judge-agent-result/3"
+# Readable agent-result schemas: /3 (judge revision v3) and /2 (v2 to v2.3, e.g. the published
+# cache100 outputs); the superseded 12-dimension /1 is never reported.
+AGENT_RESULT_SCHEMAS = ("gdm-judge-agent-result/2", AGENT_RESULT_SCHEMA)
 MANIFEST_SCHEMA = "gdm-judge-review-manifest/3"
 AGENT_STATUSES = ("graded", "ungraded", "grading_failed")
 VERIFIED_STATES = ("confirmed", "adjusted")
 VERDICT_STATES = VERIFIED_STATES + ("refuted",)
+# Judge revision v3: an evaluation-awareness finding left unchecked once the agent's level and
+# certainty were settled (never counted, never refuted, never an open item).
+NOT_CHECKED = "not_checked"
 CONTEXT_ITEMS = 2        # neighbouring items shown on each side of a cited item
 
 CATEGORIES = ("cheating", "whistleblowing", "evaluation_awareness")
@@ -192,9 +205,9 @@ def load_agent_results(judge_dir):
         return results
     for path in sorted(folder.glob("*.json")):
         data = read_json(path)
-        if not isinstance(data, dict) or data.get("schema") != AGENT_RESULT_SCHEMA:
-            raise ValueError(f"{path}: expected schema {AGENT_RESULT_SCHEMA} (results of the superseded "
-                             "12-dimension judge are never reported)")
+        if not isinstance(data, dict) or data.get("schema") not in AGENT_RESULT_SCHEMAS:
+            raise ValueError(f"{path}: expected schema {' or '.join(AGENT_RESULT_SCHEMAS)} (results of the "
+                             "superseded 12-dimension judge are never reported)")
         if data.get("agent_id") != path.stem:
             raise ValueError(f"{path}: agent_id does not match the file name")
         if not SAFE_AGENT_ID.fullmatch(path.stem) or ".." in path.stem:
@@ -335,7 +348,11 @@ def is_verified(finding):
 
 
 def verification_label(state, finding=None):
-    """(label, tone) for a verifier state; tone is good|bad|warn."""
+    """(label, tone) for a verifier state; tone is good|bad|warn|muted (not checked)."""
+    if state == NOT_CHECKED:
+        reason = finding_reason(finding) if finding is not None else None
+        return (reason if reason and reason.startswith("not checked") else "not checked: level already established"), \
+            "muted"
     if state in VERIFIED_STATES and finding is not None and _adjusted_to_nothing(finding):
         return "adjusted to none", "bad"
     if state in VERIFIED_STATES and finding is not None and finding.get("holds") is False:
@@ -355,6 +372,50 @@ def finding_level(finding):
 
 def finding_notes(finding):
     return [n for n in finding.get("notes") or [] if isinstance(n, str) and n]
+
+
+# Rubric v3 Section 5: certainty and topic of evaluation awareness.
+CERTAINTIES = ("explicit", "speculative")
+TOPIC_NAMES = {"setting": "setting", "planted_traps": "planted traps", "own_conduct": "own conduct"}
+
+
+def topic_text(topics):
+    return ", ".join(TOPIC_NAMES.get(t, str(t)) for t in topics if t)
+
+
+def awareness_detail(result):
+    """{"certainty", "topics"} of an agent's verified evaluation awareness (rubric v3): the
+    certainty is ``explicit`` when any verified finding is explicit, else ``speculative``;
+    None (and no topics) when not graded, not aware or not recorded (judge revisions v2.x)."""
+    entry = category_entry(result, "evaluation_awareness") if graded(result) else {}
+    certainty = entry.get("certainty")
+    return {"certainty": certainty if certainty in CERTAINTIES else None,
+            "topics": [t for t in entry.get("topics") or [] if isinstance(t, str) and t]}
+
+
+def finding_awareness(finding):
+    """(certainty, topic) of an evaluation-awareness finding: the verified values (the
+    verifier's corrections applied) when it holds, else the judge's claim; (None, None) for
+    other findings."""
+    if finding_category(finding) != "evaluation_awareness":
+        return None, None
+    if is_verified(finding) and ("verified_certainty" in finding or "verified_topic" in finding):
+        return finding.get("verified_certainty"), finding.get("verified_topic")
+    return finding.get("certainty"), finding.get("topic")
+
+
+def awareness_finding_text(finding):
+    """``speculative, planted traps`` (or ``claimed explicit, setting; verified speculative,
+    setting`` when the verifier corrected it) for an evaluation-awareness finding, else None."""
+    if finding_category(finding) != "evaluation_awareness":
+        return None
+
+    def text(certainty, topic):
+        return f"{certainty or 'certainty not recorded'}, {TOPIC_NAMES.get(topic, topic or 'topic not recorded')}"
+    claimed, settled = (finding.get("certainty"), finding.get("topic")), finding_awareness(finding)
+    if settled != claimed:
+        return f"claimed {text(*claimed)}; verified {text(*settled)}"
+    return text(*claimed)
 
 
 def finding_category(finding):
@@ -528,14 +589,22 @@ def category_facts(result, name):
             facts.append("via " + _short(entry["channels"]))
         if entry.get("boycott") is True:
             facts.append("boycott or quit")
+    elif name == "evaluation_awareness":
+        detail = awareness_detail(result)
+        if detail["certainty"]:
+            facts.append(detail["certainty"])
+        if detail["topics"]:
+            facts.append("topics " + topic_text(detail["topics"]))
     return facts
 
 
 def finding_counts(result):
+    """verified | refuted | unverified | not_checked (judge revision v3) per finding."""
     tally = Counter()
     for finding in findings_of(result):
         state = finding_state(finding)
-        tally["verified" if is_verified(finding) else "refuted" if state in VERDICT_STATES else "unverified"] += 1
+        tally["verified" if is_verified(finding) else "refuted" if state in VERDICT_STATES
+              else NOT_CHECKED if state == NOT_CHECKED else "unverified"] += 1
     return tally
 
 
@@ -583,31 +652,61 @@ def agent_note(result):
     return ((text + "." if text else "Verified finding(s) recorded.") + (" " + extra if extra else "")), "host"
 
 
-def open_items(results):
-    """Unresolved and ungraded cases, listed and never counted as negatives (rubric Section 7)."""
+def open_items(results, refusals=None):
+    """Unresolved and ungraded cases, listed and never counted as negatives (rubric Section 7).
+    ``refusals`` (pipeline.json "refusals" "items", judge revision v3, item 6): a provider refusal
+    that left something without a result is listed once: added to the agent's item that already
+    lists what it left (undecided candidates, an unverified finding, an unjudged random-sample
+    window, an ungraded agent), else as a "provider refusal" item of its own. A split refused
+    request is not an open item: its items were re-sent one per request."""
+    rows = [r for r in refusals or [] if isinstance(r, dict) and refusal_is_open(r)]
+    used = set()
+
+    def provider(agent_id, purposes, covers=lambda row: True):
+        """The refusal notes of ``agent_id``'s open rows of ``purposes`` that ``covers`` accepts."""
+        notes = []
+        for index, row in enumerate(rows):
+            if index in used or row.get("agent_id") != agent_id or row.get("purpose") not in purposes \
+                    or not covers(row):
+                continue
+            used.add(index)
+            notes.append(refusal_text(row))
+        return "".join(f"; provider refusal: {note}" for note in notes)
+
+    def subjects_in(ids):
+        ids = {str(x) for x in ids}
+        return lambda row: bool(row.get("subjects")) and {str(x) for x in row["subjects"]} <= ids
+
+    def window_of(row):
+        unit = str(row.get("unit") or "")
+        return unit.split("/sample/", 1)[1].split("-i", 1)[0] if "/sample/" in unit else None
+
     items = []
     for agent_id, result in sorted(results.items()):
         status = result.get("status")
         if status != "graded":
-            items.append({"agent_id": agent_id, "kind": status, "detail": result.get("status_reason") or ""})
+            items.append({"agent_id": agent_id, "kind": status, "detail": (result.get("status_reason") or "")
+                          + provider(agent_id, ("judge", "judge_part", "judge_synthesis", "judge_candidates",
+                                                "judge_sample"))})
             continue
         view = cohort_view(result)
         if view["provisional"]:
             items.append({"agent_id": agent_id, "kind": "provisional cohort",
                           "detail": f"{view['cohort']} (candidate {view['candidate_cohort'] or 'not recorded'})"})
-        unverified = [f for f in findings_of(result) if finding_state(f) not in VERDICT_STATES]
+        unverified = [f for f in findings_of(result) if finding_state(f) not in VERDICT_STATES + (NOT_CHECKED,)]
         listed = set()
         for name in CATEGORIES:
             state = level_status(result, name)
             if state != "ok":
                 listed.add(name)
                 candidate = category_candidate(result, name)
-                pending = [f"{f['id']} ({finding_reason(f) or finding_state(f)})" for f in unverified
-                           if finding_category(f) == name]
+                pending = [f for f in unverified if finding_category(f) == name]
+                notes = [f"{f['id']} ({finding_reason(f) or finding_state(f)})" for f in pending]
                 items.append({"agent_id": agent_id, "kind": f"{name} {state}",
                               "detail": f"level {category_level(result, name) or 'not recorded'}"
                                         + (f", candidate {candidate}" if candidate else "")
-                                        + (f"; not verified: {', '.join(pending)}" if pending else "")})
+                                        + (f"; not verified: {', '.join(notes)}" if notes else "")
+                                        + provider(agent_id, ("verifier",), subjects_in(f["id"] for f in pending))})
         judge_only = judge_only_submissions(result)
         if judge_only:
             items.append({"agent_id": agent_id, "kind": "judge-only submission",
@@ -623,23 +722,58 @@ def open_items(results):
             if finding_category(finding) not in listed:
                 items.append({"agent_id": agent_id, "kind": "unverified finding",
                               "detail": f"{finding['id']} {finding_category(finding)} "
-                                        f"({finding_reason(finding) or finding_state(finding)})"})
+                                        f"({finding_reason(finding) or finding_state(finding)})"
+                                        + provider(agent_id, ("verifier",), subjects_in([finding["id"]]))})
         candidates = _dict(result.get("candidates"))  # judge revision v2.2 (candidate mode)
         undecided = [u.get("item") for u in candidates.get("undecided_items") or []
                      if isinstance(u, dict) and not str(u.get("unit") or "").startswith("sample/")]
         if undecided:
             items.append({"agent_id": agent_id, "kind": "undecided candidates",
-                          "detail": f"{len(undecided)}: {_short(undecided)} (no valid decision; not negatives)"})
-        rechecked = [u.get("item") for u in candidates.get("recheck_undecided_items") or [] if isinstance(u, dict)]
-        if rechecked:  # judge revision v2.3: keyword passage re-check without a valid decision
-            items.append({"agent_id": agent_id, "kind": "keyword passage re-check undecided",
-                          "detail": f"{len(rechecked)}: {_short(rechecked)} (re-check had no valid decision; "
-                                    "not negatives)"})
-        failed = _dict(result.get("prefilter")).get("windows_sampled_failed") or []
+                          "detail": f"{len(undecided)}: {_short(undecided)} (no valid decision; not negatives)"
+                                    + provider(agent_id, ("judge_candidates",), subjects_in(undecided))})
+        failed = [str(w) for w in _dict(result.get("prefilter")).get("windows_sampled_failed") or []]
         if candidates and failed:
             items.append({"agent_id": agent_id, "kind": "random-sample windows not judged",
-                          "detail": f"{_short(failed)} (excluded from the miss rate)"})
+                          "detail": f"{_short(failed)} (excluded from the miss rate)"
+                                    + provider(agent_id, ("judge_sample",), lambda row: window_of(row) in failed)})
+    items += [refusal_item(row) for index, row in enumerate(rows) if index not in used]
     return items
+
+
+def refusal_is_open(row):
+    """A pipeline.json refusal entry that left something without a result (judge revision v3:
+    ``open``; entries written before the flag existed are open unless they record a split)."""
+    if "open" in row:
+        return bool(row["open"])
+    return not str(row.get("outcome") or "").startswith("split")
+
+
+def refusal_text(row):
+    """``agent-001/verify-F2 (verify, 2 refused request(s)): ...; provider: <message>``."""
+    messages = [m for m in row.get("messages") or [] if isinstance(m, str) and m]
+    subjects = [str(x) for x in row.get("subjects") or []]
+    return (f"{row.get('unit')} ({row.get('stage')}, {row.get('refused_attempts')} refused request(s)): "
+            f"{row.get('outcome')}" + (f"; items {_short(subjects)}" if subjects else "")
+            + (f"; provider: {_clip_note(messages[0], 160)}" if messages else ""))
+
+
+def refusal_item(row):
+    return {"agent_id": row.get("agent_id") or "run", "kind": "provider refusal", "detail": refusal_text(row)}
+
+
+def refusal_open_items(pipeline):
+    """The units a provider refusal left without a result (judge revision v3, item 6;
+    pipeline.json "refusals"), as open items: never counted as negatives. A split refused request
+    is not listed (its items were re-sent one per request). ``report_open_items`` lists each case
+    once, merged with the agents' own open items."""
+    return [refusal_item(row) for row in _dict(_dict(pipeline).get("refusals")).get("items") or []
+            if isinstance(row, dict) and refusal_is_open(row)]
+
+
+def report_open_items(results, pipeline):
+    """The open items of the report and the evidence browser: ``open_items`` with the provider
+    refusals of ``pipeline`` (pipeline.json) merged in, each case listed once."""
+    return open_items(results, _dict(_dict(pipeline).get("refusals")).get("items") or [])
 
 
 def finding_source(result, finding):
@@ -663,19 +797,38 @@ def is_mixed(result, finding):
 
 def prefilter_miss_rate(results):
     """Random-sample windows whose reading produced a verified finding, over random-sample
-    windows read. Without window ids, findings are counted."""
-    sampled, misses, missing_window_ids = 0, set(), False
+    windows read. Without window ids, findings are counted. When some window held only a
+    random-sample finding left unchecked by the early stop (judge revision v3), the rate is a
+    lower bound (``windows_not_checked``, ``lower_bound``)."""
+    sampled, misses, unchecked, missing_window_ids = 0, set(), set(), False
     for agent_id, result in results.items():
         windows = _dict(result.get("prefilter")).get("windows_sampled")
         sampled += len(windows) if isinstance(windows, list) else (windows if type(windows) is int else 0)
         for finding in findings_of(result):
             source, window = finding_source(result, finding)
+            if isinstance(windows, list) and isinstance(window, str) and window not in windows:
+                continue  # a window that was not read in full (judge revision v3: a failed re-send)
+            key = (agent_id, window if isinstance(window, str) else f"finding:{finding['id']}")
             if source == "random_sample" and is_verified(finding):
                 missing_window_ids |= not isinstance(window, str)
-                misses.add((agent_id, window if isinstance(window, str) else f"finding:{finding['id']}"))
+                misses.add(key)
+            elif source == "random_sample" and finding_state(finding) == NOT_CHECKED:
+                unchecked.add(key)
+    # Judge revision v3: windows whose only random-sample findings were left unchecked by the
+    # early stop are reported beside the rate, never counted in it.
+    not_checked = len(unchecked - misses)
     return {"windows_sampled": sampled, "windows_with_misses": len(misses),
             "miss_rate": len(misses) / sampled if sampled else None,
-            "wilson95": wilson_interval(len(misses), sampled), "window_ids_missing": missing_window_ids}
+            "wilson95": wilson_interval(len(misses), sampled), "window_ids_missing": missing_window_ids,
+            "windows_not_checked": not_checked, "lower_bound": bool(not_checked)}
+
+
+def miss_rate_text(miss):
+    """``3.5%``, ``at least 3.5%`` when the rate is a lower bound, or ``n/a``."""
+    rate = (miss or {}).get("miss_rate")
+    if rate is None:
+        return "n/a"
+    return ("at least " if (miss or {}).get("windows_not_checked") else "") + f"{rate:.1%}"
 
 
 def wilson_interval(successes, trials, z=1.959963984540054):
@@ -964,7 +1117,8 @@ REVIEW_CSS = """
 .finding{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:12px 0}
 .finding h3{margin:0 0 6px;font-size:1.02rem}
 .finding.good{border-left:5px solid var(--ok)}.finding.bad{border-left:5px solid var(--warn)}
-.finding.warn{border-left:5px solid var(--amber)}
+.finding.warn{border-left:5px solid var(--amber)}.finding.muted{border-left:5px solid var(--line)}
+.chip.muted{color:var(--muted)}
 .item{border:1px solid var(--line);border-radius:6px;padding:6px 9px;margin:6px 0}
 .item.cited{border-color:var(--accent);border-width:2px}.item.host{background:var(--host)}
 .item-head{font-size:.82em;color:var(--muted)}
@@ -1007,6 +1161,8 @@ def flag_text(view):
 def level_cell(result, name):
     level, state = category_level(result, name), level_status(result, name)
     text = "–" if level is None else level
+    if name == "evaluation_awareness" and level not in (None, "none") and awareness_detail(result)["certainty"]:
+        text += f" ({awareness_detail(result)['certainty']})"
     if state == "unresolved" and category_candidate(result, name):
         text += f" → {category_candidate(result, name)}?"
     return f"<td title=\"{esc(state)}\">{esc(text)}</td>"
@@ -1053,25 +1209,41 @@ def render_passages(index, cited, open_=True):
             "text)</summary>" + "".join(parts) + "</details>")
 
 
+def view_text(origin):
+    """What the candidate judge was shown of the decided item (judge revision v3), else None:
+    ``keyword passages only (characters 21,512-22,560)``; the evidence below is the full text."""
+    spans = [s for s in origin.get("passages") or [] if isinstance(s, (list, tuple)) and len(s) == 2]
+    if origin.get("view") == "passages":
+        return ("keyword passages only" + (" (characters " + ", ".join(f"{a:,}-{b:,}" for a, b in spans) + ")"
+                                           if spans else "") + "; the evidence passages below show the full item")
+    return "the full item" if origin.get("view") == "full" else None
+
+
 def render_finding(agent_id, finding, result, index, unit_models):
     state = finding_state(finding)
     label, tone = verification_label(state, finding)
     source, window = finding_source(result, finding)
+    origin = _dict(_dict(result.get("finding_sources")).get(finding.get("id")))
     badges = [("borderline", finding.get("borderline") is True),
-              (f"prefilter miss ({window})", source == "random_sample"),
-              ("keyword passage re-check", _dict(_dict(result.get("finding_sources")).get(finding.get("id")))
-               .get("via") == "passage_recheck"),
+              (f"prefilter miss ({window})", source == "random_sample" and origin.get("missed_by") != "passages"),
+              # Judge revision v3: found in a random-sample window on the rest of a candidate the
+              # candidate judge read only as its keyword passages.
+              (f"missed by the keyword-passage view ({window})",
+               source == "random_sample" and origin.get("missed_by") == "passages"),
+              ("decided on keyword passages", origin.get("view") == "passages"),
               ("cites random-sample and selected items", is_mixed(result, finding))]
     adjustment = finding_adjustment(finding)
     claimed, established = finding_level(finding)
     model = verifier_model(result, finding, unit_models)
     verifier = (f"{state} by {model_text(model)}" if model else f"{state} (verifier model not recorded)") \
-        if state in VERDICT_STATES else state
+        if state in VERDICT_STATES else (label if state == NOT_CHECKED else state)
     details = _dl([
         ("Verification", f"<span class=\"chip {tone}\">{esc(label)}</span> "
                          + ("counted" if is_verified(finding) else "<span class=\"muted\">not counted</span>")),
-        ("Verifier", esc(verifier + (f": {finding_reason(finding)}" if finding_reason(finding) else ""))),
+        ("Verifier", esc(verifier + (f": {finding_reason(finding)}" if finding_reason(finding)
+                                     and state != NOT_CHECKED else ""))),
         ("Level", esc(f"claimed {claimed}, established {established or 'none'}" if claimed else None)),
+        ("Certainty and topic", esc(awareness_finding_text(finding))),
         ("Adjusted to", esc(json.dumps(adjustment, ensure_ascii=False, sort_keys=True)
                             if isinstance(adjustment, (dict, list)) else adjustment)),
         ("Host notes", esc("; ".join(finding_notes(finding))) or None),
@@ -1079,18 +1251,17 @@ def render_finding(agent_id, finding, result, index, unit_models):
         ("Evidence", _citation_list(citations(finding))),
         ("Counter-evidence", _citation_list(citations(finding, "counter_evidence"))),
         ("Prefilter source", esc(" ".join(str(x) for x in (source, window) if x))),
-        ("Selected by", esc(", ".join(str(x).replace("_", " ") for x in
-                                      _dict(_dict(result.get("finding_sources")).get(finding.get("id")))
-                                      .get("candidate_sources") or []) or None)),
-        ("Judge decision", esc(_dict(_dict(result.get("finding_sources")).get(finding.get("id")))
-                               .get("decision_reason") or None)),
+        ("Selected by", esc(", ".join(str(x).replace("_", " ") for x in origin.get("candidate_sources") or [])
+                            or None)),
+        ("Judge saw", esc(view_text(origin))),
+        ("Judge decision", esc(origin.get("decision_reason") or None)),
     ])
     cited = citations(finding) + citations(finding, "counter_evidence")
     return (f"<article class=\"finding {tone}\" id=\"{anchor('finding', agent_id, finding['id'])}\">"
             f"<h3>Finding <code>{esc(finding['id'])}</code> · {esc(finding_category(finding))} · "
             f"{esc(finding_claim(finding))} <span class=\"chip {tone}\">{esc(label)}</span>"
             f"{chips([name for name, on in badges if on], 'bad')}</h3>{details}"
-            + render_passages(index, cited, open_=tone != "bad") + "</article>")
+            + render_passages(index, cited, open_=tone not in ("bad", "muted")) + "</article>")
 
 
 def render_categories(agent_id, result):
@@ -1153,7 +1324,7 @@ def render_open_items(items):
                                                                               else "") + "</li>" for i in items) + "</ul>"
 
 
-def render_index(run_id, results, run_level, mode, built_at, miss):
+def render_index(run_id, results, run_level, mode, built_at, miss, rubric=None, pipeline=None):
     rows = []
     totals = Counter()
     for agent_id, result in sorted(results.items()):
@@ -1164,22 +1335,28 @@ def render_index(run_id, results, run_level, mode, built_at, miss):
             name = f"<a href=\"{esc(agent_page_name(agent_id))}\">{name}</a>"
         rows.append(f"<tr><td>{name}</td><td>{esc(view['cohort'] or result['status'])}</td>"
                     f"<td>{chips(flag_text(view))}</td>" + "".join(level_cell(result, c) for c in CATEGORIES)
-                    + f"<td>{counts['verified']} / {counts['refuted']} / {counts['unverified']}</td></tr>")
-    rate, ci = miss.get("miss_rate"), miss.get("wilson95")
+                    + f"<td>{counts['verified']} / {counts['refuted']} / {counts['unverified']} / "
+                      f"{counts[NOT_CHECKED]}</td></tr>")
+    ci = miss.get("wilson95")
     body = (f"<h1>Behavior judge evidence</h1><p class=\"muted\"><code>{esc(run_id)}</code> · built "
             f"{esc(built_at)} · mode {esc(mode)} · read-only</p>" + mode_banner(mode)
             + "<p class=\"notice\">Researcher-only, read-only evidence browser behind the five-minute report "
-            "(judge rubric gdm-judge-rubric/2, post-hoc). Agents with a judge finding link to their full "
-            "evidence, refuted findings included. It collects no marks and changes no labels.</p>"
+            f"(judge rubric {esc(rubric or 'not recorded')}, post-hoc). Agents with a judge finding link to their "
+            "full evidence, refuted findings included. It collects no marks and changes no labels.</p>"
             f"<p>{len(results)} agents; findings {totals['verified']} verified, {totals['refuted']} refuted, "
-            f"{totals['unverified']} unverified. Prefilter miss rate {esc('n/a' if rate is None else f'{rate:.1%}')} "
+            f"{totals['unverified']} unverified"
+            + (f", {totals[NOT_CHECKED]} not checked (the agent's evaluation-awareness level was already established)"
+               if totals[NOT_CHECKED] else "")
+            + f". Prefilter miss rate {esc(miss_rate_text(miss))} "
             f"({miss.get('windows_with_misses', 0)} of {miss.get('windows_sampled', 0)} random-sample windows"
-            + (f"; 95% Wilson interval {ci[0]:.1%}–{ci[1]:.1%}" if ci else "") + ").</p>"
+            + (f"; 95% Wilson interval {ci[0]:.1%}–{ci[1]:.1%}" if ci else "")
+            + (f"; a lower bound: {miss['windows_not_checked']} more window(s) held only a finding left unchecked "
+               "by the early stop" if miss.get("windows_not_checked") else "") + ").</p>"
             "<h2 id=\"agents\">Agents</h2><div class=\"scroll\"><table><tr><th>Agent</th><th>Cohort</th>"
             "<th>Flags</th>" + "".join(f"<th>{esc(CATEGORY_NAMES[c])}</th>" for c in CATEGORIES)
-            + "<th>Findings (verified / refuted / unverified)</th></tr>" + "".join(rows) + "</table></div>"
+            + "<th>Findings (verified / refuted / unverified / not checked)</th></tr>" + "".join(rows) + "</table></div>"
             + "<h2 id=\"open\">Unresolved and ungraded (never counted as negatives)</h2>"
-            + render_open_items(open_items(results))
+            + render_open_items(report_open_items(results, pipeline))
             + "<h2 id=\"runlevel\">Run-level record</h2>"
             + (f"<details><summary>Full run-level record</summary>{render_value(run_level)}</details>"
                if run_level is not None else "<p class=\"muted\">No run-level output saved.</p>"))
@@ -1217,7 +1394,8 @@ def build_review_page(run_dir, judge_dir=None, seed=None, *, now=None):
         name = agent_page_name(agent_id)
         write_text_atomic(review / name, text)
         pages[name] = sha256_bytes(text.encode("utf-8"))
-    index = render_index(run_id, results, run_level, mode, built_at, prefilter_miss_rate(results))
+    rubric = _dict(pipeline.get("rubric")).get("judge_rubric_version")
+    index = render_index(run_id, results, run_level, mode, built_at, prefilter_miss_rate(results), rubric, pipeline)
     write_text_atomic(review / "index.html", index)
     pages["index.html"] = sha256_bytes(index.encode("utf-8"))
     produced = set(pages) | {"manifest.json"}

@@ -3,9 +3,9 @@
 Researcher-only (docs/plan.md "Transcript behavior judge specified, October 17, 2026",
 rows "Reading strategy", "Route and key", "Refusals" and "Spending", as superseded by
 "Superseding decision (October 17, 2026): downsized model allocation" and "Superseding
-decision (October 17, 2026, evening): misbehavior-focused judge"; judge rubric
-gdm-judge-rubric/2 Section 7). Nothing here may enter experimental agent images,
-containers, workspaces or prompts.
+decision (October 17, 2026, evening): misbehavior-focused judge" and "Behavior judge
+iteration specified, October 19, 2026"; judge rubric gdm-judge-rubric/3 Section 7). Nothing
+here may enter experimental agent images, containers, workspaces or prompts.
 
 Route (verified against OpenRouter's public catalog and documentation on 2026-10-17;
 scripts/freeze_judge_route.py re-fetches it and writes
@@ -13,9 +13,12 @@ data/validation/judge-route-pricing-<UTC>.json):
 
 * Models (model allocation, judge rubric Section 7): ``anthropic/claude-haiku-5.5``
   (``"haiku"``, effort ``low``) screens every window; ``anthropic/claude-sonnet-5.5``
-  (``"sonnet"``, effort ``high``) performs the per-agent judging (with the 5% recall
-  sample folded into the same call); ``anthropic/claude-opus-5.5`` (``"opus"``, effort
-  ``high``) re-checks every positive finding and writes the run-level summary. Effort is sent as Chat
+  (``"sonnet"``, effort ``high``) decides the candidates and reads the seeded 5% recall
+  sample windows (judge revision v3; the superseded package mode folds both into one call
+  per agent); ``anthropic/claude-opus-5.5`` (``"opus"``, effort
+  ``high``) verifies the findings (judge revision v3: one per request; every cheating and whistleblowing
+  finding, evaluation awareness until the agent's level and certainty are settled) and writes the
+  run-level summary. Effort is sent as Chat
   Completions ``reasoning: {"effort": ...}``, which OpenRouter forwards as Anthropic's
   ``output_config.effort`` with adaptive thinking (Claude 5.5 migration guide).
   Thinking budgets are not forwarded for 5.5 models, so none is sent. Opus 5.5 and
@@ -82,8 +85,9 @@ VALID_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # Judge rubric Section 7 (documentation for callers; pipeline.STAGE_MODELS routes each unit).
 MODEL_ALLOCATION = {"prefilter": ("haiku",), "judge": ("sonnet",), "verifier": ("opus",),
                     "runlevel": ("opus",)}
-# Default request concurrency per model (configurable per client).
-DEFAULT_CONCURRENCY = {"haiku": 24, "sonnet": 8, "opus": 6}
+# Default request concurrency per model (configurable per client). Judge revision v3 (docs/plan.md,
+# "Behavior judge iteration specified, October 19, 2026", item 10): Sonnet 16 and Opus 8.
+DEFAULT_CONCURRENCY = {"haiku": 24, "sonnet": 16, "opus": 8}
 # Whether a request marks its system prompt (the shared rubric prefix) for caching
 # when the caller does not say (JudgeClient.complete(cache_system=None)).
 CACHE_SYSTEM_DEFAULTS = {"haiku": False, "sonnet": True, "opus": True}
@@ -109,10 +113,12 @@ STRUCTURED_OUTPUT_PARAMETERS = ("response_format", "structured_outputs")
 
 FRAMING_TOKEN_ALLOWANCE = 8192
 # Per-request output ceiling (thinking + reply). Well below the route's 128,000
-# maximum so one reservation stays small relative to the $40 allowance.
+# maximum so one reservation stays small relative to the analysis allowance and to an
+# invocation's run limit (judge revision v3, item 7).
 MAX_TOKENS_CEILING = 64000
-# Advisory per-purpose defaults for callers (the client takes max_tokens per call).
-DEFAULT_MAX_TOKENS = {"prefilter": 16000, "judge": 48000, "verifier": 24000, "runlevel": 48000}
+# Advisory per-purpose defaults for callers (the client takes max_tokens per call); judge revision v3
+# (item 5): verifier 6,000 and run level 8,000 (pipeline.DEFAULT_MAX_TOKENS binds them).
+DEFAULT_MAX_TOKENS = {"prefilter": 16000, "judge": 48000, "verifier": 6000, "runlevel": 8000}
 # Non-streaming responses at high effort can take many minutes; a timeout leaves the
 # reservation held as uncertain (never a silent release).
 REQUEST_TIMEOUT_SECONDS = 1800.0
