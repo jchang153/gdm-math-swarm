@@ -50,8 +50,30 @@ not create experiments, run proof evaluation, or invent a results report: first
 complete the run and save its checked `results.json` and `results.html`, preserving
 run-specific spending separately from the cumulative ledger and any uncertain holds.
 
-Export the completed run with `python scripts/export_transcripts.py --run-dir runs/RUN_ID`. Save the report's
-`results.json` and `results.html` alongside the raw records. Create a native Inspect
+Export the completed run with `python scripts/export_transcripts.py --run-dir runs/RUN_ID`. Then write the
+report with `scripts/build_results.py`, which `prepare_hf_library.py` and `publish_hf_library.py` require
+(they refuse a run without `results.json` and `results.html`). The publication steps are:
+
+1. `python scripts/build_results.py --run-dir runs/RUN_ID [flags]` writes `results.json` and `results.html`
+   in the library format (the layout of `gemini10-20261020T054602Z`).
+2. `python3 scripts/prepare_hf_library.py --run "RUN_ID=VIEWER_BUNDLE" --output-dir NEW_BUNDLE` (below).
+3. `python scripts/publish_hf_library.py --bundle NEW_BUNDLE` for the read-only preview, then `--commit`.
+
+The report is a deterministic, facts-only review of the run's own records, with no model calls,
+network or credentials: run timing and stop reason, the condition from `settings.json`, per-agent
+requests, exits and restarts, spending and tokens, submissions per task and agent with times and
+outcomes, and links to the existing record views (transcripts, conference view with board, DMs, library
+and private files, timeline, Inspect View and logs). It never summarizes those contents. The proof
+checker section is filled only from `evaluations/` (verdicts and reasons as recorded, bound by
+submission, task and source hash) and the behavior judge section only from `analysis/judge/report.json`
+(counts and links, labelled model-generated post-hoc judging); otherwise the page states "Proof checker:
+not run" / "Behavior judge: not run" and accepted submissions are `not_evaluated`. Flags:
+`--ledger LEDGER.sqlite` (a consistent ledger copy; exact run-only spending by this run's admitted request
+IDs, otherwise derived from `runtime.jsonl` with uncertain holds still counted as held),
+`--key-usage-log LOG.jsonl`, `--caveat TEXT` and `--caveat-for SUBJECT TEXT` (the only free text, stored
+under `researcher_notes` and shown under "Researcher notes"), `--title`, `--stop-utc`/`--stop-reason` for a
+run stopped without a `run_stop` event, and `--submission-ids serial` for older serial IDs. It refuses to
+replace existing reports without `--overwrite`; use `--output-dir` for a scratch copy. Create a native Inspect
 bundle with the pinned Inspect installation, running outside the repository to
 avoid automatic dotenv loading:
 
