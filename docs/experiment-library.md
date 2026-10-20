@@ -33,6 +33,23 @@ Inspect logs; it does not run or judge agents. The independent evaluator records
 remain separate from conference acceptance. No VM, Docker, model key or inference
 is required to browse. Local originals and host ledger backups are retained.
 
+## Tools
+
+All in `scripts/`; each is documented in its own `--help` and below.
+
+- `build_results.py`: the facts-only run report (`results.json`, `results.html`).
+- `prepare_hf_library.py` and `publish_hf_library.py`: prepare a bundle, then preview and `--commit` a
+  first publication.
+- `maintain_hf_run.py`: guarded updates of an already published run, `--scope judge` (default),
+  `transcripts`, `evaluator` or `results`.
+- `monitor_run.py`: read-only live progress of a run on its VM (elapsed time, spending against the
+  launch baseline, requests, cache, restarts, submissions and solved tasks).
+- `verify_hosted.py`: read-only check, at a given Space revision, that a published run's pages are
+  stored as regular files and served as HTML (not LFS downloads) with their exact stored bytes.
+
+Any tool used to produce, publish or verify a run goes into `scripts/` (with a test), never into the
+Git-ignored `runs/phase-b/` directories, which hold only that run's records and receipts.
+
 ## Preparing an archive
 
 Install the optional publisher dependencies in your environment and authenticate
