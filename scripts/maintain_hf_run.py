@@ -18,6 +18,15 @@ archive-manifest.json changes only the digests of the replaced transcripts and t
 No transcript may be stored as LFS or named by an LFS rule, and no upload may come close to HF's
 automatic LFS size. Every other local difference (reports, judge files) is reported as skipped.
 
+--scope evaluator publishes independent-evaluator results of an already-published run, after a
+user decision: it replaces the run's results.html and results.json, adds or replaces its
+RUN/evaluations/ records, replaces the existing RUN/conference-view/ pages that the rebuilt
+conference view changed (the bundle's conference file set must equal the published one, so
+nothing there is added or deleted), regenerates the catalogue (only this run's entry may
+change) and updates archive-manifest.json digests for exactly those files. As for transcripts,
+no changed file may be stored as LFS or named by an LFS rule and .gitattributes must stay
+unchanged. Every other local difference is reported as skipped and never uploaded.
+
 Default: read-only plan pinned to the current Space revision. --commit first writes the
 receipt, a before-inventory, backups of the originals and the plan, then uploads in guarded
 batches (catalogue or manifest last), verifies the result against the original pre-maintenance
@@ -40,10 +49,12 @@ from prepare_hf_library import judge_excluded
 from publish_hf_library import (DEFAULT_REPO, RUN_ID, batches, digest, load_bundle, matches,
                                 merge_entries, payload, remote_files, validate_lfs_additions)
 
-SCOPES = ('judge', 'transcripts')
+SCOPES = ('judge', 'transcripts', 'evaluator')
 REPLACEABLE = ('results.html', 'results.json')
 JUDGE_PREFIX = 'analysis/judge/'
 TRANSCRIPTS_PREFIX = 'transcripts/'
+EVALUATIONS_PREFIX = 'evaluations/'
+CONFERENCE_PREFIX = 'conference-view/'
 REGENERATED = ('index.html', 'experiments.json')
 MANIFEST = 'archive-manifest.json'
 ATTRIBUTES = '.gitattributes'
@@ -197,6 +208,8 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
     if scope not in SCOPES:
         raise ValueError('Unknown maintenance scope: ' + str(scope))
     judge_scope = scope == 'judge'
+    evaluator_scope = scope == 'evaluator'
+    catalogue_scope = scope != 'transcripts'  # judge and evaluator: reports and the catalogue entry change
     if not isinstance(run, str) or not RUN_ID.fullmatch(run):
         raise ValueError('Invalid run ID')
     check_outputs(bundle, receipt, backup_dir, commit, operation, resume_from)
@@ -218,6 +231,20 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
 
         def required(original_files):
             return [*replaceable, *REGENERATED, MANIFEST]
+    elif evaluator_scope:
+        # Evaluator scope: the reports, the bundle's RUN/evaluations/ records and its
+        # RUN/conference-view/ pages; everything else is an ordinary (skipped) bundle file.
+        judge, recorded, transcripts = [], None, []
+        evaluations = sorted(name for name in files if name.startswith(prefix + EVALUATIONS_PREFIX))
+        conference = sorted(name for name in files if name.startswith(prefix + CONFERENCE_PREFIX))
+        if not evaluations:
+            raise ValueError('The bundle has no evaluator records under ' + prefix + EVALUATIONS_PREFIX)
+        targets = set(replaceable) | set(evaluations) | set(conference)
+
+        def required(original_files):  # the first attempt saved the reports and every file it replaced
+            return [*replaceable, *REGENERATED, MANIFEST,
+                    *(name for name in [*evaluations, *conference] if name in original_files
+                      and not record_matches((bundle / name).read_bytes(), original_files[name]))]
     else:
         # Transcripts scope: exactly the bundle's RUN/transcripts/ files; judge files and reports
         # are ordinary (skipped) bundle files here.
@@ -249,7 +276,7 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
 
     if not any(name.startswith(prefix) for name in remote):
         raise ValueError('Run is not published; use publish_hf_library.py for new runs: ' + run)
-    for name in [*(replaceable if judge_scope else []), *REGENERATED, MANIFEST]:
+    for name in [*(replaceable if catalogue_scope else []), *REGENERATED, MANIFEST]:
         if name not in remote:
             raise ValueError('Remote file required for maintenance is missing: ' + name)
     if judge_scope:
@@ -258,6 +285,17 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
             raise ValueError(f'{len(stale)} published judge file(s) are not in the bundle (for example output '
                              'of another judge build); review them, nothing is deleted automatically: '
                              + ', '.join(stale[:EXAMPLES]))
+    elif evaluator_scope:
+        stale = sorted(n for n in remote if n.startswith(prefix + EVALUATIONS_PREFIX) and n not in targets)
+        if stale:
+            raise ValueError(f'{len(stale)} published evaluator record(s) are not in the bundle; review them, '
+                             'nothing is deleted automatically: ' + ', '.join(stale[:EXAMPLES]))
+        published = {n for n in remote if n.startswith(prefix + CONFERENCE_PREFIX)}
+        only_bundle, only_remote = sorted(set(conference) - published), sorted(published - set(conference))
+        if only_bundle or only_remote:
+            raise ValueError(f'The conference-view file sets of the bundle and revision {base} differ; this scope '
+                             f'only replaces existing conference pages and adds or deletes none: only in the bundle '
+                             f'{only_bundle[:EXAMPLES]}, only published {only_remote[:EXAMPLES]}')
     else:
         published = {n for n in remote if n.startswith(prefix + TRANSCRIPTS_PREFIX)}
         only_bundle, only_remote = sorted(targets - published), sorted(published - targets)
@@ -291,7 +329,7 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
         # The current generator must reproduce the catalogue byte for byte from its own entries,
         # so regenerating it cannot alter any other entry or row (the transcripts scope never
         # regenerates it).
-        if judge_scope and regenerate(index['experiments']) != {'experiments.json': index_bytes, 'index.html': html}:
+        if catalogue_scope and regenerate(index['experiments']) != {'experiments.json': index_bytes, 'index.html': html}:
             raise ValueError(f'The current generator does not reproduce the {label.lower()} catalogue byte for '
                              'byte; regenerating it would change other catalogue entries')
         return index, archive
@@ -304,11 +342,11 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
         # Transcripts scope: the catalogue is not a target, so verify() below requires its
         # original blobs; only the manifest has an original copy.
         old_index, old_archive = catalogue(
-            *((original('experiments.json'), original('index.html')) if judge_scope
+            *((original('experiments.json'), original('index.html')) if catalogue_scope
               else (fetch('experiments.json'), fetch('index.html'))), original(MANIFEST), 'Original')
         if others(current_index, run) != others(old_index, run):
             raise ValueError('Another catalogue entry changed since the original revision ' + origin_revision)
-        changeable = targets | (set(REGENERATED) if judge_scope else set())
+        changeable = targets | (set(REGENERATED) if catalogue_scope else set())
 
         def unrelated(archive):
             return ({k: v for k, v in archive.items() if k not in ('files', 'total_bytes')},
@@ -321,7 +359,7 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
     old_entries = old_index['experiments']
     old_entry = next(x for x in old_entries if x['run'] == run)
     current_entry = next(x for x in current_index['experiments'] if x['run'] == run)
-    if judge_scope:
+    if catalogue_scope:
         regenerated = regenerate(merge_entries(others(old_index, run), incoming))
         new_index = json.loads(regenerated['experiments.json'])
         if (set(new_index) != set(old_index) or others(new_index, run) != others(old_index, run)
@@ -338,8 +376,16 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
     # Run files: exactly results.html/results.json may be replaced; allowlisted judge files
     # may be added. An existing judge file must already be identical (resume).
     # Transcripts scope: exactly the existing transcripts that differ are replaced.
+    # Evaluator scope: the reports, the conference pages and the published evaluator records that
+    # differ are replaced; evaluator records absent remotely are added.
     replacements, replacement_identical, additions, judge_present = [], [], [], []
-    for name in replaceable if judge_scope else transcripts:
+    if judge_scope:
+        replace_names = replaceable
+    elif evaluator_scope:
+        replace_names = [*replaceable, *conference, *(n for n in evaluations if n in remote)]
+    else:
+        replace_names = transcripts
+    for name in replace_names:
         if matches((bundle / name).read_bytes(), remote[name]):
             replacement_identical.append(name)
         else:
@@ -351,9 +397,13 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
             judge_present.append(name)
         else:
             additions.append((name, bundle / name))
-    added = [name for name in judge if name not in origin_files]  # cumulative, relative to the original
-    if judge_scope:
-        replaced = [name for name in replaceable
+    if evaluator_scope:
+        additions += [(name, bundle / name) for name in evaluations if name not in remote]
+    addable = judge if judge_scope else evaluations if evaluator_scope else []
+    added = [name for name in addable if name not in origin_files]  # cumulative, relative to the original
+    if catalogue_scope:
+        replaced = [name for name in (replaceable if judge_scope else
+                                      [*replaceable, *conference, *(n for n in evaluations if n in origin_files)])
                     if not record_matches((bundle / name).read_bytes(), origin_files[name])]
     else:  # a transcript missing from the original inventory is refused by verify() below
         replaced = [name for name in transcripts if name not in origin_files
@@ -383,7 +433,7 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
 
     old_files = old_archive['files']
     new_files = dict(old_files)
-    if judge_scope:
+    if catalogue_scope:
         for name in sorted(targets):
             new_files[name] = files[name]  # verified against the bundle bytes by load_bundle
         for name in REGENERATED:
@@ -403,7 +453,7 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
     planned_root = {**regenerated, MANIFEST: manifest_bytes}
     root_uploads = [(n, d) for n, d in planned_root.items() if not matches(d, remote[n])]
     uploads = additions + replacements  # judge files before the report that links them
-    allowed = targets | (set(REGENERATED) if judge_scope else set()) | {MANIFEST}
+    allowed = targets | (set(REGENERATED) if catalogue_scope else set()) | {MANIFEST}
     if any(name not in allowed for name, _ in uploads + root_uploads):
         raise ValueError('Planned upload outside the maintenance allowlist')
     expected = {**{name: bundle / name for name in sorted(targets)}, **planned_root}
@@ -414,6 +464,8 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
         complete=True also requires every planned file with exactly its planned content.
         Transcripts scope: no file may be added or removed and .gitattributes must not change."""
         state = inventory(listing)
+        if evaluator_scope:
+            return verify_evaluator(state, listing, complete)
         if not judge_scope:
             return verify_transcripts(state, listing, complete)
         missing = sorted((set(origin_files) | (set(added) if complete else set())) - set(state))
@@ -464,8 +516,46 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
                     raise ValueError('File hash mismatch after maintenance: ' + name)
         return 'unchanged'
 
+    def verify_evaluator(state, listing, complete):
+        # No changed run file may be stored as LFS (HF serves LFS-tracked HTML as a download) and
+        # .gitattributes must not change; only the evaluator records may be added.
+        changed = sorted({*replaced, *added, *(n for n, _ in replacements + additions)})
+        stored_lfs = sorted(n for n in changed if n in state and state[n]['lfs_sha256'])
+        if stored_lfs:
+            raise ValueError('Planned file(s) stored as LFS, but the evaluator scope uploads only regular files and '
+                             'adds no LFS rule; repair the Space manually first: ' + ', '.join(stored_lfs[:EXAMPLES]))
+        if (ATTRIBUTES in state) != (ATTRIBUTES in origin_files) or (
+                ATTRIBUTES in state and not same(origin_files[ATTRIBUTES], state[ATTRIBUTES])):
+            raise ValueError(f'{ATTRIBUTES} changed relative to the original revision {origin_revision}, but the '
+                             'evaluator scope adds no LFS rule (was a planned file stored as LFS?)')
+        missing = sorted((set(origin_files) | (set(added) if complete else set())) - set(state))
+        unexpected = sorted(set(state) - set(origin_files) - set(added))
+        if missing or unexpected:
+            raise ValueError(f'Remote file inventory changed unexpectedly relative to the original revision '
+                             f'{origin_revision}: missing {missing[:EXAMPLES]}, unexpected {unexpected[:EXAMPLES]}')
+        for name in sorted(origin_files):
+            if name not in expected and not same(origin_files[name], state[name]):
+                raise ValueError('Unrelated remote file changed: ' + name)
+        if complete:
+            for name, data in expected.items():
+                if not matches(payload(data), listing[name]):
+                    raise ValueError('File hash mismatch after maintenance: ' + name)
+        return 'unchanged'
+
     verify(remote, base, complete=False)  # earlier attempts' commits, when resuming
-    if not judge_scope:
+    if evaluator_scope:
+        # Before any write: no run upload may meet an LFS rule or come close to HF's automatic LFS size.
+        names = sorted(n for n, _ in replacements + additions)
+        ruled = lfs_rule_matches(fetch(ATTRIBUTES), names) if ATTRIBUTES in remote else []
+        if ruled:
+            raise ValueError(f'LFS rule(s) in {ATTRIBUTES} at revision {base} match planned upload(s), so HF would '
+                             'store them as LFS; the evaluator scope uploads only regular files, repair the rules '
+                             'first: ' + ', '.join(ruled[:EXAMPLES]))
+        large = [f'{n} ({files[n]["bytes"]} bytes)' for n in names if files[n]['bytes'] >= LFS_SAFE_BYTES]
+        if large:
+            raise ValueError(f'File(s) to upload at or above {LFS_SAFE_BYTES} bytes, close to the size HF stores as '
+                             'LFS, which the evaluator scope does not allow: ' + ', '.join(large[:EXAMPLES]))
+    elif not judge_scope:
         # Before any write: no upload may meet an LFS rule or come close to HF's automatic LFS size.
         ruled = lfs_rule_matches(fetch(ATTRIBUTES), transcripts) if ATTRIBUTES in remote else []
         if ruled:
@@ -483,6 +573,16 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
         already_applied = [*judge_present, *(['experiments.json'] if current_entry == incoming[0] else []),
                            *([] if judge else replacement_identical)]
         reason = ''
+    elif evaluator_scope:
+        # The catalogue and manifest are committed last, in one batch, so a published target whose bytes
+        # differ from the published manifest's record for it (or that the manifest does not record) was
+        # uploaded by an earlier, interrupted attempt. Pages equal to the bundle have the bundle's digest.
+        def published_digest(name):
+            return files[name] if matches((bundle / name).read_bytes(), remote[name]) else digest(fetch(name))
+        already_applied = [n for n in sorted(targets) if n in remote
+                           and current_archive['files'].get(n) != published_digest(n)]
+        reason = (': published files that differ from the record of the published archive manifest, which is '
+                  'uploaded last; without an earlier attempt, review the manifest')
     else:
         # The manifest is committed last, so a published transcript whose bytes differ from the published
         # manifest's record for it was uploaded by an earlier, interrupted attempt, whatever the current
@@ -498,7 +598,7 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
                          f"file(s){reason}); rerun with --resume-from set to the first attempt's backup directory "
                          'so the result is verified against the original pre-maintenance state')
     if commit and origin is None and not judge_scope and not uploads + root_uploads:
-        raise ValueError(f'Nothing to upload at revision {base}: every transcript already equals the bundle and '
+        raise ValueError(f'Nothing to upload at revision {base}: every planned file already equals the bundle and '
                          'the archive manifest records it, so no commit is made; to verify an earlier attempt '
                          "against its original state, rerun with --resume-from set to the first attempt's backup "
                          'directory')
@@ -508,26 +608,32 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
         'origin_revision': origin_revision, 'base_revision': base,
         'resume_from': None if resume_from is None else str(resume_from), 'committed': False,
         'replaced': replaced, 'added': added,
-        **({} if judge_scope else {'replaced_sizes': [
+        **({} if catalogue_scope else {'replaced_sizes': [
             {'path': n, 'old_bytes': origin_files.get(n, {}).get('size'), 'new_bytes': files[n]['bytes']}
             for n in replaced]}),
         'to_replace': [n for n, _ in replacements], 'to_add': [n for n, _ in additions],
         'replacement_identical': replacement_identical,
         **({'judge_already_present': judge_present} if judge_scope else {}),
         'already_applied': already_applied, 'resume_required': bool(already_applied) and origin is None,
-        **({} if judge_scope else {
+        **({'evaluator': {
+            'evaluation_files': len(evaluations), 'evaluation_files_added': len(added),
+            'conference_view': {'files': len(conference), 'file_sets_equal': True,
+                                'replaced': sum(n.startswith(prefix + CONFERENCE_PREFIX) for n in replaced)},
+            'largest_upload_bytes': max([files[n]['bytes'] for n, _ in replacements + additions] or [0]),
+            'lfs_safe_limit_bytes': LFS_SAFE_BYTES}} if evaluator_scope else {}),
+        **({} if catalogue_scope else {
             'transcripts': {'files': len(transcripts), 'file_sets_equal': True,
                             'largest_new_bytes': max(files[n]['bytes'] for n in transcripts),
                             'lfs_safe_limit_bytes': LFS_SAFE_BYTES},
             'catalogue_unchanged': True}),
-        'catalogue': {'files': [n for n, _ in root_uploads] if judge_scope else [],
+        'catalogue': {'files': [n for n, _ in root_uploads] if catalogue_scope else [],
                       'entry_diff': entry_diff(old_entry, incoming[0]),
                       'other_entries_unchanged': len(old_entries) - 1,
-                      **({'remote_catalogue_reproduced': True} if judge_scope else {})},
+                      **({'remote_catalogue_reproduced': True} if catalogue_scope else {})},
         'archive_manifest': {'changed_digests': sorted(n for n in new_files if old_files.get(n) != new_files[n]),
                              'total_bytes_before': old_archive.get('total_bytes'),
                              'total_bytes_after': new_manifest['total_bytes'],
-                             **({} if judge_scope else {'upload': bool(root_uploads)})},
+                             **({} if catalogue_scope else {'upload': bool(root_uploads)})},
         'skipped_local_differences': {
             'count': len(skipped),
             'differs_from_remote': sum(r['reason'] == 'differs_from_remote' for r in skipped),
@@ -554,7 +660,9 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
         write_json(backup_dir / INVENTORY, {'operation': 'maintain-run', 'scope': scope, 'repo': repo, 'run': run,
                                             'revision': base, 'origin_revision': origin_revision,
                                             'resume_from': result['resume_from'], 'files': current})
-        saved = [*([*replaceable, *REGENERATED] if judge_scope else [n for n, _ in replacements]), MANIFEST,
+        saved = [*([*replaceable, *REGENERATED] if judge_scope else
+                   sorted({*replaceable, *REGENERATED, *(n for n, _ in replacements)}) if evaluator_scope
+                   else [n for n, _ in replacements]), MANIFEST,
                  *([ATTRIBUTES] if ATTRIBUTES in remote else [])]
         for name in saved:
             target = backup_dir / ORIGINAL / name
@@ -571,12 +679,14 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
                                  'against the latest revision')
             response = api.create_commit(
                 repo_id=repo, repo_type='space', parent_commit=revision,
-                commit_message='Maintenance update of ' + run + (': results and behavior judge outputs' if judge_scope
-                                                                 else ': regenerated transcript exports'),
+                commit_message='Maintenance update of ' + run + (
+                    ': results and behavior judge outputs' if judge_scope else
+                    ': results and independent evaluator outputs' if evaluator_scope else
+                    ': regenerated transcript exports'),
                 operations=[operation(path_in_repo=n, path_or_fileobj=str(d) if isinstance(d, Path) else d)
                             for n, d in batch])
             revision, committed_batches = response.oid, committed_batches + 1
-            write_receipt('uploading; ' + ('catalogue' if judge_scope else 'archive manifest') + ' may be pending')
+            write_receipt('uploading; ' + ('catalogue' if catalogue_scope else 'archive manifest') + ' may be pending')
             if not judge_scope and number < len(planned_batches):
                 # Stop before the manifest if HF stored a transcript as LFS, added a rule or anything
                 # else changed, so the Space stays detectably partly applied.
@@ -602,7 +712,7 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
                       'added_files': len(added), 'verified_planned_files': len(expected),
                       'verified_preserved_files': len(set(origin_files) - set(expected)
                                                       - ({ATTRIBUTES} if judge_scope else set())),
-                      'gitattributes': attributes, **({} if judge_scope else {'catalogue': 'unchanged'})})
+                      'gitattributes': attributes, **({} if catalogue_scope else {'catalogue': 'unchanged'})})
     write_receipt('verified')
     return result
 
@@ -613,7 +723,9 @@ def main(argv=None):
                         help='The already-published run whose results and judge files (or transcripts) are updated')
     parser.add_argument('--scope', choices=SCOPES, default='judge',
                         help='judge (default): results.html/results.json, judge files and the catalogue entry; '
-                             'transcripts: only the existing RUN/transcripts/ files and their manifest digests')
+                             'transcripts: only the existing RUN/transcripts/ files and their manifest digests; '
+                             'evaluator: results.html/results.json, RUN/evaluations/ records, changed existing '
+                             'RUN/conference-view/ pages and the catalogue entry')
     parser.add_argument('--bundle', required=True, type=Path,
                         help='prepare_hf_library.py bundle containing exactly this run')
     parser.add_argument('--repo-id', default=DEFAULT_REPO)
