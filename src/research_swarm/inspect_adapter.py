@@ -68,8 +68,16 @@ OPENAI_SDK_VERSION = "3.29.0"
 CLAUDE_CODE_VERSION = "2.1.296"
 
 # Built-in Claude Code tools removed from the model's tool list. "Task" was the
-# nested-agent tool name before it was renamed "Agent"; both are listed.
-DISALLOWED_TOOLS = ("Agent", "Task", "WebSearch", "WebFetch")
+# nested-agent tool name before it was renamed "Agent"; both are listed. Since
+# October 19, 2026 every built-in except Bash, Read, Write, Edit and TaskStop is
+# removed (docs/plan.md, "Unneeded built-in tools removed"; TaskStop, which stops a
+# background Bash job, kept at the user's request). The Task* to-do tools did not
+# appear in the 2.1.296 container captures; they are listed in case they appear.
+DISALLOWED_TOOLS = ("Agent", "Task", "WebSearch", "WebFetch",
+                    "Workflow", "CronCreate", "CronDelete", "CronList", "ScheduleWakeup",
+                    "SendMessage", "ListAgents", "TaskCreate", "TaskGet", "TaskList",
+                    "TaskUpdate", "Skill", "NotebookEdit", "EnterWorktree", "ExitWorktree",
+                    "ReportFindings")
 
 BASH_TIMEOUT_MS = 120_000
 
@@ -613,6 +621,46 @@ def replayed_reasoning_blocks(messages):
     return count
 
 
+# Inspect's marker for OpenRouter reasoning_details kept in ContentReasoning.signature
+# (inspect_ai/model/_openrouter_reasoning.py, pinned 0.3.279).
+_REASONING_DETAILS_SIGNATURE = "reasoning-details://"
+
+
+def _signed_details(part):
+    """The signed OpenRouter reasoning details of one reasoning block: encrypted entries with
+    data, or entries carrying a signature (what Inspect replays for signed formats such as
+    Gemini's google-gemini-v1, ``sanitize_reasoning_details_for_replay``)."""
+    signature = getattr(part, "signature", None) or ""
+    if getattr(part, "type", None) != "reasoning" or not signature.startswith(_REASONING_DETAILS_SIGNATURE):
+        return []
+    try:
+        details = json.loads(signature[len(_REASONING_DETAILS_SIGNATURE):])
+    except ValueError:
+        return []
+    return [d for d in details if isinstance(d, dict) and (
+        (d.get("type") == "reasoning.encrypted" and d.get("data")) or d.get("signature"))] \
+        if isinstance(details, list) else []
+
+
+def replayed_signed_reasoning(messages):
+    """Earlier assistant turns of a request that carry tool calls together with signed reasoning
+    details (e.g. Gemini thought signatures), which the provider needs on later turns with tool
+    calls: ``{"replayed_signed_tool_call_turns": n}``, plus the details' formats when n > 0.
+    The live compatibility check needs such a replay accepted for signed-reasoning models."""
+    turns, formats = 0, set()
+    for message in messages:
+        content = getattr(message, "content", None)
+        if getattr(message, "role", None) != "assistant" or not isinstance(content, list) \
+                or not getattr(message, "tool_calls", None):
+            continue
+        signed = [d for part in content for d in _signed_details(part)]
+        if signed:
+            turns += 1
+            formats.update(str(d.get("format") or "unknown") for d in signed)
+    return {"replayed_signed_tool_call_turns": turns,
+            **({"replayed_signed_reasoning_formats": sorted(formats)} if turns else {})}
+
+
 def _rejected_without_generation(output):
     # Inspect converts some provider 4xx rejections (context overflow, input
     # moderation) into outputs without usage; nothing was generated.
@@ -795,6 +843,7 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
         record("inference_admitted", agent_id, {"request_id": request_id, "reserved_usd": str(reservation),
                                                 "request_bytes": len(request.encode("utf-8")),
                                                 "replayed_reasoning_blocks": replayed_reasoning_blocks(messages),
+                                                **replayed_signed_reasoning(messages),
                                                 **({"prompt_cache_normalization": TOKEN_COUNTER_NORMALIZATION_VERSION,
                                                     "normalized_token_counters": normalized_counters}
                                                    if normalized_counters else {})})
@@ -860,12 +909,13 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     return intercept
 
 
-def build_claude_agent(prompt, tools, filter, env=None, cwd="/workspace", *, system_prompt_mode="append",
+def build_claude_agent(prompt, tools, filter, env=None, cwd="/workspace", *, system_prompt_mode="replace",
                        auto_memory=True):
     """Genuine Claude Code (pinned image binary) with identity-bound bridged tools.
 
-    ``system_prompt_mode``: "append" (approved default: built-in prompt plus the
-    conference prompt) or "replace" (conference prompt only).
+    ``system_prompt_mode``: "replace" (approved default since October 19, 2026:
+    conference prompt only) or "append" (built-in prompt plus the conference prompt,
+    as in the four October 15-16 baseline runs).
     """
     if system_prompt_mode not in SYSTEM_PROMPT_MODES:
         raise ValueError(f"system_prompt_mode must be one of {SYSTEM_PROMPT_MODES}")

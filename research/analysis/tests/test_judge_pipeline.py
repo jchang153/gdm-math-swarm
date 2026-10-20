@@ -971,6 +971,8 @@ class CliTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="judge-cli-"))
         self.run_dir = self.tmp / RUN_ID
         (self.run_dir / "inspect").mkdir(parents=True)
+        # A baseline run (research_swarm.budget.run_budget_track); paid judging refuses other tracks.
+        (self.run_dir / "settings.json").write_text(json.dumps({"config": {}, "effective": {"budget_track": "baseline"}}))
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -991,6 +993,23 @@ class CliTests(unittest.TestCase):
             code, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "missing.sqlite"))
         self.assertEqual(code, 4)
         self.assertIn("never create a replacement ledger", err)
+
+    def test_paid_judging_only_on_the_owners_tracks(self):
+        """Baseline and the owner's gemini track pass the track check; the collaborator's ablation track
+        and a run without readable settings.json are refused before any ledger, key or request."""
+        cases = (("gemini", "never create a replacement ledger"), ("ablation", "is on budget track 'ablation'"),
+                 (None, "is on budget track 'unknown'"))
+        for track, expected in cases:
+            with self.subTest(track=track):
+                settings = self.run_dir / "settings.json"
+                if track is None:
+                    settings.unlink()
+                else:
+                    settings.write_text(json.dumps({"config": {"budget_track": track},
+                                                    "effective": {"budget_track": track}}))
+                code, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "missing.sqlite"))
+                self.assertEqual(code, 4)
+                self.assertIn(expected, err)
 
     def test_paid_refuses_ledger_without_both_judge_raises(self):
         problems = ["analysis cap history must be exactly the two audited judge raises"]

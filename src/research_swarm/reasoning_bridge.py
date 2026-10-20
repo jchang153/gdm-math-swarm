@@ -4,8 +4,11 @@ Inspect 0.3.279 renders non-Anthropic reasoning as plain text. Claude Code then
 echoes that text rather than a reasoning block. Only the bridge's converters are
 wrapped here: genuine Anthropic conversions and provider clients are untouched.
 An authenticated, self-contained thinking signature preserves the original block
-without a history cache. Its signing key belongs to one AgentBridge instance;
-another agent cannot replay it. Omitted/compacted blocks stay omitted.
+without a history cache. Its signing key belongs to one agent: inside
+``agent_transport_scope`` (the runtime opens one per peer) every bridge of that agent
+shares the key, so a resumed Claude Code session (a new AgentBridge) can replay its own
+earlier blocks; outside a scope the key belongs to one AgentBridge instance. Another
+agent cannot replay it. Omitted/compacted blocks stay omitted.
 """
 from __future__ import annotations
 
@@ -24,18 +27,31 @@ import threading
 _PREFIX = "research-swarm-reasoning-v1:"
 _KEY_ATTRIBUTE = "_research_swarm_reasoning_transport_key"
 _SCOPE = contextvars.ContextVar("research_swarm_reasoning_bridge", default=None)
+_AGENT_KEY = contextvars.ContextVar("research_swarm_reasoning_agent_key", default=None)
 _INSTALL_LOCK = threading.Lock()
 _INSTALLED = False
 _EXPECTED_INSPECT_VERSION = "0.3.279"
 
 
 @contextlib.contextmanager
+def agent_transport_scope():
+    """One fresh signing key for every bridge opened in this context (one agent's
+    sessions, including resumed ones); tasks started inside inherit it."""
+    token = _AGENT_KEY.set(secrets.token_bytes(32))
+    try:
+        yield
+    finally:
+        _AGENT_KEY.reset(token)
+
+
+@contextlib.contextmanager
 def _bridge_scope(bridge):
     # No await between checking/assigning: concurrent requests on this bridge
-    # share its key, while independent bridge objects always receive fresh keys.
+    # share its key; a new bridge takes the agent's key (agent_transport_scope) or,
+    # outside one, a fresh key.
     key = getattr(bridge, _KEY_ATTRIBUTE, None)
     if key is None:
-        key = secrets.token_bytes(32)
+        key = _AGENT_KEY.get() or secrets.token_bytes(32)
         setattr(bridge, _KEY_ATTRIBUTE, key)
     token = _SCOPE.set(key)
     try:

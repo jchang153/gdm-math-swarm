@@ -5,27 +5,37 @@ Generalizes the per-run supervisors used for the October 15-16 runs (kept, uncha
 ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
 
 1. refuses to start twice for the same phase directory (``supervisor.started`` survives);
-2. backs up the budget ledger, then launches ``scripts/run_pilot.py --config CONFIG
-   --launch-paid-pilot --yes`` with a minimal environment (the provider key is never passed
-   on; the runtime loads it from the operator's private .env);
+2. backs up the budget ledger the run reserves against (always the config's ledger,
+   ``budget.ledger_path_for``: a budget track's own ledger such as state/gemini-budget.sqlite,
+   otherwise state/budget.sqlite; a --ledger naming any other file is refused), then launches
+   ``scripts/run_pilot.py --config CONFIG --launch-paid-pilot --yes`` with a minimal
+   environment (the provider key is never passed on; the runtime loads it from the operator's
+   private .env);
 3. writes ``live-checkpoint.json`` every 30 s while the run is going (event counts, prompt-cache
-   share, ledger snapshot, spending since launch, agent exits, run stop);
+   share, that ledger's snapshot, pilot-scope spending since launch, agent exits, run stop);
 4. afterwards sets ``paid_launch_enabled`` to false in CONFIG (never a second launch by
    accident), backs up the ledger and, unless --no-postrun, runs the unpaid follow-ups in order:
-   reconcile_ledger.py (dry run), evaluate_run.py --dry-run, evaluate_run.py, timeline.py;
-   then, when CONFIG has ``auto_behavior_judge`` true (the repository owner's standing approval,
+   reconcile_ledger.py --ledger LEDGER (dry run), evaluate_run.py --dry-run, evaluate_run.py,
+   timeline.py. evaluate_run.py is deferred (follow-ups stop, exit 4) while any comparator
+   container (label gdm-evaluator=1) runs, because its start-up cleanup removes every
+   comparator container, including another checkout's; it also refuses on its own while
+   another run's agents or judge compilers are live. Rerun it later by hand.
+   Then, when CONFIG has ``auto_behavior_judge`` true (the repository owner's standing approval,
    docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20, 2026)"),
    the PAID behavior judge (scripts/run_transcript_judge.py --standing-approval-from-config
-   CONFIG, per-run cap behavior_judge_max_usd <= $50, this checkout's state/budget.sqlite and
-   .env), after refreshing a judge route pricing record older than 72 h with the unpaid
-   scripts/freeze_judge_route.py. Its outputs land in RUN/analysis/judge/ (packaged with the
-   run); its outcome is recorded in behavior-judge.json and never changes the worker exit or
-   stops the packaging;
+   CONFIG, per-run cap behavior_judge_max_usd <= $50, the analysis scope of this checkout's
+   baseline state/budget.sqlite, also for a gemini-track run, and this checkout's .env), after
+   refreshing a judge route pricing record older than 72 h with the unpaid
+   scripts/freeze_judge_route.py. It runs only after every follow-up completed (a deferred
+   evaluation skips it). Its outputs land in RUN/analysis/judge/ (packaged with the run); its
+   outcome is recorded in behavior-judge.json and never changes the worker exit or stops the
+   packaging;
 5. packages the run and phase records with SHA-256 checksums and waits up to --retrieval-wait
    seconds for a ``retrieved.marker`` in the phase directory;
 6. shuts the VM down only when it is idle (no Docker containers, no other tmux session, no
-   unexpected process of this user, checked six times); otherwise it leaves the VM running and
-   records why. --no-shutdown skips this step.
+   unexpected process of this user and no process of another login user, e.g. a collaborator's
+   tmux or SSH session, checked six times); otherwise it leaves the VM running and records why.
+   --no-shutdown skips this step.
 
 Launching a paid run needs the operator's own recorded budget decision (docs/plan.md), the
 operator's own provider key in their private .env, and the gates in docs/validation.md; this
@@ -34,6 +44,11 @@ script adds no authorization. Example (from the operator's checkout on the VM):
   tmux new -s gdm-RUN_ID
   .venv/bin/python scripts/supervise_run.py --config runs/phase-b/RUN_ID/launch-config.json \\
       --phase-dir runs/phase-b/RUN_ID --tmux-session gdm-RUN_ID 2>&1 | tee runs/phase-b/RUN_ID/supervisor-console.log
+
+For a budget-track config (e.g. configs/gemini-collab.json, ``budget_track: "gemini"``) the
+ledger is that track's ledger (state/gemini-budget.sqlite), so backups, checkpoints,
+"new_settled_usd" and the reconcile dry run (whose default --expect-model is then the track's
+model) use it; the baseline ledger is never read or backed up then.
 
 CONFIG must name the run directory explicitly (``run_dir``) and have ``paid_launch_enabled``
 true. Researcher-only: never copy this into agent workspaces.
@@ -60,6 +75,10 @@ JUDGE_STEPS = ("judge-route-freeze", "behavior-judge")  # after FOLLOW_UPS, only
 JUDGE_PRICING_GLOB = "judge-route-pricing-*.json"
 JUDGE_PRICING_MAX_AGE_HOURS = 72  # research/analysis/judge/route.py DEFAULT_MAX_AGE_HOURS
 JUDGE_OUTCOMES = {0: "complete", 2: "errors_or_held_agents", 3: "stopped", 4: "refused"}
+EVALUATOR_LABEL = "gdm-evaluator=1"  # evaluator.CONTAINER_LABEL (comparator containers)
+# Login users have UIDs from 1000 on (65534 is "nobody"); a process of another such user means
+# someone else is working on the VM.
+FIRST_LOGIN_UID, NOBODY_UID = 1000, 65534
 IDLE_PROCESSES = {"bash", "sh", "sshd", "sshd-session", "sshd-auth", "tmux: server", "tmux", "systemd", "(sd-pam)",
                   "dbus-daemon", "ps", "sleep"}
 ENV_KEYS = ("PATH", "HOME", "USER", "LANG", "TERM", "XDG_RUNTIME_DIR")
@@ -74,7 +93,6 @@ class Supervisor:
         self.root = Path(args.root).resolve()
         self.config_path = Path(args.config).resolve()
         self.phase = Path(args.phase_dir).resolve()
-        self.ledger = self.root / "state" / "budget.sqlite"
         self.session = args.tmux_session
         self.args = args
         config = json.loads(self.config_path.read_text())
@@ -82,12 +100,33 @@ class Supervisor:
             raise SystemExit("CONFIG must set run_dir explicitly (the supervisor packages that directory)")
         if config.get("paid_launch_enabled") is not True:
             raise SystemExit("CONFIG has paid_launch_enabled false; enable it only for the authorized launch")
+        # Always the ledger run_pilot reserves against; --ledger may only restate it.
+        self.ledger = self.config_ledger(config)
+        if args.ledger is not None and Path(args.ledger).resolve() != self.ledger:
+            raise SystemExit(f"--ledger {args.ledger} is not the ledger this config's run reserves against "
+                             f"({self.ledger}, budget.ledger_path_for); omit --ledger")
+        if not self.ledger.is_file():
+            raise SystemExit(f"ledger {self.ledger} does not exist; a budget track's ledger is created by its "
+                             "compatibility check (scripts/compat_check.py) before any launch")
         run_dir = Path(config["run_dir"])
         self.run = (run_dir if run_dir.is_absolute() else self.root / run_dir).resolve()
         self.env = {k: os.environ[k] for k in ENV_KEYS if k in os.environ}  # never the provider key
         self.env["PYTHONPATH"] = "src"
         self.settled_at_launch = None
+        # The behavior judge always bills the analysis scope of the baseline ledger (docs/plan.md,
+        # "Automatic post-run behavior judge for the owner's runs"), even when the run reserves
+        # against a budget track's own ledger (self.ledger).
+        self.judge_ledger = self.root / "state" / "budget.sqlite"
         self.judge_record = None
+
+    def config_ledger(self, config):
+        """The ledger the launched run reserves against (budget.ledger_path_for in this checkout)."""
+        sys.path.insert(0, str(self.root / "src"))
+        from research_swarm.budget import ledger_path_for
+        try:
+            return Path(ledger_path_for(config, self.root)).resolve()
+        except ValueError as error:  # invalid budget_track: the run's own gates refuse it too
+            raise SystemExit(f"CONFIG: {error}")
 
     # -- records -------------------------------------------------------------
     def status(self, stage, **fields):
@@ -122,7 +161,7 @@ class Supervisor:
         data = {"utc": now(), "events": dict(Counter(e.get("kind") for e in events)),
                 "cache": {"prompt_tokens": prompt, "cached_tokens": cached,
                           "fraction": cached / prompt if prompt else None},
-                "budget": budget,
+                "ledger": str(self.ledger), "budget": budget,
                 "new_settled_usd": None if self.settled_at_launch is None else str(settled - self.settled_at_launch),
                 "agent_exits": [e for e in events if e.get("kind") == "agent_exit"],
                 "run_stop": [e for e in events if e.get("kind") == "run_stop"]}
@@ -154,13 +193,32 @@ class Supervisor:
         (self.phase / (name + ".exit")).write_text(f"{process.returncode}\n")
         return process.returncode
 
+    def comparators_running(self):
+        """Running comparator containers (any checkout's evaluator), or None if Docker cannot be listed."""
+        try:
+            result = subprocess.run(["docker", "ps", "--filter", "label=" + EVALUATOR_LABEL, "--format",
+                                     "{{.Names}}"], text=True, capture_output=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return result.stdout.split() if result.returncode == 0 else None
+
     def follow_ups(self):
         run = str(self.run)
-        commands = {"reconcile-dry": ["scripts/reconcile_ledger.py", "--run-dir", run],
+        commands = {"reconcile-dry": ["scripts/reconcile_ledger.py", "--run-dir", run, "--ledger", str(self.ledger)],
                     "evaluate-dry": ["scripts/evaluate_run.py", "--run-dir", run, "--dry-run"],
                     "evaluate": ["scripts/evaluate_run.py", "--run-dir", run],
                     "timeline": ["research/analysis/timeline.py", "--run-dir", run]}
         for name in FOLLOW_UPS:
+            if name == "evaluate":
+                running = self.comparators_running()
+                if running is None or running:
+                    # evaluate_run.py removes every comparator container when it starts; never
+                    # disturb another evaluation (e.g. a collaborator's checkout). Rerun by hand.
+                    (self.phase / "evaluate.deferred").write_text(json.dumps(
+                        {"utc": now(), "comparators": running, "reason": "comparator containers running"
+                         if running else "could not list comparator containers"}) + "\n")
+                    self.status("evaluate_deferred", comparators=running)
+                    return 4
             code = self.step(name, commands[name])
             if code:
                 return code
@@ -214,7 +272,7 @@ class Supervisor:
                 else:
                     code = self.step("behavior-judge", [
                         "scripts/run_transcript_judge.py", "--run-dir", str(self.run),
-                        "--standing-approval-from-config", str(self.config_path), "--ledger", str(self.ledger),
+                        "--standing-approval-from-config", str(self.config_path), "--ledger", str(self.judge_ledger),
                         "--credentials-root", str(self.root)])
                     record.update(exit=code, outcome=JUDGE_OUTCOMES.get(code, "failed"))
                     if code == 4:
@@ -284,10 +342,29 @@ class Supervisor:
         while time.monotonic() < deadline and not (self.phase / "retrieved.marker").exists():
             time.sleep(30)
 
+    def other_users(self):
+        """Processes of other login users (a collaborator's tmux, SSH session or run), or None if
+        they cannot be listed. ``ps -u`` and ``tmux list-sessions`` only see this user's."""
+        try:
+            result = subprocess.run(["ps", "-e", "-o", "uid=,pid=,comm="], text=True, capture_output=True,
+                                    timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode != 0:
+            return None
+        found = []
+        for line in result.stdout.splitlines():
+            parts = line.split(None, 2)
+            if len(parts) == 3 and parts[0].isdigit():
+                uid = int(parts[0])
+                if uid != os.getuid() and uid >= FIRST_LOGIN_UID and uid != NOBODY_UID:
+                    found.append({"uid": uid, "pid": int(parts[1]), "name": parts[2]})
+        return found
+
     def idle_shutdown(self, code):
         """Shut down only an idle VM; never kill processes or remove containers to get there."""
         containers = sessions = processes = None
-        others, other_processes = [], []
+        others, other_processes, other_users = [], [], None
         for _ in range(6):
             containers = subprocess.run(["docker", "ps", "--format", "{{.Names}}"], text=True, capture_output=True)
             sessions = subprocess.run(["tmux", "list-sessions", "-F", "#{session_name}"], text=True,
@@ -300,8 +377,10 @@ class Supervisor:
                 pid, name = line.strip().split(None, 1)
                 if int(pid) != os.getpid() and name not in IDLE_PROCESSES:
                     other_processes.append({"pid": int(pid), "name": name})
+            other_users = self.other_users()
             if (containers.returncode == 0 and not containers.stdout.strip() and sessions.returncode == 0
-                    and not others and processes.returncode == 0 and not other_processes):
+                    and not others and processes.returncode == 0 and not other_processes
+                    and other_users is not None and not other_users):
                 self.status("preserved_shutdown_requested", worker_exit=code, run=str(self.run))
                 os.sync()
                 result = subprocess.run(["sudo", "-n", "shutdown", "-h", "now"])
@@ -311,7 +390,7 @@ class Supervisor:
             time.sleep(10)
         self.status("preserved_shutdown_blocked_by_other_work", worker_exit=code,
                     containers=containers.stdout.splitlines(), other_sessions=others,
-                    other_processes=other_processes)
+                    other_processes=other_processes, other_users=other_users)
         return 3
 
     def main(self):
@@ -333,6 +412,10 @@ def parse_args(argv=None):
     parser.add_argument("--phase-dir", required=True, type=Path, help="ignored records folder, e.g. runs/phase-b/RUN_ID")
     parser.add_argument("--tmux-session", required=True, help="the tmux session running this supervisor")
     parser.add_argument("--root", type=Path, default=ROOT, help="repository checkout (default: this one)")
+    parser.add_argument("--ledger", type=Path, default=None,
+                        help="optional restatement of the budget ledger for backups, checkpoints and spending: "
+                             "it must be the config's own ledger (budget.ledger_path_for, e.g. "
+                             "state/gemini-budget.sqlite for budget_track gemini); any other file is refused")
     parser.add_argument("--retrieval-wait", type=int, default=600,
                         help="seconds to wait for runs/phase-b/.../retrieved.marker before the idle check (default 600)")
     parser.add_argument("--no-postrun", action="store_true", help="skip the unpaid reconcile/evaluate/timeline steps")

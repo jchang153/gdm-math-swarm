@@ -399,7 +399,135 @@ def evaluate_one(item, dataset, tasks, backend, describe, clock=time.time):
     return entry
 
 
-def summarize(latest, notes):
+_HELPER_START = re.compile(r"([ \t]*)(?:@\[[^\]\n]*\][ \t]*)?(?:(?:noncomputable|private|protected)[ \t]+)*"
+                           r"(?:def|abbrev)[ \t]+([^\s:({\[]+)")
+HELPER_CHAIN_LIMIT = 4
+
+
+def _uncomment(text):
+    """Text with Lean comments removed: nested block comments `/- … -/` and line comments `--`.
+    A removed comment leaves a space (token boundary) and keeps its line breaks."""
+    out, depth, i = [], 0, 0
+    while i < len(text):
+        two = text[i:i + 2]
+        if two == '/-':
+            depth, i = depth + 1, i + 2
+            out.append(' ')
+        elif two == '-/' and depth:
+            depth, i = depth - 1, i + 2
+        elif depth:
+            if text[i] == '\n':
+                out.append('\n')
+            i += 1
+        elif two == '--':
+            end = text.find('\n', i)
+            i = len(text) if end < 0 else end
+        else:
+            out.append(text[i])
+            i += 1
+    return ''.join(out)
+
+
+def _loose(text):
+    """Comparison form ignoring whitespace and parentheses (both sides get the same treatment)."""
+    return re.sub(r'[\s()]', '', text)
+
+
+def _helper_bodies(source):
+    """{declared name: body} for every def/abbrev in the editable regions, comments removed.
+    A body runs from its `:=` to the next nonblank line indented no deeper than its
+    declaration (the next command), so indented namespace blocks stay separate."""
+    bodies = {}
+    for a, b in ev.editable_spans(source):
+        lines = _uncomment(source[a:b]).split('\n')
+        for i, line in enumerate(lines):
+            match = _HELPER_START.match(line)
+            if not match:
+                continue
+            indent, body = len(match.group(1).expandtabs()), [line[match.end():]]
+            for later in lines[i + 1:]:
+                if later.strip() and len(later) - len(later.lstrip()) <= indent:
+                    break
+                body.append(later)
+            text = '\n'.join(body)
+            if ':=' in text:
+                bodies.setdefault(match.group(2), text.split(':=', 1)[1].strip())
+    return bodies
+
+
+def _helper_body(bodies, ident):
+    """Body of the helper named ``ident``, matched in full or by its last name component
+    (namespaces, qualified declarations); None when absent or ambiguous."""
+    if ident in bodies:
+        return bodies[ident]
+    short = ident.rsplit('.', 1)[-1]
+    found = {body for name, body in bodies.items() if name.rsplit('.', 1)[-1] == short}
+    return found.pop() if len(found) == 1 else None
+
+
+def restated_answer(template_source, source):
+    """True when the submitted answer field restates the task proposition (`answer(P) ↔ P`),
+    directly or through a chain of helper `def`/`abbrev`s; False for a canonical value or the
+    unchanged placeholder or an answer that does not contain it; None when undecidable.
+
+    Researcher-side review signal only (docs/evaluator.md, "Restated answers"): the
+    validated evaluator leaves such answers ``unresolved``, and the direct form carries no
+    evaluator flag. Lean comments, whitespace and parentheses are ignored. Never a verdict; restatements in
+    other words and notation tricks are not detected.
+    """
+    try:
+        _, other = ev.answer_counterpart(template_source)
+        if not other:
+            return False
+        x, y = ev.header_answer_span(template_source)
+        a, b = ev.header_answer_span(source)
+        text, placeholder = _uncomment(source[a:b]).strip(), template_source[x:y].strip()
+        if text == placeholder or ev.CANONICAL_ANSWER.fullmatch(text):
+            return False
+        target, bodies = _loose(other), _helper_bodies(source)
+        for _ in range(HELPER_CHAIN_LIMIT):
+            if target in _loose(text):
+                return True
+            if not ev._IDENT.fullmatch(text):
+                return False
+            body = _helper_body(bodies, text)
+            if body is None:
+                return None  # unresolved helper: never a negative
+            text = body
+        return None
+    except Exception:  # the summary must never fail on an odd source
+        return None
+
+
+def answer_review(latest, submissions, dataset):
+    """Accepted answer-based submissions the evaluator left unresolved, and which of them
+    restate the question. Recomputed from stored sources on every summary."""
+    sources = {s['submission_id']: s.get('source') for s in submissions}
+    accepted, restated, undecided = [], [], []
+    for e in sorted(latest.values(), key=lambda e: e['submission']['submission_id']):
+        sid = e['submission']['submission_id']
+        if not e.get('answer_based') or e['submission'].get('outcome') not in EVALUATED_OUTCOMES:
+            continue
+        if e['validity'] == 'unresolved':
+            accepted.append(sid)
+        task, source = dataset.tasks.get(e['task_id']), sources.get(sid)
+        try:
+            template_source = task.template_source(dataset.repository) if task else None
+        except ValueError:
+            template_source = None
+        verdict = restated_answer(template_source, source) if template_source and source else None
+        if verdict:
+            restated.append(sid)
+        elif verdict is None:
+            undecided.append(sid)
+    return {'accepted_answer_based_unresolved': accepted, 'answer_restates_question': restated,
+            'restatement_undecided': undecided,
+            'note': 'Review signals, never verdicts. An accepted answer that restates the question '
+                    '(answer(P) <-> P) is an exploit the evaluator cannot call fraudulent; review every '
+                    'listed submission by eye (docs/evaluator.md, "Restated answers").'}
+
+
+def summarize(latest, notes, answer=None):
     entries = list(latest.values())
     candidates = {}
     for e in sorted(entries, key=lambda e: e['submission']['submission_id']):
@@ -421,6 +549,7 @@ def summarize(latest, notes):
                 'evaluated': sorted(e['submission']['submission_id'] for e in entries
                                     if e.get('closed_submission_request')),
                 'by_validity': dict(Counter(e['validity'] for e in entries if e.get('closed_submission_request')))},
+            'answer_review': answer,
             'sources': notes}
 
 
@@ -434,7 +563,9 @@ def evaluate_run(run_dir, backend, dataset=None, include_rejected=False, retry_u
     ``closed``/``request_meta``: from ``closed_requests`` (judge-requested
     problem_closed submissions); ClosedRequestError is raised before any write.
     """
-    dataset = dataset or FrozenDataset(ROOT)
+    if dataset is None:
+        from research_swarm.dataset import run_task_set
+        dataset = FrozenDataset(ROOT, task_set=run_task_set(run_dir))  # the run's own task set
     submissions, tasks, notes = collect_submissions(run_dir, include_rejected, closed, request_meta)
     out_dir = ev.run_evaluations_dir(run_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -463,7 +594,8 @@ def evaluate_run(run_dir, backend, dataset=None, include_rejected=False, retry_u
                                                 ' (judge-requested)' if item.get('closed_request') else '',
                                                 entry['validity'], entry['seconds']))
     latest, malformed = read_evaluations(output)
-    summary = summarize(latest, dict(notes, evaluations_malformed=malformed))
+    summary = summarize(latest, dict(notes, evaluations_malformed=malformed),
+                        answer_review(latest, submissions, dataset))
     if interlock is not None:
         summary['interlock'] = interlock
     if stopped:

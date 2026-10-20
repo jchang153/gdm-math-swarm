@@ -4,13 +4,14 @@ import json
 import os
 import sys
 import tempfile
+import types
 import unittest
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from research_swarm.budget import BudgetLedger  # noqa: E402
+from research_swarm.budget import ABLATION_CAPS, GEMINI_CAPS, BudgetLedger, read_snapshot  # noqa: E402
 
 spec = importlib.util.spec_from_file_location("supervise_run", ROOT / "scripts" / "supervise_run.py")
 supervise = importlib.util.module_from_spec(spec)
@@ -45,6 +46,10 @@ class SuperviseRunTests(unittest.TestCase):
         self.config = self.phase / "launch-config.json"
         self.config.write_text(json.dumps({"run_dir": "runs/run-x", "paid_launch_enabled": True}))
         os.environ["OPENROUTER_API_KEY"] = "test-not-a-real-key"
+        # No Docker in these tests: no comparator container of another evaluation is running.
+        patcher = mock.patch.object(supervise.Supervisor, "comparators_running", return_value=[])
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         os.environ.pop("OPENROUTER_API_KEY", None)
@@ -91,6 +96,98 @@ class SuperviseRunTests(unittest.TestCase):
         self.assertTrue((self.phase / "budget-final.sqlite").exists())
         self.assertFalse(json.loads(self.config.read_text())["paid_launch_enabled"])
 
+
+    def gemini_ledger(self):
+        ledger = BudgetLedger(self.tmp / "state" / "gemini-budget.sqlite", GEMINI_CAPS)
+        ledger.settle(ledger.reserve("compatibility", "agent-001", "0.5"), "0.25", "provider_reported_cost")
+        return ledger
+
+    def test_track_config_uses_its_own_ledger(self):
+        """budget_track gemini: backups, checkpoints and the reconcile dry run use state/gemini-budget.sqlite."""
+        self.gemini_ledger()
+        self.config.write_text(json.dumps({"run_dir": "runs/run-x", "paid_launch_enabled": True,
+                                           "budget_track": "gemini"}))
+        supervisor = supervise.Supervisor(self.args("--no-shutdown"))
+        self.assertEqual(supervisor.ledger, (self.tmp / "state" / "gemini-budget.sqlite").resolve())
+        self.assertEqual(supervisor.main(), 0)
+        for name in ("budget-before-launch.sqlite", "budget-after-pilot.sqlite", "budget-final.sqlite"):
+            backup = read_snapshot(self.phase / name)
+            self.assertEqual((backup["pilot"]["cap_usd"], backup["compatibility"]["settled_usd"]), ("462.38", "0.25"))
+        checkpoint = json.loads((self.phase / "live-checkpoint.json").read_text())
+        self.assertEqual(checkpoint["budget"]["pilot"]["cap_usd"], "462.38")
+        self.assertEqual(checkpoint["ledger"], str(supervisor.ledger))
+        self.assertEqual(checkpoint["new_settled_usd"], "0")
+        ran = (self.tmp / "scripts" / "reconcile_ledger.py.ran").read_text()
+        self.assertIn("--ledger " + str(supervisor.ledger), ran)
+
+    def test_ledger_option_and_missing_track_ledger(self):
+        self.config.write_text(json.dumps({"run_dir": "runs/run-x", "paid_launch_enabled": True,
+                                           "budget_track": "gemini"}))
+        with self.assertRaises(SystemExit):  # the compatibility check creates the track ledger first
+            supervise.Supervisor(self.args())
+        # --ledger never replaces the ledger run_pilot reserves against (review finding): the baseline
+        # ledger, or another track's, is refused for a gemini config even when it exists.
+        baseline = self.tmp / "state" / "budget.sqlite"
+        with self.assertRaises(SystemExit) as caught:
+            supervise.Supervisor(self.args("--ledger", str(baseline)))
+        self.assertIn("gemini-budget.sqlite", str(caught.exception))
+        own = self.gemini_ledger().path
+        self.assertEqual(supervise.Supervisor(self.args("--ledger", str(own))).ledger, Path(own).resolve())
+        with self.assertRaises(SystemExit):
+            supervise.Supervisor(self.args("--ledger", str(self.tmp / "state" / "ablation-budget.sqlite")))
+        self.config.write_text(json.dumps({"run_dir": "runs/run-x", "paid_launch_enabled": True}))
+        self.assertEqual(supervise.Supervisor(self.args("--ledger", str(baseline))).ledger, baseline.resolve())
+        with self.assertRaises(SystemExit):  # nor the other way round
+            supervise.Supervisor(self.args("--ledger", str(own)))
+        self.config.write_text(json.dumps({"run_dir": "runs/run-x", "paid_launch_enabled": True,
+                                           "budget_track": "gemini-typo"}))
+        with self.assertRaises(SystemExit):
+            supervise.Supervisor(self.args())
+        self.assertFalse((self.phase / "supervisor.started").exists())
+
+    def test_evaluation_deferred_while_comparators_run(self):
+        with mock.patch.object(supervise.Supervisor, "comparators_running", return_value=["gdm-comparator-x"]):
+            self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 4)
+        deferred = json.loads((self.phase / "evaluate.deferred").read_text())
+        self.assertEqual(deferred["comparators"], ["gdm-comparator-x"])
+        self.assertEqual([(self.phase / f"{n}.exit").exists() for n in supervise.FOLLOW_UPS],
+                         [True, True, False, False])
+        self.assertFalse(json.loads(self.config.read_text())["paid_launch_enabled"])
+
+    def idle(self, *, containers="", sessions="gdm-run-x\n", processes="", users=""):
+        """idle_shutdown with every command faked; returns (code, commands run, final status)."""
+        commands = []
+
+        def run(cmd, **kwargs):
+            commands.append(cmd)
+            stdout = {"docker": containers, "tmux": sessions, "sudo": ""}.get(cmd[0])
+            if cmd[0] == "ps":
+                stdout = users if "-e" in cmd else processes
+            return types.SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+        supervisor = supervise.Supervisor(self.args())
+        with mock.patch.object(supervise.subprocess, "run", run), mock.patch.object(supervise.time, "sleep"), \
+                mock.patch.object(supervise.os, "sync"):
+            code = supervisor.idle_shutdown(0)
+        return code, commands, json.loads((self.phase / "supervisor-status.json").read_text())
+
+    def test_idle_shutdown_blocked_by_other_users_containers_or_sessions(self):
+        me = os.getuid()
+        other = 1000 if me != 1000 else 1001
+        for name, changes in (("another login user's tmux", {"users": f"{other} 4242 tmux: server\n"}),
+                              ("a container", {"containers": "inspect-other-default-1\n"}),
+                              ("another tmux session", {"sessions": "gdm-run-x\ngdm-glm\n"})):
+            with self.subTest(name=name):
+                code, commands, status = self.idle(**changes)
+                self.assertEqual(code, 3)
+                self.assertNotIn("shutdown", [part for cmd in commands for part in cmd])
+                self.assertEqual(status["stage"], "preserved_shutdown_blocked_by_other_work")
+        self.assertEqual(status["other_sessions"], ["gdm-glm"])
+        code, commands, status = self.idle(users=f"{other} 4242 tmux: server\n")
+        self.assertEqual(status["other_users"], [{"uid": other, "pid": 4242, "name": "tmux: server"}])
+        # System accounts, "nobody" and this user's own processes do not block.
+        code, commands, status = self.idle(users=f"0 1 systemd\n{supervise.NOBODY_UID} 7 x\n{me} 9 bash\n")
+        self.assertEqual((code, status["stage"]), (0, "preserved_shutdown_requested"))
+        self.assertIn(["sudo", "-n", "shutdown", "-h", "now"], commands)  # faked: nothing is shut down
 
 
 STUB_ORDER = """import os, sys
@@ -230,6 +327,7 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
 
     def test_skips(self):
         self.pricing(1)
+        BudgetLedger(self.tmp / "state" / "ablation-budget.sqlite", ABLATION_CAPS)  # the ablation case's own ledger
         cases = (({"budget_track": "ablation"}, (), "invalid standing approval"),
                  ({"behavior_judge_max_usd": 60}, (), "invalid standing approval"),
                  ({}, ("--no-postrun",), "--no-postrun"))
@@ -259,10 +357,30 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         self.assertFalse((self.phase / "behavior-judge.json").exists())
         self.assertNotIn("run_transcript_judge.py", self.order())
 
+    def test_gemini_track_run_is_judged_on_the_baseline_ledger(self):
+        """budget_track gemini (an owner track): the run reserves against state/gemini-budget.sqlite,
+        the judge bills the analysis scope of the baseline state/budget.sqlite."""
+        self.pricing(1)
+        BudgetLedger(self.tmp / "state" / "gemini-budget.sqlite", GEMINI_CAPS)
+        self.write_config(budget_track="gemini")
+        supervisor = supervise.Supervisor(self.args("--no-shutdown"))
+        self.assertEqual(supervisor.ledger, (self.tmp / "state" / "gemini-budget.sqlite").resolve())
+        self.assertEqual(supervisor.main(), 0)
+        lines = (self.tmp / "order.log").read_text().splitlines()
+        self.assertTrue(lines[-1].startswith("run_transcript_judge.py"))
+        self.assertIn("--ledger " + str(self.tmp.resolve() / "state" / "budget.sqlite"), lines[-1])
+        self.assertIn("--ledger " + str(supervisor.ledger), lines[0])  # reconcile dry run: the track ledger
+        self.assertEqual(self.judge_record()["outcome"], "complete")
+        self.assertEqual(read_snapshot(self.phase / "budget-final.sqlite")["pilot"]["cap_usd"], "462.38")
+
     # The inherited runs use the base config (no auto judge keys) and stub follow-ups.
     test_full_cycle_without_shutdown = None
     test_refuses_config_without_run_dir_or_disabled_launch = None
     test_failed_run_skips_follow_ups = None
+    test_track_config_uses_its_own_ledger = None
+    test_ledger_option_and_missing_track_ledger = None
+    test_evaluation_deferred_while_comparators_run = None
+    test_idle_shutdown_blocked_by_other_users_containers_or_sessions = None
 
 
 if __name__ == "__main__":

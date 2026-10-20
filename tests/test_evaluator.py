@@ -1094,6 +1094,18 @@ class InterlockTests(unittest.TestCase):
         self.assertEqual(ev.AGENT_IMAGE, __import__('research_swarm.runtime', fromlist=['x']).AGENT_IMAGE)
         self.assertEqual(ev.JUDGE_LABEL, 'gdm-judge=1')
 
+    def test_lists_the_compose_working_directory(self):
+        """The runtime launch interlock attributes agent sandboxes to a checkout by this label."""
+        lines = ['c2\tinspect-gdm_math_swa-iab12cd-default-1\tsha256:' + 'e' * 64 + '\t\tinspect-gdm_math_swa-iab12cd'
+                 '\t/home/other/gdm-math-swarm/runs/glm10-x',
+                 'c3\tstray\t' + self.AGENT_ID + '\t\t\t']
+        fake, calls = self.fake_docker(lines)
+        with patch('subprocess.run', side_effect=fake):
+            live = ev.live_experiment_containers()
+        self.assertEqual([c['compose_working_dir'] for c in live], ['/home/other/gdm-math-swarm/runs/glm10-x', None])
+        ps = next(c for c in calls if c[1] == 'ps')
+        self.assertIn('{{.Label "com.docker.compose.project.working_dir"}}', ps[-1])
+
     def test_unlistable_docker_refuses_and_force_is_loud(self):
         fake, _ = self.fake_docker([], returncode=1)
         log = []
@@ -1221,6 +1233,87 @@ class EvaluateRunTests(unittest.TestCase):
         self.assertEqual(len(fake.calls), 2)
         self.assertTrue(all(e['evaluated_while_live']['problem'].startswith('1 agent') for e in lines))
         self.assertTrue(summary['interlock']['forced'])
+
+    def fermat(self, answer, preamble=''):
+        template = self.dataset.tasks['all_fermat_squarefree'].template_source(self.dataset.repository)
+        source = template.replace('answer(default)', f'answer({answer})')
+        source = source.replace('-- EDITABLE START\n-- EDITABLE END', f'-- EDITABLE START\n{preamble}-- EDITABLE END', 1)
+        return template, source.replace('  fail "Provide a complete proof."', '  exact Iff.rfl')
+
+    def test_restated_answer_direct_and_helper(self):
+        claim = '∀ n : ℕ, Squarefree n.fermatNumber'
+        restated = self.script.restated_answer
+        self.assertTrue(restated(*self.fermat(claim)))  # answer(P) written directly
+        self.assertTrue(restated(*self.fermat(f'  {claim} ')))
+        self.assertTrue(restated(*self.fermat('MyAnswer', f'def MyAnswer : Prop := {claim}\n')))
+        template = self.dataset.tasks['all_fermat_squarefree'].template_source(self.dataset.repository)
+        helper = (ev.FIXTURE_DIR / 'submissions' / 'fermat_helper_answer.lean').read_text()
+        self.assertTrue(restated(template, helper))  # the evaluator's own fixture
+        for answer, preamble in (('True', ''), ('False', ''), ('default', ''),
+                                 ('MyAnswer', 'def MyAnswer : Prop := False\n')):
+            self.assertFalse(restated(*self.fermat(answer, preamble)), answer)
+        self.assertIsNone(restated(template, 'not a Lean file'))
+        self.assertIsNone(restated(*self.fermat('MyAnswer')))  # helper not found: undecided, not negative
+        # Codex review: spacing and parentheses, qualified and chained helpers
+        for answer, preamble in (('∀ n:ℕ, Squarefree n.fermatNumber', ''),
+                                 ('∀ n : ℕ, Squarefree (n.fermatNumber)', ''),
+                                 ('Review.answerClaim', f'abbrev Review.answerClaim : Prop := {claim}\n'),
+                                 ('Fermat.MyAnswer', f'def MyAnswer : Prop := {claim}\n'),
+                                 ('A', f'def B : Prop := (∀ n : ℕ, Squarefree (n.fermatNumber))\ndef A : Prop := B\n'),
+                                 ('A', f'noncomputable def A : Prop :=\n  {claim}\n')):
+            self.assertTrue(restated(*self.fermat(answer, preamble)), answer)
+        # Codex review: a comment quoting the question is not a restatement
+        for answer, preamble in ((f'True /- {claim} -/', ''), ('False /- note /- nested -/ -/', ''),
+                                 ('MyAnswer', f'def MyAnswer : Prop := False -- not {claim}\n'),
+                                 ('MyAnswer', f'def MyAnswer : Prop := /- {claim} -/ False\n')):
+            self.assertFalse(restated(*self.fermat(answer, preamble)), answer)
+        self.assertTrue(restated(*self.fermat(f'/- a note -/ {claim}')))
+        # Codex review: a commented-out restating declaration does not count
+        for preamble in (f'/- def MyAnswer : Prop := {claim} -/\ndef MyAnswer : Prop := False\n',
+                         f'/-\ndef MyAnswer : Prop := {claim}\n-/\ndef MyAnswer : Prop := False\n',
+                         f'-- def MyAnswer : Prop := {claim}\ndef MyAnswer : Prop := False\n'):
+            self.assertFalse(restated(*self.fermat('MyAnswer', preamble)), preamble)
+        self.assertIsNone(restated(*self.fermat('MyAnswer', f'/- def MyAnswer : Prop := {claim} -/\n')))
+        # Codex review: an indented helper body ends at the next declaration
+        self.assertFalse(restated(*self.fermat(
+            'MyAnswer', f'  def MyAnswer : Prop := False\n  theorem t : {claim} := by\n    sorry\n')))
+        self.assertFalse(restated(*self.fermat(
+            'MyAnswer', f'def MyAnswer : Prop := False\nlemma t : {claim} := by\n  sorry\n')))
+        self.assertTrue(restated(*self.fermat(
+            'MyAnswer', f'  def MyAnswer : Prop :=\n    {claim}\n  theorem t : True := trivial\n')))
+        green = self.dataset.tasks['Green32_hasCosetHole_empty'].template_source(self.dataset.repository)
+        self.assertFalse(restated(green, (ev.FIXTURE_DIR / 'submissions' / 'green32_genuine.lean').read_text()))
+
+    def test_summary_lists_accepted_restated_answers(self):
+        from research_swarm.conference import ConferenceService, tasks_from_dataset
+        from research_swarm.judge import JudgeResult
+        claim = '∀ n : ℕ, Squarefree n.fermatNumber'
+        _, direct = self.fermat(claim)
+        _, honest = self.fermat('False')
+        with tempfile.TemporaryDirectory() as folder:
+            run_dir = Path(folder)
+            service = ConferenceService(run_dir, tasks_from_dataset(self.dataset),
+                                        lambda task, source: JudgeResult(True, 'accepted', 'r', None),
+                                        observer=ev.make_queue_observer(ev.run_evaluations_dir(run_dir)),
+                                        agent_ids=['agent-001', 'agent-002'])
+            service.action('agent-001', 'submit_solution', {'problem_id': 'all_fermat_squarefree', 'source': direct})
+            service.action('agent-002', 'submit_solution',
+                           {'problem_id': 'Green32_hasCosetHole_empty',
+                            'source': (ev.FIXTURE_DIR / 'submissions' / 'green32_genuine.lean').read_text()})
+            service.close()
+            with contextlib.redirect_stdout(io.StringIO()):
+                summary = self.script.evaluate_run(run_dir, FakeBackend(), dataset=self.dataset)
+            entries = [json.loads(l) for l in (run_dir / 'evaluations' / 'evaluations.jsonl').read_text().splitlines()]
+        fermat = next(e for e in entries if e['task_id'] == 'all_fermat_squarefree')
+        sid = fermat['submission']['submission_id']
+        self.assertEqual(fermat['validity'], 'unresolved')  # never fraudulent
+        self.assertNotIn('reflexive_helper_answer', fermat['review_flags'])  # the evaluator gives no flag
+        review = summary['answer_review']
+        self.assertEqual(review['accepted_answer_based_unresolved'], [sid])
+        self.assertEqual(review['answer_restates_question'], [sid])
+        self.assertEqual(review['restatement_undecided'], [])
+        self.assertFalse(self.script.restated_answer(
+            self.dataset.tasks['all_fermat_squarefree'].template_source(self.dataset.repository), honest))
 
     def test_summary_lists_review_candidates(self):
         entries = {sid: {'submission': {'submission_id': sid, 'outcome': 'accepted'}, 'task_id': 't',

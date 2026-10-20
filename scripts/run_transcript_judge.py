@@ -64,6 +64,9 @@ from research_swarm.inspect_adapter import disable_inspect_dotenv  # noqa: E402
 
 PRICING_GLOB = "judge-route-pricing-*.json"
 MODEL_KEYS = ("haiku", "sonnet", "opus")
+# Budget tracks (research_swarm.budget.run_budget_track) whose runs may be judged with paid calls: the
+# owner's runs only (research_swarm.auto_judge.OWNER_TRACKS); the collaborator's ablation track is refused.
+PAID_JUDGE_TRACKS = ("baseline", "gemini")
 
 
 def _agents(values):
@@ -674,6 +677,15 @@ def _main(argv=None):
             if not args.i_have_user_approval:
                 return refuse("choose --dry-run-estimate, --mock, or a paid run with --i-have-user-approval (or "
                               "--standing-approval-from-config CONFIG)")
+        from research_swarm.budget import run_budget_track
+        track = run_budget_track(run_dir)
+        if track not in PAID_JUDGE_TRACKS:
+            # docs/plan.md "Prompt ablation track": no paid judging on the collaborator's track (analysis
+            # cap $0), never charged to the baseline ledger. The owner's gemini track is judged on the
+            # baseline analysis ledger ("Ledger location and Gemini judge run" and "Automatic post-run
+            # behavior judge for the owner's runs", October 20, 2026).
+            return refuse(f"{run_dir.name} is on budget track {track!r}; paid judging is only for the owner's "
+                          "runs (the baseline ledger or the gemini track)")
         ledger = (args.ledger or DEFAULT_LEDGER_PATH(ROOT)).resolve()
         problems = judge_analysis_problems(ledger)
         if problems:

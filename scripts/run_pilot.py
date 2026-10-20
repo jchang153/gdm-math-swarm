@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Pilot launcher. By default it runs the unpaid preflight only and spends nothing.
 
-A PAID launch (20 Claude Code peers on OpenRouter, shared cumulative pilot ledger) requires
+A PAID launch (20 Claude Code peers on OpenRouter, shared cumulative pilot ledger; a budget track's
+peers and own ledger when the config sets ``budget_track``) requires
 all of the following, in addition to every launch gate passing (including the
 compatibility evidence from the separate $2 live compatibility check; that check
 spends its own ledger scope, never the pilot's):
@@ -36,10 +37,19 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 from preflight import collect, money, render, render_spending, spending_checkpoint  # noqa: E402
-from research_swarm.budget import DEFAULT_CAPS, DEFAULT_LEDGER_PATH  # noqa: E402
+from research_swarm.budget import DEFAULT_CAPS, DEFAULT_LEDGER_PATH, caps_for, ledger_path_for  # noqa: E402
 
 
-def log_locations(run_dir, repo_root):
+def run_ledger(config, repo_root):
+    """(ledger path, caps) the run reserves against: a budget track's own ledger when the config
+    selects one (budget.ledger_path_for), otherwise the shared baseline ledger."""
+    try:
+        return ledger_path_for(config, repo_root), caps_for(config)
+    except ValueError:  # invalid budget_track: the launch gates block; show the baseline ledger
+        return DEFAULT_LEDGER_PATH(repo_root), dict(DEFAULT_CAPS)
+
+
+def log_locations(run_dir, repo_root, config=None):
     run_dir = Path(run_dir).resolve()  # as runtime.run_pilot resolves it
     inspect_dir = run_dir / "inspect"
     return {
@@ -53,15 +63,17 @@ def log_locations(run_dir, repo_root):
         "settings_and_preflight": str(run_dir / "settings.json"),
         "effective_instructions": str(run_dir / "instructions"),
         "budget_final": str(run_dir / "budget-final.json"),
-        "shared_ledger": str(DEFAULT_LEDGER_PATH(repo_root)),
+        "shared_ledger": str(run_ledger(config or {}, repo_root)[0]),
         "post_run_evaluation": f".venv/bin/python scripts/evaluate_run.py --run-dir {run_dir}",
     }
 
 
-def confirm(remaining, ask=input):
-    """True only if the operator types the remaining pilot allowance exactly."""
-    answer = ask(f"Remaining pilot allowance is {money(remaining)} (cap ${DEFAULT_CAPS['pilot']}, shared by all 20 "
-                 f"agents; the ${DEFAULT_CAPS['compatibility']} compatibility and ${DEFAULT_CAPS['analysis']} analysis "
+def confirm(remaining, ask=input, caps=None, agents=20):
+    """True only if the operator types the remaining pilot allowance exactly. ``caps``: the run's
+    ledger caps (default the baseline DEFAULT_CAPS; a budget track's own caps for its runs)."""
+    caps = caps or DEFAULT_CAPS
+    answer = ask(f"Remaining pilot allowance is {money(remaining)} (cap ${caps['pilot']}, shared by all {agents} "
+                 f"agents; the ${caps['compatibility']} compatibility and ${caps['analysis']} analysis "
                  "allowances are separate). Type that amount in USD to start the PAID pilot, anything else aborts: ")
     try:
         return Decimal(answer.strip().lstrip("$").replace(",", "")) == Decimal(str(remaining))
@@ -100,14 +112,14 @@ def main(argv=None, ask=input, run=None):
         if not sys.stdin.isatty() and ask is input:
             print("Not launching: confirmation needs an interactive terminal (or --yes after user approval).")
             return 2
-        if not confirm(remaining, ask):
+        if not confirm(remaining, ask, caps=run_ledger(config, ROOT)[1], agents=config.get("agent_count", 20)):
             print("Not launching: confirmation did not match. No paid call was made.")
             return 2
     config = dict(config)
     if not config.get("run_dir"):  # explicit, so the log locations below are exact
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         config["run_dir"] = str(ROOT / "runs" / f"pilot-{stamp}")
-    locations = log_locations(config["run_dir"], ROOT)
+    locations = log_locations(config["run_dir"], ROOT, config)
     print("Starting paid pilot. Logs:\n" + json.dumps(locations, indent=2))
     if run is None:
         from research_swarm.runtime import run_pilot
@@ -121,7 +133,8 @@ def main(argv=None, ask=input, run=None):
         return 2
     finally:
         print("Run ended. Logs:\n" + json.dumps(locations, indent=2))
-        print("\n".join(render_spending(spending_checkpoint(ROOT))))  # post-run spending checkpoint
+        # Post-run spending checkpoint of the ledger this run used (a track's own ledger if any).
+        print("\n".join(render_spending(spending_checkpoint(ROOT, *run_ledger(config, ROOT)))))
     return 0
 
 

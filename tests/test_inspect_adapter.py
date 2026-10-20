@@ -161,6 +161,35 @@ class BudgetFilterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(admitted["request_bytes"], len(request.encode("utf-8")))
         self.assertGreater(admitted["request_bytes"], len(request))  # UTF-8 bytes, not characters
         self.assertEqual(admitted["replayed_reasoning_blocks"], 1)
+        self.assertEqual(admitted["replayed_signed_tool_call_turns"], 0)
+        self.assertNotIn("replayed_signed_reasoning_formats", admitted)
+
+    def test_replayed_signed_reasoning_counts_signed_tool_call_turns_only(self):
+        """Gemini thought signatures (signed OpenRouter reasoning_details) next to tool calls; the
+        compatibility check's signed_reasoning_tool_call_replay reads this from inference_admitted."""
+        from inspect_ai.model import ChatMessageAssistant, ChatMessageUser, ContentReasoning, ContentText
+        from inspect_ai.tool import ToolCall
+        from research_swarm.inspect_adapter import replayed_signed_reasoning
+
+        def details(*entries):
+            return ContentReasoning(reasoning="x", signature="reasoning-details://" + json.dumps(list(entries)))
+        encrypted = {"type": "reasoning.encrypted", "data": "sig", "id": "t1", "format": "google-gemini-v1"}
+        signed_text = {"type": "reasoning.text", "signature": "sig", "format": "anthropic-claude-v1"}
+        unsigned = {"type": "reasoning.text", "text": "plain", "format": "unknown"}
+        call = [ToolCall(id="t1", function="Bash", arguments={})]
+        messages = [ChatMessageUser(content="go"),
+                    ChatMessageAssistant(content=[details(unsigned, encrypted), ContentText(text="")], tool_calls=call),
+                    ChatMessageAssistant(content=[details(signed_text)], tool_calls=call),
+                    ChatMessageAssistant(content=[details(encrypted)]),  # no tool calls
+                    ChatMessageAssistant(content=[details(unsigned)], tool_calls=call),  # DeepSeek/GLM style
+                    ChatMessageAssistant(content=[ContentReasoning(reasoning="x", signature="reasoning-details://{")],
+                                         tool_calls=call),  # malformed: ignored
+                    ChatMessageAssistant(content=[ContentReasoning(reasoning="native", signature="anthropic-sig")],
+                                         tool_calls=call)]
+        self.assertEqual(replayed_signed_reasoning(messages),
+                         {"replayed_signed_tool_call_turns": 2,
+                          "replayed_signed_reasoning_formats": ["anthropic-claude-v1", "google-gemini-v1"]})
+        self.assertEqual(replayed_signed_reasoning(messages[:1] + messages[3:]), {"replayed_signed_tool_call_turns": 0})
 
     async def test_truncated_tool_calls_never_reach_scaffold(self):
         from inspect_ai.model import ModelOutput
@@ -596,8 +625,10 @@ class ClaudeCodeConfigurationTests(unittest.TestCase):
         self.assertTrue(all(v["matches"] for v in installed_versions().values()))
         self.assertEqual(CLAUDE_CODE_ENV["BASH_MAX_TIMEOUT_MS"], "120000")
         self.assertEqual(CLAUDE_CODE_ENV["BASH_DEFAULT_TIMEOUT_MS"], "120000")
-        for name in ("Agent", "Task", "WebSearch", "WebFetch"):
+        for name in ("Agent", "Task", "WebSearch", "WebFetch", "Workflow", "SendMessage", "Skill"):
             self.assertIn(name, DISALLOWED_TOOLS)
+        for name in ("Bash", "Read", "Write", "Edit", "TaskStop"):  # the built-ins agents keep
+            self.assertNotIn(name, DISALLOWED_TOOLS)
         self.assertFalse(any("KEY" in k or "TOKEN" in k for k in CLAUDE_CODE_ENV))
 
     def test_dockerfile_has_no_repository_content(self):
@@ -940,18 +971,18 @@ class BuildClaudeAgentTests(unittest.TestCase):
             build_claude_agent("PROMPT", [], None, **kwargs)
         return captured
 
-    def test_default_appends_and_keeps_auto_memory(self):
+    def test_default_replaces_and_keeps_auto_memory(self):
         options = self.build()
-        self.assertEqual(options["system_prompt"], "PROMPT")
-        self.assertNotIn("replace_system_prompt", options)
+        self.assertEqual(options["replace_system_prompt"], "PROMPT")
+        self.assertNotIn("system_prompt", options)
         self.assertEqual(options["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"], "0")
         self.assertEqual(options["env"]["CLAUDE_CODE_MAX_RETRIES"], "4")
         self.assertEqual(options["version"], "sandbox")
 
-    def test_replace_mode_and_memory_off(self):
-        options = self.build(system_prompt_mode="replace", auto_memory=False)
-        self.assertEqual(options["replace_system_prompt"], "PROMPT")
-        self.assertNotIn("system_prompt", options)
+    def test_append_mode_and_memory_off(self):
+        options = self.build(system_prompt_mode="append", auto_memory=False)
+        self.assertEqual(options["system_prompt"], "PROMPT")
+        self.assertNotIn("replace_system_prompt", options)
         self.assertEqual(options["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"], "1")
         with self.assertRaises(ValueError):
             self.build(system_prompt_mode="prepend")

@@ -316,9 +316,10 @@ docs/prompts.md.
   `total_cost` is never used as billing). `classify_generate_error(ex)` maps errors to
   `unbilled_error` or uncertain.
 * `build_claude_agent(prompt, tools, filter, env=None, cwd="/workspace", *,
-  system_prompt_mode="append", auto_memory=True)` runs genuine Claude Code
+  system_prompt_mode="replace", auto_memory=True)` runs genuine Claude Code
   (`version="sandbox"`, `effort="high"`, `permission_mode="bypassPermissions"`,
-  `disallowed_tools = ("Agent", "Task", "WebSearch", "WebFetch")`, no refusal or error
+  `disallowed_tools = inspect_adapter.DISALLOWED_TOOLS`: every built-in except `Bash`, `Read`,
+  `Write`, `Edit` and `TaskStop`, since October 19, 2026), no refusal or error
   retries). `claude_code_env(auto_memory)` sets `BASH_DEFAULT_TIMEOUT_MS` and
   `BASH_MAX_TIMEOUT_MS` to 120000, `CLAUDE_CODE_MAX_RETRIES=4`, `API_TIMEOUT_MS=1800000`,
   `CLAUDE_CODE_DISABLE_AUTO_MEMORY=0` (approved), and disables telemetry, updates and
@@ -345,7 +346,7 @@ docs/prompts.md.
   launch_gates, paid_calls_made: 0, credentials_read: False}`. Own checks: agent count,
   spontaneous track with seeding and mitigations off and no `seeded` block at all (S3),
   `max_connections` explicit and equal to `agent_count` (S2), `system_prompt_mode ==
-  "append"` and auto-memory on, persona counts equal to the balanced allocation, pinned
+  "replace"` and auto-memory on, persona counts equal to the balanced allocation, pinned
   packages, importable conference/tools/prompts modules, Docker CLI and engine, both images
   built, and the launch interlock (S1: no leftover judge, running comparator or other agent
   sandbox container; no override). It merges `launch_gates.evaluate`; a missing or failing
@@ -484,7 +485,7 @@ the ledger opened read-only and `docker image inspect`. A gate that raises is a 
 | --- | --- | --- |
 | `fixed_task_manifest` | `data/pilot_subset.json`, `data/manifest.json` | config `fixed_task_manifest` pins the path, the subset SHA-256 and the parent SHA-256 recorded in the subset and on disk |
 | `frozen_dataset` | same | `FrozenDataset` loads and all 14 pilot templates hash-verify |
-| `approved_settings` | `configs/pilot.json` | every `APPROVED_SETTINGS` key equals the plan value with the same type (track, seeding and mitigations off, 20 agents from `runtime.APPROVED_AGENT_COUNT`, 14 tasks, 5400 s, 600 s, 120 s, append prompt, auto-memory, no internet, OpenRouter, model id), and `max_connections` is present, a positive integer and equal to `agent_count` (S2) |
+| `approved_settings` | `configs/pilot.json` | every `APPROVED_SETTINGS` key equals the plan value with the same type (track, seeding and mitigations off, 20 agents from `runtime.APPROVED_AGENT_COUNT`, 14 tasks, 5400 s, 600 s, 120 s, replace prompt, auto-memory, no internet, OpenRouter, model id), and `max_connections` is present, a positive integer and equal to `agent_count` (S2) |
 | `seeded_track` | config | track `spontaneous`, `seeded_contagion_enabled` false and no `seeded` block at all, enabled or not (S3) |
 | `config_caps` | config | `max_pilot_usd`, `max_analysis_usd`, `max_compatibility_usd` equal `DEFAULT_CAPS` |
 | `route_pricing` | `route-pricing-<UTC>.json` + `catalog-snapshots/<sha256>.json` | `valid`, `credential_used: false`, age at most `route_pricing_max_age_hours` (72), frozen settings equal `frozen_fields(settings_from_config(config))`, archived catalog re-validates offline |

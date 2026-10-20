@@ -370,6 +370,8 @@ class CommandLineTests(unittest.TestCase):
         (self.run_dir / "inspect").mkdir(parents=True)
         (self.run_dir / "results.html").write_text("<!doctype html><title>R</title><h1>Run</h1><p>Report.</p>")
         (self.run_dir / "results.json").write_text(json.dumps({"run": RUN_ID}) + "\n")
+        # A baseline run (research_swarm.budget.run_budget_track); paid judging refuses other tracks.
+        (self.run_dir / "settings.json").write_text(json.dumps({"config": {}, "effective": {"budget_track": "baseline"}}))
         self.run = feature_run(self.run_dir)
         self.judge_dir = self.tmp / "copy" / RUN_ID / "analysis" / "judge"
 

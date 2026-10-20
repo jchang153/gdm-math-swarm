@@ -82,3 +82,58 @@ class ProviderTests(unittest.TestCase):
         validate_catalog(catalog,ProviderSettings())
         catalog["data"]["endpoints"][0]["max_completion_tokens"]=8192
         with self.assertRaises(ValueError):validate_catalog(catalog,ProviderSettings())
+
+
+class AblationModelTests(unittest.TestCase):
+    def test_request_options_allow_only_the_ablation_models(self):
+        from research_swarm.provider import ABLATION_MODEL_IDS, GLM_MODEL_ID
+        self.assertEqual(ABLATION_MODEL_IDS, (MODEL_ID, GLM_MODEL_ID))
+        options = ProviderSettings(model_id=GLM_MODEL_ID, provider_route="z-ai/fp8").request_options()
+        self.assertEqual(options["provider"], {"only": ["z-ai/fp8"], "allow_fallbacks": False, "require_parameters": True})
+        with self.assertRaises(ValueError):
+            ProviderSettings(model_id="openai/gpt-6.1").request_options()
+
+
+class GeminiModelTests(unittest.TestCase):
+    """The owner's Gemini track (docs/plan.md, "Gemini 3.1 Pro collaboration run authorized")."""
+    CONFIG = Path(__file__).resolve().parents[1] / "configs" / "gemini-collab.json"
+
+    def catalog(self, tiered=True):
+        # Listed prices: $2/$12 per million prompt/completion tokens up to 200K prompt tokens, $4/$18 above
+        # (cache read $0.20/$0.40, cache write $0.375), on two standard Google routes.
+        base = {"prompt": "0.000002", "completion": "0.000012", "input_cache_read": "0.0000002",
+                "input_cache_write": "0.000000375", "request": "0"}
+        if tiered:
+            base["overrides"] = [{"prompt": "0.000004", "completion": "0.000018", "input_cache_read": "0.0000004",
+                                  "input_cache_write": "0.000000375"}]
+        endpoint = {"status": 0, "context_length": 1048576, "max_completion_tokens": 65536,
+                    "supported_parameters": ["tools", "tool_choice", "reasoning", "include_reasoning",
+                                             "reasoning_effort", "max_tokens"], "pricing": base}
+        return {"data": {"id": "google/gemini-3.1-pro-preview", "endpoints": [
+            dict(copy.deepcopy(endpoint), tag="google-vertex/global", provider_name="Google"),
+            dict(copy.deepcopy(endpoint), tag="google-ai-studio", provider_name="Google AI Studio")]}}
+
+    def test_config_settings_cover_the_upper_tier_on_the_pinned_route(self):
+        import json
+        from research_swarm.provider import GEMINI_MODEL_ID, KNOWN_MODEL_IDS, TRACK_MODEL_IDS
+        settings = settings_from_config(json.loads(self.CONFIG.read_text()))
+        self.assertEqual((settings.model_id, settings.provider_route), (GEMINI_MODEL_ID, "google-vertex/global"))
+        self.assertEqual((settings.max_tokens, settings.reasoning_effort), (16384, "high"))  # as the baseline
+        self.assertEqual((settings.prompt_usd_per_token, settings.output_usd_per_token), ("0.000004", "0.000018"))
+        for tiered in (True, False):
+            self.assertEqual(validate_catalog(self.catalog(tiered), settings)["tag"], "google-vertex/global")
+        options = settings.request_options()
+        self.assertEqual(options["provider"], {"only": ["google-vertex/global"], "allow_fallbacks": False,
+                                               "require_parameters": True})
+        self.assertEqual(options["reasoning"], {"effort": "high", "exclude": False})
+        self.assertEqual(TRACK_MODEL_IDS["gemini"], (GEMINI_MODEL_ID,))
+        self.assertNotIn(GEMINI_MODEL_ID, TRACK_MODEL_IDS["ablation"])
+        self.assertIn(GEMINI_MODEL_ID, KNOWN_MODEL_IDS)
+        # Lower-tier reservation prices do not cover the >200K tier.
+        lower = ProviderSettings(model_id=GEMINI_MODEL_ID, provider_route="google-vertex/global",
+                                 prompt_usd_per_token="0.000002", output_usd_per_token="0.000012")
+        with self.assertRaises(ValueError):
+            validate_catalog(self.catalog(), lower)
+        # A response bound above the route's 65,536 maximum completion is refused.
+        with self.assertRaises(ValueError):
+            validate_catalog(self.catalog(), ProviderSettings(**{**frozen_fields(settings), "max_tokens": 70000}))

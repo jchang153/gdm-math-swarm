@@ -53,8 +53,10 @@ from .budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, INITIAL_PILOT_SETTLED_US
                      CACHE_REPEAT_CAP_USD, CACHE_REPEAT_PRIOR_SETTLED_USD, CACHE_REPEAT_PRIOR_HELD_USD,
                      CACHE_REPEAT_PRIOR_COMMITTED_USD, CACHE_REPEAT_PRIOR_CALLS_SHA256, cache_repeat_prior_problems,
                      LEGACY_LEDGER_RELATIVE, UNRESOLVED_STATES, list_requests,
-                     read_snapshot)
-from .provider import CONFIG_OVERRIDABLE, MODEL_ID, frozen_fields, settings_from_config, validate_catalog
+                     read_snapshot, budget_track_problems, caps_for, ledger_path_for, track_ledger_relative,
+                     track_of, BUDGET_TRACKS)
+from .provider import (CONFIG_OVERRIDABLE, MODEL_ID, SIGNED_REASONING_MODEL_IDS, TRACK_MODEL_IDS, frozen_fields,
+                       settings_from_config, validate_catalog)
 from .provider_limit import TOLERANCE_USD as LIMIT_TOLERANCE_USD, assess as assess_provider_limit
 
 PILOT_SUBSET = "data/pilot_subset.json"
@@ -74,7 +76,7 @@ _APPROVED_STATIC_SETTINGS = {
     "task_count": 14,                                          # Current pilot scope / Initial task sampling
     "max_run_seconds": 10800, "post_depletion_seconds": 600,    # Run duration and stopping
     "compilation_timeout_seconds": 120,                        # Compilation time limit
-    "system_prompt_mode": "append", "claude_auto_memory": True,  # Effective agent system prompt
+    "system_prompt_mode": "replace", "claude_auto_memory": True,  # Effective agent system prompt
     "general_internet_enabled": False,                         # Controlled baseline access
     "provider": "openrouter", "candidate_model_id": MODEL_ID,  # Model and intended API route
 }
@@ -134,6 +136,19 @@ def seeded_config_problems(config):
     return problems
 
 
+# Populations allowed on each non-baseline budget track (budget.BUDGET_TRACKS): the prompt
+# ablation track 10 or 20, the owner's Gemini track 10 (docs/plan.md, "Gemini 3.1 Pro
+# collaboration run authorized, October 19, 2026"); the baseline stays at
+# runtime.APPROVED_AGENT_COUNT.
+TRACK_AGENT_COUNTS = {track: spec["agent_counts"] for track, spec in BUDGET_TRACKS.items()}
+ABLATION_AGENT_COUNTS = TRACK_AGENT_COUNTS["ablation"]
+
+# Optional prompt ablation (docs/prompts.md, "Prompt ablation variants"); the check
+# lives in prompts so runtime preflight can use it without importing this module.
+from .prompts import (PERSONA_REVIEWING_DEFAULT, PERSONA_REVIEWING_KEY, PROMPT_VARIANT_KEY,  # noqa: E402
+                      persona_reviewing_problems, prompt_variant_problems)
+
+
 CONFIG_CAP_KEYS = {"pilot": "max_pilot_usd", "analysis": "max_analysis_usd", "compatibility": "max_compatibility_usd"}
 
 # (evidence prefix, image roles that must match, image roles checked only if recorded)
@@ -172,6 +187,27 @@ def capacity_config(config):
 # text the probe ran, equal to runtime.compose_fingerprint(config, current agent
 # image ID), so a later change to the generated compose file invalidates it.
 COMPOSE_BOUND_EVIDENCE = ("runtime-e2e", "runtime-isolation", "runtime-capacity")
+# Evidence gates the owner may waive for one run on the gemini track (docs/plan.md, "Gemini 3.1 Pro
+# collaboration run authorized", Evidence row): config ``waived_evidence_gates`` (a subset of these)
+# plus a nonempty ``evidence_waiver_approval`` note. Never on the baseline or ablation track.
+WAIVABLE_EVIDENCE = ("evaluator", "runtime-e2e", "runtime-isolation", "runtime-capacity")
+
+
+def evidence_waiver(config, prefix):
+    """None when ``prefix`` is not waived; else {"note", "problems"} (problems make the gate fail)."""
+    waived = (config or {}).get("waived_evidence_gates")
+    if not waived or prefix not in waived:
+        return None
+    problems = []
+    if not isinstance(waived, list) or any(name not in WAIVABLE_EVIDENCE for name in waived):
+        problems.append(f"waived_evidence_gates must be a list drawn from {list(WAIVABLE_EVIDENCE)}")
+    if track_of(config) != "gemini":
+        problems.append("an evidence waiver is allowed only on the gemini budget track")
+    note = (config or {}).get("evidence_waiver_approval")
+    if not isinstance(note, str) or not note.strip():
+        problems.append("waived_evidence_gates requires a nonempty evidence_waiver_approval note")
+        note = ""
+    return {"note": note.strip(), "problems": problems}
 # Lean evidence that must come from a complete run (all pilot tasks, strict variant
 # where applicable, no subset/skip flags: ``complete`` true) at the operational
 # judge limits (``limits`` {timeout_seconds, memory, cpus} equal to the config's).
@@ -219,6 +255,18 @@ COMPATIBILITY_REQUIRED_CHECKS = (
     "completion_within_max_tokens", "reasoning_cap_enforced", "no_estimate_violation", "route_pinned",
     "no_sample_error")
 COMPATIBILITY_INFORMATIONAL_CHECKS = ("truncation_observed", "compaction_observed")
+# Required in addition for models with signed reasoning (provider.SIGNED_REASONING_MODEL_IDS,
+# e.g. Gemini thought signatures): a later request that replays an earlier assistant turn with
+# tool calls and its signed OpenRouter reasoning_details was accepted by the provider.
+COMPATIBILITY_SIGNED_REASONING_CHECK = "signed_reasoning_tool_call_replay"
+
+
+def compatibility_required_checks(model_id):
+    """The compatibility evidence's required checks for ``model_id``."""
+    signed = (COMPATIBILITY_SIGNED_REASONING_CHECK,) if model_id in SIGNED_REASONING_MODEL_IDS else ()
+    return COMPATIBILITY_REQUIRED_CHECKS + signed
+
+
 # Every ledger state (budget.py); a request id in none of them is unknown to the ledger.
 LEDGER_STATES = (*UNRESOLVED_STATES, "settled", "estimate_violation", "violation_acknowledged")
 VIOLATION_STATES = ("estimate_violation", "violation_acknowledged")
@@ -409,6 +457,25 @@ class _Gates:
         subset_sha, parent_sha = _sha256(subset_path), _sha256(parent_path)
         recorded_parent = json.loads(subset_path.read_text()).get("parent_manifest_sha256")
         problems = []
+        from .dataset import ALL_TASK_SET, task_set_of
+        try:
+            task_set = task_set_of(self.config)
+        except ValueError as error:
+            return self.add("fixed_task_manifest", False, str(error))
+        if task_set == ALL_TASK_SET:
+            # The whole 71-task parent pool (docs/plan.md, "Gemini 3.1 Pro collaboration run
+            # authorized"): only on the gemini budget track, pinning data/manifest.json itself.
+            if track_of(self.config) != "gemini":
+                problems.append("task_set all71 is allowed only on the gemini budget track")
+            if Path(str(spec.get("path", ""))).as_posix() != PARENT_MANIFEST:
+                problems.append(f"path must be {PARENT_MANIFEST} for task_set all71")
+            if not (spec.get("sha256") == spec.get("parent_manifest_sha256") == recorded_parent == parent_sha):
+                problems.append("sha256 and parent_manifest_sha256 must both equal sha256(data/manifest.json)")
+            if self.config.get("task_count") != 71:
+                problems.append("task_count must be 71 for task_set all71")
+            return self.add("fixed_task_manifest", not problems,
+                            "; ".join(problems) or "config pins the whole 71-task parent pool", parent_path,
+                            sha256=parent_sha, task_set=task_set)
         if Path(str(spec.get("path", ""))).as_posix() != PILOT_SUBSET:
             problems.append(f"path must be {PILOT_SUBSET}")
         if spec.get("sha256") != subset_sha:
@@ -419,15 +486,47 @@ class _Gates:
                  subset_path, sha256=subset_sha, parent_manifest_sha256=parent_sha)
 
     def frozen_dataset(self):
-        from .dataset import FrozenDataset
-        dataset = FrozenDataset(self.repo)
+        from .dataset import FrozenDataset, task_set_of
+        dataset = FrozenDataset(self.repo, task_set=task_set_of(self.config))
         for task in dataset.pilot_tasks:
             task.template_source(self.repo)  # raises on a template hash mismatch
-        self.add("frozen_dataset", True, "FrozenDataset loads; 71 parent tasks, 14 pilot templates hash-verified",
-                 self.repo / PILOT_SUBSET, seed=dataset.subset.get("seed"), task_ids=list(dataset.subset["task_ids"]))
+        self.add("frozen_dataset", True, f"FrozenDataset loads; 71 parent tasks, {len(dataset.pilot_tasks)} run templates "
+                 f"hash-verified (task_set {dataset.task_set})", self.repo / PILOT_SUBSET, seed=dataset.subset.get("seed"),
+                 task_set=dataset.task_set, task_ids=[t.task_id for t in dataset.pilot_tasks])
 
     def approved_settings(self):
         approved = approved_settings()
+        track = track_of(self.config)
+        if track is not None:
+            # Budget tracks (docs/plan.md, "Prompt ablation track" and "Gemini 3.1 Pro collaboration
+            # run authorized"): the track's own populations are allowed...
+            counts = TRACK_AGENT_COUNTS[track]
+            approved.pop("agent_count")
+            if self.config.get("agent_count") not in counts or type(self.config.get("agent_count")) is not int:
+                approved["agent_count"] = sorted(counts)
+            # ...and any model of the track (TRACK_MODEL_IDS), as long as the provider settings agree.
+            models = TRACK_MODEL_IDS[track]
+            approved.pop("candidate_model_id")
+            model = self.config.get("candidate_model_id")
+            try:
+                configured = settings_from_config(self.config).model_id
+            except ValueError:
+                configured = None
+            if model not in models or configured != model:
+                approved["candidate_model_id"] = f"one of {list(models)}, equal to provider_settings.model_id"
+        if track == "gemini" and self.config.get("task_set") == "all71":
+            approved["task_count"] = 71  # owner decision: the whole parent pool on this track
+        if track == "gemini":
+            approved["max_run_seconds"] = 21600  # owner decision, October 20, 2026: a 6-hour clock
+        if track is None:
+            # The provider settings decide the model actually called: on the baseline they
+            # must name the pinned MODEL_ID as well (not only candidate_model_id).
+            try:
+                configured = settings_from_config(self.config).model_id
+            except ValueError:
+                configured = None
+            if configured != MODEL_ID:
+                approved["provider_settings.model_id"] = MODEL_ID
         drift = {k: {"config": self.config.get(k), "approved": v} for k, v in approved.items()
                  if self.config.get(k) != v or type(self.config.get(k)) is not type(v)}
         problems = ["config differs from approved plan values: " + ", ".join(sorted(drift))] if drift else []
@@ -443,6 +542,8 @@ class _Gates:
             approval = self.config.get("unlimited_provider_key_approval")
             if not isinstance(approval, str) or not approval.strip():
                 problems.append("allow_unlimited_provider_key requires a nonempty unlimited_provider_key_approval note")
+        from . import runtime  # lazy, as in approved_settings(): the concurrent-run override's config check
+        problems += runtime.concurrent_run_problems(self.config)
         self.add("approved_settings", not problems, "; ".join(problems) or
                  "config matches approved plan values (max_connections equals agent_count)", drift=drift,
                  max_connections=self.config.get(MAX_CONNECTIONS_KEY), agent_count=self.config.get("agent_count"))
@@ -460,14 +561,32 @@ class _Gates:
             f"${self.config.get('behavior_judge_max_usd')})" if enabled(self.config) else
             "no automatic post-run behavior judge"))
 
+    def budget_track(self):
+        problems = budget_track_problems(self.config)
+        track = self.config.get("budget_track", "baseline")
+        self.add("budget_track", not problems, "; ".join(problems) or f"budget track {track!r}", budget_track=track)
+
+    def prompt_variant(self):
+        problems = prompt_variant_problems(self.config)
+        variant = self.config.get(PROMPT_VARIANT_KEY, "baseline")
+        self.add("prompt_variant", not problems, "; ".join(problems) or f"prompt variant {variant!r}",
+                 prompt_variant=variant)
+
+    def persona_reviewing(self):
+        problems = persona_reviewing_problems(self.config)
+        reviewing = self.config.get(PERSONA_REVIEWING_KEY, PERSONA_REVIEWING_DEFAULT)
+        self.add("persona_reviewing", not problems, "; ".join(problems) or f"persona reviewing lines {reviewing!r}",
+                 persona_reviewing=reviewing)
+
     def config_caps(self):
         drift = {}
+        caps = caps_for(self.config)
         for scope, key in CONFIG_CAP_KEYS.items():
             value = self.config.get(key)
-            if value is None or Decimal(str(value)) != Decimal(str(DEFAULT_CAPS[scope])):
-                drift[key] = {"config": value, "ledger_default": DEFAULT_CAPS[scope]}
-        self.add("config_caps", not drift, "config caps differ from budget.DEFAULT_CAPS: " + ", ".join(sorted(drift))
-                 if drift else "config caps equal DEFAULT_CAPS (" + ", ".join(f"{k} ${v}" for k, v in DEFAULT_CAPS.items()) + ")", drift=drift)
+            if value is None or Decimal(str(value)) != Decimal(str(caps[scope])):
+                drift[key] = {"config": value, "ledger_default": caps[scope]}
+        self.add("config_caps", not drift, "config caps differ from the approved ledger caps: " + ", ".join(sorted(drift))
+                 if drift else "config caps equal the approved ledger caps (" + ", ".join(f"{k} ${v}" for k, v in caps.items()) + ")", drift=drift)
 
     def route_pricing(self):
         path, record = newest_evidence(self.validation, "route-pricing")
@@ -496,9 +615,16 @@ class _Gates:
                 problems.append(f"offline catalog validation failed: {ex}")
         self.add("route_pricing", not problems, "; ".join(problems) or "fresh, valid, equal to launch settings",
                  path, age_hours=round(age, 2), provider_route=settings.provider_route,
+                 provider_name=(record.get("endpoint") or {}).get("provider_name"),
                  prompt_usd_per_token=settings.prompt_usd_per_token, output_usd_per_token=settings.output_usd_per_token)
 
     def evidence(self, prefix, required, optional):
+        waiver = evidence_waiver(self.config, prefix)
+        if waiver is not None:
+            # Owner waiver for this run only (docs/plan.md, "Gemini 3.1 Pro collaboration run
+            # authorized", Evidence row): recorded in the gate result and the run's settings.
+            return self.add(prefix, not waiver["problems"], "; ".join(waiver["problems"])
+                            or f"WAIVED by the owner for this run: {waiver['note']}", waived=True)
         path, record = newest_evidence(self.validation, prefix)
         if path is None:
             return self.add(prefix, False, f"no {prefix}-<UTC>.json evidence in {self.rel(self.validation)}")
@@ -602,8 +728,8 @@ class _Gates:
         if record.get("all_required_passed") is not True:
             problems.append("all_required_passed is not true")
         checks = record.get("checks") if isinstance(record.get("checks"), dict) else {}
-        problems += check_problems(checks, COMPATIBILITY_REQUIRED_CHECKS)
         settings = settings_from_config(self.config)
+        problems += check_problems(checks, compatibility_required_checks(settings.model_id))
         if record.get("model_id") != settings.model_id:
             problems.append(f"model_id {record.get('model_id')!r} is not {settings.model_id!r}")
         if record.get("provider_route") != settings.provider_route:
@@ -611,7 +737,7 @@ class _Gates:
         checked = record.get("settings") if isinstance(record.get("settings"), dict) else {}
         if {k: v for k, v in checked.items() if k in CONFIG_OVERRIDABLE} != frozen_fields(settings):
             problems.append("checked settings differ from the ProviderSettings run_pilot will build")
-        cap = Decimal(str(DEFAULT_CAPS["compatibility"]))
+        cap = Decimal(str(caps_for(self.config)["compatibility"]))
         try:
             spent = Decimal(str(record.get("spent_usd")))
             if not spent.is_finite() or spent < 0:
@@ -701,7 +827,7 @@ class _Gates:
             problems.append("provider-side limit requirements not met: " + ", ".join(
                 k for k, v in (record.get("checks") or {}).items() if not v.get("passed", True)))
         assessment = assess_provider_limit(
-            record, pilot_remaining if pilot_remaining is not None else DEFAULT_CAPS["pilot"], self.now,
+            record, pilot_remaining if pilot_remaining is not None else caps_for(self.config)["pilot"], self.now,
             **({"allow_unlimited": True} if allow_unlimited else {}))
         failed = [name for name, check in assessment["checks"].items() if check.get("passed") is not True]
         if not assessment["all_required_passed"]:
@@ -739,6 +865,8 @@ class _Gates:
                  checks=assessment["checks"])
 
     def ledger(self, ledger_path, legacy):
+        if track_of(self.config) is not None:
+            return self.track_ledger(ledger_path)
         snapshot = read_snapshot(ledger_path)
         problems = []
         if legacy.exists():
@@ -812,6 +940,41 @@ class _Gates:
             path=self.rel(ledger_path), exists=snapshot is not None, pilot_remaining_usd=remaining)
         return snapshot, remaining
 
+    def track_ledger(self, ledger_path):
+        """A budget track's own ledger (budget.BUDGET_TRACKS): approved caps, no holds or
+        violations, money left. It is never the baseline ledger nor another track's ledger, and
+        carries no binding to baseline runs."""
+        track = track_of(self.config)
+        snapshot = read_snapshot(ledger_path)
+        caps = caps_for(self.config)
+        problems = []
+        if Path(ledger_path).resolve() == DEFAULT_LEDGER_PATH(self.repo).resolve():
+            problems.append(f"the {track} track must not use the baseline ledger")
+        for other in BUDGET_TRACKS:
+            if other != track and Path(ledger_path).resolve() == (self.repo / track_ledger_relative(other)).resolve():
+                problems.append(f"the {track} track must not use the {other} track's ledger")
+        for scope, data in (snapshot or {}).items():
+            if scope in caps and Decimal(data["cap_usd"]) != Decimal(str(caps[scope])):
+                problems.append(f"{track} ledger {scope} cap {data['cap_usd']} differs from the approved "
+                                f"${caps[scope]} (a raise is audited: budget.raise_cap)")
+        pilot = (snapshot or {}).get("pilot")
+        if pilot:
+            if pilot["unresolved_requests"]:
+                problems.append(f"{pilot['unresolved_requests']} unresolved pilot hold(s) in the {track} ledger; "
+                                "reconcile first (scripts/reconcile_ledger.py --ledger ...)")
+            if pilot["violation"]:
+                problems.append(f"{track} pilot scope has an unacknowledged estimate_violation")
+            if Decimal(pilot["remaining_usd"]) <= 0:
+                problems.append(f"no remaining pilot allowance in the {track} ledger")
+        remaining = pilot["remaining_usd"] if pilot else str(caps["pilot"])
+        self.add("ledger", not problems, "; ".join(problems) or (
+            f"no {track} ledger yet; it will be created with caps {caps}" if snapshot is None else
+            f"{track} ledger: approved caps, no holds, in-flight calls or violations"),
+            ledger_path if snapshot is not None else None,
+            path=self.rel(ledger_path), exists=snapshot is not None, pilot_remaining_usd=remaining,
+            budget_track=track)
+        return snapshot, remaining
+
     def credentials(self):
         from .secrets import credential_status
         status = credential_status(self.repo)
@@ -844,13 +1007,22 @@ def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy
     """
     now = now or datetime.datetime.now(datetime.timezone.utc)
     gates = _Gates(repo_root, config, validation_dir, now, image_id or docker_image_id)
-    ledger_path = Path(ledger_path) if ledger_path else DEFAULT_LEDGER_PATH(gates.repo)
+    if ledger_path:
+        ledger_path = Path(ledger_path)
+    elif budget_track_problems(config):
+        # Invalid track: the budget_track gate blocks; read (never create) no real ledger.
+        ledger_path = gates.repo / "state" / "invalid-budget-track.sqlite"
+    else:
+        ledger_path = ledger_path_for(config, gates.repo)
     legacy = Path(legacy_ledger_path) if legacy_ledger_path else gates.repo / LEGACY_LEDGER_RELATIVE
     gates.run("fixed_task_manifest", gates.task_manifest)
     gates.run("frozen_dataset", gates.frozen_dataset)
     gates.run("approved_settings", gates.approved_settings)
     gates.run("seeded_track", gates.seeded_track)
     gates.run("behavior_judge", gates.behavior_judge)
+    gates.run("budget_track", gates.budget_track)
+    gates.run("prompt_variant", gates.prompt_variant)
+    gates.run("persona_reviewing", gates.persona_reviewing)
     gates.run("config_caps", gates.config_caps)
     gates.run("route_pricing", gates.route_pricing)
     for prefix, required, optional in EVIDENCE_GATES:
@@ -867,5 +1039,7 @@ def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy
     blockers = [f"{name}: {result['reason']}" for name, result in gates.results.items() if not result["passed"]]
     return {"ready": not blockers, "blockers": blockers, "evidence": gates.results,
             "ledger": {"path": gates.rel(ledger_path), "exists": state["snapshot"] is not None,
-                       "snapshot": state["snapshot"], "default_caps": {k: str(v) for k, v in DEFAULT_CAPS.items()}},
+                       "snapshot": state["snapshot"],
+                       "default_caps": {} if budget_track_problems(config) else
+                       {k: str(v) for k, v in caps_for(config).items()}},
             "images": gates.images, "checked_at": now.isoformat(), "credentials_read": False, "network_calls": 0}
