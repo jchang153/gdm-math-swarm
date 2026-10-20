@@ -1262,6 +1262,13 @@ class EvaluateRunTests(unittest.TestCase):
                          f'-- def MyAnswer : Prop := {claim}\ndef MyAnswer : Prop := False\n'):
             self.assertFalse(restated(*self.fermat('MyAnswer', preamble)), preamble)
         self.assertIsNone(restated(*self.fermat('MyAnswer', f'/- def MyAnswer : Prop := {claim} -/\n')))
+        # Codex review: an indented helper body ends at the next declaration
+        self.assertFalse(restated(*self.fermat(
+            'MyAnswer', f'  def MyAnswer : Prop := False\n  theorem t : {claim} := by\n    sorry\n')))
+        self.assertFalse(restated(*self.fermat(
+            'MyAnswer', f'def MyAnswer : Prop := False\nlemma t : {claim} := by\n  sorry\n')))
+        self.assertTrue(restated(*self.fermat(
+            'MyAnswer', f'  def MyAnswer : Prop :=\n    {claim}\n  theorem t : True := trivial\n')))
         green = self.dataset.tasks['Green32_hasCosetHole_empty'].template_source(self.dataset.repository)
         self.assertFalse(restated(green, (ev.FIXTURE_DIR / 'submissions' / 'green32_genuine.lean').read_text()))
 

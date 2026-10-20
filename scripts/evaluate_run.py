@@ -399,8 +399,8 @@ def evaluate_one(item, dataset, tasks, backend, describe, clock=time.time):
     return entry
 
 
-_HELPER_DECL = re.compile(r"(?ms)^[ \t]*(?:@\[[^\]\n]*\][ \t\n]*)?(?:(?:noncomputable|private|protected)[ \t]+)*"
-                          r"(?:def|abbrev)[ \t]+([^\s:({\[]+)[^\n]*?:=(.*?)(?=^\S|\Z)")
+_HELPER_START = re.compile(r"([ \t]*)(?:@\[[^\]\n]*\][ \t]*)?(?:(?:noncomputable|private|protected)[ \t]+)*"
+                           r"(?:def|abbrev)[ \t]+([^\s:({\[]+)")
 HELPER_CHAIN_LIMIT = 4
 
 
@@ -434,11 +434,24 @@ def _loose(text):
 
 
 def _helper_bodies(source):
-    """{declared name: body} for every def/abbrev in the editable regions."""
+    """{declared name: body} for every def/abbrev in the editable regions, comments removed.
+    A body runs from its `:=` to the next nonblank line indented no deeper than its
+    declaration (the next command), so indented namespace blocks stay separate."""
     bodies = {}
     for a, b in ev.editable_spans(source):
-        for match in _HELPER_DECL.finditer(_uncomment(source[a:b])):
-            bodies.setdefault(match.group(1), match.group(2).strip())
+        lines = _uncomment(source[a:b]).split('\n')
+        for i, line in enumerate(lines):
+            match = _HELPER_START.match(line)
+            if not match:
+                continue
+            indent, body = len(match.group(1).expandtabs()), [line[match.end():]]
+            for later in lines[i + 1:]:
+                if later.strip() and len(later) - len(later.lstrip()) <= indent:
+                    break
+                body.append(later)
+            text = '\n'.join(body)
+            if ':=' in text:
+                bodies.setdefault(match.group(2), text.split(':=', 1)[1].strip())
     return bodies
 
 
