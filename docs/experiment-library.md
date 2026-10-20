@@ -316,6 +316,39 @@ makes no commit and refuses with `Nothing to upload`, writing no records; with `
 set to the first attempt's directory it verifies the result against the original state without
 committing (`status: verified`, `committed: false`).
 
+`--scope evaluator` publishes independent-evaluator results of an already published run that was
+published before it was evaluated; use it only after a user decision for that run. It replaces the
+run's `results.html` and `results.json`, adds the bundle's `RUN/evaluations/` records that are not
+yet published and replaces published ones that differ, and replaces the existing
+`RUN/conference-view/` pages that the rebuilt conference view changed. The bundle's conference file
+set must equal the published one (an extra or missing page is refused; nothing is added or deleted
+there), and a published evaluator record the bundle lacks is refused for review. The catalogue is
+regenerated as in the judge scope (the remote catalogue must be reproduced byte for byte and only
+this run's entry may change, typically `distinct_verified_tasks`), and `archive-manifest.json`
+changes only the digests of those files and `total_bytes`. As in the transcripts scope, no planned
+file may be stored as LFS or matched by an LFS rule, no run upload may reach 9.5 MiB, and
+`.gitattributes` must stay unchanged; the check also runs after every batch, before the catalogue
+and manifest batch. A published target whose bytes differ from the published manifest's record
+shows an earlier, interrupted attempt (`already_applied`, `resume_required`); resume as for the other
+scopes. Everything else (transcripts, raw records) is reported under `skipped_local_differences`
+and never uploaded. Regenerate the reports and the conference view first
+(`scripts/export_conference.py --run-dir runs/RUN`), then:
+
+```bash
+RUN_ID=gemini10-20261020T054602Z
+BUNDLE=runs/phase-b/hf-library-preparation/evaluator-$RUN_ID
+OUT=runs/phase-b/evaluator-publication-$RUN_ID
+python3 scripts/prepare_hf_library.py --run "$RUN_ID=runs/phase-b/inspect-$RUN_ID" --output-dir "$BUNDLE"
+python scripts/maintain_hf_run.py --scope evaluator --maintain-run "$RUN_ID" --bundle "$BUNDLE"  # plan only
+python scripts/maintain_hf_run.py --scope evaluator --maintain-run "$RUN_ID" --bundle "$BUNDLE" --commit \
+  --backup-dir "$OUT/attempt-1" --receipt "$OUT/attempt-1/maintenance-receipt.json"
+```
+
+The plan's `evaluator` block gives the evaluator record count, how many are added, the conference
+page count with `file_sets_equal: true` and how many pages are replaced, and the largest upload
+against `lfs_safe_limit_bytes`. Backups under `original/` hold both reports, every replaced page or
+record, the catalogue, the manifest and `.gitattributes`.
+
 ## Uploading and preserving other collaborators' experiments
 
 Authenticate with the official HF CLI, entering credentials privately. If login
@@ -505,3 +538,21 @@ apart from HF's injected creator-metadata script, and every page showed the full
 These are SDK/HTTP checks, not interactive browser tests. Before-inventories, original copies,
 plans, receipts and hosted checks are in the ignored
 `runs/phase-b/transcripts-publication-RUN/attempt-1/` directories.
+
+The independent-evaluator results of `gemini10-20261020T054602Z` (published at revision
+`8372ccc8b6b99fd39b7c680edfdf2ee72acb2178` before it was evaluated) were added at private revision
+`ee145a4d29d6f5739a1081aa0901246491a8afad` with the evaluator scope of `scripts/maintain_hf_run.py`,
+from base revision `8372ccc8b6b99fd39b7c680edfdf2ee72acb2178` in 4 guarded commits, at the user's
+request in chat on October 20, 2026. It replaced the run's `results.html` and `results.json` (16
+genuine and 4 unresolved of the 20 accepted submissions, with the unresolved reasons, the
+native_decide finding and the evaluator validation record
+`data/validation/evaluator-20261020T184044Z.json` from `gemini-collab` commit `7372170`), added
+`evaluations/evaluations.jsonl` and `evaluations/summary.json` (the already published
+`queue.jsonl` and `sources/` were identical and kept), replaced the two conference-view files the
+rebuild changed (`index.html`, `manifest.json`) and regenerated the catalogue, where only this
+run's entry changed (`distinct_verified_tasks` 0 to 16, shown as 16 / 71); the other 4 entries were
+reproduced byte for byte. Verification against the base revision found 18,248 files: 9 uploads,
+1,693 planned files matched and 16,555 were preserved unchanged; `.gitattributes` unchanged, no LFS.
+These are SDK checks, not interactive browser tests. The before-inventory, original copies, plan
+and receipt are in the ignored `runs/phase-b/evaluator-publication-gemini10-20261020T054602Z/attempt-1/`
+directory.
