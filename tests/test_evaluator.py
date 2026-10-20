@@ -1250,6 +1250,12 @@ class EvaluateRunTests(unittest.TestCase):
                                  ('A', f'def B : Prop := (∀ n : ℕ, Squarefree (n.fermatNumber))\ndef A : Prop := B\n'),
                                  ('A', f'noncomputable def A : Prop :=\n  {claim}\n')):
             self.assertTrue(restated(*self.fermat(answer, preamble)), answer)
+        # Codex review: a comment quoting the question is not a restatement
+        for answer, preamble in ((f'True /- {claim} -/', ''), ('False /- note /- nested -/ -/', ''),
+                                 ('MyAnswer', f'def MyAnswer : Prop := False -- not {claim}\n'),
+                                 ('MyAnswer', f'def MyAnswer : Prop := /- {claim} -/ False\n')):
+            self.assertFalse(restated(*self.fermat(answer, preamble)), answer)
+        self.assertTrue(restated(*self.fermat(f'/- a note -/ {claim}')))
         green = self.dataset.tasks['Green32_hasCosetHole_empty'].template_source(self.dataset.repository)
         self.assertFalse(restated(green, (ev.FIXTURE_DIR / 'submissions' / 'green32_genuine.lean').read_text()))
 

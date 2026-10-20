@@ -404,6 +404,26 @@ _HELPER_DECL = re.compile(r"(?ms)^[ \t]*(?:@\[[^\]\n]*\][ \t\n]*)?(?:(?:noncompu
 HELPER_CHAIN_LIMIT = 4
 
 
+def _uncomment(text):
+    """Text with Lean comments removed: nested block comments `/- … -/` and line comments `--`."""
+    out, depth, i = [], 0, 0
+    while i < len(text):
+        two = text[i:i + 2]
+        if two == '/-':
+            depth, i = depth + 1, i + 2
+        elif two == '-/' and depth:
+            depth, i = depth - 1, i + 2
+        elif depth:
+            i += 1
+        elif two == '--':
+            end = text.find('\n', i)
+            i = len(text) if end < 0 else end
+        else:
+            out.append(text[i])
+            i += 1
+    return ''.join(out)
+
+
 def _loose(text):
     """Comparison form ignoring whitespace and parentheses (both sides get the same treatment)."""
     return re.sub(r'[\s()]', '', text)
@@ -414,7 +434,7 @@ def _helper_bodies(source):
     bodies = {}
     for a, b in ev.editable_spans(source):
         for match in _HELPER_DECL.finditer(source[a:b]):
-            bodies.setdefault(match.group(1), match.group(2).strip())
+            bodies.setdefault(match.group(1), _uncomment(match.group(2)).strip())
     return bodies
 
 
@@ -435,7 +455,7 @@ def restated_answer(template_source, source):
 
     Researcher-side review signal only (docs/evaluator.md, "Restated answers"): the
     validated evaluator leaves such answers ``unresolved``, and the direct form carries no
-    evaluator flag. Whitespace and parentheses are ignored. Never a verdict; restatements in
+    evaluator flag. Lean comments, whitespace and parentheses are ignored. Never a verdict; restatements in
     other words and notation tricks are not detected.
     """
     try:
@@ -444,7 +464,7 @@ def restated_answer(template_source, source):
             return False
         x, y = ev.header_answer_span(template_source)
         a, b = ev.header_answer_span(source)
-        text, placeholder = source[a:b].strip(), template_source[x:y].strip()
+        text, placeholder = _uncomment(source[a:b]).strip(), template_source[x:y].strip()
         if text == placeholder or ev.CANONICAL_ANSWER.fullmatch(text):
             return False
         target, bodies = _loose(other), _helper_bodies(source)
