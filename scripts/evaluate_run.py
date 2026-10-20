@@ -563,7 +563,9 @@ def evaluate_run(run_dir, backend, dataset=None, include_rejected=False, retry_u
     ``closed``/``request_meta``: from ``closed_requests`` (judge-requested
     problem_closed submissions); ClosedRequestError is raised before any write.
     """
-    dataset = dataset or FrozenDataset(ROOT)
+    if dataset is None:
+        from research_swarm.dataset import run_task_set
+        dataset = FrozenDataset(ROOT, task_set=run_task_set(run_dir))  # the run's own task set
     submissions, tasks, notes = collect_submissions(run_dir, include_rejected, closed, request_meta)
     out_dir = ev.run_evaluations_dir(run_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

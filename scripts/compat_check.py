@@ -11,6 +11,9 @@ before the paid call. Do not run it during the execution hold (docs/plan.md).
 Refusals (nothing is spent and no credential is read):
 
 * without ``--i-have-user-approval``;
+* while another paid launcher of this checkout (a pilot or another compatibility check)
+  holds the launch lock (``runtime.launch_lock``, state/launch.lock next to the ledger),
+  which this check then holds until it ends;
 * unless the ledger scope ``compatibility`` (budget.DEFAULT_LEDGER_PATH, opened with
   budget.DEFAULT_CAPS) exists with the approved $2 cap, has no unacknowledged
   estimate violation and at least ``--min-remaining`` left;
@@ -19,8 +22,11 @@ Refusals (nothing is spent and no credential is read):
   settings, credential presence, and the unpaid runtime-e2e and runtime-isolation
   evidence), the pinned Inspect packages are installed, the launch interlock is clear
   (``runtime.launch_interlock``: no leftover judge container, no running comparator
-  container, no agent sandbox of another run; no override for this paid check), and
-  both image tags resolve to local image IDs;
+  container, no agent sandbox of another run; no command-line override for this paid
+  check, only the config's recorded concurrent-run override on a track that allows it,
+  which turns another checkout's agent sandboxes and judge compilers into warnings recorded
+  in the evidence as ``concurrent_run_override``; comparators and this checkout's own
+  sandboxes still block), and both image tags resolve to local image IDs;
 * unless the operator types the remaining compatibility allowance (``--yes`` skips
   the prompt and may be used only when the user approved this exact run).
 
@@ -54,6 +60,11 @@ If the probe does not pass, the agent run is skipped (abort reason
 
 Abort criteria: no request is admitted after ``--max-requests`` (default 12)
 admitted agent requests; ``--max-minutes`` (default 10) after the first inference;
+``allowance_exhausted``: the ledger refused the next request only because the remaining
+compatibility allowance cannot cover its reservation (``BudgetExceeded`` without an
+estimate violation; with $4/$18 reservation prices this can come before
+``--max-requests``). These three end the check normally, and the checks are judged on what
+ran. Failures: any other admission refusal (``admission_refused``);
 the first permanent provider HTTP 4xx (excluding transient 408/429), converted
 pre-generation rejection, tool-call parse failure or provider output error; any
 estimate violation in the compatibility scope. An abort stops admission at once;
@@ -69,6 +80,12 @@ criteria do not change the pilot's retry policy. Known transient attempt errors
 are allowed in the final evidence only after a later successful provider-priced
 inference by that agent; unknown or terminal errors still fail the check, and
 unresolved billing holds still block launch until reconciled.
+
+Signed reasoning (``provider.SIGNED_REASONING_MODEL_IDS``, e.g. Gemini thought signatures in
+OpenRouter ``reasoning_details``): the required check ``signed_reasoning_tool_call_replay``
+passes only when a later agent request replayed an earlier assistant turn that carried both
+tool calls and signed reasoning details (encrypted data or a signature), and the provider
+accepted it (finished, provider-priced). For other models the check is informational.
 
 Writes data/validation/compatibility-<UTC YYYYMMDDTHHMMSSZ>.json (schema
 ``gdm-compatibility/1``), read by the launch gate ``compatibility``. ``request_ids``
@@ -98,10 +115,10 @@ sys.path.insert(0, str(ROOT / "src"))
 os.environ.setdefault("INSPECT_DISPLAY", "plain")  # eval_async has no display argument
 
 from research_swarm import runtime  # noqa: E402
-from research_swarm.budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, BudgetLedger, caps_for,  # noqa: E402
-                                   ledger_path_for, list_requests)
+from research_swarm.budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, BudgetExceeded, BudgetLedger,  # noqa: E402
+                                   caps_for, ledger_path_for, list_requests)
 from research_swarm.inspect_adapter import _rejected_without_generation, classify_generate_error  # noqa: E402
-from research_swarm.provider import frozen_fields, settings_from_config  # noqa: E402
+from research_swarm.provider import SIGNED_REASONING_MODEL_IDS, frozen_fields, settings_from_config  # noqa: E402
 
 SCHEMA = "gdm-compatibility/1"
 PREFIX = "compatibility"
@@ -124,7 +141,11 @@ REQUIRED_CHECKS = ("tool_call_parsed", "conference_tool_call", "reasoning_replay
                    "completion_within_max_tokens", "reasoning_cap_enforced", "no_estimate_violation", "route_pinned",
                    "no_sample_error")
 OPTIONAL_CHECKS = ("truncation_observed", "compaction_observed")
-# Abort reasons that mean the check failed (the others end it normally).
+# Required for models with signed reasoning (SIGNED_REASONING_MODEL_IDS; launch_gates
+# COMPATIBILITY_SIGNED_REASONING_CHECK), informational otherwise.
+SIGNED_REASONING_CHECK = "signed_reasoning_tool_call_replay"
+# Abort reasons that mean the check failed (the others, max_requests, max_minutes and
+# allowance_exhausted, end it normally).
 FAILURE_ABORTS = ("provider_4xx", "provider_rejection", "tool_call_parse_failure", "provider_output_error", "estimate_violation",
                   "admission_refused", "reasoning_cap_unverified", "monitor_error")
 # Every ledger state (research_swarm.budget); request rows are looked up in all of them.
@@ -161,18 +182,30 @@ def rel(path):
 # ---------------------------------------------------------------------------
 # Refusal checks (unpaid; no credential)
 
+def approved_cap(caps):
+    """The approved compatibility allowance for these caps: $2 for the baseline and the
+    ablation track; a budget track's own recorded allowance otherwise (gemini: $10, owner
+    decision, docs/plan.md "Gemini 3.1 Pro collaboration run authorized")."""
+    from research_swarm.budget import BUDGET_TRACKS
+    for spec in BUDGET_TRACKS.values():
+        if caps is spec["caps"] or caps == spec["caps"]:
+            return Decimal(str(spec["caps"][SCOPE]))
+    return APPROVED_CAP_USD
+
+
 def ledger_problems(snapshot, min_remaining, caps=DEFAULT_CAPS):
     """Reasons to refuse based on the compatibility scope of a ledger snapshot."""
     problems = []
+    approved = approved_cap(caps)
     default = caps.get(SCOPE)
-    if default is None or Decimal(str(default)) != APPROVED_CAP_USD:
-        problems.append(f"budget.DEFAULT_CAPS[{SCOPE!r}] is {default}, not the approved ${APPROVED_CAP_USD}")
+    if default is None or Decimal(str(default)) != approved:
+        problems.append(f"budget.DEFAULT_CAPS[{SCOPE!r}] is {default}, not the approved ${approved}")
     data = (snapshot or {}).get(SCOPE)
     if data is None:
         problems.append(f"ledger scope {SCOPE!r} does not exist")
         return problems
-    if Decimal(data["cap_usd"]) != APPROVED_CAP_USD:
-        problems.append(f"ledger scope {SCOPE!r} cap is ${data['cap_usd']}, not the approved ${APPROVED_CAP_USD}")
+    if Decimal(data["cap_usd"]) != approved:
+        problems.append(f"ledger scope {SCOPE!r} cap is ${data['cap_usd']}, not the approved ${approved}")
     if data.get("violation"):
         problems.append(f"ledger scope {SCOPE!r} has an unacknowledged estimate_violation")
     if Decimal(data["remaining_usd"]) < Decimal(str(min_remaining)):
@@ -198,13 +231,17 @@ def evaluate_gates(config):
     return launch_gates.evaluate(config, ROOT)
 
 
-def environment_check(config, interlock=None):
+def environment_check(config, interlock=None, *, override_record=None):
     """(problems, pinned images): pinned packages, the launch interlock, image IDs (read-only Docker).
 
     The interlock (``runtime.launch_interlock``) refuses while a comparator container
     (label gdm-evaluator=1) runs, a judge container (gdm-judge=1) is left over, or an
     agent sandbox of another run runs, or when Docker cannot be listed. This paid
-    check has no override."""
+    check has no command-line override; only the config's recorded concurrent-run
+    override (``runtime.apply_concurrent_run_override``) turns another checkout's agent
+    sandboxes and judge compilers into warnings, which the evidence records: a dict
+    ``override_record`` receives that override's record (left empty without a valid
+    override). Comparators, this checkout's own sandboxes and listing failures still refuse."""
     from research_swarm.inspect_adapter import installed_versions
     problems, images = [], None
     versions = installed_versions()
@@ -212,8 +249,11 @@ def environment_check(config, interlock=None):
         problems.append("pinned Inspect runtime packages are not installed: "
                         + ", ".join(f"{k} {v['actual']} (expected {v['expected']})" for k, v in versions.items()
                                     if not v["matches"]))
-    status = (interlock or runtime.launch_interlock)(runtime.image_tags(config)["agent"])
+    status = runtime.apply_concurrent_run_override(
+        (interlock or runtime.launch_interlock)(runtime.image_tags(config)["agent"]), config)
     problems += status["blockers"]
+    if override_record is not None and status["concurrent_run_override"] is not None:
+        override_record.update(status["concurrent_run_override"])
     try:
         images = runtime.pin_images(config)
     except runtime.LaunchBlocked as ex:
@@ -238,7 +278,7 @@ def confirm(remaining, settings, args, ask=input):
     answer = ask(f"PAID compatibility check: one reasoning-cap probe request (max_tokens {args.cap_probe_max_tokens}), "
                  f"then one Claude Code agent on {settings.model_id} via route {settings.provider_route!r}, at most "
                  f"{args.max_requests} admitted agent requests and {args.max_minutes} minutes. Remaining compatibility "
-                 f"allowance is ${remaining} (cap ${APPROVED_CAP_USD}). Type that amount in USD to start, anything else "
+                 f"allowance is ${remaining}. Type that amount in USD to start, anything else "
                  "aborts: ")
     try:
         return Decimal(str(answer).strip().lstrip("$").replace(",", "")) == Decimal(str(remaining))
@@ -323,7 +363,12 @@ class AbortGuard:
                             {"error": exception_message(ex)[:500], "status": status,
                              "reason": info.get("reason")})
             elif type(ex).__name__ == "LimitExceededError" and not self.clock.stop.is_set():
-                self.abort("admission_refused", error=str(ex)[:300])
+                if isinstance(ex.__cause__, BudgetExceeded) and not await asyncio.to_thread(self._violation):
+                    # The ledger refused only because the remaining allowance cannot cover this
+                    # request's reservation: the cap working as intended, a normal end.
+                    self.abort("allowance_exhausted", error=str(ex.__cause__)[:300], admitted=admitted)
+                else:
+                    self.abort("admission_refused", error=str(ex)[:300])
             raise
         failures = output_failures(output)
         if failures:
@@ -400,10 +445,15 @@ def _norm(value):
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
 
 
-def route_consistent(finished, settings):
+def route_consistent(finished, settings, provider_name=None):
+    """The serving provider is the pinned route and the model the frozen one. ``provider_name``
+    is the pinned endpoint's catalog name from the route freeze (e.g. Google Vertex endpoints
+    are tagged ``google-vertex/...`` but may be named "Google"); an exact (normalized) match
+    with it also counts, so another provider of the same family never does."""
     name, model = finished.get("provider_name"), finished.get("provider_model")
     route = _norm(settings.provider_route.split("/")[0])
-    name_ok = bool(name) and _norm(name).startswith(route)
+    name_ok = bool(name) and (_norm(name).startswith(route)
+                              or (bool(_norm(provider_name)) and _norm(name) == _norm(provider_name)))
     model_ok = bool(model) and (model == settings.model_id or re.fullmatch(re.escape(settings.model_id) + r"[-:@].+",
                                                                            model) is not None)
     return name_ok and model_ok
@@ -442,7 +492,31 @@ def unrecovered_model_errors(activity, events, agent_id):
     return errors
 
 
-def cap_probe_check(events, settings, violation_ids=()):
+def signed_replay_check(admitted, finished_by_id, events, settings):
+    """``signed_reasoning_tool_call_replay`` (passed, detail): a request replaying an earlier
+    assistant turn with tool calls and signed reasoning details (``inference_admitted``
+    ``replayed_signed_tool_call_turns`` > 0, counted by the budget filter on the request the
+    provider receives) finished without error at a provider-reported cost, and no such request
+    was rejected (unbilled provider error). Required for SIGNED_REASONING_MODEL_IDS."""
+    replays = [a for a in admitted if (a.get("replayed_signed_tool_call_turns") or 0) > 0]
+    accepted = [a for a in replays if a.get("request_id") in finished_by_id
+                and not finished_by_id[a["request_id"]].get("error")
+                and finished_by_id[a["request_id"]].get("basis") == "provider_reported_cost"]
+    replay_ids = {a.get("request_id") for a in replays}
+    rejected = [e["payload"] for e in events if e.get("kind") == "inference_unbilled"
+                and e["payload"].get("request_id") in replay_ids]
+    formats = sorted({f for a in replays for f in a.get("replayed_signed_reasoning_formats") or []})
+    passed = bool(accepted) and not rejected
+    detail = (f"{len(accepted)} of {len(replays)} request(s) replaying an earlier assistant turn with tool calls and "
+              f"signed reasoning details (formats {formats}) finished at a provider-reported cost; {len(rejected)} "
+              f"rejected by the provider" + (f" (statuses {sorted({r.get('status') for r in rejected}, key=str)})"
+                                             if rejected else "")
+              + ("" if settings.model_id in SIGNED_REASONING_MODEL_IDS else
+                 f"; informational for {settings.model_id} (no signed reasoning required)"))
+    return passed, detail
+
+
+def cap_probe_check(events, settings, violation_ids=(), provider_name=None):
     """``reasoning_cap_enforced`` from the probe's runtime.jsonl events (agent id CAP_PROBE_AGENT).
 
     Passes only when the single probe request, sent with max_tokens = the recorded
@@ -468,7 +542,7 @@ def cap_probe_check(events, settings, violation_ids=()):
     passed = (isinstance(cap, int) and cap > 0 and len(admitted) == 1 and len(finished) == 1 and not failures
               and not last.get("error") and stop_reason == "max_tokens" and generated is not None
               and generated <= cap and reasoning > 0 and last.get("basis") == "provider_reported_cost"
-              and not violated and route_consistent(last, settings))
+              and not violated and route_consistent(last, settings, provider_name))
     if started is None:
         detail = "the reasoning-cap probe did not run"
     else:
@@ -477,14 +551,15 @@ def cap_probe_check(events, settings, violation_ids=()):
                   f"provider-reported generated tokens incl. reasoning {generated} (reasoning {reasoning}; required "
                   f"<= {cap} with reasoning > 0); settled {(last or {}).get('settled_usd')} by "
                   f"{(last or {}).get('basis')!r} within the probe reservation: {not violated and bool(last)}; "
-                  f"route consistent: {bool(last) and route_consistent(last, settings)}")
+                  f"route consistent: {bool(last) and route_consistent(last, settings, provider_name)}")
     return passed, detail, {"max_tokens": cap, "stop_reason": stop_reason, "generated_tokens": generated,
                             "reasoning_tokens": reasoning, "request_ids": [a.get("request_id") for a in admitted]}
 
 
 def build_checks(*, agent_id, events, conference_events, activity, settings, abort_reason, violation_ids,
-                 scope_violation=False):
-    """The shared-interface checks {name: {passed, required, detail}}."""
+                 scope_violation=False, provider_name=None):
+    """The shared-interface checks {name: {passed, required, detail}}. ``provider_name``: the
+    pinned endpoint's catalog name from the route freeze (``route_consistent``)."""
     kinds = defaultdict(list)
     for event in events:
         if event.get("agent_id") in (agent_id, None):
@@ -522,12 +597,14 @@ def build_checks(*, agent_id, events, conference_events, activity, settings, abo
     tokens = [completion_tokens(f) for f in finished]
     over = [t for t in tokens if t is None or t > settings.max_tokens]
     off_route = [{"provider_name": f.get("provider_name"), "provider_model": f.get("provider_model")}
-                 for f in finished if not route_consistent(f, settings)]
+                 for f in finished if not route_consistent(f, settings, provider_name)]
     provider_errors = len(kinds["inference_unbilled"]) + len(kinds["inference_uncertain"])
     truncations = kinds["truncated_response"]
     compaction_requests = len(kinds["compaction_request"])
-    probe_passed, probe_detail, _ = cap_probe_check(events, settings, violation_ids)
+    probe_passed, probe_detail, _ = cap_probe_check(events, settings, violation_ids, provider_name)
     model_errors = unrecovered_model_errors(activity, events, agent_id)
+    signed_passed, signed_detail = signed_replay_check(
+        admitted, finished_by_id, [e for e in events if e.get("agent_id") in (agent_id, None)], settings)
 
     checks = {
         "tool_call_parsed": _check(
@@ -573,6 +650,8 @@ def build_checks(*, agent_id, events, conference_events, activity, settings, abo
             activity["compaction_events"] > 0 or compaction_requests > 0,
             f"{activity['compaction_events']} compaction event(s), {compaction_requests} compaction request(s)",
             required=False),
+        SIGNED_REASONING_CHECK: _check(signed_passed, signed_detail,
+                                       required=settings.model_id in SIGNED_REASONING_MODEL_IDS),
     }
     return checks
 
@@ -626,10 +705,10 @@ def committed_usd(rows):
                Decimal(0))
 
 
-def summarize_run(result, settings, ledger_path):
+def summarize_run(result, settings, ledger_path, provider_name=None):
     """(checks, spent_usd, request_ids, estimate-violation ids, ledger details) from a
     finished run (``run_check`` result). ``spent_usd`` is the committed total of exactly
-    the requests this check admitted."""
+    the requests this check admitted. ``provider_name``: the frozen endpoint's catalog name."""
     events = result["runtime_events"]
     request_ids = admitted_request_ids(events)
     rows = request_rows(ledger_path, request_ids)
@@ -640,7 +719,8 @@ def summarize_run(result, settings, ledger_path):
     abort_reason = result.get("abort_reason")
     checks = build_checks(agent_id=AGENT_ID, events=events, conference_events=result["conference_events"],
                           activity=result["activity"], settings=settings, abort_reason=abort_reason,
-                          violation_ids=violations, scope_violation=bool(after.get("violation")))
+                          violation_ids=violations, scope_violation=bool(after.get("violation")),
+                          provider_name=provider_name)
     states = Counter(rows[i]["state"] for i in request_ids if i in rows)
     details = {"committed_delta_usd": str(Decimal(after["committed_usd"]) - Decimal(before["committed_usd"])),
                "request_states": dict(states), "missing_request_ids": [i for i in request_ids if i not in rows]}
@@ -690,7 +770,7 @@ async def reasoning_cap_probe(model, ledger, settings, record, *, cap=DEFAULT_CA
     return None
 
 
-async def run_check(config, args, stamp, *, images, ledger, ledger_path):
+async def run_check(config, args, stamp, *, images, ledger, ledger_path, provider_name=None):
     from inspect_ai import eval_async
     from research_swarm.inspect_adapter import (InstructionArchive, budget_filter, claude_code_env,
                                                 credentials_in_environment, disable_inspect_dotenv)
@@ -765,7 +845,7 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path):
         probe_violations = [r["request_id"] for r in list_requests(ledger_path, states=("estimate_violation",),
                                                                    scope=SCOPE)]
         probe_passed, probe_detail, probe_facts = cap_probe_check(_read_jsonl(run_dir / "runtime.jsonl"), settings,
-                                                                  probe_violations)
+                                                                  probe_violations, provider_name)
         record("reasoning_cap_probe", CAP_PROBE_AGENT, {"passed": probe_passed, "detail": probe_detail,
                                                         "error": None if probe_error is None
                                                         else type(probe_error).__name__, **probe_facts})
@@ -855,6 +935,24 @@ def main(argv=None, *, ask=input, gates=None, environment=None, run=None, ledger
     except ValueError as ex:
         print(f"Refusing: {ex}. Nothing was spent and no ledger was opened.")
         return 2
+    # One paid launcher per checkout (runtime.launch_lock in the ledger directory, state/): never
+    # next to this checkout's own pilot or another compatibility check, whatever the interlock says.
+    lock = runtime.launch_lock(path.parent, "compat_check")
+    try:
+        lock.__enter__()
+    except runtime.LaunchBlocked as ex:
+        print(f"Refusing: {ex}. Nothing was spent and no credential was read.")
+        return 2
+    try:
+        return checked_run(args, config, settings, path, caps, min_remaining, ask=ask, gates=gates,
+                           environment=environment, run=run, isatty=isatty)
+    finally:
+        lock.__exit__(None, None, None)
+
+
+def checked_run(args, config, settings, path, caps, min_remaining, *, ask, gates, environment, run, isatty):
+    """``main`` after the launch lock is held: the refusal checks, the confirmation, the paid run
+    and its evidence."""
     problems, ledger, snapshot = [], None, None
     try:
         ledger = BudgetLedger(path, caps=caps)  # creates the approved scopes; refuses a differing cap
@@ -864,9 +962,17 @@ def main(argv=None, *, ask=input, gates=None, environment=None, run=None, ledger
                         "--raise-ledger-cap, never by resetting the ledger)")
     if ledger is not None:
         problems += ledger_problems(snapshot, min_remaining, caps=caps)
-    problems += gate_problems((gates or evaluate_gates)(config))
-    env_problems, images = (environment or environment_check)(config)
+    report = (gates or evaluate_gates)(config)
+    problems += gate_problems(report)
+    # The pinned endpoint's catalog name, from the route freeze the route_pricing gate checked.
+    provider_name = (((report or {}).get("evidence") or {}).get("route_pricing") or {}).get("provider_name")
+    override = {}
+    env_problems, images = (environment or (lambda c: environment_check(c, override_record=override)))(config)
+    concurrent_run_override = override or None
     problems += env_problems
+    if concurrent_run_override is not None and concurrent_run_override["applied"]:
+        print("WARNING: concurrent-run override (" + concurrent_run_override["approval"] + "): starting while "
+              + "; ".join(concurrent_run_override["warnings"]) + ". Recorded in the evidence.")
     print(render_snapshot(path, snapshot))
     if args.cap_probe_max_tokens >= settings.max_tokens:
         problems.append(f"--cap-probe-max-tokens {args.cap_probe_max_tokens} must be below the frozen max_tokens "
@@ -886,13 +992,14 @@ def main(argv=None, *, ask=input, gates=None, environment=None, run=None, ledger
     stamp = utc_stamp()
     started = time.time()
     try:
-        result = asyncio.run((run or run_check)(config, args, stamp, images=images, ledger=ledger, ledger_path=path))
+        result = asyncio.run((run or run_check)(config, args, stamp, images=images, ledger=ledger, ledger_path=path,
+                                                **({"provider_name": provider_name} if provider_name else {})))
     except Exception as ex:  # no evidence without a finished run; show what the scope now holds
         print(f"Compatibility check aborted before evidence could be written: {type(ex).__name__}: {ex}")
         print(render_snapshot(path, ledger.snapshot()))
         return 1
     checks, spent, request_ids, violations, ledger_details = summarize_run(result, result.get("settings") or settings,
-                                                                           path)
+                                                                           path, provider_name)
     credentials = result.get("credentials_in_environment")
     if credentials is None:  # measured after the run (presence only)
         from research_swarm.inspect_adapter import credentials_in_environment
@@ -911,7 +1018,8 @@ def main(argv=None, *, ask=input, gates=None, environment=None, run=None, ledger
         tool_calls=[{k: c[k] for k in ("function", "parse_error")} for c in result["activity"]["tool_calls"]],
         duration_seconds=round(time.time() - started, 1), credential_source="host only (secrets.load_openrouter_key)",
         credentials_in_environment=bool(credentials), provider_limit=result.get("provider_limit"),
-        compose_sha256=result.get("compose_sha256"), cap_probe_error=result.get("cap_probe_error"))
+        compose_sha256=result.get("compose_sha256"), cap_probe_error=result.get("cap_probe_error"),
+        frozen_provider_name=provider_name, concurrent_run_override=concurrent_run_override)
     out = write_evidence(args.output_dir, stamp, record)
     print(json.dumps({k: (v["passed"], v["required"]) for k, v in record["checks"].items()}, indent=2))
     print(f"spent ${record['spent_usd']} in {record['requests']} admitted request(s); "

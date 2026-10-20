@@ -31,8 +31,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from research_swarm import launch_gates  # noqa: E402
-from research_swarm.budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, caps_for, is_ablation,  # noqa: E402
-                                   ledger_path_for, raise_ablation_cap, raise_cap, read_snapshot)
+from research_swarm.budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, caps_for, ledger_path_for,  # noqa: E402
+                                   raise_cap, raise_track_cap, read_snapshot, track_of)
 
 # What each allowance is for (docs/plan.md "Approved spending limits" and "Live
 # compatibility check"); every scope is outside the others.
@@ -91,15 +91,19 @@ def money(value):
     return f"${Decimal(str(value)):,.4f}"
 
 
-def allowance_summary():
+def allowance_summary(caps=None):
+    """The separate allowances: ``caps`` {scope: cap} of the ledger shown (default DEFAULT_CAPS)."""
+    caps = caps or DEFAULT_CAPS
     return "Separate allowances (docs/plan.md): " + ", ".join(
-        f"{scope} ${DEFAULT_CAPS[scope]} ({SCOPE_NOTES.get(scope, 'scope')})" for scope in DEFAULT_CAPS) + "."
+        f"{scope} ${caps[scope]} ({SCOPE_NOTES.get(scope, 'scope')})" for scope in caps) + "."
 
 
 def render_spending(spending):
+    # The caps of the ledger shown (a budget track's own ledger has its own caps).
+    caps = {scope: data["cap_usd"] for scope, data in spending["scopes"].items() if scope in SCOPE_NOTES}
     lines = ["Spending-cap checkpoint (shared ledger, read-only):",
              f"  ledger {spending['ledger']}" + ("" if spending["ledger_exists"] else " (not created yet)"),
-             "  " + allowance_summary()]
+             "  " + allowance_summary(caps or None)]
     for scope, data in spending["scopes"].items():
         lines.append(f"  {scope:<13} cap {money(data['cap_usd'])}  prior known costs {money(data['settled_usd'])}  "
                      f"unresolved holds {money(data['held_usd'])} ({data['unresolved_requests']})  "
@@ -169,11 +173,12 @@ def main(argv=None):
         except ValueError as ex:
             print(f"Not raised: {ex}")
             return 2
-        # The ablation track raises its own ledger to its own approved caps (budget.caps_for).
-        path = ledger_path_for(config, ROOT) if is_ablation(config) else DEFAULT_LEDGER_PATH(ROOT)
+        # A budget track raises its own ledger to its own approved caps (budget.caps_for).
+        track = track_of(config)
+        path = ledger_path_for(config, ROOT) if track else DEFAULT_LEDGER_PATH(ROOT)
         code = apply_cap_raise(path, args.raise_ledger_cap, args.approval_note,
                                args.i_have_user_approval, caps=caps_for(config),
-                               raiser=raise_ablation_cap if is_ablation(config) else raise_cap)
+                               raiser=(lambda p, s, n: raise_track_cap(p, s, n, track)) if track else raise_cap)
         if code:
             return code
     report = collect(config, ROOT)

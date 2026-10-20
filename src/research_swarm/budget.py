@@ -141,41 +141,99 @@ ABLATION_LEDGER_RELATIVE = Path("state") / "ablation-budget.sqlite"
 # scripts/preflight.py --config <ablation config> --raise-ledger-cap pilot after that run.
 ABLATION_CAPS = {"pilot": "160", "analysis": "0", "compatibility": 2}
 
+# Gemini budget track (docs/plan.md, "Gemini 3.1 Pro collaboration run authorized, October 19,
+# 2026"): the repository owner's Gemini 3.1 Pro runs, with the owner's own provider key, on
+# their own ledger file and caps (pilot $400, no paid analysis, $2 compatibility), separate
+# from both the authoritative baseline ledger and the collaborator's ablation ledger.
+GEMINI_BUDGET_TRACK = "gemini"
+GEMINI_LEDGER_RELATIVE = Path("state") / "gemini-budget.sqlite"
+# Compatibility $10 (owner, October 19: "The budget limit is set and I don't care just run it"):
+# the $2 default is too small for a 12-request check at Gemini's upper-tier reservation prices.
+GEMINI_CAPS = {"pilot": "400", "analysis": "0", "compatibility": 10}
+
+# Every non-baseline budget track: its own ledger file (relative to the repository), its caps,
+# the agent populations it allows (the baseline stays at runtime.APPROVED_AGENT_COUNT), whether
+# a plan decision allows its runs to launch alongside another checkout's live run
+# (``concurrent_run``: the config's recorded override, runtime.apply_concurrent_run_override;
+# only the Gemini track, VM row "Run alongside hers") and the plan section that approved it.
+# Without ``budget_track`` none of them applies.
+BUDGET_TRACKS = {
+    ABLATION_BUDGET_TRACK: {"ledger": ABLATION_LEDGER_RELATIVE, "caps": ABLATION_CAPS,
+                            "agent_counts": frozenset({10, 20}), "concurrent_run": False,
+                            "plan_section": "Prompt ablation track, October 19, 2026"},
+    GEMINI_BUDGET_TRACK: {"ledger": GEMINI_LEDGER_RELATIVE, "caps": GEMINI_CAPS, "agent_counts": frozenset({10}),
+                          "concurrent_run": True,
+                          "plan_section": "Gemini 3.1 Pro collaboration run authorized, October 19, 2026"},
+}
+
+
+def track_ledger_relative(track) -> Path:
+    return BUDGET_TRACKS[track]["ledger"]
+
+
+def track_caps(track) -> dict:
+    return dict(BUDGET_TRACKS[track]["caps"])
+
+
+def track_agent_counts(track) -> frozenset:
+    return BUDGET_TRACKS[track]["agent_counts"]
+
+
+def track_allows_concurrent_run(track) -> bool:
+    """True only for a budget track whose plan decision allows the concurrent-run override
+    (BUDGET_TRACKS ``concurrent_run``); never for the baseline (``track`` None)."""
+    return track in BUDGET_TRACKS and BUDGET_TRACKS[track].get("concurrent_run") is True
+
 
 def budget_track_problems(config) -> list[str]:
-    """Config check: absent means the baseline ledger; the only other value is ``ablation``."""
+    """Config check: absent means the baseline ledger; any value must name a track in BUDGET_TRACKS."""
     if BUDGET_TRACK_KEY not in config:
         return []
-    if config[BUDGET_TRACK_KEY] != ABLATION_BUDGET_TRACK:
-        return [f"{BUDGET_TRACK_KEY} {config[BUDGET_TRACK_KEY]!r} is not {ABLATION_BUDGET_TRACK!r} (omit it for the "
-                "baseline ledger)"]
+    if not isinstance(config[BUDGET_TRACK_KEY], str) or config[BUDGET_TRACK_KEY] not in BUDGET_TRACKS:
+        names = " or ".join(repr(name) for name in BUDGET_TRACKS)
+        return [f"{BUDGET_TRACK_KEY} {config[BUDGET_TRACK_KEY]!r} is not {names} (omit it for the baseline ledger)"]
     return []
 
 
+def track_of(config):
+    """The budget track ``config`` selects, or None for the baseline (no validation; see _checked_track)."""
+    value = (config or {}).get(BUDGET_TRACK_KEY)
+    return value if isinstance(value, str) and value in BUDGET_TRACKS else None
+
+
 def is_ablation(config) -> bool:
-    return (config or {}).get(BUDGET_TRACK_KEY) == ABLATION_BUDGET_TRACK
+    return track_of(config) == ABLATION_BUDGET_TRACK
 
 
 def _checked_track(config):
     problems = budget_track_problems(config or {})
     if problems:  # never fall back to the baseline ledger on a typo
         raise ValueError("; ".join(problems))
-    return is_ablation(config)
+    return track_of(config)
 
 
 def ledger_path_for(config, repo_root) -> Path:
     """The ledger a run with ``config`` reserves against; raises on an invalid track."""
-    return Path(repo_root) / ABLATION_LEDGER_RELATIVE if _checked_track(config) else DEFAULT_LEDGER_PATH(repo_root)
+    track = _checked_track(config)
+    return Path(repo_root) / track_ledger_relative(track) if track else DEFAULT_LEDGER_PATH(repo_root)
 
 
 def caps_for(config) -> dict:
     """The approved caps for ``config``'s ledger; raises on an invalid track."""
-    return dict(ABLATION_CAPS) if _checked_track(config) else dict(DEFAULT_CAPS)
+    track = _checked_track(config)
+    return track_caps(track) if track else dict(DEFAULT_CAPS)
+
+
+def track_for_ledger(path):
+    """The budget track whose ledger file has ``path``'s name, or None (e.g. the baseline ledger)."""
+    name = Path(path).name
+    return next((track for track in BUDGET_TRACKS if track_ledger_relative(track).name == name), None)
 
 
 def run_budget_track(run_dir) -> str:
-    """The budget track a saved run recorded ("ablation" or "baseline"); "unknown" when its
-    settings.json is missing or unreadable."""
+    """The budget track a saved run recorded (a BUDGET_TRACKS name, or "baseline"); "unknown" when
+    its settings.json is missing or unreadable. Any other recorded value is returned as recorded,
+    so callers that only accept "baseline" refuse it."""
     import json
     try:
         data = json.loads((Path(run_dir) / "settings.json").read_text())
@@ -183,7 +241,10 @@ def run_budget_track(run_dir) -> str:
         return "unknown"
     effective = (data.get("effective") or {}).get(BUDGET_TRACK_KEY)
     configured = (data.get("config") or {}).get(BUDGET_TRACK_KEY)
-    return "ablation" if ABLATION_BUDGET_TRACK in (effective, configured) else "baseline"
+    for value in (effective, configured):
+        if value not in (None, "baseline"):
+            return str(value)
+    return "baseline"
 
 
 class BudgetExceeded(RuntimeError):
@@ -434,22 +495,25 @@ def raise_cap(path, scope, new_cap, approval_note):
     return {"scope": scope, "previous_cap_usd": usd(row[0]), "new_cap_usd": usd(target), "note": note}
 
 
-def raise_ablation_cap(path, scope, approval_note):
-    """Audited raise of the ablation track's own ledger (docs/plan.md, "Prompt ablation
-    track") to ``ABLATION_CAPS[scope]``. Only a file named like ABLATION_LEDGER_RELATIVE,
-    only upwards, only with no in-flight or unresolved requests and no violation; recorded
-    spending is kept and an audit row is written. Never touches the baseline ledger."""
+def raise_track_cap(path, scope, approval_note, track=ABLATION_BUDGET_TRACK):
+    """Audited raise of a budget track's own ledger (BUDGET_TRACKS; e.g. docs/plan.md, "Prompt
+    ablation track") to its approved cap ``track_caps(track)[scope]``. Only a file named like the
+    track's ledger, only upwards, only with no in-flight or unresolved requests and no violation;
+    recorded spending is kept and an audit row is written. Never touches the baseline ledger."""
     note = str(approval_note or "").strip()
     if not note:
         raise ValueError("A cap raise requires a note recording the user's approval")
+    if track not in BUDGET_TRACKS:
+        raise ValueError(f"Unknown budget track {track!r}")
+    relative = track_ledger_relative(track)
     path = Path(path)
-    if path.name != ABLATION_LEDGER_RELATIVE.name:
-        raise ValueError(f"{path} is not an ablation ledger ({ABLATION_LEDGER_RELATIVE.name})")
+    if path.name != relative.name:
+        raise ValueError(f"{path} is not the {track} track's ledger ({relative.name})")
     if scope != "pilot":
-        raise ValueError("Only the ablation pilot scope has an approved raise")
+        raise ValueError(f"Only the {track} pilot scope has an approved raise")
     if not path.exists():
-        raise ValueError(f"No ledger at {path}; a new ablation ledger is created with ABLATION_CAPS")
-    target = units(ABLATION_CAPS[scope])
+        raise ValueError(f"No ledger at {path}; a new {track} ledger is created with its approved caps")
+    target = units(track_caps(track)[scope])
     with closing(sqlite3.connect(str(path), timeout=30)) as db, db:
         db.execute("PRAGMA busy_timeout=30000")
         db.execute("BEGIN EXCLUSIVE")
@@ -461,12 +525,17 @@ def raise_ablation_cap(path, scope, approval_note):
             raise ValueError(f"{scope} cap is already {usd(row[0])}; caps are never lowered or reset")
         data = _snapshot(db)[scope]
         if data["unresolved_requests"] or data.get("in_flight_requests") or data["violation"]:
-            raise ValueError("The ablation raise needs no in-flight or unresolved requests and no violation "
+            raise ValueError(f"The {track} raise needs no in-flight or unresolved requests and no violation "
                              "(the previous run must have ended and been reconciled)")
         db.execute("UPDATE scopes SET cap=? WHERE name=?", (target, scope))
         db.execute("INSERT INTO cap_changes (scope,previous_cap,new_cap,note) VALUES (?,?,?,?)",
                    (scope, row[0], target, note))
     return {"scope": scope, "previous_cap_usd": usd(row[0]), "new_cap_usd": usd(target), "note": note}
+
+
+def raise_ablation_cap(path, scope, approval_note):
+    """``raise_track_cap`` for the ablation track (docs/plan.md, "Prompt ablation track")."""
+    return raise_track_cap(path, scope, approval_note, ABLATION_BUDGET_TRACK)
 
 
 # User decisions, October 17, 2026. (1) docs/plan.md "Transcript behavior judge specified,

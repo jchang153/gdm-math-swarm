@@ -434,16 +434,17 @@ class LaunchInterlockTests(unittest.TestCase):
     COMPARATOR = {"id": "c" * 12, "name": "gdm-comparator-x", "image": "sha256:c", "kind": "comparator",
                   "compose_project": None}
     AGENT = {"id": "a" * 12, "name": "inspect-gdm_capacity-iabcdef1-default-1", "image": "sha256:a", "kind": "agent",
-             "compose_project": "inspect-gdm_capacity-iabcdef1"}
+             "compose_project": "inspect-gdm_capacity-iabcdef1",
+             "compose_working_dir": "/home/collaborator/gdm-math-swarm/runs/glm10-x"}
 
-    def interlock(self, judges=(), comparators=(), live=()):
+    def interlock(self, judges=(), comparators=(), live=(), repo_root=ROOT):
         with mock.patch("research_swarm.lean.judge_containers",
                         lambda docker="docker": None if judges is None else list(judges)), \
                 mock.patch.object(runtime, "_running_comparators",
                                   lambda docker="docker": None if comparators is None else list(comparators)), \
                 mock.patch("research_swarm.evaluator.live_experiment_containers",
                            lambda docker="docker", agent_image=None: None if live is None else list(live)):
-            return runtime.launch_interlock("gdm-math-swarm-agent:local")
+            return runtime.launch_interlock("gdm-math-swarm-agent:local", repo_root=repo_root)
 
     def test_kinds_and_blockers(self):
         self.assertEqual(self.interlock()["blockers"], [])
@@ -475,6 +476,118 @@ class LaunchInterlockTests(unittest.TestCase):
             self.assertIsNone(runtime._running_comparators())
         with mock.patch.object(runtime.subprocess, "run", side_effect=OSError("no docker")):
             self.assertIsNone(runtime._running_comparators())
+
+    def test_listing_failures_are_reported_separately(self):
+        self.assertEqual(self.interlock()["listing_errors"], [])
+        status = self.interlock(None, [self.COMPARATOR], None)
+        self.assertEqual(len(status["listing_errors"]), 2)
+        self.assertTrue(all(e.startswith("Could not list") for e in status["listing_errors"]))
+        self.assertTrue(set(status["listing_errors"]) < set(status["blockers"]))
+
+    def test_concurrent_run_override_needs_both_keys(self):
+        """Gemini collaboration run (docs/plan.md): the config override turns another checkout's agent
+        sandboxes and judge compilers into recorded warnings; listing failures still block; without the
+        keys nothing changes."""
+        busy = self.interlock(["gdm-lean-old"], [], [self.AGENT])
+        self.assertEqual(len(busy["blockers"]), 2)
+        note = "Owner approved running alongside the collaborator's live run"
+        gemini = {"budget_track": "gemini"}
+        for config in ({}, dict(gemini, allow_concurrent_run=False, concurrent_run_approval=note),
+                       dict(gemini, allow_concurrent_run=True), dict(gemini, allow_concurrent_run=True,
+                                                                     concurrent_run_approval=" "),
+                       dict(gemini, allow_concurrent_run="yes", concurrent_run_approval=note),
+                       dict(gemini, concurrent_run_approval=note)):
+            with self.subTest(config=config):
+                result = runtime.apply_concurrent_run_override(busy, config)
+                self.assertEqual(result["blockers"], busy["blockers"])  # unchanged
+                self.assertIsNone(result["concurrent_run_override"])
+                self.assertIsNone(runtime.concurrent_run_approval(config))
+        self.assertEqual(runtime.concurrent_run_problems({}), [])
+        self.assertEqual(runtime.concurrent_run_problems({"allow_concurrent_run": False}), [])
+        self.assertIn("nonempty concurrent_run_approval",
+                      runtime.concurrent_run_problems(dict(gemini, allow_concurrent_run=True))[0])
+        self.assertIn("true or false", runtime.concurrent_run_problems({"allow_concurrent_run": 1})[0])
+        config = dict(gemini, allow_concurrent_run=True, concurrent_run_approval=f"  {note} ")
+        result = runtime.apply_concurrent_run_override(busy, config)
+        self.assertEqual(result["blockers"], [])
+        record = result["concurrent_run_override"]
+        self.assertTrue(record["applied"])
+        self.assertEqual(record["approval"], note)
+        self.assertEqual(record["warnings"], busy["blockers"])
+        self.assertEqual(record["still_blocking"], [])
+        self.assertEqual(sorted(c["kind"] for c in record["containers"]), ["agent", "judge"])
+        self.assertEqual(record["checked_at"], busy["checked_at"])
+        # A Docker listing that fails still blocks with the override.
+        broken = self.interlock(None, [], [self.AGENT])
+        result = runtime.apply_concurrent_run_override(broken, config)
+        self.assertEqual(result["blockers"], broken["listing_errors"])
+        self.assertEqual(len(result["concurrent_run_override"]["warnings"]), 1)
+        # A clear interlock records that the override was available but not needed.
+        clear = runtime.apply_concurrent_run_override(self.interlock(), config)
+        self.assertEqual((clear["blockers"], clear["concurrent_run_override"]["applied"]), ([], False))
+        # A status without kind tags (an older or faked interlock) waives nothing.
+        untagged = {k: v for k, v in busy.items() if k != "blocking"}
+        self.assertEqual(runtime.apply_concurrent_run_override(untagged, config)["blockers"], busy["blockers"])
+
+    def test_agent_sandboxes_are_attributed_to_their_checkout(self):
+        """The compose working directory tells this checkout's runs from another checkout's."""
+        own = dict(self.AGENT, id="b" * 12, name="inspect-gdm_math_swar-iown1234-default-1",
+                   compose_working_dir=str(ROOT / "runs" / "gemini10-x"))
+        stray = dict(self.AGENT, id="d" * 12, name="stray", compose_project=None, compose_working_dir=None)
+        status = self.interlock([], [], [self.AGENT, own, stray])
+        self.assertEqual([b["kind"] for b in status["blocking"]], ["agent", "own_agent", "unattributed_agent"])
+        self.assertEqual([b["blocker"] for b in status["blocking"]], status["blockers"])
+        self.assertIn("from another run", status["blockers"][0])
+        self.assertIn("started from this checkout", status["blockers"][1])
+        self.assertEqual({c["name"]: c["checkout"] for c in status["containers"]},
+                         {self.AGENT["name"]: "other", own["name"]: "this", "stray": "unknown"})
+        # Relative to the repo_root given (preflight passes its own).
+        elsewhere = self.interlock([], [], [own], repo_root=ROOT / "tests")
+        self.assertEqual([b["kind"] for b in elsewhere["blocking"]], ["agent"])
+        self.assertEqual(runtime._checkout_of(str(ROOT), ROOT), "this")
+        self.assertEqual(runtime._checkout_of(str(ROOT) + "-other/runs/x", ROOT), "other")
+        self.assertEqual(runtime._checkout_of(None, ROOT), "unknown")
+
+    def test_concurrent_run_override_never_waives_own_sandboxes_or_comparators(self):
+        """Review findings: the override waives only the kinds the owner named (another checkout's agent
+        sandboxes and judge compilers). This checkout's own run, unattributed sandboxes and a running
+        comparator (another checkout's post-run evaluation) still block."""
+        config = {"budget_track": "gemini", "allow_concurrent_run": True, "concurrent_run_approval": "owner"}
+        own = dict(self.AGENT, id="b" * 12, name="inspect-gdm_math_swar-iown1234-default-1",
+                   compose_working_dir=str(ROOT / "runs" / "gemini10-first"))
+        stray = dict(self.AGENT, id="d" * 12, name="stray", compose_project=None, compose_working_dir=None)
+        for live, comparators, fragment in (([own], [], "started from this checkout"),
+                                            ([stray], [], "checkout unknown"),
+                                            ([], [self.COMPARATOR], "comparator container")):
+            with self.subTest(fragment=fragment):
+                status = self.interlock(["gdm-lean-x"], comparators, [self.AGENT, *live])
+                result = runtime.apply_concurrent_run_override(status, config)
+                self.assertEqual(len(result["blockers"]), 1, result["blockers"])
+                self.assertIn(fragment, result["blockers"][0])
+                record = result["concurrent_run_override"]
+                self.assertEqual(record["still_blocking"], result["blockers"])
+                self.assertEqual(len(record["warnings"]), 2)  # her sandboxes and the judge: warnings
+
+    def test_concurrent_run_override_only_on_a_track_that_allows_it(self):
+        """Review finding: the owner allowed the override for the Gemini run only; the baseline and the
+        ablation track refuse the keys and their interlock stays unchanged."""
+        from research_swarm import budget
+        self.assertTrue(budget.track_allows_concurrent_run("gemini"))
+        self.assertFalse(budget.track_allows_concurrent_run("ablation"))
+        self.assertFalse(budget.track_allows_concurrent_run(None))
+        busy = self.interlock(["gdm-lean-old"], [], [self.AGENT])
+        keys = {"allow_concurrent_run": True, "concurrent_run_approval": "x"}
+        for config in (keys, dict(keys, budget_track="ablation"), dict(keys, budget_track="typo")):
+            with self.subTest(config=config):
+                problems = runtime.concurrent_run_problems(config)
+                self.assertEqual(len(problems), 1)
+                self.assertIn("only on a budget track", problems[0])
+                result = runtime.apply_concurrent_run_override(busy, config)
+                self.assertEqual(result["blockers"], busy["blockers"])
+                self.assertIsNone(result["concurrent_run_override"])
+        # allow_concurrent_run false stays harmless anywhere.
+        self.assertEqual(runtime.concurrent_run_problems({"allow_concurrent_run": False,
+                                                          "budget_track": "ablation"}), [])
 
     def test_enforce_refuses_or_forces_with_a_recorded_warning(self):
         busy = lambda image: {"checked_at": "t", "blockers": ["1 running comparator container(s)"],  # noqa: E731
@@ -564,6 +677,16 @@ class PreflightTests(unittest.TestCase):
         raising = lambda c, r: 1 / 0
         self.assertTrue(any("evaluation failed" in b for b in self._preflight(self.base(), raising)["blockers"]))
 
+    def test_track_populations(self):
+        ok = lambda c, r: {"ready": True, "blockers": [], "evidence": {}, "ledger": {}}  # noqa: E731
+        for track, count, allowed in (("ablation", 10, True), ("ablation", 20, True), ("gemini", 10, True),
+                                      ("gemini", 20, False), ("gemini", 15, False)):
+            with self.subTest(track=track, count=count):
+                blockers = self._preflight(self.base(budget_track=track, agent_count=count, max_connections=count),
+                                           ok)["blockers"]
+                self.assertEqual(any(f"The {track} track allows" in b for b in blockers), not allowed, blockers)
+                self.assertFalse(any("20 peers" in b for b in blockers))
+
 
 class PreflightDockerTests(unittest.TestCase):
     """Docker-dependent preflight checks with every Docker call faked."""
@@ -617,6 +740,68 @@ class PreflightDockerTests(unittest.TestCase):
         clear = self._preflight(self.base(), ok, [])
         self.assertFalse(any("container" in b for b in clear["blockers"]), clear["blockers"])
         self.assertEqual(clear["docker"]["interlock"]["containers"], [])
+
+    def test_concurrent_run_override_records_warnings_instead_of_blocking(self):
+        """With allow_concurrent_run and an approval note, another run's containers are recorded in the
+        preflight report (docker.interlock.concurrent_run_override) and do not block; nothing else changes."""
+        ok = lambda c, r: {"ready": True, "blockers": [], "evidence": {}, "ledger": {}}  # noqa: E731
+        agent = {"id": "a" * 12, "name": "inspect-gdm_math_swar-iother-default-1", "image": "sha256:y",
+                 "kind": "agent", "compose_project": "inspect-gdm_math_swar-iother",
+                 "compose_working_dir": "/home/collaborator/gdm-math-swarm/runs/glm10-x"}
+        judge = {"id": "j" * 12, "name": "gdm-lean-other", "image": "l", "kind": "judge", "compose_project": None}
+        note = "Owner approved running alongside the collaborator's live run"
+        gemini = self.base(budget_track="gemini", agent_count=10, max_connections=10)
+        override = dict(gemini, allow_concurrent_run=True, concurrent_run_approval=note)
+        report = self._preflight(override, ok, ["gdm-lean-other"], [], [judge, agent])
+        self.assertTrue(report["ready"], report["blockers"])
+        record = report["docker"]["interlock"]["concurrent_run_override"]
+        self.assertTrue(record["applied"])
+        self.assertEqual(record["approval"], note)
+        self.assertEqual(len(record["warnings"]), 2)
+        self.assertEqual(sorted(c["kind"] for c in report["docker"]["interlock"]["containers"]), ["agent", "judge"])
+        # Without the keys (or without a note) the same containers block as before.
+        for config in (gemini, dict(gemini, allow_concurrent_run=True)):
+            report = self._preflight(config, ok, ["gdm-lean-other"], [], [judge, agent])
+            self.assertFalse(report["ready"])
+            self.assertTrue(any("agent sandbox container" in b for b in report["blockers"]))
+            self.assertTrue(any("leftover judge container" in b for b in report["blockers"]))
+            self.assertIsNone(report["docker"]["interlock"]["concurrent_run_override"])
+        self.assertTrue(any("concurrent_run_approval" in b for b in self._preflight(
+            dict(gemini, allow_concurrent_run=True), ok, [])["blockers"]))
+        # Listing failures still block with the override.
+        blockers = self._preflight(override, ok, None, None, None)["blockers"]
+        self.assertTrue(any("Could not list" in b for b in blockers))
+
+    def test_concurrent_run_override_keeps_own_run_comparators_and_other_tracks_blocking(self):
+        """Review findings: with the Gemini config's override, a sandbox of a run from this checkout (a
+        duplicate launch) and a running comparator still block; the baseline config with the same keys
+        is refused and its interlock is unchanged."""
+        ok = lambda c, r: {"ready": True, "blockers": [], "evidence": {}, "ledger": {}}  # noqa: E731
+        theirs = {"id": "a" * 12, "name": "inspect-gdm_math_swar-iother-default-1", "image": "sha256:y",
+                  "kind": "agent", "compose_project": "inspect-gdm_math_swar-iother",
+                  "compose_working_dir": "/home/collaborator/gdm-math-swarm/runs/glm10-x"}
+        ours = {"id": "b" * 12, "name": "inspect-gdm_math_swar-iours12-default-1", "image": "sha256:y",
+                "kind": "agent", "compose_project": "inspect-gdm_math_swar-iours12",
+                "compose_working_dir": str(ROOT / "runs" / "gemini10-first")}
+        comparator = {"id": "c" * 12, "name": "gdm-comparator-1a2b", "image": "sha256:x", "kind": "comparator",
+                      "compose_project": None}
+        keys = {"allow_concurrent_run": True, "concurrent_run_approval": "owner"}
+        gemini = self.base(budget_track="gemini", agent_count=10, max_connections=10, **keys)
+        report = self._preflight(gemini, ok, [], [], [theirs, ours])
+        self.assertFalse(report["ready"])
+        self.assertEqual([b for b in report["blockers"] if "container" in b],
+                         report["docker"]["interlock"]["concurrent_run_override"]["still_blocking"])
+        self.assertTrue(any("started from this checkout" in b and ours["name"] in b for b in report["blockers"]))
+        self.assertFalse(any(theirs["name"] in b for b in report["blockers"]))
+        report = self._preflight(gemini, ok, [], [comparator], [theirs])
+        self.assertFalse(report["ready"])
+        self.assertTrue(any("comparator container" in b for b in report["blockers"]), report["blockers"])
+        baseline = self._preflight(self.base(**keys), ok, ["gdm-lean-other"], [], [theirs])
+        self.assertFalse(baseline["ready"])
+        self.assertTrue(any("only on a budget track" in b for b in baseline["blockers"]))
+        self.assertTrue(any("leftover judge container" in b for b in baseline["blockers"]))
+        self.assertTrue(any("agent sandbox container" in b for b in baseline["blockers"]))
+        self.assertIsNone(baseline["docker"]["interlock"]["concurrent_run_override"])
 
     def test_leftover_judge_containers_block(self):
         ok = lambda c, r: {"ready": True, "blockers": [], "evidence": {}, "ledger": {}}  # noqa: E731
@@ -1030,6 +1215,8 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
 
         async def eval_async(task, model, **options):
             order.append(("eval", model, options["max_samples"], options["sandbox_prebuilt"]))
+            if getattr(self, "during_eval", None):
+                self.during_eval()
             return ["log"]
         with mock.patch.object(runtime, "preflight", return_value=report or self.report), \
                 mock.patch.object(runtime, "pin_images", return_value=self.images), \
@@ -1085,6 +1272,66 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings["budget"]["pilot"]["cap_usd"], "307.809660142")
         self.assertEqual(settings["config"]["unlimited_provider_key_approval"],
                          self.config["unlimited_provider_key_approval"])
+
+    async def test_gemini_track_records_track_condition_and_concurrent_run_override(self):
+        """configs/gemini-collab.json: its own ledger and caps, the collaboration prompt, and the
+        recorded concurrent-run override from preflight in settings.json and runtime.jsonl."""
+        self.config = dict(json.loads((ROOT / "configs" / "gemini-collab.json").read_text()),
+                           run_dir=str(self.folder / "runs" / "gemini-test"))
+        override = {"applied": True, "approval": self.config["concurrent_run_approval"],
+                    "warnings": ["1 running agent sandbox container(s) from another run (inspect-x); wait"],
+                    "containers": [{"id": "a" * 12, "name": "inspect-x", "image": "sha256:y", "kind": "agent",
+                                    "compose_project": "inspect-x"}], "checked_at": "t"}
+        report = dict(self.report, docker=dict(self.report["docker"], interlock={
+            "checked_at": "t", "containers": override["containers"], "concurrent_run_override": override}))
+        tasks = []
+        with mock.patch.object(runtime, "build_task", side_effect=lambda **kw: tasks.append(kw) or "task"):
+            await self.run_pilot(report)
+        run_dir = Path(self.config["run_dir"])
+        settings = json.loads((run_dir / "settings.json").read_text())
+        effective = settings["effective"]
+        self.assertEqual(effective["budget_track"], "gemini")
+        self.assertEqual(effective["ledger_path"], str(self.folder / "state" / "gemini-budget.sqlite"))
+        self.assertEqual(settings["budget"]["pilot"]["cap_usd"], "400")
+        self.assertEqual(effective["prompt_variant"], "collaboration")
+        self.assertEqual(effective["concurrent_run_override"], override)
+        self.assertEqual(effective["persona_counts"], {"algebra": 3, "analysis_topology": 3, "combinatorics": 2,
+                                                       "number_theory": 2})
+        self.assertEqual(settings["model"]["model_id"], "google/gemini-3.1-pro-preview")
+        self.assertEqual(tasks[0]["metadata"]["condition"], "gemini-track-collaboration")
+        records = [json.loads(line) for line in (run_dir / "runtime.jsonl").read_text().splitlines()]
+        self.assertEqual([r["payload"] for r in records if r["kind"] == "concurrent_run_override"], [override])
+        self.assertIs(self.model_allow_unlimited, True)
+        self.assertFalse((ROOT / "state" / "gemini-budget.sqlite").exists())  # never the repository's ledger
+
+    async def test_launch_lock_refuses_a_second_launch_from_this_checkout(self):
+        """Review finding: with the Gemini config's concurrent-run override the interlock no longer
+        refuses a duplicate launch from this checkout (a new phase directory and run_dir pass the other
+        guards). run_pilot holds state/launch.lock for its whole run: a second launch refuses before
+        preflight, and the lock is free again afterwards."""
+        state = self.folder / "state"
+        with runtime.launch_lock(state, "run_pilot (first Gemini run)"):
+            with mock.patch.object(runtime, "preflight", side_effect=AssertionError("preflight ran")), \
+                    self.assertRaises(LaunchBlocked) as caught:
+                await run_pilot(dict(self.config, run_dir=str(self.folder / "runs" / "second")), self.folder)
+        self.assertIn("launch.lock", str(caught.exception))
+        self.assertIn("first Gemini run", str(caught.exception))
+        self.assertFalse((self.folder / "runs" / "second").exists())
+        seen = []
+
+        def second_launch():
+            try:
+                with runtime.launch_lock(state, "compat_check"):
+                    seen.append("acquired")
+            except LaunchBlocked as ex:
+                seen.append(str(ex))
+        self.during_eval = second_launch
+        result, _, _ = await self.run_pilot()
+        self.assertEqual(result, ["log"])
+        self.assertEqual(len(seen), 1)
+        self.assertIn("run_pilot", seen[0])  # the holder is named
+        with runtime.launch_lock(state, "after"):  # released when run_pilot returned
+            pass
 
     async def test_missing_max_connections_refuses_before_anything_runs(self):
         del self.config["max_connections"]

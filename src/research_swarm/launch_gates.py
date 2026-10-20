@@ -53,9 +53,10 @@ from .budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, INITIAL_PILOT_SETTLED_US
                      CACHE_REPEAT_CAP_USD, CACHE_REPEAT_PRIOR_SETTLED_USD, CACHE_REPEAT_PRIOR_HELD_USD,
                      CACHE_REPEAT_PRIOR_COMMITTED_USD, CACHE_REPEAT_PRIOR_CALLS_SHA256, cache_repeat_prior_problems,
                      LEGACY_LEDGER_RELATIVE, UNRESOLVED_STATES, list_requests,
-                     read_snapshot, budget_track_problems, caps_for, is_ablation, ledger_path_for)
-from .provider import (ABLATION_MODEL_IDS, CONFIG_OVERRIDABLE, MODEL_ID, frozen_fields, settings_from_config,
-                       validate_catalog)
+                     read_snapshot, budget_track_problems, caps_for, ledger_path_for, track_ledger_relative,
+                     track_of, BUDGET_TRACKS)
+from .provider import (CONFIG_OVERRIDABLE, MODEL_ID, SIGNED_REASONING_MODEL_IDS, TRACK_MODEL_IDS, frozen_fields,
+                       settings_from_config, validate_catalog)
 from .provider_limit import TOLERANCE_USD as LIMIT_TOLERANCE_USD, assess as assess_provider_limit
 
 PILOT_SUBSET = "data/pilot_subset.json"
@@ -135,9 +136,12 @@ def seeded_config_problems(config):
     return problems
 
 
-# Populations allowed on the prompt ablation track (budget_track "ablation"); the
-# baseline stays at runtime.APPROVED_AGENT_COUNT.
-ABLATION_AGENT_COUNTS = frozenset({10, 20})
+# Populations allowed on each non-baseline budget track (budget.BUDGET_TRACKS): the prompt
+# ablation track 10 or 20, the owner's Gemini track 10 (docs/plan.md, "Gemini 3.1 Pro
+# collaboration run authorized, October 19, 2026"); the baseline stays at
+# runtime.APPROVED_AGENT_COUNT.
+TRACK_AGENT_COUNTS = {track: spec["agent_counts"] for track, spec in BUDGET_TRACKS.items()}
+ABLATION_AGENT_COUNTS = TRACK_AGENT_COUNTS["ablation"]
 
 # Optional prompt ablation (docs/prompts.md, "Prompt ablation variants"); the check
 # lives in prompts so runtime preflight can use it without importing this module.
@@ -230,6 +234,18 @@ COMPATIBILITY_REQUIRED_CHECKS = (
     "completion_within_max_tokens", "reasoning_cap_enforced", "no_estimate_violation", "route_pinned",
     "no_sample_error")
 COMPATIBILITY_INFORMATIONAL_CHECKS = ("truncation_observed", "compaction_observed")
+# Required in addition for models with signed reasoning (provider.SIGNED_REASONING_MODEL_IDS,
+# e.g. Gemini thought signatures): a later request that replays an earlier assistant turn with
+# tool calls and its signed OpenRouter reasoning_details was accepted by the provider.
+COMPATIBILITY_SIGNED_REASONING_CHECK = "signed_reasoning_tool_call_replay"
+
+
+def compatibility_required_checks(model_id):
+    """The compatibility evidence's required checks for ``model_id``."""
+    signed = (COMPATIBILITY_SIGNED_REASONING_CHECK,) if model_id in SIGNED_REASONING_MODEL_IDS else ()
+    return COMPATIBILITY_REQUIRED_CHECKS + signed
+
+
 # Every ledger state (budget.py); a request id in none of them is unknown to the ledger.
 LEDGER_STATES = (*UNRESOLVED_STATES, "settled", "estimate_violation", "violation_acknowledged")
 VIOLATION_STATES = ("estimate_violation", "violation_acknowledged")
@@ -420,6 +436,25 @@ class _Gates:
         subset_sha, parent_sha = _sha256(subset_path), _sha256(parent_path)
         recorded_parent = json.loads(subset_path.read_text()).get("parent_manifest_sha256")
         problems = []
+        from .dataset import ALL_TASK_SET, task_set_of
+        try:
+            task_set = task_set_of(self.config)
+        except ValueError as error:
+            return self.add("fixed_task_manifest", False, str(error))
+        if task_set == ALL_TASK_SET:
+            # The whole 71-task parent pool (docs/plan.md, "Gemini 3.1 Pro collaboration run
+            # authorized"): only on the gemini budget track, pinning data/manifest.json itself.
+            if track_of(self.config) != "gemini":
+                problems.append("task_set all71 is allowed only on the gemini budget track")
+            if Path(str(spec.get("path", ""))).as_posix() != PARENT_MANIFEST:
+                problems.append(f"path must be {PARENT_MANIFEST} for task_set all71")
+            if not (spec.get("sha256") == spec.get("parent_manifest_sha256") == recorded_parent == parent_sha):
+                problems.append("sha256 and parent_manifest_sha256 must both equal sha256(data/manifest.json)")
+            if self.config.get("task_count") != 71:
+                problems.append("task_count must be 71 for task_set all71")
+            return self.add("fixed_task_manifest", not problems,
+                            "; ".join(problems) or "config pins the whole 71-task parent pool", parent_path,
+                            sha256=parent_sha, task_set=task_set)
         if Path(str(spec.get("path", ""))).as_posix() != PILOT_SUBSET:
             problems.append(f"path must be {PILOT_SUBSET}")
         if spec.get("sha256") != subset_sha:
@@ -430,30 +465,37 @@ class _Gates:
                  subset_path, sha256=subset_sha, parent_manifest_sha256=parent_sha)
 
     def frozen_dataset(self):
-        from .dataset import FrozenDataset
-        dataset = FrozenDataset(self.repo)
+        from .dataset import FrozenDataset, task_set_of
+        dataset = FrozenDataset(self.repo, task_set=task_set_of(self.config))
         for task in dataset.pilot_tasks:
             task.template_source(self.repo)  # raises on a template hash mismatch
-        self.add("frozen_dataset", True, "FrozenDataset loads; 71 parent tasks, 14 pilot templates hash-verified",
-                 self.repo / PILOT_SUBSET, seed=dataset.subset.get("seed"), task_ids=list(dataset.subset["task_ids"]))
+        self.add("frozen_dataset", True, f"FrozenDataset loads; 71 parent tasks, {len(dataset.pilot_tasks)} run templates "
+                 f"hash-verified (task_set {dataset.task_set})", self.repo / PILOT_SUBSET, seed=dataset.subset.get("seed"),
+                 task_set=dataset.task_set, task_ids=[t.task_id for t in dataset.pilot_tasks])
 
     def approved_settings(self):
         approved = approved_settings()
-        if is_ablation(self.config):
-            # Prompt ablation track (docs/plan.md): smaller populations are allowed.
+        track = track_of(self.config)
+        if track is not None:
+            # Budget tracks (docs/plan.md, "Prompt ablation track" and "Gemini 3.1 Pro collaboration
+            # run authorized"): the track's own populations are allowed...
+            counts = TRACK_AGENT_COUNTS[track]
             approved.pop("agent_count")
-            if self.config.get("agent_count") not in ABLATION_AGENT_COUNTS or type(self.config.get("agent_count")) is not int:
-                approved["agent_count"] = sorted(ABLATION_AGENT_COUNTS)
-            # ...and any model in ABLATION_MODEL_IDS, as long as the provider settings agree.
+            if self.config.get("agent_count") not in counts or type(self.config.get("agent_count")) is not int:
+                approved["agent_count"] = sorted(counts)
+            # ...and any model of the track (TRACK_MODEL_IDS), as long as the provider settings agree.
+            models = TRACK_MODEL_IDS[track]
             approved.pop("candidate_model_id")
             model = self.config.get("candidate_model_id")
             try:
                 configured = settings_from_config(self.config).model_id
             except ValueError:
                 configured = None
-            if model not in ABLATION_MODEL_IDS or configured != model:
-                approved["candidate_model_id"] = f"one of {list(ABLATION_MODEL_IDS)}, equal to provider_settings.model_id"
-        if not is_ablation(self.config):
+            if model not in models or configured != model:
+                approved["candidate_model_id"] = f"one of {list(models)}, equal to provider_settings.model_id"
+        if track == "gemini" and self.config.get("task_set") == "all71":
+            approved["task_count"] = 71  # owner decision: the whole parent pool on this track
+        if track is None:
             # The provider settings decide the model actually called: on the baseline they
             # must name the pinned MODEL_ID as well (not only candidate_model_id).
             try:
@@ -477,6 +519,8 @@ class _Gates:
             approval = self.config.get("unlimited_provider_key_approval")
             if not isinstance(approval, str) or not approval.strip():
                 problems.append("allow_unlimited_provider_key requires a nonempty unlimited_provider_key_approval note")
+        from . import runtime  # lazy, as in approved_settings(): the concurrent-run override's config check
+        problems += runtime.concurrent_run_problems(self.config)
         self.add("approved_settings", not problems, "; ".join(problems) or
                  "config matches approved plan values (max_connections equals agent_count)", drift=drift,
                  max_connections=self.config.get(MAX_CONNECTIONS_KEY), agent_count=self.config.get("agent_count"))
@@ -540,6 +584,7 @@ class _Gates:
                 problems.append(f"offline catalog validation failed: {ex}")
         self.add("route_pricing", not problems, "; ".join(problems) or "fresh, valid, equal to launch settings",
                  path, age_hours=round(age, 2), provider_route=settings.provider_route,
+                 provider_name=(record.get("endpoint") or {}).get("provider_name"),
                  prompt_usd_per_token=settings.prompt_usd_per_token, output_usd_per_token=settings.output_usd_per_token)
 
     def evidence(self, prefix, required, optional):
@@ -646,8 +691,8 @@ class _Gates:
         if record.get("all_required_passed") is not True:
             problems.append("all_required_passed is not true")
         checks = record.get("checks") if isinstance(record.get("checks"), dict) else {}
-        problems += check_problems(checks, COMPATIBILITY_REQUIRED_CHECKS)
         settings = settings_from_config(self.config)
+        problems += check_problems(checks, compatibility_required_checks(settings.model_id))
         if record.get("model_id") != settings.model_id:
             problems.append(f"model_id {record.get('model_id')!r} is not {settings.model_id!r}")
         if record.get("provider_route") != settings.provider_route:
@@ -783,8 +828,8 @@ class _Gates:
                  checks=assessment["checks"])
 
     def ledger(self, ledger_path, legacy):
-        if is_ablation(self.config):
-            return self.ablation_ledger(ledger_path)
+        if track_of(self.config) is not None:
+            return self.track_ledger(ledger_path)
         snapshot = read_snapshot(ledger_path)
         problems = []
         if legacy.exists():
@@ -858,34 +903,39 @@ class _Gates:
             path=self.rel(ledger_path), exists=snapshot is not None, pilot_remaining_usd=remaining)
         return snapshot, remaining
 
-    def ablation_ledger(self, ledger_path):
-        """The ablation track's own ledger: approved caps, no holds or violations, money left.
-        It is never the baseline ledger and carries no binding to baseline runs."""
+    def track_ledger(self, ledger_path):
+        """A budget track's own ledger (budget.BUDGET_TRACKS): approved caps, no holds or
+        violations, money left. It is never the baseline ledger nor another track's ledger, and
+        carries no binding to baseline runs."""
+        track = track_of(self.config)
         snapshot = read_snapshot(ledger_path)
         caps = caps_for(self.config)
         problems = []
         if Path(ledger_path).resolve() == DEFAULT_LEDGER_PATH(self.repo).resolve():
-            problems.append("the ablation track must not use the baseline ledger")
+            problems.append(f"the {track} track must not use the baseline ledger")
+        for other in BUDGET_TRACKS:
+            if other != track and Path(ledger_path).resolve() == (self.repo / track_ledger_relative(other)).resolve():
+                problems.append(f"the {track} track must not use the {other} track's ledger")
         for scope, data in (snapshot or {}).items():
             if scope in caps and Decimal(data["cap_usd"]) != Decimal(str(caps[scope])):
-                problems.append(f"ablation ledger {scope} cap {data['cap_usd']} differs from the approved "
+                problems.append(f"{track} ledger {scope} cap {data['cap_usd']} differs from the approved "
                                 f"${caps[scope]} (a raise is audited: budget.raise_cap)")
         pilot = (snapshot or {}).get("pilot")
         if pilot:
             if pilot["unresolved_requests"]:
-                problems.append(f"{pilot['unresolved_requests']} unresolved pilot hold(s) in the ablation ledger; "
+                problems.append(f"{pilot['unresolved_requests']} unresolved pilot hold(s) in the {track} ledger; "
                                 "reconcile first (scripts/reconcile_ledger.py --ledger ...)")
             if pilot["violation"]:
-                problems.append("ablation pilot scope has an unacknowledged estimate_violation")
+                problems.append(f"{track} pilot scope has an unacknowledged estimate_violation")
             if Decimal(pilot["remaining_usd"]) <= 0:
-                problems.append("no remaining pilot allowance in the ablation ledger")
+                problems.append(f"no remaining pilot allowance in the {track} ledger")
         remaining = pilot["remaining_usd"] if pilot else str(caps["pilot"])
         self.add("ledger", not problems, "; ".join(problems) or (
-            f"no ablation ledger yet; it will be created with caps {caps}" if snapshot is None else
-            "ablation ledger: approved caps, no holds, in-flight calls or violations"),
+            f"no {track} ledger yet; it will be created with caps {caps}" if snapshot is None else
+            f"{track} ledger: approved caps, no holds, in-flight calls or violations"),
             ledger_path if snapshot is not None else None,
             path=self.rel(ledger_path), exists=snapshot is not None, pilot_remaining_usd=remaining,
-            budget_track="ablation")
+            budget_track=track)
         return snapshot, remaining
 
     def credentials(self):

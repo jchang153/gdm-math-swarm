@@ -419,8 +419,8 @@ def _main(argv=None):
         from research_swarm.budget import run_budget_track
         track = run_budget_track(run_dir)
         if track != "baseline":
-            # docs/plan.md "Prompt ablation track": no paid judging on that track (analysis cap $0),
-            # and never charged to the baseline ledger.
+            # docs/plan.md "Prompt ablation track" and "Gemini 3.1 Pro collaboration run authorized":
+            # no paid judging on a budget track (analysis cap $0), never charged to the baseline ledger.
             return refuse(f"{run_dir.name} is on budget track {track!r}; paid judging is only for baseline runs")
         ledger = (args.ledger or DEFAULT_LEDGER_PATH(ROOT)).resolve()
         problems = judge_analysis_problems(ledger)

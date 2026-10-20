@@ -621,6 +621,46 @@ def replayed_reasoning_blocks(messages):
     return count
 
 
+# Inspect's marker for OpenRouter reasoning_details kept in ContentReasoning.signature
+# (inspect_ai/model/_openrouter_reasoning.py, pinned 0.3.279).
+_REASONING_DETAILS_SIGNATURE = "reasoning-details://"
+
+
+def _signed_details(part):
+    """The signed OpenRouter reasoning details of one reasoning block: encrypted entries with
+    data, or entries carrying a signature (what Inspect replays for signed formats such as
+    Gemini's google-gemini-v1, ``sanitize_reasoning_details_for_replay``)."""
+    signature = getattr(part, "signature", None) or ""
+    if getattr(part, "type", None) != "reasoning" or not signature.startswith(_REASONING_DETAILS_SIGNATURE):
+        return []
+    try:
+        details = json.loads(signature[len(_REASONING_DETAILS_SIGNATURE):])
+    except ValueError:
+        return []
+    return [d for d in details if isinstance(d, dict) and (
+        (d.get("type") == "reasoning.encrypted" and d.get("data")) or d.get("signature"))] \
+        if isinstance(details, list) else []
+
+
+def replayed_signed_reasoning(messages):
+    """Earlier assistant turns of a request that carry tool calls together with signed reasoning
+    details (e.g. Gemini thought signatures), which the provider needs on later turns with tool
+    calls: ``{"replayed_signed_tool_call_turns": n}``, plus the details' formats when n > 0.
+    The live compatibility check needs such a replay accepted for signed-reasoning models."""
+    turns, formats = 0, set()
+    for message in messages:
+        content = getattr(message, "content", None)
+        if getattr(message, "role", None) != "assistant" or not isinstance(content, list) \
+                or not getattr(message, "tool_calls", None):
+            continue
+        signed = [d for part in content for d in _signed_details(part)]
+        if signed:
+            turns += 1
+            formats.update(str(d.get("format") or "unknown") for d in signed)
+    return {"replayed_signed_tool_call_turns": turns,
+            **({"replayed_signed_reasoning_formats": sorted(formats)} if turns else {})}
+
+
 def _rejected_without_generation(output):
     # Inspect converts some provider 4xx rejections (context overflow, input
     # moderation) into outputs without usage; nothing was generated.
@@ -803,6 +843,7 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
         record("inference_admitted", agent_id, {"request_id": request_id, "reserved_usd": str(reservation),
                                                 "request_bytes": len(request.encode("utf-8")),
                                                 "replayed_reasoning_blocks": replayed_reasoning_blocks(messages),
+                                                **replayed_signed_reasoning(messages),
                                                 **({"prompt_cache_normalization": TOKEN_COUNTER_NORMALIZATION_VERSION,
                                                     "normalized_token_counters": normalized_counters}
                                                    if normalized_counters else {})})

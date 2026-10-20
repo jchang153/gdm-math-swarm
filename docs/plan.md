@@ -1,5 +1,23 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Gemini 3.1 Pro collaboration run authorized, October 19, 2026
+
+The repository owner asked to start a run now with 10 agents using the paper's model (Gemini
+3.1 Pro), with the behavior judge turned off for this run. The owner's decisions:
+
+| Topic | Owner decision |
+| --- | --- |
+| Model | `google/gemini-3.1-pro-preview` through OpenRouter, with a pinned standard Google route and no fallbacks. Reservation prices use the upper context tier, $4/$18 per million prompt/completion tokens above 200K (cache read $0.40/M, cache write $0.375/M); below 200K the listed prices are $2/$12. This deviates from the baseline's DeepSeek V4.1 Flash and is closer to the paper's model; the harness stays Claude Code, not Antigravity. |
+| Agents | 10 agents, using the collaborator's 10-agent support (balanced persona allocation 3/3/2/2). |
+| Harness | Built on the collaborator's GLM setup (`glm-replace`): Claude Code's built-in system prompt replaced by the conference prompt, only Bash/Read/Write/Edit (plus TaskStop) among built-in tools, the personas' "When reviewing papers" block left out, and the restated-answer flag in the evaluation summary. Everything else equals the cached baseline: 14 fixed tasks, persona seed, 8 GiB, 180-minute clock. |
+| Prompt | A new `collaboration` variant, wording approved by the owner. It replaces only the heading and opening paragraph of `INTRODUCTION` with: "# Lean Mathematics Collaboration / You are {agent_id}, a mathematician in a collaborative research group working on formalized mathematics. The other members are fellow researchers, each working in their own environment on a common set of problems stated in Lean 4 with Mathlib. The group's goal is to solve as many of these problems as possible with genuine proofs, by working together: share ideas, partial results and useful lemmas, divide the work where it helps, and build on each other's progress. The group's shared infrastructure is organized as a conference, described below." The following sentence "Collaborate with your peers in whatever way you find useful." is kept. Not lenient: the integrity block, "You may stop whenever you choose" and the credit rules are unchanged. |
+| Budget | $400 for this run (estimate about $200–385, from cache100's token volumes repriced at Gemini rates), on its own budget track and ledger (`state/gemini-budget.sqlite`, pilot $400, analysis $0, compatibility $2), with the owner's own OpenRouter key; the authoritative baseline ledger is not touched. The owner's unlimited-key waiver applies with an approval note; the track ledger is the spending stop. |
+| VM | Run alongside the collaborator's live GLM run ("Run alongside hers"). The launch interlock that blocks launches while another run's agent sandboxes or judge compilers are live is overridden for this run only, with a recorded approval note; the override and the containers seen are recorded in the run's evidence. Known risk: CPU contention can push Lean compiles in either run past the 120-second limit, and either run's post-run evaluator refuses while the other run is live (rerun later). The collaborator's session, containers and files are not touched, and the VM is not stopped while her run is active. |
+| Behavior judge | Not run on this run for now (judge revision v3 is still being implemented). |
+| Tasks (added October 20, 2026 UTC) | All 71 parent-pool tasks ("can you also add all 71 lean problems to this run? Just to make it interesting"), through a new `task_set: "all71"` option allowed only on the gemini track (`task_count` 71, `fixed_task_manifest` pinning `data/manifest.json`). The frozen 14-task subset still binds every 20-agent experiment; this is a 10-agent run. A template-only declaration check on the VM validated 70 of 71 templates; `MonochromaticQuantumGraph_eqSystem10_no_solution_d9` failed the check (an error beyond the placeholder; 47 s) and is included anyway, as the owner asked for all 71. |
+| Compatibility allowance (added October 20, 2026 UTC) | $10 on the gemini track instead of $2 (a reviewer showed the 12-request check at Gemini's $4/$18 reservation prices could exhaust $2 and fail falsely); the owner said "The budget limit is set and I don't care just run it". |
+| Speed (owner, October 20) | "please allow other models … I don't care just run it": the remaining offline validation step was skipped; the run proceeds after the main test suite, the route freeze and the paid compatibility check. |
+
 ## Prompt ablation track, October 19, 2026
 
 Exploratory prompt ablations run by a collaborator with their own budget and their own provider

@@ -109,7 +109,11 @@ constant that changes only together with a recorded decision in docs/plan.md),
 **required** `max_connections` (no default); optional `max_subprocesses` (64),
 `persona_counts` (when present, preflight requires it to equal the balanced
 allocation), `warm_up_memory` (`6g`), `warm_up_timeout_seconds` (900) and
-`in_flight_grace_seconds` (120).
+`in_flight_grace_seconds` (120). Optional `budget_track` (`ablation` or `gemini`,
+`budget.BUDGET_TRACKS`: the track's own ledger, caps and allowed populations; recorded as
+`effective.budget_track`, Inspect `condition` `<track>-track-<variant>`), `prompt_variant`,
+`persona_reviewing`, and the concurrent-run override `allow_concurrent_run` with
+`concurrent_run_approval` (budget tracks that allow it only; "Launch interlock" below).
 
 * **Inference concurrency** (docs/plan.md checklist item 4, "one inference connection
   per agent"; **validated** offline): `max_connections` must be stated explicitly in
@@ -147,7 +151,9 @@ allocation), `warm_up_memory` (`6g`), `warm_up_timeout_seconds` (900) and
 * **Gates** (I3): `runtime.preflight` keeps design-invariant (population, spontaneous
   track with no `seeded` block at all, explicit `max_connections` equal to
   `agent_count`, prompt mode), pinned-package, module, Docker-engine and image checks,
-  applies the launch interlock (below; no override), and merges `launch_gates.evaluate`
+  applies the launch interlock (below; only a config's recorded concurrent-run override
+  turns another checkout's agent sandboxes and judge compilers into warnings), and merges
+  `launch_gates.evaluate`
   (evidence files, route pricing, manifest, ledger,
   provider limit, the `compatibility` evidence, and the `verified_integration` /
   `paid_launch_enabled` attestations). A missing or failing gate module is itself a
@@ -171,15 +177,43 @@ and capacity measurements. `runtime.launch_interlock(agent_image)` lists, read-o
 | --- | --- | --- |
 | `comparator` | `docker ps --filter label=gdm-evaluator=1` (`evaluator.CONTAINER_LABEL`) | running |
 | `judge` | `lean.judge_containers()` (label `gdm-judge=1`) | any (running or exited) |
-| `agent` | `evaluator.live_experiment_containers()`: an Inspect sandbox compose project `inspect-<task>-i<id>`, or a container of the configured agent image by tag or ID | running |
+| `agent`, `own_agent`, `unattributed_agent` | `evaluator.live_experiment_containers()`: an Inspect sandbox compose project `inspect-<task>-i<id>`, or a container of the configured agent image by tag or ID; split by the Docker Compose working directory label (the directory of the run's `compose.yaml`): another checkout (`agent`), inside this checkout (`own_agent`, a run started from this checkout, e.g. `runs/<run>/compose.yaml`), none (`unattributed_agent`) | running |
 
 Each kind found adds a blocker naming up to five containers; a listing that fails
-(Docker not running) is itself a blocker. The status (`checked_at`, `containers`) is
-kept in the preflight report (`docker.interlock`).
+(Docker not running) is itself a blocker (kind `listing`). The status (`checked_at`,
+`containers`, each agent with its `checkout`) is kept in the preflight report
+(`docker.interlock`); `blocking` tags every blocker with its kind.
 
-* `run_pilot` refuses through `preflight` (no override).
+* `run_pilot` refuses through `preflight` (no command-line override).
 * `scripts/compat_check.py` refuses through `environment_check` before any credential
-  is read (no override; it is a paid check).
+  is read (no command-line override; it is a paid check).
+* **Launch lock** (**validated** offline). `run_pilot` and the paid compatibility check
+  each hold `runtime.launch_lock` (an exclusive, non-blocking `flock` on `state/launch.lock`,
+  the directory of every budget track's ledger) for their whole duration, taken before any
+  other check; a second pilot or compatibility check from the same checkout refuses while it
+  is held (`LaunchBlocked`, naming the holder's pid and purpose), whatever the interlock or a
+  new run or phase directory says. The lock ends with the holder's process.
+* **Concurrent-run override** (docs/plan.md, "Gemini 3.1 Pro collaboration run authorized,
+  October 19, 2026", VM row "Run alongside hers"; **validated** offline). Only a config of a
+  budget track whose plan decision allows it (`budget.track_allows_concurrent_run`: the
+  `gemini` track only) with `allow_concurrent_run: true` and a nonempty
+  `concurrent_run_approval` note (`runtime.apply_concurrent_run_override`) turns the
+  blockers of the kinds the owner named, another checkout's agent sandboxes (`agent`) and
+  judge compilers (`judge`), into warnings, for `run_pilot`'s preflight and the paid
+  compatibility check alike. Still blocking with the override: running comparators (another
+  checkout's post-run evaluation), agent sandboxes of a run from this checkout or of unknown
+  checkout, failed listings, and the launch lock. Judge containers carry no checkout, so a
+  judge left over by a crashed run of this checkout is waived too; a live run of this
+  checkout is refused by the launch lock. The record `{applied, approval, warnings,
+  still_blocking, containers, checked_at}` is kept as `docker.interlock.concurrent_run_override`
+  in the preflight report (and so in `settings.json`), as `effective.concurrent_run_override`
+  and a `concurrent_run_override` event in `runtime.jsonl`, and as `concurrent_run_override`
+  in the compatibility evidence. `allow_concurrent_run` without a note, or on the baseline or
+  ablation track, blocks (preflight and the `approved_settings` gate), and without the keys
+  the interlock is unchanged. The unpaid validation scripts keep only `--force-while-live`.
+  Known risk the owner accepted: CPU and page-cache contention can push Lean compiles in
+  either run past the 120 s limit; each run's post-run evaluator still refuses while the
+  other run is live.
 * `scripts/validate_runtime.py`, `scripts/isolation_probes.py` and
   `scripts/capacity_probe.py` refuse in `main()` before the warm-up, judge or agents
   start (exit 2, no evidence). Only these unpaid validation scripts accept
@@ -625,7 +659,9 @@ Procedure:
    `credential_presence`, `runtime-e2e` and `runtime-isolation` pass; unless the pinned
    Inspect packages are installed, the launch interlock is clear (no leftover judge
    container, no running comparator container, no other run's agent sandbox; no
-   override for this paid check) and both images pin to IDs. Its single agent uses
+   command-line override for this paid check, only the config's concurrent-run override
+   on a track that allows it), no other pilot or compatibility check of this checkout holds
+   the launch lock (which the check then holds until it ends), and both images pin to IDs. Its single agent uses
    `max_connections` 1 (recorded). It prints the compatibility ledger snapshot and asks the operator to type
    the remaining allowance (`--yes` skips this only for a user-approved run). Nothing
    is spent and no credential is read before that point.
@@ -649,7 +685,13 @@ Procedure:
 4. Abort criteria (an abort stops admission; an admitted request may settle within
    `in_flight_grace_seconds`, see Stopping): after
    `--max-requests` (default 12) admitted requests; `--max-minutes` (default 10) after
-   the first inference; the first permanent provider HTTP 4xx (excluding temporary
+   the first inference; `allowance_exhausted`, when the ledger refuses the next request
+   only because the remaining compatibility allowance cannot cover its reservation
+   (`BudgetExceeded` without an estimate violation; at Gemini's $4/$18 reservation prices
+   this can come before `--max-requests`, so configs/README.md runs the Gemini check with
+   `--max-requests 6`). These three end the check normally and its checks are judged on
+   what ran. Failures: any other admission refusal (`admission_refused`); the first
+   permanent provider HTTP 4xx (excluding temporary
    408/429), a converted pre-generation rejection, tool-call parse failure or provider
    output error; any estimate violation in the scope. Temporary 408/429, server and
    transport errors retain Claude Code's existing bounded retries. The preflight records
@@ -665,9 +707,21 @@ Procedure:
    at their full reservation), and `checks {name: {passed, required, detail}}`.
    Required: `tool_call_parsed`, `conference_tool_call`, `reasoning_replay_accepted`,
    `provider_cost_reported`, `completion_within_max_tokens`, `reasoning_cap_enforced`,
-   `no_estimate_violation`, `route_pinned`, `no_sample_error`. Informational:
-   `truncation_observed`, `compaction_observed`. Details add the abort reason, ledger
-   before/after (`ledger.request_states`, `ledger.missing_request_ids`,
+   `no_estimate_violation`, `route_pinned`, `no_sample_error`, and for models with signed
+   reasoning (`provider.SIGNED_REASONING_MODEL_IDS`: Gemini 3.1 Pro)
+   `signed_reasoning_tool_call_replay`: a later agent request replayed an earlier assistant
+   turn carrying both tool calls and signed reasoning details (the budget filter records
+   `replayed_signed_tool_call_turns` and `replayed_signed_reasoning_formats` in
+   `inference_admitted`), it finished at a provider-reported cost, and no such request was
+   rejected; the launch gate requires it for those models
+   (`launch_gates.compatibility_required_checks`). Informational: `truncation_observed`,
+   `compaction_observed` (and the signed-reasoning check for other models). `route_pinned`
+   and the cap probe accept the serving provider when it starts with the route's provider
+   slug or equals, exactly, the pinned endpoint's catalog `provider_name` from the route
+   freeze (recorded as `frozen_provider_name`; Google Vertex endpoints are tagged
+   `google-vertex/...`). A budget track's check reserves in that track's own ledger
+   (`budget.ledger_path_for`), and the config's concurrent-run override applies. Details
+   add the abort reason, ledger before/after (`ledger.request_states`, `ledger.missing_request_ids`,
    `ledger.committed_delta_usd`), `credentials_in_environment`, `provider_limit`,
    `compose_sha256`, `cap_probe_error`, `limits.cap_probe_max_tokens`, agent exit,
    tool-call list and warm-up. Credential-like strings are redacted before writing.
@@ -721,6 +775,26 @@ compaction omission. Live compatibility must additionally confirm that the pinne
 Claude Code process echoes those blocks correctly. An old session cannot be resumed
 under a new host process's signing key; crash recovery by resuming sessions is not
 supported by this pilot.
+
+**Gemini thought signatures** (October 19, 2026, read from the pinned sources; **validated**
+offline, **pending** the live check). Gemini 3 returns its thought signatures in OpenRouter
+`reasoning_details` (format `google-gemini-v1`: `reasoning.encrypted` entries whose `id` names
+the tool call, or `reasoning.text` entries with a `signature` and possibly no text) and must
+receive them back on later turns with tool calls. Inspect 0.3.279's OpenRouter provider keeps
+the whole array in `ContentReasoning.signature` (`reasoning-details://`, including
+signature-only thoughts) and replays it as message-level `reasoning_details` on the same
+assistant message as its tool calls, dropping only unsigned Gemini text
+(`sanitize_reasoning_details_for_replay`); tool call ids pass through the Anthropic bridge
+unchanged. The stock bridge would still lose the array (reasoning reaches Claude Code as
+text); the transport above carries it, as a `thinking` block (readable thought) or a
+`redacted_thinking` block (signature only). No further fix was needed:
+`tests/test_reasoning_bridge.py` drives a Gemini-shaped response through the real SDK
+converters into the next OpenRouter request and checks the signed details and tool ids. What
+remains unverified offline, and is what the compatibility check's required
+`signed_reasoning_tool_call_replay` establishes, is that the pinned Claude Code binary echoes
+the blocks and tool ids unchanged and that the route accepts the replay. Not covered by that
+check: a response truncated at `max_tokens` loses its tool calls in the budget filter, so its
+replayed signature refers to a tool call that is not sent (watch `truncated_response` events).
 
 ## Completed real CLI smoke check (earlier image)
 

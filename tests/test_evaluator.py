@@ -1094,6 +1094,18 @@ class InterlockTests(unittest.TestCase):
         self.assertEqual(ev.AGENT_IMAGE, __import__('research_swarm.runtime', fromlist=['x']).AGENT_IMAGE)
         self.assertEqual(ev.JUDGE_LABEL, 'gdm-judge=1')
 
+    def test_lists_the_compose_working_directory(self):
+        """The runtime launch interlock attributes agent sandboxes to a checkout by this label."""
+        lines = ['c2\tinspect-gdm_math_swa-iab12cd-default-1\tsha256:' + 'e' * 64 + '\t\tinspect-gdm_math_swa-iab12cd'
+                 '\t/home/other/gdm-math-swarm/runs/glm10-x',
+                 'c3\tstray\t' + self.AGENT_ID + '\t\t\t']
+        fake, calls = self.fake_docker(lines)
+        with patch('subprocess.run', side_effect=fake):
+            live = ev.live_experiment_containers()
+        self.assertEqual([c['compose_working_dir'] for c in live], ['/home/other/gdm-math-swarm/runs/glm10-x', None])
+        ps = next(c for c in calls if c[1] == 'ps')
+        self.assertIn('{{.Label "com.docker.compose.project.working_dir"}}', ps[-1])
+
     def test_unlistable_docker_refuses_and_force_is_loud(self):
         fake, _ = self.fake_docker([], returncode=1)
         log = []

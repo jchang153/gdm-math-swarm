@@ -244,14 +244,14 @@ def write_compose(path, image=AGENT_IMAGE, memory="1g", cpus=None, pids=256):
     return str(Path(path).resolve())
 
 
-def export_public_tasks(repo_root):
+def export_public_tasks(repo_root, task_set="pilot14"):
     """Sanitized templates + tasks.json via FrozenDataset.export_agent_tasks.
 
     Returns (listing, files) where files maps container paths to contents. The
     export goes through a private temporary directory, never an agent mount.
     """
     from .dataset import FrozenDataset
-    dataset = FrozenDataset(repo_root)
+    dataset = FrozenDataset(repo_root, task_set=task_set)
     with tempfile.TemporaryDirectory(prefix="gdm-export-") as folder:
         listing = dataset.export_agent_tasks(folder)
         files = {f"{PROBLEMS_DIR}/{p.name}": p.read_text() for p in sorted(Path(folder).iterdir()) if p.is_file()}
@@ -400,11 +400,15 @@ class Snapshotter:
             await asyncio.sleep(interval)
 
 
-def condition_label(variant: str, ablation_track: bool = False) -> str:
+def condition_label(variant: str, budget_track=None) -> str:
     """Inspect ``condition`` metadata: only the unchanged prompt on the baseline track is
-    the baseline condition; every ablation-track run is labelled as such."""
-    if ablation_track:
-        return f"ablation-track-{variant}"
+    the baseline condition; every run on a budget track is labelled with its track
+    (``<track>-track-<variant>``). ``budget_track`` is a budget.BUDGET_TRACKS name, None or
+    "baseline" for the baseline, or (earlier interface) True for the ablation track."""
+    if budget_track is True:
+        budget_track = "ablation"
+    if budget_track and budget_track != "baseline":
+        return f"{budget_track}-track-{variant}"
     return "baseline-spontaneous" if variant == "baseline" else f"prompt-ablation-{variant}"
 
 
@@ -720,50 +724,188 @@ def _running_comparators(docker="docker"):
     return found
 
 
-def launch_interlock(agent_image=AGENT_IMAGE, docker="docker"):
+def _checkout_of(working_dir, repo_root):
+    """``"this"`` when a compose working directory lies inside ``repo_root`` (a sandbox of a run
+    started from this checkout: its compose file is runs/<run>/compose.yaml), ``"other"`` when it
+    lies elsewhere, ``"unknown"`` without one."""
+    if not working_dir:
+        return "unknown"
+    try:
+        Path(working_dir).resolve().relative_to(Path(repo_root).resolve())
+    except ValueError:
+        return "other"
+    return "this"
+
+
+def launch_interlock(agent_image=AGENT_IMAGE, docker="docker", repo_root=None):
     """Containers that block a runtime launch, read-only (nothing is started or removed).
 
-    Returns ``{"checked_at", "blockers", "containers", "judge_containers"}``: one
-    blocker per kind found (or per listing that failed: an unlistable Docker blocks
-    too). Kinds: ``comparator`` (running, label gdm-evaluator=1), ``judge`` (label
-    gdm-judge=1 in any state, ``lean.judge_containers``) and ``agent`` (running
-    Inspect sandbox compose projects or containers of ``agent_image``, by tag or ID;
-    ``evaluator.live_experiment_containers``). Callers check before creating any
+    Returns ``{"checked_at", "blockers", "blocking", "containers", "judge_containers",
+    "listing_errors"}``: one blocker per kind found (or per listing that failed: an
+    unlistable Docker blocks too; those blockers are also in ``listing_errors``).
+    ``blocking`` tags each blocker with its kind (``{"kind", "blocker"}``, in ``blockers``
+    order). Kinds: ``listing`` (a failed listing), ``comparator`` (running, label
+    gdm-evaluator=1), ``judge`` (label gdm-judge=1 in any state, ``lean.judge_containers``)
+    and, for running Inspect sandbox compose projects or containers of ``agent_image`` (by tag
+    or ID; ``evaluator.live_experiment_containers``), by the checkout their compose file lies
+    in (``checkout`` on each container): ``agent`` (another checkout), ``own_agent`` (inside
+    ``repo_root``, default this package's checkout: a run started from this checkout) and
+    ``unattributed_agent`` (no compose working directory). Callers check before creating any
     container of their own, so every agent sandbox seen belongs to another run.
     """
     from . import evaluator, lean
-    blockers, containers = [], []
+    root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[2]
+    blocking, containers = [], []
+
+    def block(kind, text):
+        blocking.append({"kind": kind, "blocker": text})
     leftover = lean.judge_containers(docker)
     if leftover is None:
-        blockers.append(f"Could not list leftover judge containers (label {lean.JUDGE_LABEL})")
+        block("listing", f"Could not list leftover judge containers (label {lean.JUDGE_LABEL})")
     else:
         containers += [{"id": None, "name": name, "image": None, "kind": "judge", "compose_project": None}
                        for name in leftover]
         if leftover:
-            blockers.append(f"{len(leftover)} leftover judge container(s) with label {lean.JUDGE_LABEL} "
-                            f"({', '.join(leftover[:5])}); remove them (docker rm -f) before launch")
+            block("judge", f"{len(leftover)} leftover judge container(s) with label {lean.JUDGE_LABEL} "
+                           f"({', '.join(leftover[:5])}); remove them (docker rm -f) before launch")
     comparators = _running_comparators(docker)
     if comparators is None:
-        blockers.append(f"Could not list comparator containers (label {evaluator.CONTAINER_LABEL})")
+        block("listing", f"Could not list comparator containers (label {evaluator.CONTAINER_LABEL})")
     else:
         containers += comparators
         if comparators:
-            blockers.append(f"{len(comparators)} running comparator container(s) with label "
-                            f"{evaluator.CONTAINER_LABEL} ({', '.join(c['name'] for c in comparators[:5])}); wait "
-                            "until the evaluation or evaluator validation finishes before launch")
+            block("comparator", f"{len(comparators)} running comparator container(s) with label "
+                                f"{evaluator.CONTAINER_LABEL} ({', '.join(c['name'] for c in comparators[:5])}); "
+                                "wait until the evaluation or evaluator validation finishes before launch")
     live = evaluator.live_experiment_containers(docker, agent_image=agent_image)
     if live is None:
-        blockers.append("Could not list running agent sandbox containers")
+        block("listing", "Could not list running agent sandbox containers")
     else:
         seen = {c["id"] for c in containers if c["id"]}
-        agents = [c for c in live if c.get("kind") == "agent" and c.get("id") not in seen]
+        agents = [dict(c, checkout=_checkout_of(c.get("compose_working_dir"), root))
+                  for c in live if c.get("kind") == "agent" and c.get("id") not in seen]
         containers += agents
-        if agents:
-            blockers.append(f"{len(agents)} running agent sandbox container(s) from another run "
-                            f"({', '.join(c['name'] for c in agents[:5])}); wait until that run finishes (or remove "
+        groups = (("agent", "other", "from another run"),
+                  ("own_agent", "this", f"of a run started from this checkout ({root})"),
+                  ("unattributed_agent", "unknown", "without a compose working directory (checkout unknown)"))
+        for kind, checkout, origin in groups:
+            found = [c for c in agents if c["checkout"] == checkout]
+            if found:
+                block(kind, f"{len(found)} running agent sandbox container(s) {origin} "
+                            f"({', '.join(c['name'] for c in found[:5])}); wait until that run finishes (or remove "
                             "its containers) before launch")
+    blockers = [b["blocker"] for b in blocking]
+    errors = [b["blocker"] for b in blocking if b["kind"] == "listing"]
     return {"checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "blockers": blockers,
-            "containers": containers, "judge_containers": leftover}
+            "blocking": blocking, "containers": containers, "judge_containers": leftover, "listing_errors": errors}
+
+
+# Concurrent-run override (docs/plan.md, "Gemini 3.1 Pro collaboration run authorized, October
+# 19, 2026", VM row: "Run alongside hers"). Only a config of a budget track whose plan decision
+# allows it (budget.track_allows_concurrent_run: the gemini track) that sets allow_concurrent_run:
+# true together with a nonempty concurrent_run_approval note turns the interlock blockers the
+# owner named, another checkout's agent sandboxes ("agent") and judge compilers ("judge"), into
+# recorded warnings, for run_pilot's preflight and the paid compatibility check. Everything else
+# still blocks: running comparators, agent sandboxes of a run from this checkout or of unknown
+# checkout, and failed Docker listings; a second paid launch from this checkout is refused by
+# the launch lock (``launch_lock``). Without both keys the interlock is unchanged.
+CONCURRENT_RUN_KEY = "allow_concurrent_run"
+CONCURRENT_RUN_APPROVAL_KEY = "concurrent_run_approval"
+CONCURRENT_RUN_WAIVABLE_KINDS = ("agent", "judge")
+
+
+def concurrent_run_problems(config):
+    """Config check: absent or false means no override; true requires a budget track whose plan
+    decision allows it and a nonempty approval note."""
+    from .budget import BUDGET_TRACKS, track_allows_concurrent_run, track_of
+    value = (config or {}).get(CONCURRENT_RUN_KEY, False)
+    if type(value) is not bool:
+        return [f"{CONCURRENT_RUN_KEY} must be true or false"]
+    if value:
+        track = track_of(config)
+        if not track_allows_concurrent_run(track):
+            allowed = " or ".join(repr(t) for t in BUDGET_TRACKS if track_allows_concurrent_run(t))
+            return [f"{CONCURRENT_RUN_KEY} is allowed only on a budget track whose plan decision approves it "
+                    f"({allowed}), not on the {track or 'baseline'} track"]
+        approval = config.get(CONCURRENT_RUN_APPROVAL_KEY)
+        if not isinstance(approval, str) or not approval.strip():
+            return [f"{CONCURRENT_RUN_KEY} requires a nonempty {CONCURRENT_RUN_APPROVAL_KEY} note"]
+    return []
+
+
+def concurrent_run_approval(config):
+    """The approval note when the config's concurrent-run override is valid and on, else None."""
+    if concurrent_run_problems(config) or (config or {}).get(CONCURRENT_RUN_KEY) is not True:
+        return None
+    return config[CONCURRENT_RUN_APPROVAL_KEY].strip()
+
+
+def apply_concurrent_run_override(status, config):
+    """``status`` (``launch_interlock``) with the config's concurrent-run override applied.
+
+    Adds ``concurrent_run_override``: None without a valid override; otherwise ``{"applied",
+    "approval", "warnings", "still_blocking", "containers", "checked_at"}``, where ``warnings``
+    are the blockers of a waivable kind (CONCURRENT_RUN_WAIVABLE_KINDS, by ``status["blocking"]``)
+    that no longer block (``applied`` is false when there were none). ``blockers`` keeps every
+    other blocker (``still_blocking``); a status without ``blocking`` waives nothing. The
+    containers seen are recorded either way.
+    """
+    approval = concurrent_run_approval(config)
+    if approval is None:
+        return dict(status, concurrent_run_override=None)
+    waived = [b["blocker"] for b in status.get("blocking") or [] if b.get("kind") in CONCURRENT_RUN_WAIVABLE_KINDS]
+    blockers = [b for b in status["blockers"] if b not in waived]
+    record = {"applied": bool(waived), "approval": approval, "warnings": waived, "still_blocking": blockers,
+              "containers": list(status.get("containers") or []), "checked_at": status.get("checked_at")}
+    return dict(status, blockers=blockers, concurrent_run_override=record)
+
+
+# Launch lock: one paid launcher (run_pilot, the paid compatibility check) at a time per ledger
+# directory (state/, which holds every budget track's ledger, so in practice per checkout). It
+# is held for the launcher's whole duration and released when its process ends, so a duplicate
+# launch from this checkout is refused even when the concurrent-run override waives the
+# interlock and the duplicate's run directory or phase directory is new.
+LAUNCH_LOCK_NAME = "launch.lock"
+
+
+class launch_lock:  # noqa: N801 (used as a context manager)
+    """Exclusive, non-blocking ``flock`` on ``<directory>/launch.lock``; ``LaunchBlocked`` when
+    another process holds it. The file records the holder (pid, purpose, start) for the refusal
+    message; it is never deleted (the lock, not the file, is the signal)."""
+
+    def __init__(self, directory, purpose):
+        self.path = Path(directory) / LAUNCH_LOCK_NAME
+        self.purpose = str(purpose)
+        self.handle = None
+
+    def __enter__(self):
+        import fcntl
+        import os
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644), "r+", encoding="utf-8")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            holder = handle.read(500).strip() or "unknown holder"
+            handle.close()
+            raise LaunchBlocked(f"Another paid launch from this checkout holds {self.path} ({holder}); wait until "
+                                "it has ended. A second pilot or compatibility check never runs next to it")
+        except OSError as ex:
+            handle.close()
+            raise LaunchBlocked(f"Could not take the launch lock {self.path} ({type(ex).__name__}: {ex})") from ex
+        handle.seek(0)
+        handle.truncate()
+        handle.write(json.dumps({"pid": os.getpid(), "purpose": self.purpose,
+                                 "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}))
+        handle.flush()
+        self.handle = handle
+        return self.path
+
+    def __exit__(self, *exc):
+        if self.handle is not None:
+            self.handle.close()  # releases the lock
+            self.handle = None
+        return False
 
 
 INTERLOCK_FORCE_WARNING = (
@@ -775,8 +917,9 @@ INTERLOCK_FORCE_WARNING = (
 def enforce_launch_interlock(force=False, agent_image=AGENT_IMAGE, *, log=print, check=None):
     """Interlock for the unpaid validation scripts: the status (with ``forced``) to
     proceed, or None to refuse. ``force`` (their ``--force-while-live``) proceeds with
-    a loud warning. ``run_pilot`` and the paid compatibility check have no override:
-    they refuse through ``preflight`` / ``environment_check`` instead."""
+    a loud warning. ``run_pilot`` and the paid compatibility check have no flag: they
+    refuse through ``preflight`` / ``environment_check`` instead, unless their config
+    carries the recorded concurrent-run override (``apply_concurrent_run_override``)."""
     status = (check or launch_interlock)(agent_image)
     if not status["blockers"]:
         return dict(status, forced=False)
@@ -838,17 +981,21 @@ def preflight(config, repo_root):
     seeded configuration, explicit ``max_connections`` equal to ``agent_count``,
     prompt mode), pinned host packages, modules, Docker engine, images and the
     launch interlock (``launch_interlock``: leftover judge, running comparator and
-    other agent sandbox containers; no override). Evidence/ledger/route/manifest/
-    attestation gates come from ``launch_gates.evaluate`` (blockers concatenated).
+    other agent sandbox containers; only the config's recorded concurrent-run override
+    turns the container blockers into warnings, ``apply_concurrent_run_override``).
+    Evidence/ledger/route/manifest/attestation gates come from ``launch_gates.evaluate``
+    (blockers concatenated).
     """
     from .inspect_adapter import SYSTEM_PROMPT_MODES, installed_versions
     blockers = []
-    from .budget import budget_track_problems, is_ablation
+    from .budget import budget_track_problems, track_agent_counts, track_of
     blockers.extend(budget_track_problems(config))
-    if is_ablation(config):
-        from .launch_gates import ABLATION_AGENT_COUNTS
-        if config.get("agent_count") not in ABLATION_AGENT_COUNTS or type(config.get("agent_count")) is not int:
-            blockers.append(f"The ablation track allows {sorted(ABLATION_AGENT_COUNTS)} peers")
+    blockers.extend(concurrent_run_problems(config))
+    track = track_of(config)
+    if track is not None:
+        counts = track_agent_counts(track)
+        if config.get("agent_count") not in counts or type(config.get("agent_count")) is not int:
+            blockers.append(f"The {track} track allows {sorted(counts)} peers")
     elif config.get("agent_count") != APPROVED_AGENT_COUNT:
         blockers.append(f"Pilot requires {APPROVED_AGENT_COUNT} peers (a population change needs user agreement)")
     if config.get("track") != "spontaneous" or config.get("seeded_contagion_enabled") or config.get("mitigations_enabled"):
@@ -909,9 +1056,11 @@ def preflight(config, repo_root):
                 if ids.get(tag) is None:
                     blockers.append(f"{key.replace('_', ' ').capitalize()} {tag} is not built")
             if proc.returncode == 0:
-                interlock = launch_interlock(images["agent_image"])
+                interlock = apply_concurrent_run_override(
+                    launch_interlock(images["agent_image"], repo_root=repo_root), config)
                 docker["judge_containers"] = interlock["judge_containers"]
-                docker["interlock"] = {k: interlock[k] for k in ("checked_at", "containers")}
+                docker["interlock"] = {k: interlock[k] for k in ("checked_at", "containers",
+                                                                 "concurrent_run_override")}
                 blockers.extend(interlock["blockers"])
         except (OSError, subprocess.TimeoutExpired, ValueError):
             blockers.append("Docker engine preflight failed")
@@ -1031,13 +1180,13 @@ def queue_observer(run_dir, record=None):
 
 
 def ledger_path(repo_root, config=None):
-    """Authoritative cross-run ledger (I4: <repo>/state/budget.sqlite), or the ablation
-    track's own ledger when ``config`` selects it (budget.ledger_path_for)."""
+    """Authoritative cross-run ledger (I4: <repo>/state/budget.sqlite), or a budget track's
+    own ledger when ``config`` selects one (budget.ledger_path_for)."""
     from .budget import ledger_path_for
     return Path(ledger_path_for(config or {}, repo_root))
 
 
-def default_conference_factory(repo_root, observer=None, compiler=None):
+def default_conference_factory(repo_root, observer=None, compiler=None, task_set="pilot14"):
     """Baseline service: frozen pilot tasks + vulnerable operational judge.
 
     ``observer`` (the independent evaluator queue) writes only researcher-side
@@ -1049,7 +1198,7 @@ def default_conference_factory(repo_root, observer=None, compiler=None):
         from .conference import ConferenceService, operational_judge, tasks_from_dataset
         from .dataset import FrozenDataset
         from .lean import DockerLeanCompiler
-        return ConferenceService(run_dir, tasks_from_dataset(FrozenDataset(repo_root)),
+        return ConferenceService(run_dir, tasks_from_dataset(FrozenDataset(repo_root, task_set=task_set)),
                                  operational_judge(compiler if compiler is not None else DockerLeanCompiler()),
                                  observer=observer, agent_ids=agent_ids, **track_arguments)
     return factory
@@ -1073,7 +1222,9 @@ def make_conference(repo_root, run_dir, agent_ids, config, record, *, lean_image
     observer = None
     if conference_factory is None:
         observer = queue_observer(run_dir, record)
-        conference_factory = default_conference_factory(repo_root, observer=observer, compiler=compiler)
+        from .dataset import task_set_of
+        conference_factory = default_conference_factory(repo_root, observer=observer, compiler=compiler,
+                                                        task_set=task_set_of(config))
     if track_arguments:
         conference = conference_factory(run_dir, agent_ids, **track_arguments)
         if getattr(conference, "track", None) != track_arguments["track"]:
@@ -1217,11 +1368,22 @@ async def run_pilot(config, repo_root, conference_factory=None):
     ``conference_factory(run_dir, agent_ids)`` returns the ConferenceService
     (default: ``default_conference_factory`` with the I1 judge compiler and the
     I2 evaluator queue observer). Fails closed until every preflight gate holds
-    (including the launch interlock, which has no override here) and refuses a
-    config without an explicit ``max_connections``, which is passed to the model and
-    recorded in settings.json. Image tags are pinned to local image IDs once; a Lean
-    warm-up runs before the start barrier. No substitute custom agent loop exists.
+    (including the launch interlock; only the config's recorded concurrent-run override
+    turns another checkout's agent sandboxes and judge compilers into warnings, recorded in
+    settings.json) and refuses a config without an explicit ``max_connections``, which is
+    passed to the model and recorded in settings.json. The launch lock (``launch_lock`` in
+    the ledger directory, state/) is held for the whole run, before preflight, so a second
+    pilot or paid compatibility check from this checkout refuses while this one runs. Image
+    tags are pinned to local image IDs once; a Lean warm-up runs before the start barrier. No
+    substitute custom agent loop exists.
     """
+    from .budget import DEFAULT_LEDGER_PATH
+    with launch_lock(DEFAULT_LEDGER_PATH(repo_root).parent, "run_pilot"):
+        return await _run_pilot(config, repo_root, conference_factory)
+
+
+async def _run_pilot(config, repo_root, conference_factory=None):
+    """``run_pilot`` while it holds the launch lock."""
     report = preflight(config, repo_root)
     if not report["ready"]:
         raise LaunchBlocked("; ".join(report["blockers"]))
@@ -1250,7 +1412,11 @@ async def run_pilot(config, repo_root, conference_factory=None):
     record = make_recorder(run_dir / "runtime.jsonl")
     record("inspect_dotenv_disabled", None, dotenv)
     record("images_pinned", None, images)
-    from .budget import caps_for, is_ablation
+    override = ((report.get("docker") or {}).get("interlock") or {}).get("concurrent_run_override")
+    if override is not None:
+        record("concurrent_run_override", None, override)
+    from .budget import caps_for, track_of
+    track = track_of(config)
     ledger_file = ledger_path(repo_root, config)
     ledger = BudgetLedger(ledger_file, caps=caps_for(config))
     # Pricing and compatibility evidence were checked by launch_gates above, against
@@ -1258,7 +1424,9 @@ async def run_pilot(config, repo_root, conference_factory=None):
     settings = settings_from_config(config, pricing_verified=True, live_compatibility_verified=True)
     personas = assign_personas(agent_count, persona_seed)
     agent_ids = list(personas)
-    listing, task_files = export_public_tasks(repo_root)
+    from .dataset import task_set_of
+    task_set = task_set_of(config)
+    listing, task_files = export_public_tasks(repo_root, task_set=task_set)
     # Before any agent container starts (and so before the barrier): warm the page cache.
     warm_up = await asyncio.to_thread(warm_up_lean, images["lean"]["id"], record, **warm_up_options(config))
     conference, compiler, observer = make_conference(repo_root, run_dir, agent_ids, config, record,
@@ -1282,11 +1450,12 @@ async def run_pilot(config, repo_root, conference_factory=None):
                                                                 ("memory", "memory"), ("cpus", "cpus"),
                                                                 ("max_concurrent", "max_concurrent"))},
             "lean_warm_up": warm_up, "system_prompt_mode": mode, "prompt_variant": variant,
+            "task_set": task_set, "task_ids": [t["task_id"] for t in listing],
             "persona_reviewing": reviewing,
             "claude_auto_memory": auto_memory,
             "prompt_cache_normalization": TOKEN_COUNTER_NORMALIZATION_VERSION,
             "claude_code_env": claude_code_env(auto_memory), "ledger_path": str(ledger_file), "budget_scope": "pilot",
-            "budget_track": "ablation" if is_ablation(config) else "baseline",
+            "budget_track": track or "baseline", "concurrent_run_override": override,
             "evaluator_observer": None if observer is None else "queue",
             "fixed_task_manifest": config.get("fixed_task_manifest"), "inspect_dotenv": dotenv,
             "provider_limit": provider_limit, "in_flight_grace_seconds": in_flight_grace,
@@ -1305,7 +1474,7 @@ async def run_pilot(config, repo_root, conference_factory=None):
                              run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,
                              auto_memory=auto_memory, in_flight_grace=in_flight_grace)
         task = build_task(agent_ids=agent_ids, files=agent_files(task_files), solver=solver, compose=compose,
-                          metadata={"condition": condition_label(variant, is_ablation(config)), "prompt_variant": variant,
+                          metadata={"condition": condition_label(variant, track), "prompt_variant": variant,
                                     "persona_reviewing": reviewing, "personas": personas, "persona_seed": persona_seed},
                           initial_message=INITIAL_MESSAGE)
         return await supervise(eval_async(task, model=model, **eval_options(agent_count, run_dir, config)),

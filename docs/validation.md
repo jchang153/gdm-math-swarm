@@ -39,7 +39,13 @@ Conventions:
     be listed. The three validation scripts accept `--force-while-live` for debugging
     only; their evidence then fails the required check `no_conflicting_containers_at_start`
     and cannot satisfy a gate. `run_pilot.py` and the paid compatibility check have no
-    override.
+    command-line override; only a config of the `gemini` budget track with
+    `allow_concurrent_run: true` and a nonempty `concurrent_run_approval` note (the owner's
+    Gemini run, `configs/gemini-collab.json`) turns another checkout's agent sandboxes and
+    judge compilers into warnings recorded in the run's settings and the compatibility
+    evidence (docs/runtime.md, "Launch interlock"). Running comparators, sandboxes of a run
+    from this checkout and listing failures still block, and the launch lock
+    (`state/launch.lock`) refuses a second pilot or compatibility check from this checkout.
   * Evaluator scripts (`validate_evaluator.py`, `evaluate_run.py`) refuse while judge or
     agent containers run (docs/evaluator.md, "Interlock"). Never use their
     `--force-while-live` for a gate record or a pilot evaluation.
@@ -684,7 +690,8 @@ PYTHONPATH=src .venv/bin/python scripts/compat_check.py --i-have-user-approval
 * Before spending, it refuses unless ledger scope `compatibility` exists at exactly $2 (a
   new ledger is created with the approved caps) with no unacknowledged violation and at
   least $0.50 left; unless no comparator, leftover judge or other agent sandbox container
-  is present (S1; no override); unless the gates `fixed_task_manifest`, `frozen_dataset`,
+  is present (S1; no command-line override, only the config's recorded concurrent-run
+  override); unless the gates `fixed_task_manifest`, `frozen_dataset`,
   `approved_settings`, `config_caps`, `route_pricing`, `credential_presence`,
   `runtime-e2e`, `runtime-isolation` pass; and unless the operator types the remaining
   compatibility allowance (`--yes` only for a user-approved run).
@@ -707,7 +714,9 @@ PYTHONPATH=src .venv/bin/python scripts/compat_check.py --i-have-user-approval
   Fetching OpenRouter's generation cost needs the user's approval
   (`--i-have-user-approval`); a hold without a generation id can be settled only with
   `--manual REQUEST_ID COST --note TEXT --i-have-user-approval` after the user identifies
-  the charge. Nothing is released automatically.
+  the charge. Nothing is released automatically. For a budget track's check or run, add
+  `--ledger state/<track ledger>` (e.g. `state/gemini-budget.sqlite`); the accepted
+  generation model then defaults to the track's (`provider.TRACK_MODEL_IDS`).
 * **On failure.** Do not re-run automatically: a second paid attempt needs a new
   confirmation, and the $2 scope is never reset. A failed required check is a material
   incompatibility to bring to the user (plan row "Remaining model-setting authority").

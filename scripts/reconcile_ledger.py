@@ -23,6 +23,11 @@ files, not in runtime.jsonl; pass them with --map, restrict the run with --scope
 name the judge models with --expect-model (repeatable; default the pilot model) and point
 --credentials-root at the checkout holding the host .env (default: this checkout).
 
+Budget-track ledgers (budget.BUDGET_TRACKS): pass --ledger state/<track ledger>; the caps are
+the ledger's own and the default --expect-model is the track's models
+(provider.TRACK_MODEL_IDS: google/gemini-3.1-pro-preview for state/gemini-budget.sqlite, DeepSeek
+V4.1 Flash and GLM 5.3 for state/ablation-budget.sqlite).
+
 Manual settlement (an exception-path hold without a generation id, after the user
 has identified its charge, e.g. in the OpenRouter activity log by time and model,
 and approved the amount): ``--manual REQUEST_ID COST --note TEXT`` (repeatable
@@ -33,6 +38,8 @@ planned settlements.
 
     .venv/bin/python scripts/reconcile_ledger.py --run-dir runs/pilot-...           # dry run
     .venv/bin/python scripts/reconcile_ledger.py --run-dir runs/pilot-... --i-have-user-approval
+    .venv/bin/python scripts/reconcile_ledger.py --ledger state/gemini-budget.sqlite --run-dir runs/gemini10-... \\
+        --i-have-user-approval
     .venv/bin/python scripts/reconcile_ledger.py --scope analysis --map REQUEST_ID=gen-... \\
         --expect-model anthropic/claude-opus-5.5 --credentials-root ~/gdm-math-swarm --i-have-user-approval
     .venv/bin/python scripts/reconcile_ledger.py --manual REQUEST_ID 0.0123 \\
@@ -53,7 +60,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from research_swarm.budget import (DEFAULT_LEDGER_PATH, MANUAL_BASIS, UNRESOLVED_STATES, BudgetLedger,  # noqa: E402
                                    list_requests, read_snapshot)
-from research_swarm.provider import MODEL_ID  # noqa: E402
+from research_swarm.provider import MODEL_ID, TRACK_MODEL_IDS  # noqa: E402
 
 URL = "https://openrouter.ai/api/v1/generation?id={id}"
 END_EVENTS = ("inference_finished", "inference_uncertain", "inference_unbilled")
@@ -214,15 +221,29 @@ def settle_manual(ledger, planned, note, *, allow_reserved=False):
 
 
 def ledger_caps(path):
-    """Caps to open ``path`` with: the ablation track's own ledger keeps its own caps
-    (docs/plan.md, "Prompt ablation track"); every other ledger the approved DEFAULT_CAPS."""
-    from research_swarm.budget import ABLATION_CAPS, ABLATION_LEDGER_RELATIVE, read_snapshot
-    if Path(path).name != ABLATION_LEDGER_RELATIVE.name:
+    """Caps to open ``path`` with: a budget track's own ledger (budget.BUDGET_TRACKS, e.g.
+    docs/plan.md, "Prompt ablation track", or the owner's Gemini track) keeps its own caps;
+    every other ledger the approved DEFAULT_CAPS."""
+    from research_swarm.budget import read_snapshot, track_caps, track_for_ledger
+    track = track_for_ledger(path)
+    if track is None:
         return None
     # Reconciliation never changes caps: open the ledger at the caps it has (before or
-    # after an audited raise), falling back to ABLATION_CAPS for a scope it lacks.
+    # after an audited raise), falling back to the track's caps for a scope it lacks.
     snapshot = read_snapshot(path) or {}
-    return {scope: snapshot[scope]["cap_usd"] if scope in snapshot else cap for scope, cap in ABLATION_CAPS.items()}
+    return {scope: snapshot[scope]["cap_usd"] if scope in snapshot else cap
+            for scope, cap in track_caps(track).items()}
+
+
+def expected_models(ledger_path, explicit=None):
+    """Accepted generation models: ``--expect-model`` when given; otherwise the models of the
+    budget track whose ledger ``ledger_path`` is (provider.TRACK_MODEL_IDS, e.g.
+    google/gemini-3.1-pro-preview for state/gemini-budget.sqlite), else the pilot MODEL_ID."""
+    if explicit:
+        return tuple(explicit)
+    from research_swarm.budget import track_for_ledger
+    track = track_for_ledger(ledger_path)
+    return tuple(TRACK_MODEL_IDS[track]) if track in TRACK_MODEL_IDS else (MODEL_ID,)
 
 
 def write_audit(ledger_path, ledger, entries, **extra):
@@ -258,8 +279,10 @@ def main(argv=None):
                              "needs --note and --i-have-user-approval")
     parser.add_argument("--note", help="audit note for --manual: where the amount came from and the user's approval")
     parser.add_argument("--expect-model", action="append",
-                        help=f"accepted generation model (repeatable; default {MODEL_ID}), e.g. the judge's "
-                             "anthropic/claude-opus-5.5 and anthropic/claude-sonnet-5.5")
+                        help="accepted generation model (repeatable; default: the models of the --ledger's "
+                             "budget track, e.g. google/gemini-3.1-pro-preview for state/gemini-budget.sqlite, "
+                             f"otherwise {MODEL_ID}), e.g. the judge's anthropic/claude-opus-5.5 and "
+                             "anthropic/claude-sonnet-5.5")
     parser.add_argument("--credentials-root", type=Path, default=ROOT,
                         help="checkout whose private .env holds the host key (default: this checkout)")
     parser.add_argument("--include-stale-reserved", action="store_true",
@@ -300,7 +323,7 @@ def main(argv=None):
     from research_swarm.secrets import load_openrouter_key
     key = load_openrouter_key(args.credentials_root)
     ledger = BudgetLedger(args.ledger, caps=ledger_caps(args.ledger))
-    models = tuple(args.expect_model or (MODEL_ID,))
+    models = expected_models(args.ledger, args.expect_model)
     entries = reconcile_requests(ledger, requests, generation_ids, lambda gid: fetch_generation(gid, key),
                                  model_id=models, allow_reserved=args.include_stale_reserved)
     path = write_audit(args.ledger, ledger, entries, mode="generation_lookup", expected_models=list(models),

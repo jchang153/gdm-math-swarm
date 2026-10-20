@@ -28,8 +28,39 @@ class DatasetTask:
             raise ValueError(f'Template hash mismatch: {self.task_id}')
         return data.decode('utf-8')
 
+# Task sets (docs/plan.md, "Gemini 3.1 Pro collaboration run authorized"): the frozen 14-task
+# pilot subset (default, every baseline) or the whole 71-task parent pool (owner decision for
+# the Gemini collaboration run; launch gates allow it only on that budget track).
+PILOT_TASK_SET = 'pilot14'
+ALL_TASK_SET = 'all71'
+TASK_SETS = (PILOT_TASK_SET, ALL_TASK_SET)
+TASK_SET_KEY = 'task_set'
+
+
+def task_set_of(config) -> str:
+    """The config's task set (absent: the pilot subset); unknown values are refused."""
+    value = (config or {}).get(TASK_SET_KEY, PILOT_TASK_SET)
+    if value not in TASK_SETS:
+        raise ValueError(f'{TASK_SET_KEY} {value!r} is not one of {list(TASK_SETS)}')
+    return value
+
+
+def run_task_set(run_dir) -> str:
+    """The task set a saved run used (settings.json effective/config), default the pilot subset."""
+    path = Path(run_dir) / 'settings.json'
+    try:
+        settings = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return PILOT_TASK_SET
+    effective = (settings.get('effective') or {}).get(TASK_SET_KEY)
+    return effective or (settings.get('config') or {}).get(TASK_SET_KEY) or PILOT_TASK_SET
+
+
 class FrozenDataset:
-    def __init__(self, repository: str | Path):
+    def __init__(self, repository: str | Path, task_set: str = PILOT_TASK_SET):
+        if task_set not in TASK_SETS:
+            raise ValueError(f'task_set {task_set!r} is not one of {list(TASK_SETS)}')
+        self.task_set = task_set
         self.repository = Path(repository).resolve()
         path = self.repository / 'data' / 'manifest.json'
         raw = path.read_bytes()
@@ -46,6 +77,9 @@ class FrozenDataset:
             raise ValueError('Invalid pilot subset')
     @property
     def pilot_tasks(self) -> list[DatasetTask]:
+        """The run's tasks: the frozen 14-task subset, or all 71 in manifest order (task_set all71)."""
+        if self.task_set == ALL_TASK_SET:
+            return [self.tasks[entry['task_id']] for entry in self.manifest['tasks']]
         return [self.tasks[task_id] for task_id in self.subset['task_ids']]
     def export_agent_tasks(self, destination: str | Path) -> list[dict]:
         """Export Lean templates and public metadata only; never observer statements/solutions."""

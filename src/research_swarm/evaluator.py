@@ -1028,10 +1028,15 @@ def live_experiment_containers(docker: str = 'docker', agent_image: str = AGENT_
     Judge: label gdm-judge=1 (lean.JUDGE_LABEL). Agent: an Inspect sandbox
     compose project (any Inspect task: pilot, compatibility check, probes) or
     a container of the agent image (tag or ID). Lists only; starts nothing.
+    Each entry also carries ``compose_working_dir`` (Docker Compose's
+    project working directory label, i.e. the directory of the compose file; None
+    without one), which the runtime's launch interlock uses to tell a sandbox of a
+    run from its own checkout from another checkout's.
     """
     key, value = JUDGE_LABEL.split('=', 1)
     fmt = '\t'.join(('{{.ID}}', '{{.Names}}', '{{.Image}}', '{{.Label "%s"}}' % key,
-                     '{{.Label "com.docker.compose.project"}}'))
+                     '{{.Label "com.docker.compose.project"}}',
+                     '{{.Label "com.docker.compose.project.working_dir"}}'))
     try:
         result = subprocess.run([docker, 'ps', '--no-trunc', '--format', fmt], capture_output=True,
                                 encoding='utf-8', timeout=60, check=False)
@@ -1047,14 +1052,15 @@ def live_experiment_containers(docker: str = 'docker', agent_image: str = AGENT_
     for line in result.stdout.splitlines():
         if not line.strip():
             continue
-        cid, name, image, judge, project = (line.split('\t') + [''] * 5)[:5]
+        cid, name, image, judge, project, working_dir = (line.split('\t') + [''] * 6)[:6]
         if judge == value:
             kind = 'judge'
         elif INSPECT_PROJECT.match(project) or image in agent_images:
             kind = 'agent'
         else:
             continue
-        live.append({'id': cid[:12], 'name': name, 'image': image, 'kind': kind, 'compose_project': project or None})
+        live.append({'id': cid[:12], 'name': name, 'image': image, 'kind': kind, 'compose_project': project or None,
+                     'compose_working_dir': working_dir.strip() or None})
     return live
 
 

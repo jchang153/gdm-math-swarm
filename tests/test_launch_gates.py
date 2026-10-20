@@ -550,6 +550,229 @@ class LaunchGateTests(GateFixture):
         self.assertBlocked(self.evaluate(sneaky), "approved_settings", "provider_settings.model_id")
         self.assertTrue(self.evaluate()["evidence"]["approved_settings"]["passed"])
 
+    def gemini_config(self, **overrides):
+        return {**json.loads((ROOT / "configs" / "gemini-collab.json").read_text()), **overrides}
+
+    def evaluate_gemini(self, config=None, ledger_path=None):
+        return launch_gates.evaluate(config or self.gemini_config(), ROOT, validation_dir=self.validation,
+                                     ledger_path=ledger_path or self.tmp / "gemini" / "gemini-budget.sqlite",
+                                     legacy_ledger_path=self.legacy, now=NOW, image_id=lambda tag: self.images.get(tag))
+
+    def write_capacity_for(self, config):
+        """Runtime capacity evidence measured at ``config`` (as a fresh capacity probe writes it)."""
+        agent, lean = IMAGES["gdm-math-swarm-agent:local"], IMAGES["gdm-math-swarm-lean:local"]
+        self.write("runtime-capacity", {"all_required_passed": True, "image_ids": {"agent": agent, "lean": lean},
+                                        "validated_config": launch_gates.capacity_config(config),
+                                        "checks": passed_checks(launch_gates.REQUIRED_EVIDENCE_CHECKS["runtime-capacity"]),
+                                        "compose_sha256": self.fake_fingerprint(config, agent)},
+                   NOW - datetime.timedelta(minutes=30))
+
+    def write_gemini_compatibility(self, ledger_path, config, **overrides):
+        from research_swarm import budget
+        settings = settings_from_config(config)
+        ledger = BudgetLedger(ledger_path, budget.GEMINI_CAPS)
+        request = ledger.reserve("compatibility", "agent-001", "0.5")
+        ledger.settle(request, "0.31", "provider_reported_cost")
+        record = {"schema": launch_gates.COMPATIBILITY_SCHEMA, "all_required_passed": True,
+                  "image_ids": {"agent": IMAGES["gdm-math-swarm-agent:local"]},
+                  "model_id": settings.model_id, "provider_route": settings.provider_route,
+                  "settings": frozen_fields(settings), "spent_usd": "0.31", "requests": 1, "request_ids": [request],
+                  "checks": passed_checks(launch_gates.compatibility_required_checks(settings.model_id))}
+        record.update(overrides)
+        return self.write("compatibility", record, NOW - datetime.timedelta(minutes=10))
+
+    def test_gemini_config_passes_every_gate_but_its_own_evidence_and_the_launch_flags(self):
+        """configs/gemini-collab.json (docs/plan.md, "Gemini 3.1 Pro collaboration run authorized"): only the
+        route freeze, the compatibility check and the two user confirmations remain."""
+        from research_swarm import budget
+        config = self.gemini_config()
+        self.write_capacity_for(config)
+        result = self.evaluate_gemini()
+        failed = sorted(name for name, check in result["evidence"].items() if not check["passed"])
+        self.assertEqual(failed, ["compatibility", "paid_launch_enabled", "route_pricing", "verified_integration"],
+                         {name: result["evidence"][name]["reason"] for name in failed})
+        self.assertEqual(result["ledger"]["default_caps"], {"pilot": "400", "analysis": "0", "compatibility": "10"})
+        self.assertEqual(result["evidence"]["ledger"]["budget_track"], "gemini")
+        self.assertEqual(budget.ledger_path_for(config, ROOT), ROOT / "state" / "gemini-budget.sqlite")
+        self.assertEqual((config["paid_launch_enabled"], config["verified_integration"]), (False, False))
+        self.assertNotIn("run_dir", config)
+        from research_swarm.runtime import assign_personas, persona_counts
+        self.assertEqual(config["persona_counts"], persona_counts(assign_personas(10, config["persona_seed"])))
+        # With its own route freeze and compatibility evidence (in the gemini ledger) and the two
+        # confirmations, the config is ready.
+        own = self.tmp / "gemini" / "gemini-budget.sqlite"
+        self.write_route(settings=settings_from_config(config), when=NOW - datetime.timedelta(minutes=20))
+        self.write_gemini_compatibility(own, config)
+        ready = self.evaluate_gemini(dict(config, paid_launch_enabled=True, verified_integration=True), own)
+        self.assertEqual(ready["blockers"], [])
+        # Gemini compatibility evidence must show an accepted signed-reasoning tool-call replay.
+        checks = passed_checks(launch_gates.COMPATIBILITY_REQUIRED_CHECKS)
+        self.write_gemini_compatibility(own, config, checks=checks)
+        self.assertBlocked(self.evaluate_gemini(ledger_path=own), "compatibility",
+                           launch_gates.COMPATIBILITY_SIGNED_REASONING_CHECK)
+        self.assertEqual(launch_gates.compatibility_required_checks(MODEL_ID), launch_gates.COMPATIBILITY_REQUIRED_CHECKS)
+
+    def test_freeze_route_supports_the_gemini_route(self):
+        """scripts/freeze_route.py on configs/gemini-collab.json (public catalog faked): the pinned Vertex
+        endpoint validates and the route_pricing gate accepts the freeze, naming its catalog provider."""
+        freeze = load_script("freeze_route")
+        config_path = ROOT / "configs" / "gemini-collab.json"
+        settings = settings_from_config(json.loads(config_path.read_text()))
+        endpoint = {"status": 0, "context_length": 1048576, "max_completion_tokens": 65536,
+                    "supported_parameters": ["tools", "tool_choice", "reasoning", "include_reasoning",
+                                             "reasoning_effort", "max_tokens"],
+                    "pricing": {"prompt": "0.000002", "completion": "0.000012", "input_cache_read": "0.0000002",
+                                "input_cache_write": "0.000000375", "request": "0",
+                                "overrides": [{"prompt": "0.000004", "completion": "0.000018",
+                                               "input_cache_read": "0.0000004"}]}}
+        catalog = {"data": {"id": settings.model_id, "endpoints": [
+            dict(endpoint, tag="google-vertex/global", provider_name="Google"),
+            dict(endpoint, tag="google-ai-studio", provider_name="Google AI Studio")]}}
+        urls = []
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(request, timeout):
+            urls.append(request.full_url)
+            return Response(json.dumps(catalog).encode())
+        out = self.tmp / "freeze"
+        with mock.patch.object(freeze.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(sys, "argv", ["freeze_route.py", "--config", str(config_path), "--output-dir",
+                                                str(out)]), redirect_stdout(io.StringIO()):
+            self.assertEqual(freeze.main(), 0)
+        self.assertEqual(urls, ["https://openrouter.ai/api/v1/models/google/gemini-3.1-pro-preview/endpoints"])
+        record = json.loads(next(out.glob("route-pricing-*.json")).read_text())
+        self.assertEqual((record["valid"], record["endpoint"]["tag"], record["endpoint"]["provider_name"]),
+                         (True, "google-vertex/global", "Google"))
+        self.assertEqual(record["max_prompt_usd_per_token"], "0.000004")
+        result = launch_gates.evaluate(self.gemini_config(), ROOT, validation_dir=out,
+                                       ledger_path=self.tmp / "gemini" / "gemini-budget.sqlite",
+                                       legacy_ledger_path=self.legacy, image_id=lambda tag: self.images.get(tag))
+        gate = result["evidence"]["route_pricing"]
+        self.assertTrue(gate["passed"], gate["reason"])
+        self.assertEqual((gate["provider_route"], gate["provider_name"]), ("google-vertex/global", "Google"))
+
+    def test_gemini_model_only_on_the_gemini_track(self):
+        from research_swarm.provider import GEMINI_MODEL_ID, GLM_MODEL_ID
+        config = self.gemini_config()
+        self.write_capacity_for(config)
+        self.assertTrue(self.evaluate_gemini()["evidence"]["approved_settings"]["passed"])
+        glm = {**config, "candidate_model_id": GLM_MODEL_ID,
+               "provider_settings": {**config["provider_settings"], "model_id": GLM_MODEL_ID}}
+        self.assertBlocked(self.evaluate_gemini(glm), "approved_settings", "candidate_model_id")
+        self.assertBlocked(self.evaluate_gemini({**config, "agent_count": 20, "max_connections": 20}),
+                           "approved_settings", "agent_count")
+        # Neither the ablation track nor the baseline may run Gemini.
+        self.assertBlocked(self.evaluate_ablation({**config, "budget_track": "ablation", "max_pilot_usd": "160"}),
+                           "approved_settings", "candidate_model_id")
+        baseline = {k: v for k, v in config.items() if k != "budget_track"}
+        self.assertBlocked(self.evaluate(baseline), "approved_settings", "candidate_model_id")
+        self.assertBlocked(self.evaluate(pilot_config(provider_settings={"model_id": GEMINI_MODEL_ID})),
+                           "approved_settings", "provider_settings.model_id")
+        # The concurrent-run override needs its approval note.
+        self.assertBlocked(self.evaluate_gemini({**config, "concurrent_run_approval": " "}), "approved_settings",
+                           "concurrent_run_approval")
+        self.assertBlocked(self.evaluate_gemini({**config, "allow_concurrent_run": "true"}), "approved_settings",
+                           "allow_concurrent_run")
+        self.assertBlocked(self.evaluate_gemini({**config, "max_pilot_usd": "160"}), "config_caps", "max_pilot_usd")
+
+    def test_concurrent_run_override_only_on_the_gemini_track(self):
+        """Review finding: the owner approved the concurrent-run override for the Gemini run only; a
+        baseline or ablation config carrying the keys fails approved_settings (and so every paid launcher)."""
+        keys = {"allow_concurrent_run": True, "concurrent_run_approval": "x"}
+        config = self.gemini_config()
+        self.write_capacity_for(config)
+        self.assertTrue(self.evaluate_gemini()["evidence"]["approved_settings"]["passed"])
+        self.assertTrue(self.evaluate()["evidence"]["approved_settings"]["passed"])
+        self.assertBlocked(self.evaluate(pilot_config(**keys)), "approved_settings",
+                           "allowed only on a budget track")
+        self.assertTrue(self.evaluate_ablation()["evidence"]["approved_settings"]["passed"])
+        self.assertBlocked(self.evaluate_ablation(self.ablation_config(**keys)), "approved_settings",
+                           "not on the ablation track")
+        # Switched off, the keys are harmless anywhere.
+        self.assertTrue(self.evaluate(pilot_config(allow_concurrent_run=False))["evidence"]["approved_settings"]
+                        ["passed"])
+
+    def test_gemini_track_uses_only_its_own_ledger(self):
+        from research_swarm import budget
+        config = self.gemini_config()
+        own = self.tmp / "gemini" / "gemini-budget.sqlite"
+        BudgetLedger(own, budget.GEMINI_CAPS)
+        self.assertTrue(self.evaluate_gemini(ledger_path=own)["evidence"]["ledger"]["passed"])
+        self.assertBlocked(self.evaluate_gemini(ledger_path=budget.DEFAULT_LEDGER_PATH(ROOT)), "ledger",
+                           "the gemini track must not use the baseline ledger")
+        self.assertBlocked(self.evaluate_gemini(ledger_path=ROOT / budget.ABLATION_LEDGER_RELATIVE), "ledger",
+                           "the gemini track must not use the ablation track's ledger")
+        other = self.tmp / "other" / "gemini-budget.sqlite"
+        BudgetLedger(other, budget.ABLATION_CAPS)
+        self.assertBlocked(self.evaluate_gemini(ledger_path=other), "ledger", "differs from the approved $400")
+        held = BudgetLedger(own, budget.GEMINI_CAPS)
+        held.reserve("pilot", "agent-001", "0.5")
+        self.assertBlocked(self.evaluate_gemini(ledger_path=own), "ledger", "unresolved pilot hold(s) in the gemini")
+        self.assertEqual(budget.caps_for(config), budget.GEMINI_CAPS)
+        self.assertEqual(budget.track_for_ledger(own), "gemini")
+        self.assertIsNone(budget.track_for_ledger(budget.DEFAULT_LEDGER_PATH(ROOT)))
+
+    def test_gemini_runs_are_never_judged_and_reconcile_with_their_caps(self):
+        from research_swarm import budget
+        run = self.tmp / "gemini-run"
+        run.mkdir()
+        (run / "settings.json").write_text(json.dumps({"config": {"budget_track": "gemini"},
+                                                       "effective": {"budget_track": "gemini"}}))
+        self.assertEqual(budget.run_budget_track(run), "gemini")  # the paid judge accepts only "baseline"
+        (run / "settings.json").write_text(json.dumps({"config": {"budget_track": "typo"}}))
+        self.assertEqual(budget.run_budget_track(run), "typo")
+        reconcile = load_script("reconcile_ledger")
+        path = self.tmp / "state" / "gemini-budget.sqlite"
+        BudgetLedger(path, budget.GEMINI_CAPS)
+        self.assertEqual({k: str(v) for k, v in reconcile.ledger_caps(path).items()},
+                         {k: str(v) for k, v in budget.GEMINI_CAPS.items()})
+        BudgetLedger(path, caps=reconcile.ledger_caps(path))
+        # The gemini ledger starts at its approved caps; there is no raise to apply (and never on
+        # another file).
+        with self.assertRaises(ValueError):
+            budget.raise_track_cap(path, "pilot", "note", "gemini")
+        with self.assertRaises(ValueError):
+            budget.raise_track_cap(self.tmp / "state" / "ablation-budget.sqlite", "pilot", "note", "gemini")
+        with self.assertRaises(ValueError):
+            budget.raise_track_cap(path, "pilot", "note", "unknown")
+
+    def test_reconcile_expects_the_track_model_on_a_track_ledger(self):
+        """Review finding: an approved generation lookup on state/gemini-budget.sqlite, run as documented
+        (no --expect-model), accepts the Gemini model; the baseline ledger keeps the pilot model."""
+        from research_swarm import budget
+        from research_swarm.provider import ABLATION_MODEL_IDS, GEMINI_MODEL_ID
+        reconcile = load_script("reconcile_ledger")
+        path = self.tmp / "state" / "gemini-budget.sqlite"
+        self.assertEqual(reconcile.expected_models(path), (GEMINI_MODEL_ID,))
+        self.assertEqual(reconcile.expected_models(self.tmp / "state" / "ablation-budget.sqlite"), ABLATION_MODEL_IDS)
+        self.assertEqual(reconcile.expected_models(self.tmp / "state" / "budget.sqlite"), (MODEL_ID,))
+        self.assertEqual(reconcile.expected_models(path, ["x/y"]), ("x/y",))
+        ledger = BudgetLedger(path, budget.GEMINI_CAPS)
+        hold = ledger.reserve("pilot", "agent-003", "0.6")
+        ledger.settle(hold, None)
+        run_dir = self.tmp / "gemini-run"
+        run_dir.mkdir()
+        (run_dir / "runtime.jsonl").write_text(json.dumps({"kind": "inference_uncertain", "payload": {
+            "request_id": hold, "provider_generation_id": "gen-g"}}) + "\n")
+        with mock.patch("research_swarm.secrets.load_openrouter_key", return_value="k"), \
+                mock.patch.object(reconcile, "fetch_generation",
+                                  return_value={"model": GEMINI_MODEL_ID, "total_cost": 0.042,
+                                                "provider_name": "Google"}), \
+                redirect_stdout(io.StringIO()) as out:
+            code = reconcile.main(["--ledger", str(path), "--run-dir", str(run_dir), "--i-have-user-approval"])
+        self.assertEqual(code, 0)
+        self.assertIn('"reconciled"', out.getvalue())
+        snapshot = read_snapshot(path)["pilot"]
+        self.assertEqual((snapshot["unresolved_requests"], snapshot["settled_usd"]), (0, "0.042"))
+        audit = json.loads(sorted((path.parent / "reconciliations").glob("reconcile-*.json"))[-1].read_text())
+        self.assertEqual(audit["expected_models"], [GEMINI_MODEL_ID])
+
     def test_ablation_cap_raise_is_audited_and_ablation_only(self):
         from research_swarm import budget
         path = self.tmp / "state" / "ablation-budget.sqlite"

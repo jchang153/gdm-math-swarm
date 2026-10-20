@@ -161,6 +161,35 @@ class BudgetFilterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(admitted["request_bytes"], len(request.encode("utf-8")))
         self.assertGreater(admitted["request_bytes"], len(request))  # UTF-8 bytes, not characters
         self.assertEqual(admitted["replayed_reasoning_blocks"], 1)
+        self.assertEqual(admitted["replayed_signed_tool_call_turns"], 0)
+        self.assertNotIn("replayed_signed_reasoning_formats", admitted)
+
+    def test_replayed_signed_reasoning_counts_signed_tool_call_turns_only(self):
+        """Gemini thought signatures (signed OpenRouter reasoning_details) next to tool calls; the
+        compatibility check's signed_reasoning_tool_call_replay reads this from inference_admitted."""
+        from inspect_ai.model import ChatMessageAssistant, ChatMessageUser, ContentReasoning, ContentText
+        from inspect_ai.tool import ToolCall
+        from research_swarm.inspect_adapter import replayed_signed_reasoning
+
+        def details(*entries):
+            return ContentReasoning(reasoning="x", signature="reasoning-details://" + json.dumps(list(entries)))
+        encrypted = {"type": "reasoning.encrypted", "data": "sig", "id": "t1", "format": "google-gemini-v1"}
+        signed_text = {"type": "reasoning.text", "signature": "sig", "format": "anthropic-claude-v1"}
+        unsigned = {"type": "reasoning.text", "text": "plain", "format": "unknown"}
+        call = [ToolCall(id="t1", function="Bash", arguments={})]
+        messages = [ChatMessageUser(content="go"),
+                    ChatMessageAssistant(content=[details(unsigned, encrypted), ContentText(text="")], tool_calls=call),
+                    ChatMessageAssistant(content=[details(signed_text)], tool_calls=call),
+                    ChatMessageAssistant(content=[details(encrypted)]),  # no tool calls
+                    ChatMessageAssistant(content=[details(unsigned)], tool_calls=call),  # DeepSeek/GLM style
+                    ChatMessageAssistant(content=[ContentReasoning(reasoning="x", signature="reasoning-details://{")],
+                                         tool_calls=call),  # malformed: ignored
+                    ChatMessageAssistant(content=[ContentReasoning(reasoning="native", signature="anthropic-sig")],
+                                         tool_calls=call)]
+        self.assertEqual(replayed_signed_reasoning(messages),
+                         {"replayed_signed_tool_call_turns": 2,
+                          "replayed_signed_reasoning_formats": ["anthropic-claude-v1", "google-gemini-v1"]})
+        self.assertEqual(replayed_signed_reasoning(messages[:1] + messages[3:]), {"replayed_signed_tool_call_turns": 0})
 
     async def test_truncated_tool_calls_never_reach_scaffold(self):
         from inspect_ai.model import ModelOutput

@@ -8,6 +8,19 @@ MODEL_ID = "deepseek/deepseek-v4.1-flash"
 # baseline stays pinned to MODEL_ID by the launch gates (approved candidate_model_id).
 GLM_MODEL_ID = "z-ai/glm-5.3"
 ABLATION_MODEL_IDS = (MODEL_ID, GLM_MODEL_ID)
+# The owner's Gemini track (docs/plan.md, "Gemini 3.1 Pro collaboration run authorized, October
+# 19, 2026"): the paper's model, allowed on budget track "gemini" and nowhere else.
+GEMINI_MODEL_ID = "google/gemini-3.1-pro-preview"
+GEMINI_MODEL_IDS = (GEMINI_MODEL_ID,)
+# Models each budget track (budget.BUDGET_TRACKS) may run; the launch gates check this table.
+TRACK_MODEL_IDS = {"ablation": ABLATION_MODEL_IDS, "gemini": GEMINI_MODEL_IDS}
+# Every model any track may call (request_options refuses all others).
+KNOWN_MODEL_IDS = tuple(dict.fromkeys(m for ids in ((MODEL_ID,), *TRACK_MODEL_IDS.values()) for m in ids))
+# Models whose reasoning is signed (OpenRouter reasoning_details formats with a signature or an
+# encrypted payload, e.g. Gemini thought signatures) and must be passed back on later turns with
+# tool calls. Their live compatibility check must show such a replay accepted
+# (``signed_reasoning_tool_call_replay``, scripts/compat_check.py).
+SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID,)
 
 # Chat-template and provider framing allowance added to the byte bound below.
 FRAMING_TOKEN_ALLOWANCE = 8192
@@ -26,7 +39,7 @@ class ProviderSettings:
     reasoning_effort: str = "high"
 
     def request_options(self):
-        if self.model_id not in ABLATION_MODEL_IDS or not self.provider_route:
+        if self.model_id not in KNOWN_MODEL_IDS or not self.provider_route:
             raise ValueError("The approved model and explicit provider route are required")
         return {"provider":{"only":[self.provider_route],"allow_fallbacks":False,"require_parameters":True},
                 "reasoning":{"effort":self.reasoning_effort,"exclude":False},
@@ -39,6 +52,11 @@ class ProviderSettings:
         least one UTF-8 byte, so the UTF-8 length of the serialized request (which
         also includes JSON quoting) bounds its prompt tokens. Special/framing tokens
         are covered by FRAMING_TOKEN_ALLOWANCE. Capped at the route context length.
+        The same argument is assumed for the other tracks' models (GLM's BPE vocabulary;
+        Gemini's SentencePiece vocabulary with byte fallback, whose pieces also cover at
+        least one byte each). Replayed reasoning, including Gemini's encrypted thought
+        signatures, is part of the serialized request and so of the bound. An
+        unexpected excess shows up as an estimate_violation, which blocks the scope.
         """
         size = len(serialized_request.encode("utf-8")) + FRAMING_TOKEN_ALLOWANCE
         return min(size, self.context_length)

@@ -95,12 +95,14 @@ class BuildChecksTests(unittest.TestCase):
     def test_passing_run(self):
         checks = self.checks()
         self.assertEqual(failed(checks), [])
-        self.assertEqual(set(cc.REQUIRED_CHECKS) | set(cc.OPTIONAL_CHECKS), set(checks))
+        self.assertEqual(set(cc.REQUIRED_CHECKS) | set(cc.OPTIONAL_CHECKS) | {cc.SIGNED_REASONING_CHECK}, set(checks))
         for name in cc.REQUIRED_CHECKS:
             self.assertTrue(checks[name]["required"], name)
             self.assertIsInstance(checks[name]["detail"], str)
         for name in cc.OPTIONAL_CHECKS:
             self.assertFalse(checks[name]["required"])
+        # Signed reasoning is required only for models that sign it (Gemini), not for DeepSeek.
+        self.assertFalse(checks[cc.SIGNED_REASONING_CHECK]["required"])
 
     def test_tool_call_failures(self):
         inputs = passing_inputs()
@@ -225,6 +227,60 @@ class BuildChecksTests(unittest.TestCase):
                 ("terminal sample failure", events, dict(activity, sample_error="retries exhausted"))):
             with self.subTest(name=name):
                 self.assertIn("no_sample_error", failed(self.checks(events=changed_events, activity=changed_activity)))
+
+    def test_signed_reasoning_tool_call_replay_is_required_for_gemini(self):
+        """Gemini thought signatures: a later request replaying an earlier assistant turn with tool calls
+        and signed reasoning details must be accepted; required only for SIGNED_REASONING_MODEL_IDS."""
+        gemini_config = json.loads((ROOT / "configs" / "gemini-collab.json").read_text())
+        gemini = settings_from_config(gemini_config, pricing_verified=True)
+        self.assertIn(gemini.model_id, cc.SIGNED_REASONING_MODEL_IDS)
+
+        def signed(request_id, turns=1):
+            event = admitted(request_id, replayed=turns)
+            event["payload"].update(replayed_signed_tool_call_turns=turns,
+                                    **({"replayed_signed_reasoning_formats": ["google-gemini-v1"]} if turns else {}))
+            return event
+
+        def gemini_finished(request_id, **changes):
+            return finished(request_id, name="Google", model=gemini.model_id, **changes)
+
+        def probe():
+            events = probe_events()
+            events[2]["payload"].update(provider_name="Google", provider_model=gemini.model_id)
+            return events
+
+        def checks(events):
+            return self.checks(events=events, settings=gemini, provider_name="Google")
+
+        passing = probe() + [admitted("r1"), gemini_finished("r1"), signed("r2"), gemini_finished("r2")]
+        result = checks(passing)
+        self.assertEqual(failed(result), [])
+        self.assertTrue(result[cc.SIGNED_REASONING_CHECK]["required"])
+        self.assertIn("google-gemini-v1", result[cc.SIGNED_REASONING_CHECK]["detail"])
+        self.assertTrue(cc.build_evidence(checks=result, images=IMAGES, settings=gemini, spent_usd=0,
+                                          request_ids=[])["all_required_passed"])
+        rejected = {"kind": "inference_unbilled", "agent_id": "agent-001",
+                    "payload": {"request_id": "r3", "status": 400, "reason": "provider_rejected_before_generation"}}
+        for name, events in (
+                ("reasoning replayed only without tool calls", probe() + [admitted("r1"), gemini_finished("r1"),
+                                                                          signed("r2", 0), admitted("r3", 1),
+                                                                          gemini_finished("r2"), gemini_finished("r3")]),
+                ("replay never finished", probe() + [admitted("r1", 1), gemini_finished("r1"), signed("r2")]),
+                ("replay not provider-priced", probe() + [admitted("r1", 1), gemini_finished("r1"), signed("r2"),
+                                                          gemini_finished("r2", basis="usage_priced_upper_bound")]),
+                ("a signed replay was rejected", passing + [signed("r3"), rejected])):
+            with self.subTest(name=name):
+                self.assertIn(cc.SIGNED_REASONING_CHECK, failed(checks(events)))
+        # The Vertex endpoint is named "Google" in the catalog: accepted by exact name, not by family.
+        self.assertTrue(cc.route_consistent({"provider_name": "Google", "provider_model": gemini.model_id}, gemini,
+                                            "Google"))
+        self.assertFalse(cc.route_consistent({"provider_name": "Google", "provider_model": gemini.model_id}, gemini))
+        self.assertFalse(cc.route_consistent({"provider_name": "Google AI Studio", "provider_model": gemini.model_id},
+                                             gemini, "Google"))
+        self.assertTrue(cc.route_consistent({"provider_name": "Google Vertex", "provider_model": gemini.model_id},
+                                            gemini))
+        # DeepSeek: informational only, so its existing evidence keeps passing.
+        self.assertFalse(self.checks()[cc.SIGNED_REASONING_CHECK]["required"])
 
     def test_optional_observations(self):
         events = passing_inputs()["events"] + [
@@ -539,6 +595,61 @@ class AbortGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(guard.reason, "estimate_violation")
         self.assertTrue(clock.stop.is_set())
 
+    async def test_exhausted_allowance_ends_the_check_normally(self):
+        """Review finding: at Gemini's $4/$18 reservation prices the $2 compatibility scope can run out
+        before --max-requests. The production filter's refusal for that reason (BudgetExceeded, no
+        estimate violation) ends the check like max_requests, not as the failure admission_refused."""
+        from inspect_ai.model import ChatMessageUser, GenerateConfig
+        from inspect_ai.util import LimitExceededError
+        from research_swarm.budget import GEMINI_CAPS
+        from research_swarm.inspect_adapter import budget_filter
+        gemini = settings_from_config(json.loads((ROOT / "configs" / "gemini-collab.json").read_text()),
+                                      pricing_verified=True)
+        with tempfile.TemporaryDirectory() as folder:
+            ledger = BudgetLedger(Path(folder) / "gemini-budget.sqlite", GEMINI_CAPS)
+            earlier = ledger.reserve(cc.SCOPE, cc.AGENT_ID, Decimal("9.9"))
+            ledger.settle(earlier, Decimal("9.8"))  # $0.20 left of $10: below one Gemini reservation (about $0.33)
+            events = []
+            record = lambda *args: events.append(args)  # noqa: E731
+            clock = runtime.RunClock(runtime.StartBarrier(1))
+            inner = budget_filter(cc.AGENT_ID, ledger, gemini, clock.barrier, record, cc.SCOPE, stop=clock.stop)
+            guard = cc.AbortGuard(inner, clock, record, ledger)
+            with self.assertRaises(LimitExceededError):  # never reaches the (absent) model
+                await guard(None, [ChatMessageUser(content="hello")], [], None, GenerateConfig())
+            self.assertEqual((guard.reason, clock.reason), ("allowance_exhausted", "allowance_exhausted"))
+            self.assertNotIn(guard.reason, cc.FAILURE_ABORTS)
+            abort = next(payload for kind, _, payload in events if kind == "compatibility_abort")
+            self.assertIn("allowance cannot cover request", abort["error"])
+            snapshot = ledger.snapshot()[cc.SCOPE]
+            self.assertEqual((snapshot["unresolved_requests"], snapshot["committed_usd"]), (0, "9.8"))
+        checks = cc.build_checks(agent_id=cc.AGENT_ID, events=[], conference_events=[],
+                                 activity={"tool_calls": [], "tool_results": {}, "model_errors": [],
+                                           "compaction_events": 0, "sample_error": None, "sample_limit": "cost"},
+                                 settings=SETTINGS, abort_reason="allowance_exhausted", violation_ids=[])
+        self.assertTrue(checks["no_sample_error"]["passed"], checks["no_sample_error"])
+
+    async def test_other_admission_refusals_still_fail(self):
+        """An estimate violation or an unavailable ledger is not an exhausted allowance."""
+        from inspect_ai.util import LimitExceededError
+        from research_swarm.budget import BudgetExceeded
+
+        def refused(cause):
+            def behavior():
+                try:
+                    raise cause
+                except Exception as ex:
+                    raise LimitExceededError("cost", value=1.0, limit=0,
+                                             message="Inference budget cannot admit further requests.") from ex
+            return behavior
+        for cause, violation in ((BudgetExceeded("A reservation estimate was exceeded"), True),
+                                 (RuntimeError("database is locked"), False)):
+            with self.subTest(cause=cause):
+                guard, clock, _ = self.make([refused(cause)], violation=violation)
+                with self.assertRaises(LimitExceededError):
+                    await self.call(guard)
+                self.assertEqual(guard.reason, "admission_refused")
+                self.assertIn(guard.reason, cc.FAILURE_ABORTS)
+
 
 def _gates_all_pass(config):
     return {"evidence": {name: {"passed": True, "reason": "ok"} for name in cc.REQUIRED_GATES}}
@@ -645,6 +756,120 @@ class MainRefusalTests(unittest.TestCase):
                                    environment=lambda config: (busy["blockers"], IMAGES)), 2)
         self.assertIn("gdm-evaluator=1", self.output.getvalue())
         self.assertEqual(self.runs, [])
+
+    def test_concurrent_run_override_is_honored_and_recorded(self):
+        """With the config's allow_concurrent_run and approval note, another run's containers become
+        warnings recorded in the evidence; listing failures still refuse; without the keys nothing changes."""
+        busy = {"checked_at": "t", "judge_containers": ["gdm-lean-x"], "listing_errors": [],
+                "containers": [{"id": "a" * 12, "name": "inspect-a", "image": "i", "kind": "agent",
+                                "compose_project": "inspect-a", "checkout": "other"}],
+                "blockers": ["1 leftover judge container(s) with label gdm-judge=1 (gdm-lean-x); remove them",
+                             "1 running agent sandbox container(s) from another run (inspect-a); wait"]}
+        busy["blocking"] = [{"kind": kind, "blocker": b} for kind, b in zip(("judge", "agent"), busy["blockers"])]
+        note = "Owner approved running alongside the collaborator's live run"
+        config = dict(CONFIG, budget_track="gemini", allow_concurrent_run=True, concurrent_run_approval=note)
+        versions = {"inspect-ai": {"actual": "x", "expected": "x", "matches": True}}
+        with mock.patch("research_swarm.inspect_adapter.installed_versions", return_value=versions), \
+                mock.patch.object(runtime, "pin_images", return_value=IMAGES):
+            record = {}
+            self.assertEqual(cc.environment_check(config, interlock=lambda image: busy, override_record=record),
+                             ([], IMAGES))
+            self.assertTrue(record["applied"])
+            self.assertEqual((record["approval"], record["warnings"]), (note, busy["blockers"]))
+            self.assertEqual(record["containers"], busy["containers"])
+            record = {}
+            self.assertEqual(cc.environment_check(CONFIG, interlock=lambda image: busy, override_record=record),
+                             (busy["blockers"], IMAGES))
+            self.assertEqual(record, {})
+            broken = dict(busy, listing_errors=["Could not list running agent sandbox containers"],
+                          blockers=busy["blockers"] + ["Could not list running agent sandbox containers"],
+                          blocking=busy["blocking"] + [{"kind": "listing",
+                                                        "blocker": "Could not list running agent sandbox containers"}])
+            self.assertEqual(cc.environment_check(config, interlock=lambda image: broken)[0],
+                             ["Could not list running agent sandbox containers"])
+            path = self.folder / "override.json"
+            path.write_text(json.dumps(config))
+            with mock.patch.object(runtime, "launch_interlock", lambda image, docker="docker": busy):
+                self.output = io.StringIO()
+                with contextlib.redirect_stdout(self.output):
+                    code = cc.main(["--i-have-user-approval", "--yes", "--config", str(path), "--output-dir",
+                                    str(self.out), "--runs-dir", str(self.folder / "runs")],
+                                   gates=_gates_all_pass, run=self.fake_run, ledger_file=self.ledger_file)
+        self.assertEqual(code, 0, self.output.getvalue())
+        self.assertIn("concurrent-run override", self.output.getvalue())
+        evidence = json.loads(sorted(self.out.glob("compatibility-*.json"))[-1].read_text())
+        self.assertEqual(evidence["concurrent_run_override"]["warnings"], busy["blockers"])
+        self.assertEqual(evidence["concurrent_run_override"]["approval"], note)
+        self.assertIsNone(evidence["frozen_provider_name"])
+
+    def test_concurrent_run_override_keeps_comparators_own_runs_and_other_tracks_blocking(self):
+        """Review findings: a running comparator (another checkout's post-run evaluation) and a sandbox of
+        a run from this checkout still refuse the paid check with the override; a baseline config
+        carrying the keys waives nothing."""
+        comparator = "1 running comparator container(s) with label gdm-evaluator=1 (gdm-comparator-x); wait"
+        own = "1 running agent sandbox container(s) of a run started from this checkout (inspect-b); wait"
+        theirs = "1 running agent sandbox container(s) from another run (inspect-a); wait"
+        busy = {"checked_at": "t", "judge_containers": [], "listing_errors": [], "containers": [],
+                "blockers": [comparator, theirs, own],
+                "blocking": [{"kind": "comparator", "blocker": comparator}, {"kind": "agent", "blocker": theirs},
+                             {"kind": "own_agent", "blocker": own}]}
+        keys = {"allow_concurrent_run": True, "concurrent_run_approval": "owner"}
+        versions = {"inspect-ai": {"actual": "x", "expected": "x", "matches": True}}
+        with mock.patch("research_swarm.inspect_adapter.installed_versions", return_value=versions), \
+                mock.patch.object(runtime, "pin_images", return_value=IMAGES):
+            record = {}
+            problems, _ = cc.environment_check(dict(CONFIG, budget_track="gemini", **keys),
+                                               interlock=lambda image: busy, override_record=record)
+            self.assertEqual(problems, [comparator, own])
+            self.assertEqual((record["warnings"], record["still_blocking"]), ([theirs], [comparator, own]))
+            record = {}
+            problems, _ = cc.environment_check(dict(CONFIG, **keys), interlock=lambda image: busy,
+                                               override_record=record)
+            self.assertEqual((problems, record), (busy["blockers"], {}))
+
+    def test_launch_lock_refuses_while_another_paid_launch_runs(self):
+        """Review finding: one paid launcher per checkout. While a pilot (or another check) holds
+        state/launch.lock the check refuses before any gate, credential or spending; the check holds
+        the lock itself while it runs and releases it afterwards."""
+        never = lambda config: self.fail("nothing may be evaluated while the lock is held")  # noqa: E731
+        with runtime.launch_lock(self.ledger_file.parent, "run_pilot"):
+            self.assertEqual(self.main("--i-have-user-approval", "--yes", gates=never, environment=never), 2)
+        self.assertIn("launch.lock", self.output.getvalue())
+        self.assertIn("run_pilot", self.output.getvalue())
+        self.assertEqual(self.runs, [])
+        original, held = self.fake_run, []
+
+        async def run(config, args, stamp, **kwargs):
+            try:
+                with runtime.launch_lock(self.ledger_file.parent, "second"):
+                    held.append(False)
+            except runtime.LaunchBlocked:
+                held.append(True)
+            return await original(config, args, stamp, **kwargs)
+        self.fake_run = run
+        self.assertEqual(self.main("--i-have-user-approval", "--yes"), 0)
+        self.assertEqual(held, [True])
+        with runtime.launch_lock(self.ledger_file.parent, "after"):  # released when the check ended
+            pass
+
+    def test_frozen_endpoint_name_reaches_the_run_and_evidence(self):
+        seen = []
+        original = self.fake_run
+
+        async def run(config, args, stamp, *, provider_name=None, **kwargs):
+            seen.append(provider_name)
+            return await original(config, args, stamp, **kwargs)
+
+        def gates(config):
+            report = _gates_all_pass(config)
+            report["evidence"]["route_pricing"]["provider_name"] = "Google"
+            return report
+        self.fake_run = run
+        self.assertEqual(self.main("--i-have-user-approval", "--yes", gates=gates), 0)
+        self.assertEqual(seen, ["Google"])
+        evidence = json.loads(sorted(self.out.glob("compatibility-*.json"))[-1].read_text())
+        self.assertEqual(evidence["frozen_provider_name"], "Google")
+        self.assertIsNone(evidence["concurrent_run_override"])
 
     def test_confirmation(self):
         self.assertEqual(self.main("--i-have-user-approval", ask=lambda prompt: "1.00"), 2)
