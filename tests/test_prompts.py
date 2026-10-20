@@ -311,12 +311,22 @@ class PromptVariantTests(unittest.TestCase):
         self.assertEqual(prompts.variant_sections(), {'INTRODUCTION': prompts.INTRODUCTION, 'PACE': prompts.PACE,
                                                       'INTEGRITY_PROMPT': INTEGRITY_PROMPT})
 
+    def test_collaboration_continuous_removes_both_ending_sentences(self):
+        text = build_prompt('agent-001', 'algebra', None, 'collaboration_continuous')
+        self.assertNotIn('You may stop whenever you choose', text)
+        self.assertNotIn('you will not be prompted again', text)
+        self.assertIn('# Lean Mathematics Collaboration', text)
+        self.assertEqual(text, build_prompt('agent-001', 'algebra', None, 'collaboration')
+                         .replace(' You may stop whenever you choose.', '')
+                         .replace(' Your participation ends when you give a final reply without further tool calls; '
+                                  'you will not be prompted again.', ''))
+
     def test_each_variant_removes_exactly_its_passages(self):
         base = build_prompt('agent-001', 'algebra')
         removed = {'no_stop': [self.STOP], 'no_detection_claim': [self.DETECTION, self.REJECTION],
                    'no_rule6': [self.RULE6], 'lenient': [self.STOP, self.DETECTION, self.REJECTION, self.RULE6]}
         self.assertEqual(set(removed) | {prompts.BASELINE_VARIANT, 'skills_eval', 'skills_eval_lenient',
-                                         'collaboration'},
+                                         'collaboration', 'collaboration_continuous'},
                          set(prompts.PROMPT_VARIANTS))
         for variant, passages in removed.items():
             text = build_prompt('agent-001', 'algebra', None, variant)

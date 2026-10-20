@@ -591,7 +591,7 @@ class LaunchGateTests(GateFixture):
         failed = sorted(name for name, check in result["evidence"].items() if not check["passed"])
         self.assertEqual(failed, ["compatibility", "paid_launch_enabled", "route_pricing", "verified_integration"],
                          {name: result["evidence"][name]["reason"] for name in failed})
-        self.assertEqual(result["ledger"]["default_caps"], {"pilot": "400", "analysis": "0", "compatibility": "10"})
+        self.assertEqual(result["ledger"]["default_caps"], {"pilot": "421.46", "analysis": "0", "compatibility": "10"})
         self.assertEqual(result["evidence"]["ledger"]["budget_track"], "gemini")
         self.assertEqual(budget.ledger_path_for(config, ROOT), ROOT / "state" / "gemini-budget.sqlite")
         self.assertEqual((config["paid_launch_enabled"], config["verified_integration"]), (False, False))
@@ -710,7 +710,7 @@ class LaunchGateTests(GateFixture):
                            "the gemini track must not use the ablation track's ledger")
         other = self.tmp / "other" / "gemini-budget.sqlite"
         BudgetLedger(other, budget.ABLATION_CAPS)
-        self.assertBlocked(self.evaluate_gemini(ledger_path=other), "ledger", "differs from the approved $400")
+        self.assertBlocked(self.evaluate_gemini(ledger_path=other), "ledger", "differs from the approved $421.46")
         held = BudgetLedger(own, budget.GEMINI_CAPS)
         held.reserve("pilot", "agent-001", "0.5")
         self.assertBlocked(self.evaluate_gemini(ledger_path=own), "ledger", "unresolved pilot hold(s) in the gemini")

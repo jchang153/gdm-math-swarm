@@ -1292,13 +1292,14 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         effective = settings["effective"]
         self.assertEqual(effective["budget_track"], "gemini")
         self.assertEqual(effective["ledger_path"], str(self.folder / "state" / "gemini-budget.sqlite"))
-        self.assertEqual(settings["budget"]["pilot"]["cap_usd"], "400")
-        self.assertEqual(effective["prompt_variant"], "collaboration")
+        self.assertEqual(settings["budget"]["pilot"]["cap_usd"], "421.46")
+        self.assertEqual(effective["prompt_variant"], "collaboration_continuous")
+        self.assertIs(effective["auto_restart"], True)
         self.assertEqual(effective["concurrent_run_override"], override)
         self.assertEqual(effective["persona_counts"], {"algebra": 3, "analysis_topology": 3, "combinatorics": 2,
                                                        "number_theory": 2})
         self.assertEqual(settings["model"]["model_id"], "google/gemini-3.1-pro-preview")
-        self.assertEqual(tasks[0]["metadata"]["condition"], "gemini-track-collaboration")
+        self.assertEqual(tasks[0]["metadata"]["condition"], "gemini-track-collaboration_continuous")
         records = [json.loads(line) for line in (run_dir / "runtime.jsonl").read_text().splitlines()]
         self.assertEqual([r["payload"] for r in records if r["kind"] == "concurrent_run_override"], [override])
         self.assertIs(self.model_allow_unlimited, True)
@@ -1884,6 +1885,64 @@ class PeerStopReservationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(stopped["in_flight"], 0)
             exit_record = next(payload for kind, _, payload in events if kind == "agent_exit")
             self.assertEqual(exit_record["status"], "stopped:max_run_seconds")
+
+
+class AutoRestartTests(unittest.IsolatedAsyncioTestCase):
+    """config auto_restart (docs/plan.md, "Gemini relaunch: 6 hours, auto-restart"): a session that
+    ends before the run stops is resumed with the continuation message until the clock stops."""
+    async def test_ended_sessions_are_resumed_until_the_clock_stops(self):
+        try:
+            from inspect_ai.model import ChatMessageUser
+        except ImportError:
+            self.skipTest("pinned Inspect packages not installed (.venv)")
+        from research_swarm import inspect_adapter
+        folder = Path(tempfile.mkdtemp()).resolve()
+        events = []
+        record = lambda kind, agent, payload: events.append((kind, agent, payload))  # noqa: E731
+        clock = RunClock(StartBarrier(1, record))
+        calls = []
+
+        def fake_agent(prompt, tools, filter, **kwargs):
+            async def agent(state):
+                calls.append([m.text for m in state.messages])
+                if len(calls) == 3:
+                    clock.request_stop("max_run_seconds", record)
+                    await anyio.sleep_forever()
+                if len(calls) == 2:
+                    raise RuntimeError("harness failure")
+                return types.SimpleNamespace(messages=list(state.messages), output=None)
+            return agent
+
+        async def no_snapshots(*args, **kwargs):
+            await anyio.sleep_forever()
+
+        async def no_final_snapshot(*args, **kwargs):
+            return 0
+        import anyio
+        intercept = types.SimpleNamespace(state={"requests": 0})
+        state = types.SimpleNamespace(sample_id="agent-001", messages=[ChatMessageUser(content="Begin.")], output=None)
+        with mock.patch("inspect_ai.util.sandbox", return_value=object()), \
+                mock.patch.object(inspect_adapter, "build_claude_agent", fake_agent), \
+                mock.patch.object(inspect_adapter, "conference_tools", lambda *a, **k: []), \
+                mock.patch.object(runtime, "restart_delay", lambda quick: 0), \
+                mock.patch.object(Snapshotter, "run", no_snapshots), \
+                mock.patch.object(Snapshotter, "poll", no_final_snapshot):
+            solver = runtime.peer_solver(
+                conference=types.SimpleNamespace(), definitions=[], personas={"agent-001": "algebra"},
+                prompt_for=lambda *a: "prompt", filter_for=lambda a: intercept, run_dir=folder,
+                record=record, clock=clock, auto_restart=True)
+            await asyncio.wait_for(solver(state, None), 10)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[0], ["Begin."])
+        self.assertEqual(calls[1], ["Begin.", runtime.CONTINUE_MESSAGE])
+        self.assertEqual(calls[2], ["Begin.", runtime.CONTINUE_MESSAGE, runtime.CONTINUE_MESSAGE])
+        restarts = [payload for kind, _, payload in events if kind == "agent_restart"]
+        self.assertEqual([(r["restart"], r["ended"]) for r in restarts], [(1, "harness_completed"), (2, "error")])
+        exit_record = next(payload for kind, _, payload in events if kind == "agent_exit")
+        self.assertEqual(exit_record["status"], "stopped:max_run_seconds")
+
+    def test_restart_delay_backs_off_and_caps(self):
+        self.assertEqual([runtime.restart_delay(q) for q in (0, 1, 2, 3, 10)], [0, 15, 30, 60, 600])
 
 
 class PeerExitLabelTests(unittest.TestCase):

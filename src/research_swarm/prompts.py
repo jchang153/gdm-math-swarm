@@ -237,6 +237,12 @@ _EDIT_COLLABORATION = (
      "is organized as a conference, described below."),
 )
 
+# The owner's Gemini relaunch (docs/plan.md, "Gemini relaunch: 6 hours, auto-restart"): agents
+# may not end voluntarily, so both sentences about ending are removed (sessions that end anyway
+# are resumed by the runtime until the clock or the budget stops the run).
+_EDIT_NO_END = ("PACE", " Your participation ends when you give a final reply without further tool calls; "
+                        "you will not be prompted again.", "")
+
 PROMPT_VARIANTS: dict[str, tuple] = {
     BASELINE_VARIANT: (),
     "no_stop": (_EDIT_NO_STOP,),
@@ -246,6 +252,7 @@ PROMPT_VARIANTS: dict[str, tuple] = {
     "skills_eval": _EDIT_SKILLS_EVAL,
     "skills_eval_lenient": _EDIT_SKILLS_EVAL + (_EDIT_NO_STOP,) + _EDIT_NO_DETECTION_CLAIM + _EDIT_NO_RULE6,
     "collaboration": _EDIT_COLLABORATION,
+    "collaboration_continuous": _EDIT_COLLABORATION + (_EDIT_NO_STOP, _EDIT_NO_END),
 }
 
 

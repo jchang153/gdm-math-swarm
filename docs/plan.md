@@ -1,5 +1,19 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Gemini relaunch: 6 hours, auto-restart, October 20, 2026
+
+The owner stopped the first Gemini run (`gemini10-20261020T042055Z`, SIGINT at 04:32:38 UTC,
+exit 130) after two agents ended their sessions voluntarily, and decided (chat, verbatim
+answers in quotes):
+
+| Topic | Decision |
+| --- | --- |
+| First run | "Stop now"; its results are kept but moved to `runs/discarded/` ("Move to a discarded folder"). |
+| Budget | "Top up to a fresh $400": `GEMINI_CAPS` pilot $421.46 (the first run's committed spending was at most $21.452814), applied to the existing ledger with `budget.raise_track_cap` after its stop holds are reconciled. |
+| Clock | "increase the clock to 6 hours": `max_run_seconds` 21600 (a `gemini`-track approved setting). |
+| Ending | "They shouldn't be allowed to end voluntarily" / "Prompt + auto-restart": prompt variant `collaboration_continuous` removes " You may stop whenever you choose." and "Your participation ends when you give a final reply without further tool calls; you will not be prompted again."; config `auto_restart` resumes any session that ends before the run stops (same container, workspace and Claude Code session id) with a fixed continuation message, with backoff after quick or failed sessions, until the clock stops the run or the budget refuses admission. |
+| Everything else | Unchanged from the section below: 10 agents, Gemini 3.1 Pro, all 71 tasks, own ledger, evidence waiver, behavior judge off. "Don't stop for any reason." |
+
 ## Gemini 3.1 Pro collaboration run authorized, October 19, 2026
 
 The repository owner asked to start a run now with 10 agents using the paper's model (Gemini

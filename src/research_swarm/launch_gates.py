@@ -516,6 +516,8 @@ class _Gates:
                 approved["candidate_model_id"] = f"one of {list(models)}, equal to provider_settings.model_id"
         if track == "gemini" and self.config.get("task_set") == "all71":
             approved["task_count"] = 71  # owner decision: the whole parent pool on this track
+        if track == "gemini":
+            approved["max_run_seconds"] = 21600  # owner decision, October 20, 2026: a 6-hour clock
         if track is None:
             # The provider settings decide the model actually called: on the baseline they
             # must name the pinned MODEL_ID as well (not only candidate_model_id).

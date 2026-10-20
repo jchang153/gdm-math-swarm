@@ -499,8 +499,27 @@ async def wait_for_in_flight(filter_state, grace, poll=IN_FLIGHT_POLL_SECONDS):
     return at_stop, int(state.get("in_flight") or 0), round(time.monotonic() - started, 3)
 
 
+# Auto-restart (config ``auto_restart``; docs/plan.md, "Gemini relaunch: 6 hours, auto-restart"):
+# a session that ends before the run stops is resumed (same container, workspace and Claude Code
+# session id, via --resume) with this user message, until the clock stops the run or the budget
+# refuses admission. Restarts back off when a session ends quickly or errors.
+CONTINUE_MESSAGE = ("The collaboration is still in session and the run's time has not ended. Continue your work "
+                    "on the problems: check the conference for new posts, messages and library updates, and keep "
+                    "making progress.")
+RESTART_BASE_DELAY, RESTART_MAX_DELAY, RESTART_QUICK_REQUESTS = 15, 600, 3
+
+
+def restart_delay(consecutive_quick):
+    """Seconds to wait before a restart: 0 after a productive session, then 15, 30, 60...
+    (capped) for consecutive sessions that errored or made at most RESTART_QUICK_REQUESTS requests."""
+    if consecutive_quick <= 0:
+        return 0
+    return min(RESTART_BASE_DELAY * 2 ** (consecutive_quick - 1), RESTART_MAX_DELAY)
+
+
 def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, run_dir, record, clock,
-                system_prompt_mode="replace", auto_memory=True, in_flight_grace=IN_FLIGHT_GRACE_SECONDS):
+                system_prompt_mode="replace", auto_memory=True, in_flight_grace=IN_FLIGHT_GRACE_SECONDS,
+                auto_restart=False):
     """Solver running one genuine Claude Code peer inside its own sandbox.
 
     On ``clock.stop`` the filter admits nothing further and conference actions are
@@ -509,6 +528,7 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
     and stays an uncertain ledger hold).
     """
     from inspect_ai.agent import AgentState
+    from inspect_ai.model import ChatMessageUser
     from inspect_ai.solver import solver
     from inspect_ai.util import sandbox
     from .inspect_adapter import build_claude_agent, conference_tools
@@ -535,20 +555,51 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
             snapshots = Snapshotter(run_dir / "snapshots", agent_id, record)
             outcome = {"status": None, "error": None, "harness_after_stop": None}
 
+            def budget_refused():
+                inference = getattr(gen_filter, "state", None) or {}
+                return inference.get("last_request_outcome") == "not_admitted" \
+                    and inference.get("last_denial") in BUDGET_DENIALS
+
             async def run_agent():
+                nonlocal agent_state
+                quick = restarts = 0
                 try:
-                    result = await agent(agent_state)
-                    state.messages, state.output = result.messages, result.output
-                    if outcome["status"] is None:
-                        outcome["status"] = "harness_completed"
-                    else:  # ended during the in-flight grace after the stop; the stop label stays
-                        outcome["harness_after_stop"] = "harness_completed"
-                except Exception as ex:  # re-raised below, outside the task group
-                    if outcome["status"] is None:
-                        outcome["status"] = "error"
-                    else:
-                        outcome["harness_after_stop"] = "error"
-                    outcome["error"] = ex
+                    while True:
+                        requests_before = int((getattr(gen_filter, "state", None) or {}).get("requests") or 0)
+                        session_status, session_error = None, None
+                        try:
+                            result = await agent(agent_state)
+                            state.messages, state.output = result.messages, result.output
+                            session_status = "harness_completed"
+                        except Exception as ex:
+                            session_status, session_error = "error", ex
+                        if not auto_restart or clock.stop.is_set() or budget_refused():
+                            break
+                        made = int((getattr(gen_filter, "state", None) or {}).get("requests") or 0) - requests_before
+                        quick = quick + 1 if session_status == "error" or made <= RESTART_QUICK_REQUESTS else 0
+                        delay = restart_delay(quick)
+                        restarts += 1
+                        _safe_record(record, "agent_restart", agent_id, {
+                            "restart": restarts, "ended": exit_status(session_status, getattr(gen_filter, "state", None)),
+                            "requests_in_session": made, "delay_seconds": delay,
+                            "error": None if session_error is None else repr(session_error)[:500]})
+                        if delay:
+                            await asyncio.sleep(delay)
+                        if clock.stop.is_set():
+                            break
+                        prior = list(state.messages if session_status == "harness_completed" else agent_state.messages)
+                        agent_state = AgentState(messages=prior + [ChatMessageUser(content=CONTINUE_MESSAGE)])
+                    if session_error is None:
+                        if outcome["status"] is None:
+                            outcome["status"] = "harness_completed"
+                        else:  # ended during the in-flight grace after the stop; the stop label stays
+                            outcome["harness_after_stop"] = "harness_completed"
+                    else:  # re-raised below, outside the task group
+                        if outcome["status"] is None:
+                            outcome["status"] = "error"
+                        else:
+                            outcome["harness_after_stop"] = "error"
+                        outcome["error"] = session_error
                 finally:
                     group.cancel_scope.cancel()
 
@@ -1459,7 +1510,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "evaluator_observer": None if observer is None else "queue",
             "fixed_task_manifest": config.get("fixed_task_manifest"), "inspect_dotenv": dotenv,
             "provider_limit": provider_limit, "in_flight_grace_seconds": in_flight_grace,
-            "max_connections": connections, "track": getattr(conference, "track", config.get("track"))}
+            "max_connections": connections, "track": getattr(conference, "track", config.get("track")),
+            "auto_restart": config.get("auto_restart") is True}
         (run_dir / "settings.json").write_text(json.dumps({"config": config, "effective": effective,
                                                             "model": asdict(settings), "personas": personas,
                                                             "tasks": listing, "budget": ledger.snapshot(),
@@ -1472,7 +1524,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                              filter_for=lambda a: budget_filter(a, ledger, settings, barrier, record, "pilot", archive,
                                                                 clock.stop),
                              run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,
-                             auto_memory=auto_memory, in_flight_grace=in_flight_grace)
+                             auto_memory=auto_memory, in_flight_grace=in_flight_grace,
+                             auto_restart=config.get("auto_restart") is True)
         task = build_task(agent_ids=agent_ids, files=agent_files(task_files), solver=solver, compose=compose,
                           metadata={"condition": condition_label(variant, track), "prompt_variant": variant,
                                     "persona_reviewing": reviewing, "personas": personas, "persona_seed": persona_seed},
