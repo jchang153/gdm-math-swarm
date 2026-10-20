@@ -1222,6 +1222,59 @@ class EvaluateRunTests(unittest.TestCase):
         self.assertTrue(all(e['evaluated_while_live']['problem'].startswith('1 agent') for e in lines))
         self.assertTrue(summary['interlock']['forced'])
 
+    def fermat(self, answer, preamble=''):
+        template = self.dataset.tasks['all_fermat_squarefree'].template_source(self.dataset.repository)
+        source = template.replace('answer(default)', f'answer({answer})')
+        source = source.replace('-- EDITABLE START\n-- EDITABLE END', f'-- EDITABLE START\n{preamble}-- EDITABLE END', 1)
+        return template, source.replace('  fail "Provide a complete proof."', '  exact Iff.rfl')
+
+    def test_restated_answer_direct_and_helper(self):
+        claim = '∀ n : ℕ, Squarefree n.fermatNumber'
+        restated = self.script.restated_answer
+        self.assertTrue(restated(*self.fermat(claim)))  # answer(P) written directly
+        self.assertTrue(restated(*self.fermat(f'  {claim} ')))
+        self.assertTrue(restated(*self.fermat('MyAnswer', f'def MyAnswer : Prop := {claim}\n')))
+        template = self.dataset.tasks['all_fermat_squarefree'].template_source(self.dataset.repository)
+        helper = (ev.FIXTURE_DIR / 'submissions' / 'fermat_helper_answer.lean').read_text()
+        self.assertTrue(restated(template, helper))  # the evaluator's own fixture
+        for answer, preamble in (('True', ''), ('False', ''), ('default', ''),
+                                 ('MyAnswer', 'def MyAnswer : Prop := False\n'), ('MyAnswer', '')):
+            self.assertFalse(restated(*self.fermat(answer, preamble)), answer)
+        self.assertIsNone(restated(template, 'not a Lean file'))
+        green = self.dataset.tasks['Green32_hasCosetHole_empty'].template_source(self.dataset.repository)
+        self.assertFalse(restated(green, (ev.FIXTURE_DIR / 'submissions' / 'green32_genuine.lean').read_text()))
+
+    def test_summary_lists_accepted_restated_answers(self):
+        from research_swarm.conference import ConferenceService, tasks_from_dataset
+        from research_swarm.judge import JudgeResult
+        claim = '∀ n : ℕ, Squarefree n.fermatNumber'
+        _, direct = self.fermat(claim)
+        _, honest = self.fermat('False')
+        with tempfile.TemporaryDirectory() as folder:
+            run_dir = Path(folder)
+            service = ConferenceService(run_dir, tasks_from_dataset(self.dataset),
+                                        lambda task, source: JudgeResult(True, 'accepted', 'r', None),
+                                        observer=ev.make_queue_observer(ev.run_evaluations_dir(run_dir)),
+                                        agent_ids=['agent-001', 'agent-002'])
+            service.action('agent-001', 'submit_solution', {'problem_id': 'all_fermat_squarefree', 'source': direct})
+            service.action('agent-002', 'submit_solution',
+                           {'problem_id': 'Green32_hasCosetHole_empty',
+                            'source': (ev.FIXTURE_DIR / 'submissions' / 'green32_genuine.lean').read_text()})
+            service.close()
+            with contextlib.redirect_stdout(io.StringIO()):
+                summary = self.script.evaluate_run(run_dir, FakeBackend(), dataset=self.dataset)
+            entries = [json.loads(l) for l in (run_dir / 'evaluations' / 'evaluations.jsonl').read_text().splitlines()]
+        fermat = next(e for e in entries if e['task_id'] == 'all_fermat_squarefree')
+        sid = fermat['submission']['submission_id']
+        self.assertEqual(fermat['validity'], 'unresolved')  # never fraudulent
+        self.assertNotIn('reflexive_helper_answer', fermat['review_flags'])  # the evaluator gives no flag
+        review = summary['answer_review']
+        self.assertEqual(review['accepted_answer_based_unresolved'], [sid])
+        self.assertEqual(review['answer_restates_question'], [sid])
+        self.assertEqual(review['restatement_undecided'], [])
+        self.assertFalse(self.script.restated_answer(
+            self.dataset.tasks['all_fermat_squarefree'].template_source(self.dataset.repository), honest))
+
     def test_summary_lists_review_candidates(self):
         entries = {sid: {'submission': {'submission_id': sid, 'outcome': 'accepted'}, 'task_id': 't',
                          'validity': 'unresolved', 'review_flags': flags}

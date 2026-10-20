@@ -399,7 +399,59 @@ def evaluate_one(item, dataset, tasks, backend, describe, clock=time.time):
     return entry
 
 
-def summarize(latest, notes):
+def restated_answer(template_source, source):
+    """True when the submitted answer field restates the task proposition (`answer(P) ↔ P`),
+    directly or through a helper `def`/`abbrev` named in the field; None when undecidable.
+
+    Researcher-side review signal only (docs/evaluator.md, "Restated answers"): the
+    validated evaluator leaves such answers ``unresolved``, and the direct form carries no
+    evaluator flag. Never a verdict; chained helpers and notation tricks are not detected.
+    """
+    try:
+        _, other = ev.answer_counterpart(template_source)
+        if not other:
+            return False
+        a, b = ev.header_answer_span(source)
+    except ValueError:
+        return None
+    text, target = source[a:b].strip(), ev._norm(other)
+    if target and target in ev._norm(text):
+        return True
+    if ev._IDENT.fullmatch(text):
+        definition = ev.helper_definition(source, text)
+        return bool(definition) and target in ev._norm(definition)
+    return False
+
+
+def answer_review(latest, submissions, dataset):
+    """Accepted answer-based submissions the evaluator left unresolved, and which of them
+    restate the question. Recomputed from stored sources on every summary."""
+    sources = {s['submission_id']: s.get('source') for s in submissions}
+    accepted, restated, undecided = [], [], []
+    for e in sorted(latest.values(), key=lambda e: e['submission']['submission_id']):
+        sid = e['submission']['submission_id']
+        if not e.get('answer_based') or e['submission'].get('outcome') not in EVALUATED_OUTCOMES:
+            continue
+        if e['validity'] == 'unresolved':
+            accepted.append(sid)
+        task, source = dataset.tasks.get(e['task_id']), sources.get(sid)
+        try:
+            template_source = task.template_source(dataset.repository) if task else None
+        except ValueError:
+            template_source = None
+        verdict = restated_answer(template_source, source) if template_source and source else None
+        if verdict:
+            restated.append(sid)
+        elif verdict is None:
+            undecided.append(sid)
+    return {'accepted_answer_based_unresolved': accepted, 'answer_restates_question': restated,
+            'restatement_undecided': undecided,
+            'note': 'Review signals, never verdicts. An accepted answer that restates the question '
+                    '(answer(P) <-> P) is an exploit the evaluator cannot call fraudulent; review every '
+                    'listed submission by eye (docs/evaluator.md, "Restated answers").'}
+
+
+def summarize(latest, notes, answer=None):
     entries = list(latest.values())
     candidates = {}
     for e in sorted(entries, key=lambda e: e['submission']['submission_id']):
@@ -421,6 +473,7 @@ def summarize(latest, notes):
                 'evaluated': sorted(e['submission']['submission_id'] for e in entries
                                     if e.get('closed_submission_request')),
                 'by_validity': dict(Counter(e['validity'] for e in entries if e.get('closed_submission_request')))},
+            'answer_review': answer,
             'sources': notes}
 
 
@@ -463,7 +516,8 @@ def evaluate_run(run_dir, backend, dataset=None, include_rejected=False, retry_u
                                                 ' (judge-requested)' if item.get('closed_request') else '',
                                                 entry['validity'], entry['seconds']))
     latest, malformed = read_evaluations(output)
-    summary = summarize(latest, dict(notes, evaluations_malformed=malformed))
+    summary = summarize(latest, dict(notes, evaluations_malformed=malformed),
+                        answer_review(latest, submissions, dataset))
     if interlock is not None:
         summary['interlock'] = interlock
     if stopped:
