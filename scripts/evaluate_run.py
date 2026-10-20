@@ -405,15 +405,19 @@ HELPER_CHAIN_LIMIT = 4
 
 
 def _uncomment(text):
-    """Text with Lean comments removed: nested block comments `/- … -/` and line comments `--`."""
+    """Text with Lean comments removed: nested block comments `/- … -/` and line comments `--`.
+    A removed comment leaves a space (token boundary) and keeps its line breaks."""
     out, depth, i = [], 0, 0
     while i < len(text):
         two = text[i:i + 2]
         if two == '/-':
             depth, i = depth + 1, i + 2
+            out.append(' ')
         elif two == '-/' and depth:
             depth, i = depth - 1, i + 2
         elif depth:
+            if text[i] == '\n':
+                out.append('\n')
             i += 1
         elif two == '--':
             end = text.find('\n', i)
@@ -433,8 +437,8 @@ def _helper_bodies(source):
     """{declared name: body} for every def/abbrev in the editable regions."""
     bodies = {}
     for a, b in ev.editable_spans(source):
-        for match in _HELPER_DECL.finditer(source[a:b]):
-            bodies.setdefault(match.group(1), _uncomment(match.group(2)).strip())
+        for match in _HELPER_DECL.finditer(_uncomment(source[a:b])):
+            bodies.setdefault(match.group(1), match.group(2).strip())
     return bodies
 
 

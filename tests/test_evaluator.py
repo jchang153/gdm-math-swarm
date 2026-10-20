@@ -1256,6 +1256,12 @@ class EvaluateRunTests(unittest.TestCase):
                                  ('MyAnswer', f'def MyAnswer : Prop := /- {claim} -/ False\n')):
             self.assertFalse(restated(*self.fermat(answer, preamble)), answer)
         self.assertTrue(restated(*self.fermat(f'/- a note -/ {claim}')))
+        # Codex review: a commented-out restating declaration does not count
+        for preamble in (f'/- def MyAnswer : Prop := {claim} -/\ndef MyAnswer : Prop := False\n',
+                         f'/-\ndef MyAnswer : Prop := {claim}\n-/\ndef MyAnswer : Prop := False\n',
+                         f'-- def MyAnswer : Prop := {claim}\ndef MyAnswer : Prop := False\n'):
+            self.assertFalse(restated(*self.fermat('MyAnswer', preamble)), preamble)
+        self.assertIsNone(restated(*self.fermat('MyAnswer', f'/- def MyAnswer : Prop := {claim} -/\n')))
         green = self.dataset.tasks['Green32_hasCosetHole_empty'].template_source(self.dataset.repository)
         self.assertFalse(restated(green, (ev.FIXTURE_DIR / 'submissions' / 'green32_genuine.lean').read_text()))
 
