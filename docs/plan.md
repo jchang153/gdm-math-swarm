@@ -1,5 +1,12 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Ledger location and Gemini judge run, October 20, 2026
+
+| Date | Item | Record |
+| --- | --- | --- |
+| 2026-10-20 | Paid v3 judge on `gemini10-20261020T054602Z` | User approved in chat ("go ahead and do that to run it"): judge revision v3, rubric `gdm-judge-rubric/3`, estimate $8.49 central, run limit $16.98 (2× central), within the $200 analysis cap. The judge runs on VM `owner-vm` (README: paid runs on the VM only), checkout `~/gdm-judge` at `83a256d`, key from `~/gdm-math-swarm/.env` via `--credentials-root`. |
+| 2026-10-20 | Authoritative baseline/analysis ledger moved | On the user's instruction the single authoritative `state/budget.sqlite` (sha256 `9bcf868e…25fbad`, unchanged since October 18; analysis cap $110, $99.8998293 committed, 4 uncertain holds of $3.29486 carried over) now lives on `owner-vm` at `/home/owner/gdm-judge/state/budget.sqlite`. The previous copies on `collab-vm-1` and in `owner-vm:~/gdm-math-swarm/state/` were renamed (not deleted) to `budget.sqlite.retired-20261020-moved-to-owner-vm-gdm-judge`, each with a README note. Pre-raise backup: `owner-vm:~/gdm-math-swarm/runs/phase-b/judge-gemini10-20261020/budget-before-fifth-raise.sqlite`. The fifth audited raise ($110 → $200) is still to be applied by the operator before the paid run. |
+
 ## Behavior judge iteration specified, October 19, 2026
 
 On the `judge-iteration` branch the user reviewed each proposed change in turn and approved
