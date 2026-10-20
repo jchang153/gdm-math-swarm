@@ -35,34 +35,18 @@ enter agent containers.
   PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> --i-have-user-approval \
       --judge-mode candidates --upgrade-judge-revision
 
-Every judging invocation (--mock or paid) first estimates, without a model call, exactly what it
-would send now (research/analysis/judge/estimate.py: cached units are free) and sets its own run
-limit at 2 x the central estimate, raised when needed to the central estimate plus 1.25 x the
-largest single reservation it plans (so that request can be admitted), at least $1 (--run-limit
-USD overrides): it never sends a request that would push its committed spend (in-flight holds,
-settled and uncertain costs) past that limit, and stops cleanly instead (stop reason run_limit; in-flight requests finish and a
-resume pays nothing twice); the ledger's cap applies as well. --mock, --dry-run-estimate and
---rescore-cached never load credentials, never call a real model and never write the
-authoritative ledger (the mock uses its own rehearsal ledger inside the output directory). A
-paid run needs --i-have-user-approval, an interactive terminal, the applied audited analysis
-raises (all five, $5 -> $40 -> $50 -> $100 -> $110 -> $200; budget.judge_analysis_problems), a
-fresh judge route pricing record (scripts/freeze_judge_route.py, at most 72 h old) and one typed
-confirmation: the script prints the estimate, the run limit and the analysis scope's remaining
-allowance, and the operator types that remaining_usd exactly as displayed. A run config with the owner's standing approval
-(--standing-approval-from-config CONFIG: auto_behavior_judge true, a nonempty
-behavior_judge_approval note, behavior_judge_max_usd at most $50, the baseline or the gemini
-budget track; docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20,
-2026)") replaces only --i-have-user-approval, the interactive terminal and the typed
-confirmation: the run limit becomes the smallest of the automatic (or --run-limit) limit, the
-config's cap and the analysis scope's remaining allowance, the run is refused when that cannot
-cover the central estimate, and the approval note, config path and cap are recorded with the
-run limit (state.json) and in standing-approvals.json; every other refusal stays. Only then does
-JudgeClient load the host key, in memory, from the private .env under --credentials-root
-(default: this checkout). An agent whose prefilter selection exceeds --max-selected-fraction of
-its item tokens is held before its judge call (nothing is sent for it). Exit codes: 0 complete,
-2 errors or held agents, 3 stopped (ledger or run limit), 4 refused before any request.
+No estimate, no typed confirmation (owner decision, October 20, 2026: "Don't require estimates for
+anything"). Every judging invocation (--mock or paid) has a fixed run limit: --run-limit USD, else
+the standing approval's behavior_judge_max_usd (--standing-approval-from-config CONFIG), else $50,
+clamped to the analysis scope's remaining allowance. It never sends a request that would push its
+committed spend (in-flight holds, settled and uncertain costs) past that limit, and stops cleanly
+instead (stop reason run_limit; a resume pays nothing twice); the ledger's cap applies as well.
+--mock, --dry-run-estimate (optional, never required) and --rescore-cached never load credentials,
+never call a real model and never write the authoritative ledger. A paid run needs
+--i-have-user-approval (or the standing approval), the applied audited analysis raises
+(budget.judge_analysis_problems) and a fresh judge route pricing record
+(scripts/freeze_judge_route.py, at most 72 h old).
 """
-from __future__ import annotations
 
 import argparse
 import asyncio
@@ -196,9 +180,8 @@ def parse_args(argv=None):
     parser.add_argument("--run-limit", type=_usd, metavar="USD",
                         help="this judging invocation's own spending limit (paid or mock): no request is sent that "
                              "would push the invocation's committed spend (in-flight holds plus settled and uncertain "
-                             "costs) past it; default 2 x the central estimate of exactly what the invocation would "
-                             "send (cached units free), raised when needed to the central estimate plus 1.25 x the "
-                             "largest single reservation, at least $1. The ledger's cap applies as well")
+                             "costs) past it; default the standing approval's cap or $50, clamped to the analysis "
+                             "allowance. No estimate is made. The ledger's cap applies as well")
     parser.add_argument("--mock-cap", default="50", help="rehearsal ledger cap in USD (mock only)")
     parser.add_argument("--estimate-output", type=Path, help="write the full estimate JSON here")
     parser.add_argument("--estimate-fractions", default="0.02,0.05,0.10,0.20")
@@ -513,6 +496,31 @@ def print_estimate(result, out=None):
                                                   projection["in_flight_reservation_ceiling_usd"].items()), file=out)
 
 
+DEFAULT_RUN_LIMIT_USD = Decimal("50")
+
+
+def fixed_run_limit(override, standing, snapshot):
+    """The invocation's run limit without any estimate: ``--run-limit``, else the standing
+    approval's cap, else DEFAULT_RUN_LIMIT_USD; clamped to the analysis scope's remaining
+    allowance when a ledger snapshot is given."""
+    if override is not None:
+        limit, source = Decimal(str(override)), "override"
+    else:
+        limit, source = DEFAULT_RUN_LIMIT_USD, "default"
+    basis = source
+    if standing is not None:  # the standing approval's cap is a ceiling, never exceeded
+        cap = Decimal(str(standing["max_usd"]))
+        if override is None or cap < limit:
+            limit, basis = cap, "standing_approval_cap"
+        source = "standing_approval"
+    remaining = ((snapshot or {}).get("analysis") or {}).get("remaining_usd")
+    if remaining is not None and Decimal(str(remaining)) < limit:
+        limit, basis = Decimal(str(remaining)), "analysis_remaining"
+    if limit <= 0:
+        raise SystemExit("no analysis allowance remains; nothing was sent")
+    return {"limit_usd": str(limit), "source": source, "basis": basis}
+
+
 def standing_run_limit(limit, invocation, standing, snapshot):
     """The run limit under a standing approval (``research_swarm.auto_judge``): the smallest of the
     invocation's own limit (automatic or --run-limit), the config's per-run cap (never above $50)
@@ -666,8 +674,6 @@ def _main(argv=None):
             if not args.i_have_user_approval:
                 return refuse("choose --dry-run-estimate, --mock, or a paid run with --i-have-user-approval (or "
                               "--standing-approval-from-config CONFIG)")
-            if not sys.stdin.isatty():
-                return refuse("a paid run needs an interactive terminal for the typed confirmation")
         ledger = (args.ledger or DEFAULT_LEDGER_PATH(ROOT)).resolve()
         problems = judge_analysis_problems(ledger)
         if problems:
@@ -691,20 +697,16 @@ def _main(argv=None):
             pipeline.check_manifest(write=False)
         except pl.PipelineError as error:
             return refuse(str(error))
-        # Judge revision v3, item 7: the invocation's own limit, 2 x the central estimate of exactly what
-        # it would send (cached units free) unless --run-limit overrides it.
-        invocation = est.plan_invocation(run_dir, judge_dir, settings, routes, agents=agents, stage=args.stage,
-                                         retry_failed=args.retry_failed, recompute_stale=args.recompute_stale,
-                                         all_agents=all_agents, log=log)
-        limit = est.invocation_run_limit(invocation, args.run_limit)
+        # Owner decision, October 20, 2026 ("Don't require estimates for anything"): no pre-run cost
+        # estimate and no typed confirmation. A fixed run limit: --run-limit, else the standing
+        # approval's cap, else DEFAULT_RUN_LIMIT_USD, clamped to the analysis scope's remaining
+        # allowance. The ledger cap and the run limit still stop the run cleanly.
+        invocation = None
+        limit = fixed_run_limit(args.run_limit, standing, read_snapshot(ledger) if mode == "paid" else None)
         if standing is not None:
-            try:
-                limit = standing_run_limit(limit, invocation, standing, read_snapshot(ledger))
-            except ValueError as error:
-                return refuse(str(error))
-        run_limit = RunLimit(limit["limit_usd"], source=limit["source"], estimate=est.limit_record(invocation),
-                             factor=limit["factor"], floor_usd=limit["floor_usd"], basis=limit["basis"],
-                             standing_approval=standing)
+            standing.update({"run_limit_usd": limit["limit_usd"], "run_limit_basis": limit["basis"]})
+        run_limit = RunLimit(limit["limit_usd"], source=limit["source"], estimate=None, factor=None,
+                             floor_usd=None, basis=limit["basis"], standing_approval=standing)
         pipeline.run_limit = run_limit
     if args.mock:
         from research.analysis.judge.history import agent_code
@@ -717,7 +719,6 @@ def _main(argv=None):
                             exploit_agents=set(chosen[0::5]), aware_agents=set(chosen[1:2]),
                             whistle_agents=set(chosen[2:3]))
         transport = FakeTransport(responder=mock)
-        print_invocation_estimate(invocation, limit, out=sys.stderr)
         clients.update({key: JudgeClient(key, ledger, scope=scope, archive_dir=judge_dir / "raw", settings=routes,
                                          http=transport, max_concurrency=settings.concurrency(key),
                                          ledger_caps={scope: str(Decimal(args.mock_cap))}, run_limit=run_limit)
@@ -730,17 +731,10 @@ def _main(argv=None):
                           "settings": settings.binding(), "runtime": settings.runtime(), "agents": agents or "all",
                           "stage": args.stage, "judge_mode": settings.judge_mode,
                           "upgrade_judge_revision": args.upgrade_judge_revision,
-                          "cost_estimate": est.limit_record(invocation), "run_limit": limit}, indent=2),
+                          "run_limit": limit}, indent=2),
               file=sys.stderr)
-        print_invocation_estimate(invocation, limit, out=sys.stderr, analysis=snapshot)
-        if standing is None:
-            typed = input("Type the analysis scope remaining_usd shown above to start PAID judging: ").strip()
-            if not snapshot.get("remaining_usd") or typed != snapshot["remaining_usd"]:
-                return refuse("typed allowance does not match the ledger; nothing was sent")
-        else:
-            print(f"standing approval from {standing['config_path']} ({standing['plan_section']}): "
-                  f"{standing['approval']!r}; run limit ${limit['limit_usd']} (set by {standing['run_limit_basis']}); "
-                  "no typed confirmation", file=sys.stderr)
+        print(f"paid judging: run limit ${limit['limit_usd']} ({limit['basis']}); analysis remaining "
+              f"${snapshot.get('remaining_usd')}", file=sys.stderr)
         clients.update({key: JudgeClient(key, ledger, scope=scope, archive_dir=judge_dir / "raw", settings=routes,
                                          http=None, max_concurrency=settings.concurrency(key), paid_authorized=True,
                                          credentials_root=credentials_root, run_limit=run_limit)
@@ -761,7 +755,6 @@ def _main(argv=None):
         record = run_limit.record()
         short["run_limit"] = {k: record[k] for k in ("limit_usd", "source", "basis", "settled_usd", "uncertain_usd",
                                                       "peak_committed_usd", "requests", "denied")}
-        short["run_limit"]["estimate_central_usd"] = (record.get("estimate") or {}).get("central_usd")
     if pipeline.upgrade:
         short["judge_revision_upgrade"] = {k: pipeline.upgrade[k] for k in ("at", "archived_to", "superseded_spend",
                                                                             "prefilter_units_kept")}

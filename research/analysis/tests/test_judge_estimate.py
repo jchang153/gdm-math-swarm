@@ -426,35 +426,38 @@ class CommandLineTests(unittest.TestCase):
                       "pipeline gdm-judge-pipeline/3))", out)
         self.assertIn("planned as for a new --output-dir", out)
 
-    def test_paid_confirmation_shows_estimate_limit_and_allowance_before_the_typed_allowance(self):
-        shown, created = [], []
+    def test_paid_run_needs_no_estimate_terminal_or_typed_confirmation(self):
+        """Owner decision, October 20, 2026: no estimate and no typed confirmation for any run."""
+        created = []
+
+        class Stop(Exception):
+            pass
 
         class FakeClient:
             def __init__(self, key, ledger, **kwargs):
                 created.append(kwargs)
 
-        snapshot = {"analysis": {"remaining_usd": "150.000000000", "cap_usd": "200"}}
+            def prepare(self):
+                raise Stop()
 
-        def typed(prompt):
-            shown.append(sys.stderr.getvalue())
-            return "150"
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+        snapshot = {"analysis": {"remaining_usd": "150.000000000", "cap_usd": "200"}}
+        with mock.patch.object(sys.stdin, "isatty", return_value=False), \
                 mock.patch("research_swarm.budget.judge_analysis_problems", return_value=[]), \
                 mock.patch("research_swarm.budget.read_snapshot", return_value=snapshot), \
                 mock.patch.object(self.cli, "route_settings", return_value=JudgeRouteSettings.defaults(
                     pricing_verified=True)), \
                 mock.patch("research.analysis.judge.client.JudgeClient", FakeClient), \
-                mock.patch("builtins.input", typed):
-            code, _, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"),
-                                     "--output-dir", str(self.judge_dir))
-        self.assertEqual(code, 4)
-        self.assertIn("typed allowance does not match", err)
-        self.assertEqual(created, [])  # nothing loaded or sent
-        self.assertEqual(len(shown), 1)
-        for text in ('"cost_estimate"', '"run_limit"', "This judging invocation", "run limit: $",
-                     "analysis scope: remaining $150.000000000 of cap $200"):
-            self.assertIn(text, shown[0])
-        self.assertFalse((self.judge_dir / "manifest.json").exists())  # nothing written before the confirmation
+                mock.patch("builtins.input", side_effect=AssertionError("no typed confirmation")), \
+                mock.patch.object(est, "plan_invocation", side_effect=AssertionError("no estimate")):
+            with self.assertRaises(Stop):
+                self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"),
+                          "--output-dir", str(self.judge_dir))
+        limit = created[0]["run_limit"]
+        self.assertEqual((limit.limit, limit.source), (Decimal("50"), "default"))
+
+    def test_default_limit_is_clamped_to_the_remaining_allowance(self):
+        limit = self.cli.fixed_run_limit(None, None, {"analysis": {"remaining_usd": "12.5"}})
+        self.assertEqual((limit["limit_usd"], limit["basis"]), ("12.5", "analysis_remaining"))
 
     def test_paid_clients_share_the_run_limit(self):
         created = []
@@ -485,16 +488,16 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(len(limits), 1)  # one RunLimit shared by the three clients
         limit = created[0]["run_limit"]
         self.assertEqual((limit.limit, limit.source), (Decimal("9"), "override"))
-        self.assertEqual(limit.estimate["schema"], est.INVOCATION_SCHEMA)
+        self.assertIsNone(limit.estimate)
 
     def test_mock_rehearsal_end_to_end_uses_every_v3_feature(self):
         code, out, err = self.call("--mock", "--output-dir", str(self.judge_dir), "--max-selected-fraction", "1",
                                    "--no-label-check")
         self.assertEqual(code, 0, err[-3000:])
-        self.assertIn("This judging invocation", err)
+        self.assertNotIn("This judging invocation", err)  # no estimate is made
         summary = json.loads(out)
         self.assertEqual(summary["status"], "complete")
-        self.assertEqual(summary["run_limit"]["source"], "estimate")
+        self.assertEqual(summary["run_limit"]["source"], "default")
         report = read(self.judge_dir / "report.json")
         counts = report["counts"]
         # Early-stopping verification: agent-002's speculative statement was not checked.
@@ -515,11 +518,10 @@ class CommandLineTests(unittest.TestCase):
         self.assertTrue(any(item["messages"] for item in refusals["items"]))
         # The run limit and the estimate are recorded and the report compares them with the spend.
         state = read(self.judge_dir / "state.json")["invocations"][-1]
-        self.assertEqual(state["run_limit"]["source"], "estimate")
-        self.assertEqual(state["run_limit"]["limit_usd"],
-                         est.invocation_run_limit(state["run_limit"]["estimate"])["limit_usd"])
+        self.assertEqual(state["run_limit"]["source"], "default")
+        self.assertEqual(state["run_limit"]["limit_usd"], "50")
+        self.assertIsNone(state["run_limit"]["estimate"])  # no estimate is made
         cost = read(self.judge_dir / "pipeline.json")["cost"]
-        self.assertEqual(cost["compared"]["invocations"], 1)
         self.assertEqual(report["cost"], cost)
         html = (self.judge_dir / "report.html").read_text()
         for text in ("Estimate against actual", "not checked", "Provider refusals", "keyword passages",

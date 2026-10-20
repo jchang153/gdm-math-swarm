@@ -78,38 +78,21 @@ class StandingApprovalTests(unittest.TestCase):
         limit = created[0]["run_limit"]
         self.assertEqual((limit.limit, limit.source), (Decimal("50"), "standing_approval"))  # clamped to the cap
         self.assertEqual(limit.standing_approval["run_limit_basis"], "standing_approval_cap")
-        self.assertEqual(limit.standing_approval["unclamped_limit_usd"], "200")
         self.assertEqual(limit.record()["standing_approval"]["approval"], "owner standing approval (test)")
         records = json.loads((self.judge_dir / "standing-approvals.json").read_text())
         self.assertEqual(len(records), 1)
         self.assertEqual((records[0]["max_usd"], records[0]["track"], records[0]["config_path"]),
                          ("50", "baseline", str((self.tmp / "launch-config.json").resolve())))
 
-    def test_limit_never_exceeds_the_remaining_allowance_or_the_automatic_limit(self):
+    def test_limit_never_exceeds_the_cap_or_the_remaining_allowance(self):
         code, err, created = self.paid(self.config(), remaining="150")
         self.assertEqual(code, "prepared", err)
-        automatic = created[0]["run_limit"]
-        self.assertEqual(automatic.standing_approval["run_limit_basis"], "invocation")  # the synthetic run is cheap
-        self.assertEqual(automatic.limit, Decimal(automatic.standing_approval["unclamped_limit_usd"]))
-        central = Decimal(automatic.standing_approval["estimate_central_usd"])
-        self.assertLess(automatic.limit, Decimal(50))
-        tight = (central + Decimal("0.01")).quantize(Decimal("0.01"))  # covers the estimate, below the automatic limit
-        self.assertLess(tight, automatic.limit)
+        self.assertEqual(created[0]["run_limit"].limit, Decimal(50))
         (self.judge_dir / "standing-approvals.json").unlink()
-        code, err, created = self.paid(self.config(), remaining=str(tight))
+        code, err, created = self.paid(self.config(), remaining="7.5")
         self.assertEqual(code, "prepared", err)
         limit = created[0]["run_limit"]
-        self.assertEqual((limit.limit, limit.standing_approval["run_limit_basis"]), (tight, "analysis_remaining"))
-
-    def test_refused_when_the_clamped_limit_cannot_cover_the_central_estimate(self):
-        code, err, created = self.paid(self.config(behavior_judge_max_usd="0.0001"), remaining="150")
-        self.assertEqual(code, 4)
-        self.assertIn("cannot cover the central estimate", err)
-        self.assertEqual(created, [])
-        self.assertFalse((self.judge_dir / "standing-approvals.json").exists())
-        code, err, created = self.paid(self.config(), remaining="0.0001")
-        self.assertEqual((code, created), (4, []))
-        self.assertIn("analysis_remaining", err)
+        self.assertEqual((limit.limit, limit.standing_approval["run_limit_basis"]), (Decimal("7.5"), "analysis_remaining"))
 
     def test_invalid_configs_are_refused_before_anything(self):
         for changes, text in (({"budget_track": "ablation"}, "owner's runs"),

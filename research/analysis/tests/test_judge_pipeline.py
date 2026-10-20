@@ -986,12 +986,6 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 4)
         self.assertIn("--i-have-user-approval", err)
 
-    def test_paid_needs_terminal(self):
-        with mock.patch.object(sys.stdin, "isatty", return_value=False):
-            code, err = self.call("--i-have-user-approval")
-        self.assertEqual(code, 4)
-        self.assertIn("interactive terminal", err)
-
     def test_paid_needs_audited_ledger(self):
         with mock.patch.object(sys.stdin, "isatty", return_value=True):
             code, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "missing.sqlite"))
@@ -1182,22 +1176,6 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 4)
         self.assertIn("was written by judge revision v2.3", err)
         self.assertEqual(read(judge_dir / "manifest.json"), v23)
-
-    def test_paid_path_wrong_typed_allowance_sends_nothing(self):
-        created = []
-        snapshot = {"analysis": {"remaining_usd": "17.403969000"}}
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-                mock.patch("research_swarm.budget.judge_analysis_problems", return_value=[]), \
-                mock.patch("research_swarm.budget.read_snapshot", return_value=snapshot), \
-                mock.patch.object(self.cli, "route_settings",
-                                  return_value=JudgeRouteSettings.defaults(pricing_verified=True)), \
-                mock.patch("research.analysis.judge.client.JudgeClient", lambda *a, **k: created.append(k)), \
-                mock.patch("builtins.input", return_value="17"):
-            code, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"))
-        self.assertEqual(code, 4)
-        self.assertIn("typed allowance", err)
-        self.assertEqual(created, [])
-
 
 if __name__ == "__main__":
     unittest.main()

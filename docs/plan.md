@@ -1,5 +1,16 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## No cost estimates for judge runs, October 20, 2026
+
+Owner (chat): "Don't require estimates for anything—either runs or behavior judges." and "I don't
+ever want to see a cost estimate again." The behavior judge no longer computes a pre-run estimate
+and never asks for a typed confirmation. Each judging invocation has a fixed run limit:
+`--run-limit`, else $50 (a standing approval's `behavior_judge_max_usd` is a ceiling), clamped to
+the analysis scope's remaining allowance; the ledger cap, run limit, audited raises and the
+72-hour pricing-record check still apply. `--dry-run-estimate` remains an optional separate
+command. Experiment runs keep per-request ledger reservations (they enforce the run's cap and add
+no waiting); there is no estimate step for runs.
+
 ## Automatic post-run behavior judge for the owner's runs (October 20, 2026)
 
 The repository owner (Jonathan) decided in chat on October 20, 2026, verbatim: "In the future I
