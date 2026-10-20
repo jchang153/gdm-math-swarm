@@ -149,10 +149,11 @@ GEMINI_BUDGET_TRACK = "gemini"
 GEMINI_LEDGER_RELATIVE = Path("state") / "gemini-budget.sqlite"
 # Compatibility $10 (owner, October 19: "The budget limit is set and I don't care just run it"):
 # the $2 default is too small for a 12-request check at Gemini's upper-tier reservation prices.
-# Pilot $421.46 (owner, October 20: "Top up to a fresh $400" after the stopped first run, whose
-# committed spending was at most $21.452814 including its uncertain holds at reservation): applied
-# to the existing ledger with budget.raise_track_cap, so recorded spending is kept.
-GEMINI_CAPS = {"pilot": "421.46", "analysis": "0", "compatibility": 10}
+# Pilot $462.38 (owner, October 20: "Top up to a fresh $400", first after the stopped first run,
+# then again after the second run was stopped for the auto-restart key bug; committed spending
+# before this relaunch $62.3713844, uncertain holds settled at reservation): applied to the
+# existing ledger with budget.raise_track_cap, so recorded spending is kept.
+GEMINI_CAPS = {"pilot": "462.38", "analysis": "0", "compatibility": 10}
 
 # Every non-baseline budget track: its own ledger file (relative to the repository), its caps,
 # the agent populations it allows (the baseline stays at runtime.APPROVED_AGENT_COUNT), whether

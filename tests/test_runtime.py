@@ -1292,7 +1292,7 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         effective = settings["effective"]
         self.assertEqual(effective["budget_track"], "gemini")
         self.assertEqual(effective["ledger_path"], str(self.folder / "state" / "gemini-budget.sqlite"))
-        self.assertEqual(settings["budget"]["pilot"]["cap_usd"], "421.46")
+        self.assertEqual(settings["budget"]["pilot"]["cap_usd"], "462.38")
         self.assertEqual(effective["prompt_variant"], "collaboration_continuous")
         self.assertIs(effective["auto_restart"], True)
         self.assertEqual(effective["concurrent_run_override"], override)

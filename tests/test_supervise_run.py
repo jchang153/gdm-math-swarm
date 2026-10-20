@@ -112,9 +112,9 @@ class SuperviseRunTests(unittest.TestCase):
         self.assertEqual(supervisor.main(), 0)
         for name in ("budget-before-launch.sqlite", "budget-after-pilot.sqlite", "budget-final.sqlite"):
             backup = read_snapshot(self.phase / name)
-            self.assertEqual((backup["pilot"]["cap_usd"], backup["compatibility"]["settled_usd"]), ("421.46", "0.25"))
+            self.assertEqual((backup["pilot"]["cap_usd"], backup["compatibility"]["settled_usd"]), ("462.38", "0.25"))
         checkpoint = json.loads((self.phase / "live-checkpoint.json").read_text())
-        self.assertEqual(checkpoint["budget"]["pilot"]["cap_usd"], "421.46")
+        self.assertEqual(checkpoint["budget"]["pilot"]["cap_usd"], "462.38")
         self.assertEqual(checkpoint["ledger"], str(supervisor.ledger))
         self.assertEqual(checkpoint["new_settled_usd"], "0")
         ran = (self.tmp / "scripts" / "reconcile_ledger.py.ran").read_text()
