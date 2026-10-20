@@ -668,6 +668,34 @@ estimate remain preconditions.
 10. **Publication**: `scripts/build_experiment_index.py` and the HF library update
     (docs/experiment-library.md). The evidence browser is for optional inspection only.
 
+### Automatic judge after the owner's runs (standing approval, October 20, 2026)
+
+docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20, 2026)": a run
+config with `auto_behavior_judge: true`, a nonempty `behavior_judge_approval` note and
+`behavior_judge_max_usd` (at most 50), on the baseline ledger or the owner's `gemini` budget track
+(never the collaborator's `ablation` track; `research_swarm.auto_judge`, launch gate
+`behavior_judge`), makes `scripts/supervise_run.py` judge the run after its unpaid follow-ups
+(reconcile dry run, evaluate, timeline):
+
+1. if the newest judge route pricing record is older than 72 h (or missing), it runs the unpaid
+   `scripts/freeze_judge_route.py` (`judge-route-freeze.log`); still stale: skipped, reason recorded;
+2. it runs `scripts/run_transcript_judge.py --run-dir RUN --standing-approval-from-config CONFIG
+   --ledger state/budget.sqlite --credentials-root <checkout>` (`behavior-judge.log`/`.exit`).
+
+`--standing-approval-from-config` replaces only `--i-have-user-approval`, the interactive terminal
+and the typed confirmation. The run limit is the smallest of the automatic limit (or
+`--run-limit`), the config's cap and the analysis scope's remaining allowance (record source
+`standing_approval`, with the note, config path, cap, basis and unclamped limit); a central
+estimate above it is refused before any request (exit 4). Every other refusal stays: stale or
+missing pricing record, missing audited raises, a judge directory with other binding settings,
+label checks, held agents. The approval is appended to `RUN/analysis/judge/standing-approvals.json`
+and recorded with the run limit in `state.json`. The supervisor writes `behavior-judge.json`
+(outcome `complete`, `errors_or_held_agents`, `stopped`, `refused` with the REFUSED line, `skipped`
+with its reason, or `supervisor_error`) and adds the judge logs and the pricing record to
+`completed-phase.tgz`; the judge directory is inside `completed-run.tgz`. A judge outcome never
+changes the worker exit or stops the packaging. The run report (`scripts/build_results.py`) still
+excludes judge content.
+
 ## Costs
 
 Prices come from the frozen judge route record (`data/validation/judge-route-pricing-*.json`;

@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +90,179 @@ class SuperviseRunTests(unittest.TestCase):
         self.assertFalse((self.phase / "evaluate.exit").exists())
         self.assertTrue((self.phase / "budget-final.sqlite").exists())
         self.assertFalse(json.loads(self.config.read_text())["paid_launch_enabled"])
+
+
+
+STUB_ORDER = """import os, sys
+root = os.getcwd()  # the supervisor runs every step from the checkout root
+open(os.path.join(root, 'order.log'), 'a').write(os.path.basename(sys.argv[0]) + ' ' + ' '.join(sys.argv[1:]) + '\\n')
+"""
+STUB_JUDGE = STUB_ORDER + """assert 'OPENROUTER_API_KEY' not in os.environ, 'provider key leaked to the judge child'
+run = sys.argv[sys.argv.index('--run-dir') + 1]
+os.makedirs(os.path.join(run, 'analysis', 'judge'), exist_ok=True)
+open(os.path.join(run, 'analysis', 'judge', 'report.json'), 'w').write('{}')
+mode = open(os.path.join(root, 'judge-mode')).read().strip() if os.path.exists(os.path.join(root, 'judge-mode')) else 'ok'
+if mode == 'refuse':
+    print('REFUSED: standing approval: the run limit $1 cannot cover the central estimate $9; nothing was sent',
+          file=sys.stderr)
+    raise SystemExit(4)
+if mode == 'crash':
+    raise RuntimeError('judge crashed')
+"""
+STUB_FREEZE = STUB_ORDER + """import datetime, json
+if not os.path.exists(os.path.join(root, 'freeze-fails')):
+    os.makedirs(os.path.join(root, 'data', 'validation'), exist_ok=True)
+    stamp = datetime.datetime.now(datetime.timezone.utc)
+    open(os.path.join(root, 'data', 'validation', 'judge-route-pricing-' + stamp.strftime('%Y%m%dT%H%M%SZ') + '.json'),
+         'w').write(json.dumps({'created_at': stamp.isoformat()}))
+else:
+    raise SystemExit(1)
+"""
+APPROVAL = {"auto_behavior_judge": True, "behavior_judge_approval": "owner standing approval (test)",
+            "behavior_judge_max_usd": 50}
+
+
+class AutoBehaviorJudgeTests(SuperviseRunTests):
+    """The automatic post-run behavior judge (docs/plan.md, "Automatic post-run behavior judge for the
+    owner's runs (October 20, 2026)") with a fake judge and a fake route freeze: no paid call."""
+
+    def setUp(self):
+        super().setUp()
+        for name in ("scripts/reconcile_ledger.py", "scripts/evaluate_run.py", "research/analysis/timeline.py"):
+            (self.tmp / name).write_text(STUB_ORDER)
+        (self.tmp / "scripts" / "run_transcript_judge.py").write_text(STUB_JUDGE)
+        (self.tmp / "scripts" / "freeze_judge_route.py").write_text(STUB_FREEZE)
+        self.write_config()
+
+    def write_config(self, **changes):
+        self.config.write_text(json.dumps(dict(APPROVAL, run_dir="runs/run-x", paid_launch_enabled=True, **changes)))
+
+    def pricing(self, hours_old):
+        import datetime
+        folder = self.tmp / "data" / "validation"
+        folder.mkdir(parents=True, exist_ok=True)
+        created = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours_old)
+        (folder / "judge-route-pricing-20261001T000000Z.json").write_text(json.dumps({"created_at": created.isoformat()}))
+
+    def order(self):
+        path = self.tmp / "order.log"
+        return [line.split()[0] for line in path.read_text().splitlines()] if path.exists() else []
+
+    def judge_record(self):
+        return json.loads((self.phase / "behavior-judge.json").read_text())
+
+    def packaged(self):
+        import tarfile
+        with tarfile.open(self.phase / "completed-phase.tgz") as tar:
+            phase = set(tar.getnames())
+        with tarfile.open(self.phase / "completed-run.tgz") as tar:
+            run = set(tar.getnames())
+        return phase, run
+
+    def test_judge_runs_after_the_follow_ups_and_is_packaged(self):
+        self.pricing(1)
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        self.assertEqual(self.order(), ["reconcile_ledger.py", "evaluate_run.py", "evaluate_run.py", "timeline.py",
+                                        "run_transcript_judge.py"])  # fresh record: no freeze
+        judge_line = (self.tmp / "order.log").read_text().splitlines()[-1]
+        root = self.tmp.resolve()
+        for text in ("--standing-approval-from-config " + str(self.config.resolve()),
+                     "--ledger " + str(root / "state" / "budget.sqlite"), "--credentials-root " + str(root),
+                     "--run-dir " + str(root / "runs" / "run-x")):
+            self.assertIn(text, judge_line)
+        self.assertNotIn("--i-have-user-approval", judge_line)
+        record = self.judge_record()
+        self.assertEqual((record["outcome"], record["exit"]), ("complete", 0))
+        self.assertEqual((self.phase / "behavior-judge.exit").read_text().strip(), "0")
+        phase, run = self.packaged()
+        self.assertTrue({"behavior-judge.json", "behavior-judge.log", "behavior-judge.exit"} <= phase)
+        self.assertIn("judge-route-pricing/judge-route-pricing-20261001T000000Z.json", phase)
+        self.assertIn("runs/run-x/analysis/judge/report.json", run)
+        status = json.loads((self.phase / "supervisor-status.json").read_text())
+        self.assertEqual(status["stage"], "done_vm_left_running")
+        self.assertEqual(json.loads((self.phase / "worker.exit").read_text()), 0)
+
+    def test_stale_pricing_is_refreshed_first(self):
+        self.pricing(73)
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        self.assertEqual(self.order()[-2:], ["freeze_judge_route.py", "run_transcript_judge.py"])
+        record = self.judge_record()
+        self.assertEqual((record["freeze_exit"], record["outcome"]), (0, "complete"))
+        self.assertLess(record["pricing_age_hours"], 1)
+        self.assertIn("judge-route-freeze.log", self.packaged()[0])
+
+    def test_still_stale_pricing_skips_the_judge(self):
+        (self.tmp / "freeze-fails").write_text("")
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)  # no record at all
+        self.assertEqual(self.order()[-1], "freeze_judge_route.py")
+        record = self.judge_record()
+        self.assertEqual(record["outcome"], "skipped")
+        self.assertIn("no judge route pricing record at most 72 h old (freeze_judge_route.py exit 1)", record["reason"])
+        self.assertFalse((self.phase / "behavior-judge.exit").exists())
+        self.assertTrue((self.phase / "completed-checksums.json").exists())
+
+    def test_judge_refusal_or_failure_never_fails_the_run(self):
+        self.pricing(1)
+        (self.tmp / "judge-mode").write_text("refuse")
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        record = self.judge_record()
+        self.assertEqual((record["outcome"], record["exit"]), ("refused", 4))
+        self.assertIn("cannot cover the central estimate", record["reason"])
+        self.assertTrue((self.phase / "completed-checksums.json").exists())
+        self.assertTrue((self.phase / "budget-final.sqlite").exists())
+        status = json.loads((self.phase / "supervisor-status.json").read_text())
+        self.assertEqual(status["stage"], "done_vm_left_running")
+
+    def test_judge_crash_never_fails_the_run(self):
+        self.pricing(1)
+        (self.tmp / "judge-mode").write_text("crash")
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        self.assertEqual((self.judge_record()["outcome"], self.judge_record()["exit"]), ("failed", 1))
+        self.assertTrue((self.phase / "completed-run.tgz").exists())
+
+    def test_supervisor_error_in_the_judge_step_is_recorded(self):
+        self.pricing(1)
+        with mock.patch.object(supervise.Supervisor, "judge_fresh", side_effect=OSError("disk")):
+            self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        record = self.judge_record()
+        self.assertEqual((record["outcome"], record["error_type"]), ("supervisor_error", "OSError"))
+        self.assertTrue((self.phase / "completed-checksums.json").exists())
+
+    def test_skips(self):
+        self.pricing(1)
+        cases = (({"budget_track": "ablation"}, (), "invalid standing approval"),
+                 ({"behavior_judge_max_usd": 60}, (), "invalid standing approval"),
+                 ({}, ("--no-postrun",), "--no-postrun"))
+        for n, (changes, extra, reason) in enumerate(cases):
+            self.phase = self.tmp / "runs" / "phase-b" / f"run-{n}"
+            self.phase.mkdir(parents=True)
+            self.config = self.phase / "launch-config.json"
+            self.write_config(**changes)
+            self.assertEqual(supervise.Supervisor(self.args("--no-shutdown", *extra)).main(), 0)
+            record = self.judge_record()
+            self.assertEqual(record["outcome"], "skipped")
+            self.assertIn(reason, record["reason"])
+        self.assertNotIn("run_transcript_judge.py", self.order())
+
+    def test_failed_follow_up_skips_the_judge(self):
+        self.pricing(1)
+        (self.tmp / "research" / "analysis" / "timeline.py").write_text("raise SystemExit(7)\n")
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 7)
+        record = self.judge_record()
+        self.assertEqual(record["outcome"], "skipped")
+        self.assertIn("did not complete (exit 7)", record["reason"])
+        self.assertNotIn("run_transcript_judge.py", self.order())
+
+    def test_no_judge_without_the_config_keys(self):
+        self.config.write_text(json.dumps({"run_dir": "runs/run-x", "paid_launch_enabled": True}))
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        self.assertFalse((self.phase / "behavior-judge.json").exists())
+        self.assertNotIn("run_transcript_judge.py", self.order())
+
+    # The inherited runs use the base config (no auto judge keys) and stub follow-ups.
+    test_full_cycle_without_shutdown = None
+    test_refuses_config_without_run_dir_or_disabled_launch = None
+    test_failed_run_skips_follow_ups = None
 
 
 if __name__ == "__main__":

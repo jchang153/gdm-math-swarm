@@ -48,7 +48,15 @@ paid run needs --i-have-user-approval, an interactive terminal, the applied audi
 raises (all five, $5 -> $40 -> $50 -> $100 -> $110 -> $200; budget.judge_analysis_problems), a
 fresh judge route pricing record (scripts/freeze_judge_route.py, at most 72 h old) and one typed
 confirmation: the script prints the estimate, the run limit and the analysis scope's remaining
-allowance, and the operator types that remaining_usd exactly as displayed. Only then does
+allowance, and the operator types that remaining_usd exactly as displayed. A run config with the owner's standing approval
+(--standing-approval-from-config CONFIG: auto_behavior_judge true, a nonempty
+behavior_judge_approval note, behavior_judge_max_usd at most $50, the baseline or the gemini
+budget track; docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20,
+2026)") replaces only --i-have-user-approval, the interactive terminal and the typed
+confirmation: the run limit becomes the smallest of the automatic (or --run-limit) limit, the
+config's cap and the analysis scope's remaining allowance, the run is refused when that cannot
+cover the central estimate, and the approval note, config path and cap are recorded with the
+run limit (state.json) and in standing-approvals.json; every other refusal stays. Only then does
 JudgeClient load the host key, in memory, from the private .env under --credentials-root
 (default: this checkout). An agent whose prefilter selection exceeds --max-selected-fraction of
 its item tokens is held before its judge call (nothing is sent for it). Exit codes: 0 complete,
@@ -113,6 +121,12 @@ def parse_args(argv=None):
                            "evaluator verdicts for closed submissions")
     parser.add_argument("--i-have-user-approval", action="store_true",
                         help="required for a paid (non-mock) run; an interactive confirmation follows")
+    parser.add_argument("--standing-approval-from-config", type=Path, metavar="CONFIG",
+                        help="paid run without the typed confirmation, under the owner's standing approval recorded in "
+                             "this run config (auto_behavior_judge true, behavior_judge_approval, "
+                             "behavior_judge_max_usd <= 50; baseline or gemini budget track only): the run limit is "
+                             "clamped to the config's cap and the analysis scope's remaining allowance; every other "
+                             "refusal stays")
     parser.add_argument("--stage", default="report", help="run every stage up to and including this one: "
                         "history, prefilter, judge, verify, host, closed, runlevel, report (default)")
     parser.add_argument("--agents", action="append", help="agent subset, comma separated (repeatable)")
@@ -410,7 +424,9 @@ def print_invocation_estimate(estimate, limit, out=None, *, analysis=None, note=
     largest = estimate.get("largest_reservation_usd") or {}
     if largest:
         print("  largest single reservation: " + ", ".join(f"{k} ${v}" for k, v in largest.items()), file=out)
-    rule = ("--run-limit override" if limit["source"] != "estimate" else
+    rule = ("standing approval: the smallest of the automatic limit, the config's cap and the analysis allowance"
+            if limit["source"] == "standing_approval" else
+            "--run-limit override" if limit["source"] != "estimate" else
             f"central ${limit['central_usd']} + {limit['reservation_margin']} x the largest single reservation "
             f"${limit['largest_reservation_usd']}, above {limit['factor']} x central so that request can be admitted"
             if limit.get("basis") == "largest_reservation" else
@@ -497,6 +513,42 @@ def print_estimate(result, out=None):
                                                   projection["in_flight_reservation_ceiling_usd"].items()), file=out)
 
 
+def standing_run_limit(limit, invocation, standing, snapshot):
+    """The run limit under a standing approval (``research_swarm.auto_judge``): the smallest of the
+    invocation's own limit (automatic or --run-limit), the config's per-run cap (never above $50)
+    and the analysis scope's remaining allowance. Raises ValueError when the ledger reports no
+    remaining allowance or the clamped limit cannot cover the central estimate (nothing is sent).
+    Fills ``standing`` with the clamp and returns the limit record to use."""
+    from research_swarm.auto_judge import clamp_run_limit
+    remaining = ((snapshot or {}).get("analysis") or {}).get("remaining_usd")
+    if remaining is None:
+        raise ValueError("standing approval: the ledger reports no analysis allowance; nothing was sent")
+    clamped, basis = clamp_run_limit(limit["limit_usd"], standing["max_usd"], remaining)
+    central = Decimal(str(invocation["central_usd"]))
+    if clamped <= 0 or central > clamped:
+        raise ValueError(f"standing approval: the run limit ${clamped} (set by {basis}; cap ${standing['max_usd']}, "
+                         f"analysis remaining ${remaining}) cannot cover the central estimate ${invocation['central_usd']}"
+                         "; nothing was sent")
+    standing.update({"run_limit_usd": str(clamped), "run_limit_basis": basis, "unclamped_limit_usd": limit["limit_usd"],
+                     "unclamped_source": limit["source"], "analysis_remaining_usd": str(remaining),
+                     "estimate_central_usd": invocation["central_usd"]})
+    return dict(limit, limit_usd=str(clamped), source="standing_approval")
+
+
+def record_standing_approval(judge_dir, standing, *, run_dir, ledger):
+    """Append this invocation's standing approval to ``judge_dir/standing-approvals.json``."""
+    import datetime
+    path = Path(judge_dir) / "standing-approvals.json"
+    try:
+        records = json.loads(path.read_text())
+    except (OSError, ValueError):
+        records = []
+    records.append(dict(standing, at=datetime.datetime.now(datetime.timezone.utc).isoformat(), run_dir=str(run_dir),
+                        ledger=str(ledger)))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(records, indent=2) + "\n")
+
+
 def refuse(message):
     print(f"REFUSED: {message}", file=sys.stderr)
     return 4
@@ -534,6 +586,16 @@ def _main(argv=None):
     agents = _agents(args.agents)
     log = lambda message: print(message, file=sys.stderr, flush=True)  # noqa: E731
 
+    standing = None
+    if args.standing_approval_from_config is not None:
+        if args.mock or args.dry_run_estimate or args.rescore_cached:
+            return refuse("--standing-approval-from-config applies to a paid judging run only")
+        from research_swarm.auto_judge import standing_approval
+        config_path = args.standing_approval_from_config.resolve()
+        try:
+            standing = standing_approval(json.loads(config_path.read_text()), config_path)
+        except (OSError, ValueError) as error:
+            return refuse(f"no valid standing approval in {config_path}: {error}")
     if args.run_limit is not None and (args.dry_run_estimate or args.rescore_cached):
         return refuse("--run-limit applies to a judging run (--mock or a paid run), not to --dry-run-estimate or "
                       "--rescore-cached")
@@ -600,10 +662,12 @@ def _main(argv=None):
         all_agents = sorted(sample_index(run_dir))
         scope, mode, models, clients = "rehearsal", "rehearsal", models_of(routes), {}
     else:
-        if not args.i_have_user_approval:
-            return refuse("choose --dry-run-estimate, --mock, or a paid run with --i-have-user-approval")
-        if not sys.stdin.isatty():
-            return refuse("a paid run needs an interactive terminal for the typed confirmation")
+        if standing is None:
+            if not args.i_have_user_approval:
+                return refuse("choose --dry-run-estimate, --mock, or a paid run with --i-have-user-approval (or "
+                              "--standing-approval-from-config CONFIG)")
+            if not sys.stdin.isatty():
+                return refuse("a paid run needs an interactive terminal for the typed confirmation")
         ledger = (args.ledger or DEFAULT_LEDGER_PATH(ROOT)).resolve()
         problems = judge_analysis_problems(ledger)
         if problems:
@@ -633,8 +697,14 @@ def _main(argv=None):
                                          retry_failed=args.retry_failed, recompute_stale=args.recompute_stale,
                                          all_agents=all_agents, log=log)
         limit = est.invocation_run_limit(invocation, args.run_limit)
+        if standing is not None:
+            try:
+                limit = standing_run_limit(limit, invocation, standing, read_snapshot(ledger))
+            except ValueError as error:
+                return refuse(str(error))
         run_limit = RunLimit(limit["limit_usd"], source=limit["source"], estimate=est.limit_record(invocation),
-                             factor=limit["factor"], floor_usd=limit["floor_usd"], basis=limit["basis"])
+                             factor=limit["factor"], floor_usd=limit["floor_usd"], basis=limit["basis"],
+                             standing_approval=standing)
         pipeline.run_limit = run_limit
     if args.mock:
         from research.analysis.judge.history import agent_code
@@ -663,9 +733,14 @@ def _main(argv=None):
                           "cost_estimate": est.limit_record(invocation), "run_limit": limit}, indent=2),
               file=sys.stderr)
         print_invocation_estimate(invocation, limit, out=sys.stderr, analysis=snapshot)
-        typed = input("Type the analysis scope remaining_usd shown above to start PAID judging: ").strip()
-        if not snapshot.get("remaining_usd") or typed != snapshot["remaining_usd"]:
-            return refuse("typed allowance does not match the ledger; nothing was sent")
+        if standing is None:
+            typed = input("Type the analysis scope remaining_usd shown above to start PAID judging: ").strip()
+            if not snapshot.get("remaining_usd") or typed != snapshot["remaining_usd"]:
+                return refuse("typed allowance does not match the ledger; nothing was sent")
+        else:
+            print(f"standing approval from {standing['config_path']} ({standing['plan_section']}): "
+                  f"{standing['approval']!r}; run limit ${limit['limit_usd']} (set by {standing['run_limit_basis']}); "
+                  "no typed confirmation", file=sys.stderr)
         clients.update({key: JudgeClient(key, ledger, scope=scope, archive_dir=judge_dir / "raw", settings=routes,
                                          http=None, max_concurrency=settings.concurrency(key), paid_authorized=True,
                                          credentials_root=credentials_root, run_limit=run_limit)
@@ -673,6 +748,8 @@ def _main(argv=None):
     try:
         if mode == "paid" and not rescore:
             pipeline.check_manifest()  # writes the manifest (or performs the requested upgrade)
+            if standing is not None:
+                record_standing_approval(judge_dir, standing, run_dir=run_dir, ledger=ledger)
             for client in clients.values():
                 client.prepare()  # loads the host key in memory and runs the unpaid provider-limit check
         summary = asyncio.run(pipeline.run())

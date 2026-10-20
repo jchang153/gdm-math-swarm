@@ -90,6 +90,16 @@ How the parts fit together:
 | `verified_integration` | `false` | The user's explicit confirmation of the live compatibility evidence. It is not sufficient alone: launch also needs the `compatibility` gate to pass on the evidence file (see below). Set it only after that evidence passes and the user has reviewed it. |
 | `paid_launch_enabled` | `false` | Set only by the user. A paid launch also requires `--launch-paid-pilot` and a typed confirmation of the remaining allowance. |
 
+## Automatic post-run behavior judge (October 20, 2026)
+
+The repository owner's standing approval (docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20, 2026)"): after the run's unpaid follow-ups, `scripts/supervise_run.py` runs the paid misbehavior judge (`scripts/run_transcript_judge.py --standing-approval-from-config CONFIG`) without the typed confirmation. Valid only for the owner's runs: the baseline ledger (no `budget_track`) or the owner's `gemini` budget track; the collaborator's `ablation` track (and any other value) is refused. Gate `behavior_judge` (`research_swarm.auto_judge.standing_approval_problems`) refuses an invalid combination at preflight; absent keys mean no automatic judge.
+
+| Key | Value | Meaning |
+| --- | --- | --- |
+| `auto_behavior_judge` | `true` | Boolean. `true` runs the judge automatically after the run (supervisor only; a manual judge run still needs `--i-have-user-approval` and the typed confirmation, or this flag). |
+| `behavior_judge_approval` | recorded owner decision | Required nonempty note whenever `auto_behavior_judge` is true. Recorded with the judge's run limit (`state.json`) and in `RUN/analysis/judge/standing-approvals.json`. |
+| `behavior_judge_max_usd` | `50` | Per-run cap in USD: positive, at most $50 (`auto_judge.MAX_STANDING_JUDGE_USD`). The judge's run limit is the smallest of its automatic limit (2 x central estimate, or the largest-reservation rule), this cap and the analysis scope's remaining allowance; a run whose central estimate does not fit is refused before any request. The ledger's analysis cap (`max_analysis_usd`) still applies. |
+
 ## Compatibility gate
 
 The paid pilot is blocked until `data/validation/compatibility-<UTC YYYYMMDDTHHMMSSZ>.json` exists and passes. `scripts/compat_check.py` writes it after the separate $2 live compatibility check: one agent running a few turns on the frozen route, reserving and settling in ledger scope `compatibility` of `state/budget.sqlite`. The check runs only after the plan's execution hold is lifted and the user confirms immediately before the paid call. The newest file must have:

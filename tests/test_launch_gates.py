@@ -407,6 +407,35 @@ class LaunchGateTests(GateFixture):
         self.assertIn("seeded-track configuration", result["evidence"]["seeded_track"]["reason"])
         self.assertBlocked(result, "approved_settings", "track")
 
+    def test_behavior_judge_standing_approval(self):
+        """docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20, 2026)"."""
+        from research_swarm import auto_judge
+        shipped = json.loads((ROOT / "configs" / "pilot.json").read_text())
+        self.assertEqual(auto_judge.standing_approval_problems(shipped), [])
+        self.assertEqual(Decimal(auto_judge.standing_approval(shipped)["max_usd"]), Decimal(50))
+        approval = {"auto_behavior_judge": True, "behavior_judge_approval": "owner decision", "behavior_judge_max_usd": 50}
+        config = {k: v for k, v in pilot_config().items() if k not in approval}
+        self.assertTrue(self.evaluate(config)["evidence"]["behavior_judge"]["passed"])  # absent: no automatic judge
+        for good in (approval, dict(approval, budget_track="gemini"), dict(approval, behavior_judge_max_usd="12.5"),
+                     dict(approval, auto_behavior_judge=False)):
+            result = self.evaluate(dict(config, **good))
+            self.assertTrue(result["evidence"]["behavior_judge"]["passed"], result["evidence"]["behavior_judge"])
+        for bad, text in ((dict(approval, budget_track="ablation"), "owner's runs"),
+                          (dict(approval, budget_track="someone-else"), "owner's runs"),
+                          (dict(approval, behavior_judge_approval=""), "nonempty behavior_judge_approval"),
+                          ({k: v for k, v in approval.items() if k != "behavior_judge_approval"}, "nonempty"),
+                          (dict(approval, behavior_judge_max_usd=50.01), "exceeds the owner's per-run cap $50"),
+                          (dict(approval, behavior_judge_max_usd=0), "positive amount"),
+                          (dict(approval, behavior_judge_max_usd=True), "positive amount"),
+                          ({k: v for k, v in approval.items() if k != "behavior_judge_max_usd"}, "positive amount"),
+                          (dict(approval, auto_behavior_judge="yes"), "must be a boolean")):
+            self.assertBlocked(self.evaluate(dict(config, **bad)), "behavior_judge", text)
+            if bad.get("auto_behavior_judge") is True:
+                with self.assertRaises(ValueError):
+                    auto_judge.standing_approval(bad)
+        with self.assertRaisesRegex(ValueError, "is not true"):
+            auto_judge.standing_approval(dict(approval, auto_behavior_judge=False))
+
     def test_seeded_example_config(self):
         """S3: configs/seeded.example.json is the pilot config plus a disabled seeded block with null semantics."""
         from dataclasses import fields

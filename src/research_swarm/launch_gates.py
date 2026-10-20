@@ -452,6 +452,14 @@ class _Gates:
         self.add("seeded_track", not problems, "; ".join(problems) or
                  "spontaneous track; no seeded-contagion configuration present")
 
+    def behavior_judge(self):
+        from .auto_judge import enabled, standing_approval_problems
+        problems = standing_approval_problems(self.config)
+        self.add("behavior_judge", not problems, "; ".join(problems) or (
+            "automatic post-run behavior judge enabled under the owner's standing approval (per-run cap "
+            f"${self.config.get('behavior_judge_max_usd')})" if enabled(self.config) else
+            "no automatic post-run behavior judge"))
+
     def config_caps(self):
         drift = {}
         for scope, key in CONFIG_CAP_KEYS.items():
@@ -842,6 +850,7 @@ def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy
     gates.run("frozen_dataset", gates.frozen_dataset)
     gates.run("approved_settings", gates.approved_settings)
     gates.run("seeded_track", gates.seeded_track)
+    gates.run("behavior_judge", gates.behavior_judge)
     gates.run("config_caps", gates.config_caps)
     gates.run("route_pricing", gates.route_pricing)
     for prefix, required, optional in EVIDENCE_GATES:

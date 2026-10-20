@@ -1,5 +1,28 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Automatic post-run behavior judge for the owner's runs (October 20, 2026)
+
+The repository owner (Jonathan) decided in chat on October 20, 2026, verbatim: "In the future I
+want the behavior judge just to run automatically after each run", "only run it on mine for now",
+and "$50 is good" (the per-run cap). Recorded meaning: a standing approval of the paid behavior
+judge (judge revision v3, rubric `gdm-judge-rubric/3`) after each of the owner's runs, replacing
+the interactive typed confirmation for those runs only. It is recorded in the run config
+(`auto_behavior_judge: true`, a nonempty `behavior_judge_approval` note, `behavior_judge_max_usd`
+at most 50; `configs/README.md`, `research_swarm/auto_judge.py`) and executed by
+`scripts/supervise_run.py` after its unpaid follow-ups (reconcile dry run, evaluate, timeline) via
+`scripts/run_transcript_judge.py --standing-approval-from-config CONFIG`.
+
+Guards that remain:
+
+| Guard | Rule |
+| --- | --- |
+| Whose runs | Only the owner's: the baseline ledger (no `budget_track`) or the owner's `gemini` budget track. The collaborator's `ablation` track (or any other value) is refused at preflight (gate `behavior_judge`) and by the judge. Collaborators approve their own judging ("Collaborator budgets and keys"). |
+| Per-run cap | The judge's run limit is the smallest of its automatic limit (2× the central estimate, or the largest-reservation rule; item 7 above), the config's `behavior_judge_max_usd` (never above $50) and the analysis scope's remaining allowance. A run whose central estimate does not fit is refused before any request. |
+| Ledger | The judge bills the analysis scope of the checkout's authoritative `state/budget.sqlite` under its audited caps (all five analysis raises required); its cap, holds and admission checks are unchanged. |
+| Every other refusal | A judge route pricing record older than 72 h (the supervisor first refreshes it with the unpaid public-catalog `scripts/freeze_judge_route.py`; if still stale the judge is skipped with the reason recorded), a judge directory with other binding settings, label checks, held agents (selection guard), the provider-limit check and the host-only key. |
+| Records | The approval note, config path, cap and the clamped limit go into the judge's run-limit record (`state.json`) and `RUN/analysis/judge/standing-approvals.json`; the supervisor records the outcome in `behavior-judge.json` and its status. Judge outputs stay in `RUN/analysis/judge/` and are packaged with the run; the run report (`results.json`/`results.html`) still excludes judge content. |
+| Failure | A skipped, refused or failed judge never changes the run's worker exit and never stops packaging; the ledger is backed up after it (`budget-final.sqlite`). |
+
 ## Ledger location and Gemini judge run, October 20, 2026
 
 | Date | Item | Record |

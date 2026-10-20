@@ -379,7 +379,8 @@ class RunLimit:
     when the largest single reservation needed more room, or ``floor``) are recorded with the
     totals (``record()``)."""
 
-    def __init__(self, limit_usd, *, source="estimate", estimate=None, factor=None, floor_usd=None, basis=None):
+    def __init__(self, limit_usd, *, source="estimate", estimate=None, factor=None, floor_usd=None, basis=None,
+                 standing_approval=None):
         limit = _decimal_or_none(limit_usd)
         if limit is None or limit <= 0:
             raise ValueError("run limit must be a positive amount in USD")
@@ -389,6 +390,9 @@ class RunLimit:
         self.factor = factor
         self.floor = _decimal_or_none(floor_usd)
         self.basis = basis
+        # Source ``standing_approval`` (docs/plan.md, "Automatic post-run behavior judge for the owner's
+        # runs (October 20, 2026)"): the config's approval note, path and per-run cap, recorded as given.
+        self.standing_approval = standing_approval
         self.created_at = _now()
         self._lock = threading.Lock()
         self._held = {}                  # token -> (reserved USD, purpose, model key)
@@ -466,7 +470,8 @@ class RunLimit:
             return {"schema": RUN_LIMIT_SCHEMA, "limit_usd": str(self.limit), "source": self.source,
                     "basis": self.basis, "factor": None if self.factor is None else str(self.factor),
                     "floor_usd": None if self.floor is None else str(self.floor), "created_at": self.created_at,
-                    "estimate": self.estimate, "committed_usd": str(self._committed()),
+                    "estimate": self.estimate, "standing_approval": self.standing_approval,
+                    "committed_usd": str(self._committed()),
                     "peak_committed_usd": str(self.peak_committed), "settled_usd": str(self._settled),
                     "uncertain_usd": str(self._uncertain), "in_flight_usd": str(held), "requests": self.requests,
                     "denied": self.denied, "first_denial": self.first_denial,

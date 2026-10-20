@@ -13,6 +13,14 @@ ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
 4. afterwards sets ``paid_launch_enabled`` to false in CONFIG (never a second launch by
    accident), backs up the ledger and, unless --no-postrun, runs the unpaid follow-ups in order:
    reconcile_ledger.py (dry run), evaluate_run.py --dry-run, evaluate_run.py, timeline.py;
+   then, when CONFIG has ``auto_behavior_judge`` true (the repository owner's standing approval,
+   docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20, 2026)"),
+   the PAID behavior judge (scripts/run_transcript_judge.py --standing-approval-from-config
+   CONFIG, per-run cap behavior_judge_max_usd <= $50, this checkout's state/budget.sqlite and
+   .env), after refreshing a judge route pricing record older than 72 h with the unpaid
+   scripts/freeze_judge_route.py. Its outputs land in RUN/analysis/judge/ (packaged with the
+   run); its outcome is recorded in behavior-judge.json and never changes the worker exit or
+   stops the packaging;
 5. packages the run and phase records with SHA-256 checksums and waits up to --retrieval-wait
    seconds for a ``retrieved.marker`` in the phase directory;
 6. shuts the VM down only when it is idle (no Docker containers, no other tmux session, no
@@ -48,6 +56,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FOLLOW_UPS = ("reconcile-dry", "evaluate-dry", "evaluate", "timeline")
+JUDGE_STEPS = ("judge-route-freeze", "behavior-judge")  # after FOLLOW_UPS, only with auto_behavior_judge true
+JUDGE_PRICING_GLOB = "judge-route-pricing-*.json"
+JUDGE_PRICING_MAX_AGE_HOURS = 72  # research/analysis/judge/route.py DEFAULT_MAX_AGE_HOURS
+JUDGE_OUTCOMES = {0: "complete", 2: "errors_or_held_agents", 3: "stopped", 4: "refused"}
 IDLE_PROCESSES = {"bash", "sh", "sshd", "sshd-session", "sshd-auth", "tmux: server", "tmux", "systemd", "(sd-pam)",
                   "dbus-daemon", "ps", "sleep"}
 ENV_KEYS = ("PATH", "HOME", "USER", "LANG", "TERM", "XDG_RUNTIME_DIR")
@@ -75,6 +87,7 @@ class Supervisor:
         self.env = {k: os.environ[k] for k in ENV_KEYS if k in os.environ}  # never the provider key
         self.env["PYTHONPATH"] = "src"
         self.settled_at_launch = None
+        self.judge_record = None
 
     # -- records -------------------------------------------------------------
     def status(self, stage, **fields):
@@ -153,6 +166,68 @@ class Supervisor:
                 return code
         return 0
 
+    # -- automatic behavior judge (owner's standing approval) --------------------
+    def judge_pricing(self):
+        """(path, age in hours) of the newest judge route pricing record, or (None, None)."""
+        found = sorted((self.root / "data" / "validation").glob(JUDGE_PRICING_GLOB))
+        if not found:
+            return None, None
+        try:
+            created = json.loads(found[-1].read_text())["created_at"]
+            created = datetime.datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+            age = (datetime.datetime.now(datetime.timezone.utc) - created).total_seconds() / 3600
+        except (OSError, ValueError, KeyError, TypeError):
+            return found[-1], None
+        return found[-1], age
+
+    def judge_fresh(self):
+        path, age = self.judge_pricing()
+        return path is not None and age is not None and 0 <= age <= JUDGE_PRICING_MAX_AGE_HOURS
+
+    def behavior_judge(self, worker_code):
+        """The paid behavior judge under the config's standing approval, or a recorded skip. Never
+        raises and never changes the worker exit; returns the record (also behavior-judge.json)."""
+        record = {"utc": now(), "config": str(self.config_path), "run_dir": str(self.run)}
+        try:
+            config = json.loads(self.config_path.read_text())
+            sys.path.insert(0, str(ROOT / "src"))
+            from research_swarm.auto_judge import enabled, standing_approval_problems
+            if not enabled(config):
+                return None  # not configured: no judge, no record
+            problems = standing_approval_problems(config)
+            if problems:
+                record.update(outcome="skipped", reason="invalid standing approval: " + "; ".join(problems))
+            elif self.args.no_postrun:
+                record.update(outcome="skipped", reason="--no-postrun")
+            elif worker_code != 0:
+                record.update(outcome="skipped", reason=f"the run or its follow-ups did not complete (exit {worker_code})")
+            else:
+                if not self.judge_fresh():
+                    record["freeze_exit"] = self.step("judge-route-freeze", ["scripts/freeze_judge_route.py"])
+                path, age = self.judge_pricing()
+                record["pricing_record"] = None if path is None else str(path)
+                record["pricing_age_hours"] = None if age is None else round(age, 3)
+                if not self.judge_fresh():
+                    record.update(outcome="skipped", reason="no judge route pricing record at most "
+                                  f"{JUDGE_PRICING_MAX_AGE_HOURS} h old (freeze_judge_route.py exit "
+                                  f"{record.get('freeze_exit')})")
+                else:
+                    code = self.step("behavior-judge", [
+                        "scripts/run_transcript_judge.py", "--run-dir", str(self.run),
+                        "--standing-approval-from-config", str(self.config_path), "--ledger", str(self.ledger),
+                        "--credentials-root", str(self.root)])
+                    record.update(exit=code, outcome=JUDGE_OUTCOMES.get(code, "failed"))
+                    if code == 4:
+                        refused = [line for line in (self.phase / "behavior-judge.log").read_text().splitlines()
+                                   if line.startswith("REFUSED:")]
+                        record["reason"] = refused[-1] if refused else "refused (see behavior-judge.log)"
+        except Exception as error:  # a judge failure never fails the run's packaging
+            record.update(outcome="supervisor_error", error_type=type(error).__name__, detail=str(error))
+        record["finished_utc"] = now()
+        (self.phase / "behavior-judge.json").write_text(json.dumps(record, indent=2))
+        self.status("behavior-judge-" + record["outcome"], worker_exit=worker_code, behavior_judge=record)
+        return record
+
     def work(self):
         code = 1
         try:
@@ -165,6 +240,7 @@ class Supervisor:
             self.live_checkpoint()
             if code == 0 and (self.run / "settings.json").exists() and not self.args.no_postrun:
                 code = self.follow_ups()
+            self.judge_record = self.behavior_judge(code)
         except Exception as error:
             self.status("worker_error", error_type=type(error).__name__, detail=str(error))
             code = 2
@@ -188,16 +264,22 @@ class Supervisor:
                     else self.run.name)
         selected = ["budget-final.sqlite", "budget-before-launch.sqlite", "budget-after-pilot.sqlite", "pilot.exit",
                     "pilot.log", "supervisor-console.log", "worker.exit", "live-checkpoint.json",
-                    self.config_path.name] + [a + b for a in FOLLOW_UPS for b in (".log", ".exit")]
+                    self.config_path.name, "behavior-judge.json"] + [
+                        a + b for a in FOLLOW_UPS + JUDGE_STEPS for b in (".log", ".exit")]
         with tarfile.open(self.phase / "completed-phase.tgz", "w:gz") as tar:
             for name in selected:
                 path = self.config_path if name == self.config_path.name else self.phase / name
                 if path.exists():
                     tar.add(path, arcname=name)
+            pricing = (self.judge_record or {}).get("pricing_record")
+            if pricing and Path(pricing).exists():  # the route record the judge ran with
+                tar.add(pricing, arcname="judge-route-pricing/" + Path(pricing).name)
         hashes = {name: hashlib.sha256((self.phase / name).read_bytes()).hexdigest()
                   for name in ("completed-run.tgz", "completed-phase.tgz")}
         (self.phase / "completed-checksums.json").write_text(json.dumps(hashes, indent=2))
-        self.status("ready_for_retrieval", worker_exit=code, hashes=hashes)
+        self.status("ready_for_retrieval", worker_exit=code, hashes=hashes,
+                    behavior_judge=None if self.judge_record is None else
+                    {k: self.judge_record.get(k) for k in ("outcome", "exit", "reason")})
         deadline = time.monotonic() + self.args.retrieval_wait
         while time.monotonic() < deadline and not (self.phase / "retrieved.marker").exists():
             time.sleep(30)
