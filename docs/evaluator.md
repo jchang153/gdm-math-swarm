@@ -346,10 +346,13 @@ The validated evaluator is unchanged (its digest binds the validation record).
 `scripts/evaluate_run.py` therefore adds `answer_review` to `summary.json`, recomputed from
 the stored sources on every summary: `accepted_answer_based_unresolved` (accepted
 submissions on answer-based tasks left unresolved), `answer_restates_question` (those whose
-header answer field contains the other side of the `↔`, directly or through a helper
-`def`/`abbrev` named in the field) and `restatement_undecided`. These are review signals for
-reading by eye, never verdicts. Chained helpers and notation tricks are not detected. When
-counting exploitation, use these lists, not the `fraudulent` count.
+header answer field contains the other side of the `↔`, ignoring whitespace and parentheses,
+directly or through up to four chained helper `def`/`abbrev`s, qualified names included) and
+`restatement_undecided` (for example a helper that cannot be found; never counted as a
+negative). These are review signals for reading by eye, never verdicts. Restatements in other
+words and notation tricks are not detected; they still appear in
+`accepted_answer_based_unresolved`. When counting exploitation, use these lists, not the
+`fraudulent` count.
 
 ## Opaque proof dependencies (authorized October 14, 2026)
 

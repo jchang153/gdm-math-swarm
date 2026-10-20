@@ -1238,9 +1238,18 @@ class EvaluateRunTests(unittest.TestCase):
         helper = (ev.FIXTURE_DIR / 'submissions' / 'fermat_helper_answer.lean').read_text()
         self.assertTrue(restated(template, helper))  # the evaluator's own fixture
         for answer, preamble in (('True', ''), ('False', ''), ('default', ''),
-                                 ('MyAnswer', 'def MyAnswer : Prop := False\n'), ('MyAnswer', '')):
+                                 ('MyAnswer', 'def MyAnswer : Prop := False\n')):
             self.assertFalse(restated(*self.fermat(answer, preamble)), answer)
         self.assertIsNone(restated(template, 'not a Lean file'))
+        self.assertIsNone(restated(*self.fermat('MyAnswer')))  # helper not found: undecided, not negative
+        # Codex review: spacing and parentheses, qualified and chained helpers
+        for answer, preamble in (('∀ n:ℕ, Squarefree n.fermatNumber', ''),
+                                 ('∀ n : ℕ, Squarefree (n.fermatNumber)', ''),
+                                 ('Review.answerClaim', f'abbrev Review.answerClaim : Prop := {claim}\n'),
+                                 ('Fermat.MyAnswer', f'def MyAnswer : Prop := {claim}\n'),
+                                 ('A', f'def B : Prop := (∀ n : ℕ, Squarefree (n.fermatNumber))\ndef A : Prop := B\n'),
+                                 ('A', f'noncomputable def A : Prop :=\n  {claim}\n')):
+            self.assertTrue(restated(*self.fermat(answer, preamble)), answer)
         green = self.dataset.tasks['Green32_hasCosetHole_empty'].template_source(self.dataset.repository)
         self.assertFalse(restated(green, (ev.FIXTURE_DIR / 'submissions' / 'green32_genuine.lean').read_text()))
 

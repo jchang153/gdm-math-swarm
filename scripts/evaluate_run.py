@@ -399,28 +399,67 @@ def evaluate_one(item, dataset, tasks, backend, describe, clock=time.time):
     return entry
 
 
+_HELPER_DECL = re.compile(r"(?ms)^[ \t]*(?:@\[[^\]\n]*\][ \t\n]*)?(?:(?:noncomputable|private|protected)[ \t]+)*"
+                          r"(?:def|abbrev)[ \t]+([^\s:({\[]+)[^\n]*?:=(.*?)(?=^\S|\Z)")
+HELPER_CHAIN_LIMIT = 4
+
+
+def _loose(text):
+    """Comparison form ignoring whitespace and parentheses (both sides get the same treatment)."""
+    return re.sub(r'[\s()]', '', text)
+
+
+def _helper_bodies(source):
+    """{declared name: body} for every def/abbrev in the editable regions."""
+    bodies = {}
+    for a, b in ev.editable_spans(source):
+        for match in _HELPER_DECL.finditer(source[a:b]):
+            bodies.setdefault(match.group(1), match.group(2).strip())
+    return bodies
+
+
+def _helper_body(bodies, ident):
+    """Body of the helper named ``ident``, matched in full or by its last name component
+    (namespaces, qualified declarations); None when absent or ambiguous."""
+    if ident in bodies:
+        return bodies[ident]
+    short = ident.rsplit('.', 1)[-1]
+    found = {body for name, body in bodies.items() if name.rsplit('.', 1)[-1] == short}
+    return found.pop() if len(found) == 1 else None
+
+
 def restated_answer(template_source, source):
     """True when the submitted answer field restates the task proposition (`answer(P) ↔ P`),
-    directly or through a helper `def`/`abbrev` named in the field; None when undecidable.
+    directly or through a chain of helper `def`/`abbrev`s; False for a canonical value or the
+    unchanged placeholder or an answer that does not contain it; None when undecidable.
 
     Researcher-side review signal only (docs/evaluator.md, "Restated answers"): the
     validated evaluator leaves such answers ``unresolved``, and the direct form carries no
-    evaluator flag. Never a verdict; chained helpers and notation tricks are not detected.
+    evaluator flag. Whitespace and parentheses are ignored. Never a verdict; restatements in
+    other words and notation tricks are not detected.
     """
     try:
         _, other = ev.answer_counterpart(template_source)
         if not other:
             return False
+        x, y = ev.header_answer_span(template_source)
         a, b = ev.header_answer_span(source)
-    except ValueError:
+        text, placeholder = source[a:b].strip(), template_source[x:y].strip()
+        if text == placeholder or ev.CANONICAL_ANSWER.fullmatch(text):
+            return False
+        target, bodies = _loose(other), _helper_bodies(source)
+        for _ in range(HELPER_CHAIN_LIMIT):
+            if target in _loose(text):
+                return True
+            if not ev._IDENT.fullmatch(text):
+                return False
+            body = _helper_body(bodies, text)
+            if body is None:
+                return None  # unresolved helper: never a negative
+            text = body
         return None
-    text, target = source[a:b].strip(), ev._norm(other)
-    if target and target in ev._norm(text):
-        return True
-    if ev._IDENT.fullmatch(text):
-        definition = ev.helper_definition(source, text)
-        return bool(definition) and target in ev._norm(definition)
-    return False
+    except Exception:  # the summary must never fail on an odd source
+        return None
 
 
 def answer_review(latest, submissions, dataset):
