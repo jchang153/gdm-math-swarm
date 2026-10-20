@@ -11,6 +11,10 @@ comparator container at a time, by the image ID resolved at start:
 4. with --pilot-self-compare, each of the 14 frozen pilot templates against
    itself (pristine, plus the helper-answer bridge for answer-based tasks),
    expecting illegal_axiom (sorryAx) -- never mismatch or challenge_failed.
+   --task-set all71 self-compares the 71-task parent pool's templates instead
+   (docs/plan.md, "Gemini 3.1 Pro collaboration run authorized"), and
+   --only-tasks ID,ID,... restricts the self-comparisons to the named tasks (the
+   evaluator certifies only templates with a passing self-comparison).
 The record (data/validation/evaluator-<UTC>.json, interface I6) is rewritten
 atomically after every case, so a crash loses nothing; --resume continues it.
 Full comparator records (with untrusted output tails) go only to the
@@ -36,7 +40,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 from research_swarm import evaluator as ev  # noqa: E402
-from research_swarm.dataset import FrozenDataset  # noqa: E402
+from research_swarm.dataset import PILOT_TASK_SET, TASK_SETS, FrozenDataset  # noqa: E402
 from research_swarm.judge import TaskTemplate, immutable_segments  # noqa: E402
 from research_swarm.keyword_filter import check_keywords  # noqa: E402
 
@@ -57,6 +61,9 @@ def parse_args(argv=None):
     parser.add_argument('--seccomp', type=Path, default=ev.DEFAULT_SECCOMP)
     parser.add_argument('--pilot-self-compare', action='store_true',
                         help='also self-compare the 14 pilot templates (pristine and answer bridge)')
+    parser.add_argument('--task-set', default=PILOT_TASK_SET, choices=sorted(TASK_SETS),
+                        help='templates to self-compare (default the 14-task pilot)')
+    parser.add_argument('--only-tasks', help='comma-separated task ids: self-compare only these templates')
     parser.add_argument('--skip-fixtures', action='store_true', help='with --resume: only add self-comparisons')
     parser.add_argument('--no-upstream', action='store_true', help='skip the advisory upstream cross-checks')
     parser.add_argument('--cases', help='comma-separated fixture names (debug; never a gate record)')
@@ -161,9 +168,12 @@ def run_upstream(case, runner, image_id, verdict):
             'wall_seconds': round(time.time() - started, 3), 'detail': str(record.get('detail', ''))[:500]}, record
 
 
-def self_compare_requests(dataset):
-    """(kind, task, template, request) for each pilot template (researcher-only sources)."""
+def self_compare_requests(dataset, only=None):
+    """(kind, task, template, request) for each pilot template (researcher-only sources);
+    ``only``: a set of task ids to restrict to."""
     for task in dataset.pilot_tasks:
+        if only is not None and task.task_id not in only:
+            continue
         template = TaskTemplate(task.template_source(dataset.repository), task.theorem_name, task.answer_based)
         probe = ev.pristine_probe_source(template)
         yield 'pristine', task, template, ev.verify_request(probe, probe, task.theorem_name)
@@ -224,7 +234,8 @@ def offline_plan(manifest, dataset, args):
         print('  %-40s %-32s static=%s plan=%s runs>=%d' % (case['name'], case['category'],
               static_checks(template, source)['passed'], plan.mode, minimum))
     if args.pilot_self_compare:
-        planned = list(self_compare_requests(dataset))
+        only = set(args.only_tasks.split(',')) if getattr(args, 'only_tasks', None) else None
+        planned = list(self_compare_requests(dataset, only))
         runs += len(planned)
         print('Self-comparisons: %d (%d pristine, %d bridge)' % (len(planned), sum(p[0] == 'pristine' for p in planned),
                                                                sum(p[0] == 'bridge' for p in planned)))
@@ -235,7 +246,10 @@ def offline_plan(manifest, dataset, args):
 def run(args, runner=None, image_id=None, debug_root=DEBUG_DIR, log=print):
     """Programmatic entry (tests inject a fake runner). Returns (exit_code, record_path)."""
     manifest = ev.load_fixture_manifest()
-    dataset = FrozenDataset(ROOT)
+    dataset = FrozenDataset(ROOT, task_set=getattr(args, 'task_set', PILOT_TASK_SET))
+    only = set(args.only_tasks.split(',')) if getattr(args, 'only_tasks', None) else None
+    if only and not only <= {t.task_id for t in dataset.pilot_tasks}:
+        raise SystemExit('Unknown task ids for this task set: ' + ', '.join(sorted(only - {t.task_id for t in dataset.pilot_tasks})))
     selected = set(args.cases.split(',')) if args.cases else None
     if selected and not selected <= {c['name'] for c in manifest}:
         raise SystemExit('Unknown fixture names: ' + ', '.join(sorted(selected - {c['name'] for c in manifest})))
@@ -369,7 +383,9 @@ def run(args, runner=None, image_id=None, debug_root=DEBUG_DIR, log=print):
         record['self_compare'] = [e for e in record['self_compare']
                                   if not (args.rerun_failed and not ev.self_compare_passes(e))]
         kept = {(e['task_id'], e['kind'], e['template_sha256']) for e in record['self_compare']}
-        for kind, task, template, request in self_compare_requests(dataset):
+        record['self_compare_scope'] = {'task_set': getattr(args, 'task_set', PILOT_TASK_SET),
+                                        'only_tasks': sorted(only) if only else None}
+        for kind, task, template, request in self_compare_requests(dataset, only):
             if (task.task_id, kind, ev._sha256_text(template.source)) in kept:
                 continue
             entry, full = run_self_compare(kind, task, template, request, runner, image_id)
