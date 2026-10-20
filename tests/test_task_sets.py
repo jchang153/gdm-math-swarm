@@ -65,3 +65,24 @@ class TaskSetTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EvidenceWaiverTests(unittest.TestCase):
+    def test_waiver_applies_only_on_the_gemini_track_with_a_note(self):
+        from research_swarm.launch_gates import _Gates, evidence_waiver
+        config = json.loads((ROOT / "configs" / "gemini-collab.json").read_text())
+        self.assertEqual(evidence_waiver(config, "runtime-e2e")["problems"], [])
+        self.assertIsNone(evidence_waiver(config, "compatibility"))  # never waivable
+        gates = _Gates(ROOT, config, None, None, None)
+        gates.run("runtime-e2e", lambda: gates.evidence("runtime-e2e", ("agent",), ("lean",)))
+        self.assertTrue(gates.results["runtime-e2e"]["passed"])
+        self.assertTrue(gates.results["runtime-e2e"]["waived"])
+        self.assertIn("WAIVED", gates.results["runtime-e2e"]["reason"])
+        for broken in ({"evidence_waiver_approval": " "}, {"budget_track": None},
+                       {"waived_evidence_gates": ["runtime-e2e", "compatibility"]}):
+            bad = {k: v for k, v in {**config, **broken}.items() if v is not None}
+            gates = _Gates(ROOT, bad, None, None, None)
+            gates.run("runtime-e2e", lambda g=gates: g.evidence("runtime-e2e", ("agent",), ("lean",)))
+            self.assertFalse(gates.results["runtime-e2e"]["passed"], broken)
+        pilot = json.loads((ROOT / "configs" / "pilot.json").read_text())
+        self.assertIsNone(evidence_waiver(pilot, "runtime-e2e"))

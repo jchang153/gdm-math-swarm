@@ -64,5 +64,12 @@
   "concurrent_run_approval": "Repository owner's decision, docs/plan.md, \"Gemini 3.1 Pro collaboration run authorized, October 19, 2026\", VM row (\"Run alongside hers\"): launch while the collaborator's GLM run is live; her agent sandboxes and judge compilers seen at launch are recorded as warnings, not blockers (running comparators, sandboxes of a run from this checkout and a held launch lock still block). Known risk: CPU contention can push Lean compiles in either run past the 120-second limit. Her session, containers and files are not touched.",
   "prompt_cache_normalization": "counter-user-v1",
   "budget_track": "gemini",
-  "prompt_variant": "collaboration"
+  "prompt_variant": "collaboration",
+  "waived_evidence_gates": [
+    "evaluator",
+    "runtime-e2e",
+    "runtime-isolation",
+    "runtime-capacity"
+  ],
+  "evidence_waiver_approval": "Repository owner, October 20, 2026 UTC: \"yes just waive them for this run.\" The evaluator, runtime-e2e, runtime-isolation and runtime-capacity evidence does not yet match this code and 10-agent compose, and the probes refuse while the collaborator's run is live; her live runs use the same code, images and 10-agent 8 GiB setup. This run only (docs/plan.md, Gemini 3.1 Pro collaboration run, Evidence row)."
 }

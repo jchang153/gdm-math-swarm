@@ -187,6 +187,27 @@ def capacity_config(config):
 # text the probe ran, equal to runtime.compose_fingerprint(config, current agent
 # image ID), so a later change to the generated compose file invalidates it.
 COMPOSE_BOUND_EVIDENCE = ("runtime-e2e", "runtime-isolation", "runtime-capacity")
+# Evidence gates the owner may waive for one run on the gemini track (docs/plan.md, "Gemini 3.1 Pro
+# collaboration run authorized", Evidence row): config ``waived_evidence_gates`` (a subset of these)
+# plus a nonempty ``evidence_waiver_approval`` note. Never on the baseline or ablation track.
+WAIVABLE_EVIDENCE = ("evaluator", "runtime-e2e", "runtime-isolation", "runtime-capacity")
+
+
+def evidence_waiver(config, prefix):
+    """None when ``prefix`` is not waived; else {"note", "problems"} (problems make the gate fail)."""
+    waived = (config or {}).get("waived_evidence_gates")
+    if not waived or prefix not in waived:
+        return None
+    problems = []
+    if not isinstance(waived, list) or any(name not in WAIVABLE_EVIDENCE for name in waived):
+        problems.append(f"waived_evidence_gates must be a list drawn from {list(WAIVABLE_EVIDENCE)}")
+    if track_of(config) != "gemini":
+        problems.append("an evidence waiver is allowed only on the gemini budget track")
+    note = (config or {}).get("evidence_waiver_approval")
+    if not isinstance(note, str) or not note.strip():
+        problems.append("waived_evidence_gates requires a nonempty evidence_waiver_approval note")
+        note = ""
+    return {"note": note.strip(), "problems": problems}
 # Lean evidence that must come from a complete run (all pilot tasks, strict variant
 # where applicable, no subset/skip flags: ``complete`` true) at the operational
 # judge limits (``limits`` {timeout_seconds, memory, cpus} equal to the config's).
@@ -588,6 +609,12 @@ class _Gates:
                  prompt_usd_per_token=settings.prompt_usd_per_token, output_usd_per_token=settings.output_usd_per_token)
 
     def evidence(self, prefix, required, optional):
+        waiver = evidence_waiver(self.config, prefix)
+        if waiver is not None:
+            # Owner waiver for this run only (docs/plan.md, "Gemini 3.1 Pro collaboration run
+            # authorized", Evidence row): recorded in the gate result and the run's settings.
+            return self.add(prefix, not waiver["problems"], "; ".join(waiver["problems"])
+                            or f"WAIVED by the owner for this run: {waiver['note']}", waived=True)
         path, record = newest_evidence(self.validation, prefix)
         if path is None:
             return self.add(prefix, False, f"no {prefix}-<UTC>.json evidence in {self.rel(self.validation)}")
