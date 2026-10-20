@@ -142,7 +142,11 @@ def export(run):
         records.append(record('library', 'library-' + str(row['artifact_id']), row['path'], row['content'], row['published_at'],
                        [row['author']], row['task_id'], detail={k: v for k, v in row.items() if k != 'content'},
                        links=[['Author transcript', transcript(row['author'])]]))
-    evaluations = {x['submission']['submission_id']: x for x in json_lines(run / 'evaluations/evaluations.jsonl')}
+    # A run whose independent evaluation has not run yet (e.g. refused) shows every submission as
+    # "not independently evaluated" and records the evaluation source as absent.
+    evaluations_path = run / 'evaluations/evaluations.jsonl'
+    evaluations = ({x['submission']['submission_id']: x for x in json_lines(evaluations_path)}
+                   if evaluations_path.exists() else {})
     for row in tables['submissions']:
         if hashlib.sha256(row['source'].encode()).hexdigest() != row['source_sha256']:
             raise ValueError('Submission source hash mismatch')
@@ -224,6 +228,9 @@ def export(run):
                 'Board records have no reply relationship; posts are shown chronologically.',
                 'Missing timestamps stay unknown. Event order does not establish causal influence.',
                 'Operational outcomes are separate from independent validity. Closed-task attempts may be unevaluated.']
+    if not evaluations_path.exists():
+        warnings.append('No independent evaluation records: evaluations/evaluations.jsonl is absent, so no '
+                        'submission was independently evaluated.')
     data = dict(run=run.name, records=records, counts=counts, warnings=warnings,
                 conference_events=len(events), timeline_entries=len(timeline), captured_files=len(versions))
     # Script-safe JSON; agent-controlled strings are rendered only with textContent.
@@ -261,7 +268,7 @@ for(const id of ['search','agent','task','kind'])el(id).addEventListener(id==='s
     (out / 'index.html').write_text(compact_browser_page(page('Conference · ' + run.name, body + '<script id="data" type="application/json">' + encoded + '</script><script>' + script + '</script>')))
     manifest = {'schema': 'gdm-conference-view/1', 'run': run.name, 'counts': counts, 'captured_files': len(versions),
                 'conference_events': len(events), 'timeline_entries': len(timeline), 'warnings': warnings,
-                'sources': {str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest()
+                'sources': {str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else 'absent'
                             for p in [run/'conference/state.sqlite', run/'conference/events.jsonl',run/'runtime.jsonl',run/'analysis/timeline.jsonl',run/'evaluations/evaluations.jsonl']}}
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2))
     return manifest
