@@ -8,10 +8,10 @@ on any budget track (the owner's and the collaborator's alike). A config opts in
 
 - ``auto_behavior_judge``: ``true`` to judge the run after its unpaid follow-ups;
 - ``behavior_judge_max_usd``: the judge's budget for the run in USD (any positive amount; $50,
-  ``budget.DEFAULT_JUDGE_RUN_BUDGET_USD``, when absent). It holds for the whole run's judging
-  (live passes, early stages and the post-run judge together, read from the ledger's labels;
-  docs/plan.md, "Live behavior judge during the run (October 20, 2026)"). The judge stops
-  cleanly when its next request would push that committed spend past this budget.
+  ``budget.DEFAULT_JUDGE_RUN_BUDGET_USD``, when absent). It holds for the judging run, the run's
+  judge directory (live passes, early stages and the post-run judge together, and any resume of
+  them: ``client.committed_for_judging``). The judge stops cleanly when its next request would push
+  that committed spend past this budget. It is the judge's only spending control.
 
 No approval note is needed (``behavior_judge_approval`` from older configs is ignored). The
 judge bills the analysis scope of the checkout's ledger (state/budget.sqlite, or ``--ledger``),
@@ -27,24 +27,26 @@ windows, verification and the run-level summary remain after the clock stops. Th
 - ``live_behavior_judge``: ``true`` (the default when ``auto_behavior_judge`` is true), ``false``
   (post-run judging only), or ``"mock"`` (a free shadow: live passes and a post-run pass with the
   deterministic mock model into the phase folder, beside the unchanged paid post-run judge);
-- ``behavior_judge_live_max_usd``: the live passes' own share of the judge's budget (default $10,
-  at most ``behavior_judge_max_usd``);
 - ``behavior_judge_live_interval_seconds``: seconds between live passes (default 300, 60 to 3600).
+
+``behavior_judge_live_max_usd`` (a separate live share in earlier versions) is no longer read: the
+live passes use the judging run's one budget (owner decision "one spending control only",
+docs/plan.md "One per-run budget, no manual approvals (October 20, 2026)").
 """
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from .budget import DEFAULT_JUDGE_RUN_BUDGET_USD, budget_amount
 
 AUTO_JUDGE_KEY = "auto_behavior_judge"
 MAX_USD_KEY = "behavior_judge_max_usd"
 LIVE_KEY = "live_behavior_judge"
-LIVE_MAX_USD_KEY = "behavior_judge_live_max_usd"
 LIVE_INTERVAL_KEY = "behavior_judge_live_interval_seconds"
 KEYS = (AUTO_JUDGE_KEY, MAX_USD_KEY)
-LIVE_KEYS = (LIVE_KEY, LIVE_MAX_USD_KEY, LIVE_INTERVAL_KEY)
-DEFAULT_LIVE_MAX_USD = Decimal("10")
+LIVE_KEYS = (LIVE_KEY, LIVE_INTERVAL_KEY)
+# Superseded (a separate live share of the judge's budget); not read, reported by the run_budget gate.
+OBSOLETE_LIVE_MAX_USD_KEY = "behavior_judge_live_max_usd"
 DEFAULT_LIVE_INTERVAL_SECONDS = 300
 LIVE_INTERVAL_RANGE = (60, 3600)
 LIVE_PLAN_SECTION = "Live behavior judge during the run (October 20, 2026)"
@@ -57,16 +59,6 @@ def config_track(config):
     """The budget track ``config`` names (None for the baseline; "baseline" counts as None)."""
     value = (config or {}).get(BUDGET_TRACK_KEY)
     return None if value in (None, "baseline") else value
-
-
-def _amount(value):
-    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
-        return None
-    try:
-        amount = Decimal(str(value).strip().lstrip("$").replace(",", ""))
-    except (InvalidOperation, ValueError):
-        return None
-    return amount if amount.is_finite() else None
 
 
 def judge_config_problems(config):
@@ -102,15 +94,6 @@ def live_problems(config):
     problems = []
     if LIVE_KEY in config and config[LIVE_KEY] not in (True, False, "mock"):
         problems.append(f'{LIVE_KEY} must be true, false or "mock"')
-    if LIVE_MAX_USD_KEY in config:
-        amount = _amount(config[LIVE_MAX_USD_KEY])
-        cap = _amount(config.get(MAX_USD_KEY))
-        cap = cap if cap is not None and cap > 0 else DEFAULT_JUDGE_RUN_BUDGET_USD
-        if amount is None or amount <= 0:
-            problems.append(f"{LIVE_MAX_USD_KEY} must be a positive amount in USD")
-        elif amount > cap:
-            problems.append(f"{LIVE_MAX_USD_KEY} ${amount} exceeds the judge's budget for the run ({MAX_USD_KEY} "
-                            f"${cap})")
     if LIVE_INTERVAL_KEY in config:
         value = config[LIVE_INTERVAL_KEY]
         low, high = LIVE_INTERVAL_RANGE
@@ -131,16 +114,16 @@ def live_mode(config):
 
 
 def live_settings(config):
-    """``{"mode", "max_usd", "interval_seconds"}`` of the live judge for ``config`` (defaults filled)."""
+    """``{"mode", "interval_seconds"}`` of the live judge for ``config`` (defaults filled). Live passes
+    spend from the judging run's one budget (``behavior_judge_max_usd``); there is no live share."""
     config = config or {}
-    amount = _amount(config.get(LIVE_MAX_USD_KEY)) if LIVE_MAX_USD_KEY in config else DEFAULT_LIVE_MAX_USD
     interval = config.get(LIVE_INTERVAL_KEY, DEFAULT_LIVE_INTERVAL_SECONDS)
-    return {"mode": live_mode(config), "max_usd": str(amount), "interval_seconds": interval}
+    return {"mode": live_mode(config), "interval_seconds": interval}
 
 
 def judge_settings(config, config_path=None, *, live=False):
     """What a run config sets for its judging: ``{"max_usd", "budget_source", "track",
-    "config_path", "plan_section", "live", "live_max_usd"}`` (with ``live=True`` also
+    "config_path", "plan_section", "live"}`` (with ``live=True`` also
     ``"live_plan_section"``). Raises ValueError when the keys are not well formed, and with
     ``live=True`` (a paid live pass) also when the config does not enable paid live judging
     (``live_mode``: a configuration check, not an approval)."""
@@ -155,5 +138,5 @@ def judge_settings(config, config_path=None, *, live=False):
     settings = live_settings(config)
     return {"max_usd": str(amount), "budget_source": source, "track": config_track(config) or "baseline",
             "config_path": None if config_path is None else str(config_path), "plan_section": PLAN_SECTION,
-            "live": settings["mode"] == "paid", "live_max_usd": settings["max_usd"],
+            "live": settings["mode"] == "paid",
             **({"live_plan_section": LIVE_PLAN_SECTION} if live else {})}

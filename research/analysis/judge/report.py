@@ -326,9 +326,9 @@ def stage_rows(judge_dir, pipeline):
 def paid_beyond_units(pipeline, units_total):
     """What the run's judging paid outside the units of this report (``pipeline.json`` spend): units
     later redone (``replaced_units``), live screening never adopted (``live``: mispredicted windows, a
-    disabled store, units set aside and sent again), and the ledger's own total for the run
-    (``run_ledger``: every invocation and live pass, in-flight and uncertain holds at their full
-    reservation; what the per-run cap counts). ``all_settled_usd`` adds the first two to the units'
+    disabled store, units set aside and sent again), and the ledger's own total for the judging run
+    (``run_ledger``: every invocation and live pass into this judge directory, in-flight and uncertain
+    holds at their full reservation; what the judging run's budget counts). ``all_settled_usd`` adds the first two to the units'
     total."""
     spend = (pipeline.get("spend") or {}) if isinstance(pipeline, dict) else {}
     replaced = _decimal((spend.get("replaced_units") or {}).get("settled_usd")) or Decimal(0)
@@ -798,8 +798,8 @@ def _spend_html(report):
         extra += f"<p class=\"foot\">Settled in all for this run's judging: ${esc(cost['all_settled_usd'])}.</p>"
     if cost.get("run_ledger_committed_usd") is not None:
         extra += (f"<p class=\"foot\">The ledger holds ${esc(cost['run_ledger_committed_usd'])} for this run's "
-                  "judging (every invocation and live pass; a request in flight or of uncertain billing at its full "
-                  "reservation): what the per-run cap counts"
+                  "judging (every invocation and live pass into this judge directory; a request in flight or of "
+                  "uncertain billing at its full reservation): what the judging run's budget counts"
                   + (f"; {cost['run_ledger_unresolved_rows']} row(s) still unresolved"
                      if cost.get("run_ledger_unresolved_rows") else "") + ".</p>")
     return ("<div class=\"scroll\"><table><tr><th>Stage</th><th>Model</th><th>Requests</th><th>Settled cost</th></tr>"

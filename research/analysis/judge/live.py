@@ -93,10 +93,12 @@ class JudgeBusy(RuntimeError):
 
 
 def run_lock_path(ledger, run_id):
-    """The run's judging lock: ``<ledger folder>/.judge-run-locks/<ledger name>-<run id>.lock``. The
-    per-run cap is read from that ledger's rows for that run id (``client.committed_for_run``), so
-    the lock that keeps the read and the spending of two invocations apart is keyed the same way,
-    whatever their ``--output-dir`` (and whichever copy of the run directory they judge)."""
+    """The run's judging lock: ``<ledger folder>/.judge-run-locks/<ledger name>-<run id>.lock``, held
+    by every spending judging invocation of the run in that ledger whatever its ``--output-dir`` (and
+    whichever copy of the run directory it judges), so two of them never read a judging run's
+    committed spend (``client.committed_for_judging``) and spend at once. A judge directory's paid
+    spend is always counted in one ledger (``run_transcript_judge.judging_ledger``), and its
+    ``.judge.lock`` (``judge_lock``) also keeps two processes out of one judge directory."""
     ledger = Path(ledger).resolve()
     name = re.sub(r"[^A-Za-z0-9._-]", "_", f"{ledger.stem}-{run_id}")
     return ledger.parent / RUN_LOCKS_DIRNAME / f"{name}.lock"
@@ -106,8 +108,8 @@ def run_lock_path(ledger, run_id):
 def judging_locks(judge_dir, *, ledger, run_id, wait_seconds=0.0):
     """Every spending judging invocation of a run (each live pass, the early stages, the post-run
     judge, a manual re-judge into another ``--output-dir``) holds the run's lock (``run_lock_path``)
-    for its whole life, then its judge directory's (``judge_lock``), so the per-run spend read from
-    the ledger before the first request is never raced. Raises ``JudgeBusy`` when either is not
+    for its whole life, then its judge directory's (``judge_lock``), so the judging run's committed
+    spend read from the ledger before the first request is never raced. Raises ``JudgeBusy`` when either is not
     free within ``wait_seconds`` (0: at once)."""
     deadline = time.monotonic() + max(0.0, float(wait_seconds))
     with _flock(run_lock_path(ledger, run_id), wait_seconds):
@@ -689,7 +691,7 @@ def open_live_store(pipeline, route):
 
 def record_unavailable(live_dir, reason, *, run_id=None, kind="live_source_unavailable"):
     """Note in live/state.json that a pass did nothing: the live source is unavailable, or (``kind``
-    ``"deferred"``) the provider-key check failed or left no headroom for the pilot just now."""
+    ``"deferred"``) no fresh valid pricing record or no provider key could be had just now."""
     from .pipeline import write_json
     live_dir = Path(live_dir)
     state = _read(live_dir / "state.json") or {"schema": LIVE_STATE_SCHEMA, "agents": {}, "passes": []}

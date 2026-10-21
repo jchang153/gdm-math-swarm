@@ -38,7 +38,10 @@ billing and reconcilable. A live process's rows are never touched.
 
 Older ledgers keep their ``scopes`` caps and ``cap_changes`` rows as history
 (``legacy_cap_usd`` in the snapshot); nothing reads them for admission. The authoritative
-ledger lives outside run scratch (``DEFAULT_LEDGER_PATH``).
+ledger lives outside run scratch (``DEFAULT_LEDGER_PATH``). Every ledger carries a random
+``ledger_id`` (``meta`` table, assigned on first open and kept by copies and moves), so a record
+of spend (for example a judge directory's ``run-budgets.json``) can name the ledger it was
+counted in (``read_ledger_id``).
 """
 from __future__ import annotations
 
@@ -106,6 +109,8 @@ _SCHEMA = (
     "CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, scope TEXT NOT NULL, budget INTEGER NOT NULL,"
     " source TEXT, reservation_factor TEXT NOT NULL DEFAULT '1', owner TEXT, note TEXT,"
     " created TEXT DEFAULT CURRENT_TIMESTAMP, ended TEXT)",
+    # The ledger's identity (``ledger_id``), kept by copies and moves of the file.
+    "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
 )
 # Columns added to older ledgers on open: (table, column, type).
 _MIGRATIONS = (("calls", "basis", "TEXT"), ("calls", "settled", "TEXT"), ("calls", "run_id", "TEXT"),
@@ -273,6 +278,19 @@ def read_snapshot(path):
         return _snapshot(db)
 
 
+def read_ledger_id(path):
+    """The ledger's ``ledger_id`` (read only), or None when the file is absent or no process with
+    this code has opened it yet (``BudgetLedger(path)`` assigns one)."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    with closing(_read_only(path)) as db:
+        if "meta" not in _tables(db):
+            return None
+        row = db.execute("SELECT value FROM meta WHERE key='ledger_id'").fetchone()
+    return None if row is None else row[0]
+
+
 def read_run(path, run_id):
     """Read-only state of one run (budget, committed, remaining, holds, violations), or None."""
     path = Path(path)
@@ -421,6 +439,8 @@ class BudgetLedger:
             for table, column, kind in _MIGRATIONS:
                 if column not in _columns(db, table):
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+            db.execute("INSERT OR IGNORE INTO meta (key,value) VALUES ('ledger_id',?)", (uuid.uuid4().hex,))
+            self.ledger_id = db.execute("SELECT value FROM meta WHERE key='ledger_id'").fetchone()[0]
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=30)
@@ -428,26 +448,31 @@ class BudgetLedger:
         return db
 
     # -- runs ------------------------------------------------------------------
-    def start_run(self, run_id, scope, budget_usd, *, source=None, note=None):
+    def start_run(self, run_id, scope, budget_usd, *, source=None, note=None, reservation_factor=None):
         """Register run ``run_id`` in ``scope`` with its budget (positive USD) and bind this object
         to it. Registering an existing run again (e.g. the judge's three clients) needs the same
-        scope and budget. Also marks every ``reserved`` hold of a process that is provably gone as
-        ``uncertain`` (still counted against its own run). Never blocks on other runs. Returns
-        {"run": the run's state, "orphaned_holds": [request ids]}."""
+        scope and budget. ``reservation_factor`` (at least 1) starts a new run's reservation scaling
+        where an earlier part of the same work left it (a judge resume after an estimate violation);
+        it never lowers a registered run's factor. Also marks every ``reserved`` hold of a process
+        that is provably gone as ``uncertain`` (still counted against its own run). Never blocks on
+        other runs. Returns {"run": the run's state, "orphaned_holds": [request ids]}."""
         if not str(run_id or "").strip():
             raise ValueError("A run needs a nonempty run id")
         if not str(scope or "").strip():
             raise ValueError("A run needs a scope")
         budget = units(budget_amount(budget_usd))
+        factor = _factor(reservation_factor if reservation_factor is not None else 1)
         with closing(self.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT scope,budget FROM runs WHERE id=?", (run_id,)).fetchone()
+            row = db.execute("SELECT scope,budget,reservation_factor FROM runs WHERE id=?", (run_id,)).fetchone()
             if row is None:
-                db.execute("INSERT INTO runs (id,scope,budget,source,owner,note) VALUES (?,?,?,?,?,?)",
-                           (run_id, scope, budget, source, self.owner, note))
+                db.execute("INSERT INTO runs (id,scope,budget,source,owner,note,reservation_factor) "
+                           "VALUES (?,?,?,?,?,?,?)", (run_id, scope, budget, source, self.owner, note, str(factor)))
             elif (row[0], row[1]) != (scope, budget):
                 raise ValueError(f"run {run_id} is already registered with scope {row[0]!r} and budget "
                                  f"${usd(row[1])}; a run's budget is fixed when it starts")
+            elif factor > _factor(row[2]):
+                db.execute("UPDATE runs SET reservation_factor=? WHERE id=?", (str(factor), run_id))
             orphaned = self._orphan_holds(db, f"run {run_id} started")
         self.run_id, self.run_scope = run_id, scope
         return {"run": self.run_snapshot(), "orphaned_holds": orphaned}
@@ -559,9 +584,10 @@ class BudgetLedger:
 
         ``cost`` is required (normally OpenRouter's reported generation cost, see
         scripts/reconcile_ledger.py; ``basis=MANUAL_BASIS`` for an amount entered by hand).
-        A ``reserved`` hold is accepted only with ``allow_reserved=True``, after its
-        process is known to have exited without settling. A cost above the reservation
-        becomes an estimate_violation (recorded, never blocking).
+        A ``reserved`` hold is accepted only with ``allow_reserved=True`` and only when the
+        process that reserved it is provably gone (``owner_gone``): a running process settles
+        its own requests, and settling one of them here would lose its real bill. A cost above
+        the reservation becomes an estimate_violation (recorded, never blocking).
         """
         if not str(note).strip():
             raise ValueError("Reconciliation requires an audit note")
@@ -572,10 +598,13 @@ class BudgetLedger:
         actual = units(cost)
         with closing(self.connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT reserved,state,actual,run_id,requested FROM calls WHERE id=?",
+            row = db.execute("SELECT reserved,state,actual,run_id,requested,owner,created FROM calls WHERE id=?",
                              (request_id,)).fetchone()
             if row is None or row[1] not in allowed:
                 raise ValueError(f"Request is not reconcilable (state {None if row is None else row[1]})")
+            if row[1] == "reserved" and not owner_gone(row[5], row[6]):
+                raise ValueError(f"Request {request_id} is still reserved by a running process ({row[5] or 'unknown'}); "
+                                 "it settles itself, and a hold is reconcilable once that process is gone")
             state = "estimate_violation" if actual > row[0] else "settled"
             db.execute("UPDATE calls SET actual=?,state=?,basis=?,settled=CURRENT_TIMESTAMP WHERE id=?",
                        (actual, state, basis, request_id))

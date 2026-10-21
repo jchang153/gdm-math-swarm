@@ -3412,13 +3412,12 @@ class Pipeline:
             from .warm import live_spend
             out["live"] = live_spend(self.judge_dir, live_folder)
         if self.ledger_path and self.ledger_path.exists():
-            # Everything the ledger holds for this run's judging (every invocation, live passes, units
-            # redone or never adopted, in-flight and uncertain holds): what the per-run cap counts.
-            from .client import committed_for_run
+            # Everything the ledger holds for this judging run (every invocation into this judge
+            # directory, its live passes, units redone or never adopted, in-flight and uncertain
+            # holds): what the judging run's budget counts (client.committed_for_judging).
+            from .client import committed_for_judging
             try:
-                archives = sorted({self.judge_dir.resolve(), (self.run_dir / "analysis" / "judge").resolve()})
-                out["run_ledger"] = committed_for_run(self.ledger_path, self.run_id, scope=self.scope,
-                                                      archives=archives)
+                out["run_ledger"] = committed_for_judging(self.ledger_path, self.judge_dir, scope=self.scope)
             except Exception as error:   # never hides the per-unit record
                 out["run_ledger_error"] = type(error).__name__
         if self.ledger_path and self.ledger_path.exists():

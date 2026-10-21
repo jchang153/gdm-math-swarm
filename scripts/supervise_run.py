@@ -6,9 +6,10 @@ ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
 
 1. refuses to start twice for the same phase directory (``supervisor.started`` survives, so a
    second supervisor for the same phase never launches);
-2. backs up the budget ledger, then launches ``scripts/run_pilot.py --config CONFIG
-   --launch-paid-pilot`` with a minimal environment (the provider key is never passed on; the
-   runtime loads it from the operator's private .env). The run's budget is CONFIG's
+2. backs up the budget ledger, prints the run's budget on its own console (and the behavior
+   judge's, when enabled; also ``launch-budget.json``), then launches ``scripts/run_pilot.py
+   --config CONFIG --launch-paid-pilot`` with a minimal environment (the provider key is never
+   passed on; the runtime loads it from the operator's private .env). The run's budget is CONFIG's
    ``run_budget_usd`` (else $100), the one spending control (docs/plan.md, "One per-run budget,
    no manual approvals (October 20, 2026)");
 3. writes ``live-checkpoint.json`` every 30 s while the run is going (event counts, prompt-cache
@@ -18,10 +19,12 @@ ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
    failure is recorded and never stops the others), evaluate_run.py --dry-run, evaluate_run.py,
    timeline.py; then, when CONFIG has ``auto_behavior_judge`` true, the PAID behavior judge
    (scripts/run_transcript_judge.py --run-config CONFIG: its budget is CONFIG's
-   ``behavior_judge_max_usd``, else $50, for the whole run's judging; this checkout's
-   state/budget.sqlite and .env; it refreshes its own route pricing record when needed). Its
-   outputs land in RUN/analysis/judge/ (packaged with the run); its outcome is recorded in
-   behavior-judge.json and never changes the worker exit or stops the packaging;
+   ``behavior_judge_max_usd``, else $50, for the run's judging into RUN/analysis/judge, live passes
+   and early stages included; this checkout's state/budget.sqlite and .env; it refreshes its own
+   route pricing record when needed and keeps a copy in RUN/analysis/judge/route-pricing/, also
+   packaged as judge-route-pricing/ in completed-phase.tgz). Its outputs land in
+   RUN/analysis/judge/ (packaged with the run); its outcome is recorded in behavior-judge.json and
+   never changes the worker exit or stops the packaging;
    With ``auto_behavior_judge`` true the judge also runs DURING the run (docs/plan.md, "Live behavior
    judge during the run (October 20, 2026)"; ``live_behavior_judge``, default true): while the pilot
    runs, one live screening pass (``run_transcript_judge.py --live``) every
@@ -29,9 +32,10 @@ ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
    time, with a small Haiku concurrency (the pilot's provider key is shared), at nice 19,
    ``oom_score_adj`` 1000 (an agent or Inspect is never the out-of-memory victim), idle I/O class
    (honoured only by I/O schedulers such as BFQ) and a systemd memory scope only where its
-   ``MemoryMax`` is verified to apply, never after the run stop; a refused or budget-stopped pass
-   ends the live passes for the run, a deferred one (exit 5: the key check failed or left no
-   headroom just then) does not. When the pilot exits, the judge's model stages (``--stage
+   ``MemoryMax`` is verified to apply, never after the run stop; live passes spend from the judge's
+   one budget (no separate share, no provider-key gate); a refused or budget-stopped pass ends the
+   live passes for the run, a deferred one (exit 5: no fresh pricing record or no key just then)
+   does not. When the pilot exits, the judge's model stages (``--stage
    verify``) start at once, at the same low priority with few history workers, in parallel with the
    follow-ups (no model request reads the evaluator's verdicts), and the post-run judge above
    finishes it as a resume (host facts, run level, report). If a follow-up fails, the early stages
@@ -266,7 +270,7 @@ class Supervisor:
         if settings["mode"] is None:
             return None
         self.live = {"mode": settings["mode"], "interval_seconds": settings["interval_seconds"],
-                     "max_usd": settings["max_usd"], "ticks": [], "stopped": None, "next_at": None,
+                     "ticks": [], "stopped": None, "next_at": None,
                      "failures": 0, "deferred": 0, "proc": None, "started_utc": now()}
         try:
             self.live["isolation"] = self.isolation_record()
@@ -568,9 +572,47 @@ class Supervisor:
         self.status("behavior-judge-" + record["outcome"], worker_exit=worker_code, behavior_judge=record)
         return record
 
+    def announce_budget(self):
+        """Print the run's budget (and the behavior judge's, when enabled) on the supervisor's own
+        console before the launch: run_pilot.py prints it too, but only into pilot.log. Recorded in
+        ``launch-budget.json``. Never raises (an invalid budget is refused by the launch itself)."""
+        lines, record = [], {"utc": now(), "config": str(self.config_path)}
+        try:
+            sys.path.insert(0, str(self.root / "src"))
+            from research_swarm.auto_judge import enabled, judge_budget
+            from research_swarm.budget import describe_budget, run_budget
+            config = json.loads(self.config_path.read_text())
+            try:
+                amount, source = run_budget(config)
+                lines.append(describe_budget(amount, source))
+                record.update(run_budget_usd=str(amount), run_budget_source=source)
+            except ValueError as error:
+                lines.append(f"Run budget: invalid ({error}); the launch refuses it")
+                record["run_budget_error"] = str(error)
+            if enabled(config):
+                try:
+                    amount, source = judge_budget(config)
+                    lines.append(describe_budget(amount, source, key="behavior_judge_max_usd")
+                                 .replace("Run budget", "Behavior judge budget"))
+                    record.update(judge_budget_usd=str(amount), judge_budget_source=source)
+                except ValueError as error:
+                    lines.append(f"Behavior judge budget: invalid ({error})")
+        except Exception as error:   # never stops the launch
+            lines.append(f"Run budget: could not be read ({type(error).__name__}: {error})")
+            record["error"] = f"{type(error).__name__}: {error}"
+        record["lines"] = lines
+        for line in lines:
+            print(line, flush=True)
+        try:
+            (self.phase / "launch-budget.json").write_text(json.dumps(record, indent=2))
+        except OSError:
+            pass
+        return lines
+
     def work(self):
         code = 1
         try:
+            self.announce_budget()
             self.backup("budget-before-launch.sqlite")
             self.settled_at_launch = Decimal((self.snapshot().get("pilot") or {}).get("settled_usd", "0"))
             self.live_setup()
@@ -608,7 +650,7 @@ class Supervisor:
             tar.add(self.run, arcname=str(self.run.relative_to(self.root)) if self.run.is_relative_to(self.root)
                     else self.run.name)
         selected = ["budget-final.sqlite", "budget-before-launch.sqlite", "budget-after-pilot.sqlite", "pilot.exit",
-                    "pilot.log", "supervisor-console.log", "worker.exit", "live-checkpoint.json",
+                    "pilot.log", "supervisor-console.log", "worker.exit", "live-checkpoint.json", "launch-budget.json",
                     self.config_path.name, "behavior-judge.json", *LIVE_FILES] + [
                         a + b for a in FOLLOW_UPS + JUDGE_STEPS for b in (".log", ".exit")]
         with tarfile.open(self.phase / "completed-phase.tgz", "w:gz") as tar:
@@ -618,6 +660,10 @@ class Supervisor:
                     tar.add(path, arcname=name)
             if (self.phase / SHADOW_DIR).is_dir():  # the free mock shadow of the live judge
                 tar.add(self.phase / SHADOW_DIR, arcname=SHADOW_DIR)
+            # The judge route pricing records every judge reservation was priced with (each judge
+            # invocation keeps a copy of the record it used in RUN/analysis/judge/route-pricing/).
+            for record in self.judge_pricing_records():
+                tar.add(record, arcname="judge-route-pricing/" + record.name)
         hashes = {name: hashlib.sha256((self.phase / name).read_bytes()).hexdigest()
                   for name in ("completed-run.tgz", "completed-phase.tgz")}
         (self.phase / "completed-checksums.json").write_text(json.dumps(hashes, indent=2))
@@ -627,6 +673,11 @@ class Supervisor:
         deadline = time.monotonic() + self.args.retrieval_wait
         while time.monotonic() < deadline and not (self.phase / "retrieved.marker").exists():
             time.sleep(30)
+
+    def judge_pricing_records(self):
+        """The judge route pricing records the run's judging used (``RUN/analysis/judge/route-pricing/``)."""
+        folder = self.run / "analysis" / "judge" / "route-pricing"
+        return sorted(p for p in folder.glob("*.json") if p.is_file()) if folder.is_dir() else []
 
     def idle_shutdown(self, code):
         """Shut down only an idle VM; never kill processes or remove containers to get there."""

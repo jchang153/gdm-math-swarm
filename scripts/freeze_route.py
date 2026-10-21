@@ -7,9 +7,10 @@ max time-dependent prices, extra price components, context, tools/reasoning
 support), archives the raw catalog under catalog-snapshots/<sha256>.json and writes
 an I6 evidence record data/validation/route-pricing-<UTC>.json. Launch gates
 re-validate that snapshot offline. scripts/run_pilot.py and scripts/compat_check.py run
-this automatically (``refresh_if_needed``) when the newest record is missing, older than
-``route_pricing_max_age_hours`` (default 72) or frozen for other settings; a record whose
-catalog no longer validates against the config's reservation prices still blocks launch.
+this automatically (``refresh_if_needed``, retried) when the newest record is missing, not valid,
+older than ``route_pricing_max_age_hours`` (default 72) or frozen for other settings; a record that
+is still stale, or whose catalog no longer validates against the config's reservation prices,
+blocks the paid launch (nothing is sent).
 
     .venv/bin/python scripts/freeze_route.py [--config configs/pilot.json]
 """
@@ -56,22 +57,35 @@ def main(argv=None):
     print(json.dumps({"path": str(path), "valid": record["valid"], "reason": record.get("reason")}))
     return 0 if record["valid"] else 1
 
-def refresh_if_needed(config, config_path, output_dir=None, *, freeze=None, out=print):
-    """Run the unpaid freeze when the newest route-pricing record is missing, stale or frozen for
-    other settings (``launch_gates.route_pricing_refresh_reason``). Never raises: a failed refresh
-    is reported and the launch gates then judge the newest record. Returns the reason or None."""
+REFRESH_DELAYS_SECONDS = (10, 30)   # waits before the second and third attempts
+
+
+def refresh_if_needed(config, config_path, output_dir=None, *, freeze=None, out=print, sleep=None):
+    """Run the unpaid freeze when the newest route-pricing record is missing, not valid, stale or
+    frozen for other settings (``launch_gates.route_pricing_refresh_reason``), up to three times
+    until a fresh valid record is written. Never raises: a failed refresh is reported and the launch
+    gates then judge the newest record (a stale or invalid one refuses the paid launch; nothing is
+    sent). Returns the reason or None."""
+    import time
     from research_swarm.launch_gates import route_pricing_refresh_reason
     output_dir = Path(output_dir) if output_dir else ROOT / "data" / "validation"
+    sleep = sleep or time.sleep
     reason = route_pricing_refresh_reason(config, output_dir)
     if reason is None:
         return None
     out(f"Refreshing the route-pricing freeze ({reason}; unpaid public catalog, no credential).")
-    try:
-        code = (freeze or main)(["--config", str(config_path), "--output-dir", str(output_dir)])
-        if code:
-            out("The refreshed freeze did not validate against the config's reservation prices (see its record).")
-    except Exception as error:  # e.g. no network: the gates judge the newest record
-        out(f"Route-pricing refresh failed ({type(error).__name__}: {error}); continuing with the newest record.")
+    for attempt, delay in enumerate((0, *REFRESH_DELAYS_SECONDS), start=1):
+        if delay:
+            sleep(delay)
+        try:
+            code = (freeze or main)(["--config", str(config_path), "--output-dir", str(output_dir)])
+            left = route_pricing_refresh_reason(config, output_dir)
+            if not code and left is None:
+                return reason
+            out(f"Refresh attempt {attempt}: " + ("the new freeze did not validate against the config's reservation "
+                                                  "prices (see its record)." if code else f"still {left}."))
+        except Exception as error:  # e.g. no network: the gates judge the newest record
+            out(f"Refresh attempt {attempt} failed ({type(error).__name__}: {error}).")
     return reason
 
 

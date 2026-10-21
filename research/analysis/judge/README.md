@@ -418,12 +418,15 @@ C-level corruption is not identified; the fix removes that code path:
 * Smaller Sonnet reservations (owner approved): a Sonnet request reserves 12,000 output tokens
   (`route.RESERVATION_OUTPUT_TOKENS`; `JudgeRouteSettings.reserved_output_tokens`) instead of its
   48,000-token max_tokens (still sent), so 32 Sonnet requests hold about $11 rather than $22 in flight
-  against the run limit. The largest Sonnet completion measured on the gemini10 paid run was 3,181
-  tokens, and the prompt bound (UTF-8 bytes plus framing at the highest price) leaves further slack.
-  Haiku and Opus keep their full max_tokens (at most $0.04 a request to gain; their outputs reaching
-  the limit are anticipated paths). A request billed above its reservation is an `estimate_violation`
-  as before: in particular a Sonnet output that runs to its 48,000-token limit stops the run cleanly
-  until a researcher acknowledges the violation. The request archive records `reserved_output_tokens`.
+  against the judging run's budget. The largest Sonnet completion measured on the gemini10 paid run was
+  3,181 tokens, and the prompt bound (UTF-8 bytes plus framing at the highest price) leaves further
+  slack. Haiku and Opus keep their full max_tokens (at most $0.04 a request to gain). A request billed
+  above its reservation is an `estimate_violation`: under the one per-run budget (docs/plan.md, "One
+  per-run budget, no manual approvals (October 20, 2026)") it is recorded without any acknowledgement
+  and the judging run's later reservations are scaled up by the observed ratio, in later invocations
+  too. Only requests already in flight at that moment can bill past the budget (at most their
+  unreserved output: about 23% of $50 in the worst case of 32 Sonnet requests all running to 48,000
+  tokens). The request archive records `reserved_output_tokens`.
 
 Measured on the gemini10 paid run (defaults of that time, 24/16/8, 8 agents; VM, 23:05:15 to 23:08:08):
 histories rebuilt serially in the pipeline (48 s; agents started 0 to 76 s apart), Haiku prefilter
@@ -687,13 +690,18 @@ cleanly: no new request starts, in-flight requests finish and are saved, the sto
 `state.json` and the run exits with code 3. Every completed request is written to its unit file
 immediately, so a resumed run never pays for a completed call twice.
 
-Spending (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)"): every judging
-invocation is one run with its own budget, its run limit (`--run-limit`, else the run config's
-`behavior_judge_max_usd` with `--run-config`, else $50). The three clients register the same ledger
-run (`RunLimit.run_id`, scope `analysis`) with that budget, so the ledger enforces it as well. There is
-no cumulative analysis cap and no raise; the ledger is created if missing, and holds or violations of
-earlier runs never block a new judging run. An estimate violation is recorded, needs no
-acknowledgement and scales the rest of the run's reservations up by the observed ratio.
+Spending (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)"): the judge's one
+spending control is the budget of the judging run, one judge directory of one judged run (its live
+store included): `--run-limit`, else the run config's `behavior_judge_max_usd` (`--run-config`, else the
+config the run recorded in `RUN/settings.json`), else $50. Every invocation into that directory counts
+what the earlier ones committed (`client.committed_for_judging`) and registers one ledger run (scope
+`analysis`, its three clients share it) whose budget is the room left, so the ledger enforces the same
+amount. There is no cumulative analysis cap, no raise, no live share and no provider-key gate; holds or
+violations of other judging runs (another judge directory, another judged run) never block one. A
+judge directory's paid spend is counted in one ledger: its `run-budgets.json` records the ledger's
+`ledger_id`, and a later invocation without `--ledger` uses that ledger when the checkout's own
+differs, or refuses a different or missing one (nothing is sent). An estimate violation is recorded,
+needs no acknowledgement and scales the judging run's later reservations up by the observed ratio.
 
 ## Running
 
@@ -790,8 +798,11 @@ estimate remain preconditions.
 3. **Use a new judge directory**: v3 refuses any v2.x directory (for example cache100's published
    `analysis/judge/`); pass `--output-dir` for another location if `RUN/analysis/judge` is taken.
 4. **Route pricing** refreshes automatically: a paid run whose newest judge route pricing record is
-   missing or older than 72 hours runs the unpaid `scripts/freeze_judge_route.py` first (public
-   catalog fetch only); a record that no longer validates for the pinned route is refused.
+   missing, older than 72 hours or no longer valid runs the unpaid `scripts/freeze_judge_route.py`
+   first (public catalog fetch only; up to three attempts). It sends nothing when the newest record is
+   still stale or invalid after that (a live pass is deferred to the next pass; another invocation
+   refuses with exit 4 and is resumed later). The record used is copied to
+   `<judge dir>/route-pricing/`.
 5. **Back up the ledger** (it records every request; nothing in it needs raising).
 6. **Optionally screen first**: run with `--stage prefilter` (Haiku only), then
    `--dry-run-estimate --output-dir <judge dir>`: the invocation table plans the candidates from
@@ -800,8 +811,9 @@ estimate remain preconditions.
 7. **Run** `scripts/run_transcript_judge.py --run-dir runs/<run-id> [--run-limit USD] [--output-dir ...]`
    inside tmux. The script prints the run budget and the ledger run id, loads the host key in memory
    and records the key's provider-side limit (informational); nothing prompts. A `run_limit` stop
-   (exit code 3) is resumed by running the same command again (a new run with its own budget for what
-   is left).
+   (exit code 3) is resumed by running the same command again: the resume gets what is left of the
+   judging run's budget, never a fresh one (pass a larger `--run-limit` to give the judging run a
+   larger budget).
 8. **Evaluate closed submissions (unpaid)**:
    `PYTHONPATH=src .venv/bin/python scripts/evaluate_run.py --run-dir runs/<run-id> --include-closed-from --dry-run`,
    then without `--dry-run`; apply the verdicts with `--rescore-cached`; rerun
@@ -820,7 +832,8 @@ absent; no approval note; `research_swarm.auto_judge`, launch gate `behavior_jud
 `scripts/supervise_run.py` judge the run after its follow-ups (reconcile, evaluate, timeline) with
 `scripts/run_transcript_judge.py --run-dir RUN --run-config CONFIG --ledger state/budget.sqlite
 --credentials-root <checkout>` (`behavior-judge.log`/`.exit`). The judge refreshes its own pricing
-record when needed. The run's budget and config path are recorded with the run limit in `state.json`
+record when needed and keeps a copy in `RUN/analysis/judge/route-pricing/` (the supervisor also adds it
+to `completed-phase.tgz` as `judge-route-pricing/`). The run's budget and config path are recorded with the run limit in `state.json`
 (source `run_config`) and appended to `RUN/analysis/judge/run-budgets.json`. Research-integrity
 refusals stay: a pricing record that does not validate, a judge directory with other binding
 settings, label checks, held agents. The supervisor writes `behavior-judge.json` (outcome `complete`,
@@ -858,17 +871,14 @@ model allocation are unchanged.
 
    Units are stored as `live/units/<agent>/prefilter/<window>@<sha16>.json`, plus `raw/`,
    `manifest.json` and `state.json`. Ledger labels are `judge-haiku:<run id>:live:prefilter:<window>`.
-   A pass's room is the smaller of `behavior_judge_live_max_usd` minus earlier live passes and the
-   judge's budget for the run (`behavior_judge_max_usd`, else $50) minus everything this run's
-   judging holds; the pass registers its own ledger run with that room as its budget (docs/plan.md,
-   "One per-run budget, no manual approvals (October 20, 2026)": no analysis allowance, no
-   approval). With a finite provider key a pass sends nothing unless the key's `limit_remaining`
-   covers the pilot run's remaining budget (`budget.read_run`, run id = the run directory's name),
-   plus the reservations of the pilot's requests in flight or of uncertain billing (`held_usd`: the
-   ledger has taken them off the run's remaining budget, the key has not been charged for them yet),
-   plus the pass's room. A pass whose unpaid key record fails or finds no such headroom is deferred
-   (exit 5, recorded in `live/state.json`; the next pass tries again); this only postpones the pass
-   and never refuses a run. A refused (4: a configuration problem or no room under the judge's
+   A pass's room is the judge's budget for the run (`behavior_judge_max_usd`, else $50) minus
+   everything the judging run (`RUN/analysis/judge`, live passes, early stages and post-run judge
+   together) already committed; the pass registers its own ledger run with that room as its budget
+   (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)": one budget, no live
+   share, no analysis allowance, no approval). The provider key's limit is recorded (unpaid,
+   informational) and never gates a pass. A pass that sends nothing because no fresh valid pricing
+   record or no key could be had just then is deferred (exit 5, recorded in `live/state.json`; the
+   next pass tries again). A refused (4: a configuration problem or no room left under the judge's
    budget) or stopped (3) pass ends live passes for the run. After the pilot exits, a pass still running after 120 s gets
    SIGTERM: it admits nothing more, lets its requests in flight settle and exits 3 (it is killed
    only after 15 more minutes).
@@ -928,25 +938,25 @@ example a re-judge into a new `--output-dir` reusing `runs/<id>/analysis/judge/l
 its record goes to `<judge dir>/warm-consistency.json`. `pipeline.json` `spend.live` splits live
 spend into adopted (already in the post-run spend) and unadopted, units set aside and sent again
 (`*.json.failed-*`, `*.json.code-changed-*`) included, and `spend.run_ledger` is the ledger's own
-total for the run. The report's spend section (and the results page's behavior-judge section) adds
+total for the judging run (`client.committed_for_judging`, what its budget counts). The report's spend section (and the results page's behavior-judge section) adds
 to the units' total what was paid during the run and never adopted, and states the ledger's total.
 
-**The judge's budget for the run.** `behavior_judge_max_usd` (and the $50 default) holds across
-invocations (an explicit `--run-limit` is that invocation's own budget):
-`client.committed_for_run` sums the ledger rows labelled with the run id (`COALESCE(actual,
-reserved)`, so an orphaned hold counts) and, for requests made before the labels carried the run id
-(`judge-<model>:<purpose>:<unit>`), the judge rows that the request archives of the judge directory
-and of `RUN/analysis/judge` name. `RunLimit(prior_usd=...)` starts there, a resume never gets a
-fresh budget, and the invocation's own ledger run is registered with the room left (the budget
-minus that prior), so the ledger enforces the same amount as the run limit. Every spending judging invocation of a run (live passes, the early stages, the post-run
+**The judge's budget for the run.** The budget (`--run-limit`, else `behavior_judge_max_usd`, else
+$50) holds for the judging run, one judge directory, across invocations:
+`client.committed_for_judging` sums (`COALESCE(actual, reserved)`, so an orphaned hold counts) every
+ledger row of the ledger runs the directory's `run-budgets.json` and `live/run-budgets.json` record
+(written before an invocation's first request) and every row its request archives name (requests of
+earlier versions). `RunLimit(prior_usd=...)` starts there, a resume never gets a fresh budget, and the
+invocation's own ledger run is registered with the room left (the budget minus that prior) and the
+largest reservation factor those ledger runs reached, so the ledger enforces the same amount as the
+run limit. A re-judge into another `--output-dir` is a judging run with its own budget. Every spending judging invocation of a run (live passes, the early stages, the post-run
 judge, a manual re-judge into another `--output-dir`) holds the run's lock,
-`<ledger folder>/.judge-run-locks/<ledger name>-<run id>.lock` (keyed like the budget: by the ledger and
-the run id), then its judge directory's `.judge.lock`, so two invocations of one run never read the
-same prior. SIGTERM stops any judging invocation cleanly: nothing more is admitted
+`<ledger folder>/.judge-run-locks/<ledger name>-<run id>.lock` (by the ledger and the run id), then its
+judge directory's `.judge.lock`, so two invocations of one judging run never read the same prior. SIGTERM stops any judging invocation cleanly: nothing more is admitted
 (`RunLimit.close`), the requests in flight settle their ledger rows, the state is recorded and it
 exits 3; a second SIGTERM or SIGINT interrupts at once. What live passes paid and the post-run judge
-did not adopt stays counted against the judge's budget for the run (it counts all of a run's judging spend);
-the refusal rule and the clean stop keep that small.
+did not adopt stays counted against the judge's budget for the run (it counts all of the judging run's
+spend); the refusal rule and the clean stop keep that small.
 
 **Opt out, shadow.** `live_behavior_judge: false` gives post-run judging exactly as before (v3
 bytes, `prefilter_window_count` left out of the binding). `"mock"` runs mock live passes (`--live

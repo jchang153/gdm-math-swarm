@@ -13,9 +13,11 @@ gate is informational: cumulative history, holds and estimate violations of earl
 block a new run. There is no cumulative cap, no separate compatibility allowance, no
 provider-key limit refusal (``provider_limit`` is informational: the paid launch checks the key
 it loads and records the result), no typed or attested approval and no cap equality with the
-plan. A stale route-pricing freeze is a warning: the launch scripts refresh it automatically
-(unpaid) first; a freeze whose catalog no longer validates against the config's reservation
-prices still refuses (the reservations must be upper bounds).
+plan. A stale, invalid or missing route-pricing freeze is refreshed automatically (unpaid) by the
+launch scripts first; a freeze whose catalog no longer validates against the config's reservation
+prices still refuses (the reservations must be upper bounds), and so does a freeze that is still
+older than ``route_pricing_max_age_hours`` after that refresh (reservations from old prices are no
+upper bound when a price went up).
 
 Runtime evidence must name its required checks (``REQUIRED_EVIDENCE_CHECKS``,
 ``ISOLATION_AGENT_CHECKS``), so a record from an older validation script that
@@ -141,7 +143,8 @@ OBSOLETE_SPENDING_KEYS = (
     "max_pilot_usd", "max_analysis_usd", "max_compatibility_usd", "verified_integration", "paid_launch_enabled",
     "allow_unlimited_provider_key", "unlimited_provider_key_approval", "provider_limit_max_age_hours",
     "pilot_prior_settled_usd", "pilot_additional_allowance_usd", "pilot_prior_held_usd", "pilot_prior_committed_usd",
-    "pilot_prior_uncertain_requests", "pilot_prior_calls_sha256", "behavior_judge_approval")
+    "pilot_prior_uncertain_requests", "pilot_prior_calls_sha256", "behavior_judge_approval",
+    "behavior_judge_live_max_usd")
 # Recorded request transformation (docs/prompt-caching.md): a config that names the version must
 # name the one the runtime applies (research integrity, not spending).
 PROMPT_CACHE_NORMALIZATION_KEY = "prompt_cache_normalization"
@@ -257,11 +260,14 @@ def newest_evidence(validation_dir, prefix):
 
 def route_pricing_refresh_reason(config, validation_dir, now=None):
     """Why the launch scripts should refresh the route-pricing freeze (scripts/freeze_route.py,
-    unpaid) before launching, or None: no freeze yet, a freeze older than
+    unpaid) before launching, or None: no freeze yet, a newest freeze that is not valid (for example
+    a catalog that briefly reported the pinned route unavailable), one older than
     ``route_pricing_max_age_hours`` (default 72), or one frozen for other settings."""
     path, record = newest_evidence(validation_dir, "route-pricing")
     if path is None:
         return "no route-pricing freeze yet"
+    if record.get("valid") is not True:
+        return f"the newest freeze is not valid ({record.get('reason')})"
     now = now or datetime.datetime.now(datetime.timezone.utc)
     age = (now - _created(record, path)).total_seconds() / 3600
     limit = float((config or {}).get("route_pricing_max_age_hours", DEFAULT_MAX_AGE_HOURS))
@@ -484,12 +490,11 @@ class _Gates:
             return self.add("behavior_judge", not problems, "; ".join(problems) or "no automatic post-run behavior judge")
         amount, source = judge_budget(self.config)
         live = live_settings(self.config)
-        during = {"paid": f"; live judging during the run every {live['interval_seconds']} s (at most "
-                          f"${live['max_usd']} of the judge's budget)",
+        during = {"paid": f"; live judging during the run every {live['interval_seconds']} s, from the same budget",
                   "mock": "; free mock shadow of live judging during the run"}
         self.add("behavior_judge", True, f"automatic post-run behavior judge enabled; its budget for the run is "
                  f"${amount} ({source})" + during.get(live["mode"], ""), budget_usd=str(amount), budget_source=source,
-                 live_mode=live["mode"], live_max_usd=live["max_usd"] if live["mode"] == "paid" else None)
+                 live_mode=live["mode"])
 
     def run_budget(self):
         """The run's budget, the one spending control: ``run_budget_usd`` when present (it must be a
@@ -523,8 +528,9 @@ class _Gates:
         age = (self.now - _created(record, path)).total_seconds() / 3600
         limit = float(self.config.get("route_pricing_max_age_hours", DEFAULT_MAX_AGE_HOURS))
         if age > limit or age < -0.1:
-            warnings.append(f"freeze is {age:.1f} h old (refresh after {limit:g} h); scripts/run_pilot.py and "
-                            "scripts/compat_check.py refresh it automatically before launch (unpaid)")
+            problems.append(f"freeze is {age:.1f} h old (at most {limit:g} h; scripts/run_pilot.py and "
+                            "scripts/compat_check.py refresh it automatically before a paid launch, unpaid, and "
+                            "refuse only when that refresh fails)")
         frozen = {k: v for k, v in (record.get("settings") or {}).items() if k in CONFIG_OVERRIDABLE}
         if frozen != frozen_fields(settings):
             problems.append("frozen settings differ from the ProviderSettings run_pilot will build (the launch "

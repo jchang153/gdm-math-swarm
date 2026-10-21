@@ -210,6 +210,28 @@ class AdmissionTests(unittest.TestCase):
         # A later run starts at factor 1.
         self.assertEqual(run(self.path, "run-2", amount=10).run_snapshot()["reservation_factor"], "1")
 
+    def test_a_run_can_start_at_an_earlier_reservation_factor(self):
+        """A judge resume continues the judging run's reservation scaling (client.committed_for_judging):
+        start_run takes the factor reached so far, and never lowers a registered run's factor."""
+        ledger = BudgetLedger(self.path)
+        ledger.start_run("judge-2", "analysis", 10, reservation_factor="2.5")
+        self.assertEqual(ledger.run_snapshot()["reservation_factor"], "2.5")
+        call = ledger.reserve("analysis", "a", 1)
+        self.assertEqual({r["request_id"]: r["reserved_usd"] for r in list_requests(self.path)}[call], "2.5")
+        BudgetLedger(self.path).start_run("judge-2", "analysis", 10, reservation_factor="1")   # never lowered
+        self.assertEqual(ledger.run_snapshot()["reservation_factor"], "2.5")
+        BudgetLedger(self.path).start_run("judge-2", "analysis", 10, reservation_factor="3")
+        self.assertEqual(ledger.run_snapshot()["reservation_factor"], "3")
+        self.assertEqual(run(self.path, "judge-3", amount=10, scope="analysis").run_snapshot()["reservation_factor"],
+                         "1")
+
+    def test_every_ledger_has_a_stable_id(self):
+        from research_swarm.budget import read_ledger_id
+        first = BudgetLedger(self.path).ledger_id
+        self.assertRegex(first, r"^[0-9a-f]{32}$")
+        self.assertEqual((BudgetLedger(self.path).ledger_id, read_ledger_id(self.path)), (first, first))
+        self.assertNotEqual(BudgetLedger(self.root / "other.sqlite").ledger_id, first)
+
     def test_reconcile_above_reservation_is_a_violation_and_raises_the_factor(self):
         ledger = run(self.path)
         call = ledger.reserve("pilot", "a", 1)
@@ -251,13 +273,25 @@ class SettlementTests(unittest.TestCase):
             ledger.reconcile(call, 1, note="again")
         self.assertEqual(list_requests(self.path), [])
 
-    def test_stale_reserved_hold_needs_explicit_flag(self):
-        ledger = run(self.path)
-        call = ledger.reserve("pilot", "a", 1)
+    def test_stale_reserved_hold_needs_explicit_flag_and_a_gone_process(self):
+        gone = run(self.path, owner=dead_owner())
+        call = gone.reserve("pilot", "a", 1)
         with self.assertRaises(ValueError):
-            ledger.reconcile(call, 0.1, note="crashed")
-        ledger.reconcile(call, 0.1, note="process exited without settling", allow_reserved=True)
-        self.assertEqual(ledger.run_snapshot()["remaining_usd"], "19.9")
+            gone.reconcile(call, 0.1, note="crashed")
+        BudgetLedger(self.path).reconcile(call, 0.1, note="process exited without settling", allow_reserved=True)
+        self.assertEqual(gone.run_snapshot()["remaining_usd"], "19.9")
+
+    def test_reserved_hold_of_a_running_process_is_never_reconciled(self):
+        """Review finding: reconciling an in-flight hold lowered the running run's committed spend and made
+        its own later settle() fail, losing the real bill. A running process's hold is refused."""
+        ledger = run(self.path)                   # this process: alive
+        call = ledger.reserve("pilot", "a", 1)
+        with self.assertRaisesRegex(ValueError, "still reserved by a running process"):
+            BudgetLedger(self.path, owner="other:1").reconcile(call, 0, MANUAL_BASIS, note="typed by hand",
+                                                               allow_reserved=True)
+        self.assertEqual(list_requests(self.path)[0]["state"], "reserved")
+        ledger.settle(call, "0.7")                # the real bill still reaches the ledger
+        self.assertEqual(ledger.run_snapshot()["committed_usd"], "0.7")
 
     def test_settlement_basis_recorded_and_validated(self):
         ledger = run(self.path)

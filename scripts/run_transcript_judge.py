@@ -43,26 +43,31 @@ enter agent containers.
 
 No estimate, no confirmation and no approval flag (owner decisions, October 20, 2026: "Don't
 require estimates for anything"; docs/plan.md "One per-run budget, no manual approvals (October 20,
-2026)"). Every judging invocation (--mock or paid) has a fixed run limit, its budget: --run-limit USD,
-else the run config's behavior_judge_max_usd (--run-config CONFIG), else $50. The config's budget and
-the $50 default hold for the whole run's judging (docs/plan.md, "Live behavior judge during the run
-(October 20, 2026)"): what the ledger already holds for this run's judging (rows labelled with its run
-id, live passes and earlier invocations included, client.committed_for_run) counts against it, so a
-resume never gets a fresh budget; an explicit --run-limit is that invocation's own budget. A live pass
-is held, in addition, to behavior_judge_live_max_usd (the part of the judge's budget the live passes
-may use). It never sends a request that would push its committed spend (in-flight holds, settled and
-uncertain costs) past that limit, and stops cleanly instead (stop reason run_limit; a resume pays
-nothing twice); the ledger registers the invocation as one run whose budget is the room left. There
-is no cumulative analysis cap. For a run judged before ledger labels carried the run id, the rows its
-judge directories' request archives name count as well. Every spending judging invocation of one run
-holds the run's lock (keyed by the ledger and the run id: <ledger folder>/.judge-run-locks/, whatever
---output-dir) and its judge directory's lock (<judge dir>/.judge.lock). SIGTERM stops a judging
-invocation cleanly: nothing more is admitted, the requests in flight settle, the state is recorded and
-it exits 3 (a resume pays nothing twice); a second SIGTERM (or SIGINT) interrupts at once.
---mock, --dry-run-estimate (optional, never required) and --rescore-cached never load credentials,
-never call a real model and never write the authoritative ledger. A paid run refreshes the judge route
-pricing record automatically when it is missing or older than 72 h (scripts/freeze_judge_route.py,
-unpaid public catalog); a record that no longer validates for the pinned route is refused.
+2026)"). The judge's one spending control is the budget of the judging run: one judge directory of
+one judged run (RUN/analysis/judge by default, its live store included, or an --output-dir). Its
+budget is --run-limit USD, else the run config's behavior_judge_max_usd (--run-config CONFIG, else
+the config the run recorded in RUN/settings.json), else $50. Every invocation into the same judge
+directory (live passes, the early stages, the post-run judge, any resume) counts what the earlier
+ones committed (client.committed_for_judging: the ledger runs its run-budgets.json records and the
+rows its request archives name), so a resume never gets a fresh budget; a re-judge into a new
+--output-dir is a judging run of its own. An invocation never sends a request that would push the
+judging run's committed spend (in-flight holds at their full reservation, settled and uncertain
+costs) past the budget and stops cleanly instead (stop reason run_limit; a resume pays nothing
+twice); the ledger registers the invocation as one run whose budget is the room left. There is no
+cumulative analysis cap, no live share and no provider-key gate. A judge directory's paid spend is
+counted in one ledger (its ledger_id is recorded in run-budgets.json): without --ledger the
+invocation uses that ledger when this checkout's differs, and it refuses a different or missing one
+(nothing is sent). Every spending judging invocation of one run holds the run's lock (keyed by the
+ledger and the run id: <ledger folder>/.judge-run-locks/, whatever --output-dir) and its judge
+directory's lock (<judge dir>/.judge.lock). SIGTERM stops a judging invocation cleanly: nothing more
+is admitted, the requests in flight settle, the state is recorded and it exits 3 (a resume pays
+nothing twice); a second SIGTERM (or SIGINT) interrupts at once. --mock, --dry-run-estimate
+(optional, never required) and --rescore-cached never load credentials, never call a real model and
+never write the authoritative ledger. A paid run refreshes the judge route pricing record
+automatically (scripts/freeze_judge_route.py, unpaid public catalog, retried) when the newest one is
+missing, older than 72 h or no longer valid; it sends nothing with a record that is still stale or
+invalid after that (a live pass is then deferred to the next pass), and copies the record it uses
+into <judge dir>/route-pricing/, so the run's records carry it.
 """
 
 import argparse
@@ -126,7 +131,8 @@ def parse_args(argv=None):
     parser.add_argument("--run-config", "--standing-approval-from-config", dest="run_config", type=Path,
                         metavar="CONFIG",
                         help="paid run: the judged run's config; its behavior_judge_max_usd (any positive amount, "
-                             "else $50) is this judging run's budget unless --run-limit is given (any track)")
+                             "else $50) is the judging run's budget unless --run-limit is given (any track). Default: "
+                             "the config the run recorded in RUN/settings.json")
     parser.add_argument("--stage", default="report", help="run every stage up to and including this one: "
                         "history, prefilter, judge, verify, host, closed, runlevel, report (default)")
     parser.add_argument("--agents", action="append", help="agent subset, comma separated (repeatable)")
@@ -197,19 +203,16 @@ def parse_args(argv=None):
                              "Never applies to a v2.x judge directory (rubric gdm-judge-rubric/2), which judge revision "
                              "v3 refuses")
     parser.add_argument("--run-limit", type=_usd, metavar="USD",
-                        help="this judging invocation's own budget (paid or mock): no request is sent that would push "
-                             "the invocation's committed spend (in-flight holds plus settled and uncertain costs) past "
-                             "it. Default: the --run-config's behavior_judge_max_usd, else $50, for the whole run's "
-                             "judging (what earlier invocations of the run hold counts against it). No estimate is made")
+                        help="the judging run's budget (paid or mock): no request is sent that would push the "
+                             "committed spend of this judge directory's judging (earlier invocations included; "
+                             "in-flight holds plus settled and uncertain costs) past it. Default: the run config's "
+                             "behavior_judge_max_usd, else $50. No estimate is made")
     parser.add_argument("--live", action="store_true",
                         help="one live screening pass while the run is going (Haiku screens only the windows that can "
                              "no longer change, into <judge dir>/live/; the post-run judge adopts byte-identical units); "
                              "paid with --run-config of a config enabling live_behavior_judge, or --mock")
     parser.add_argument("--live-margin-seconds", type=float, default=None,
                         help="live pass: items newer than this many seconds are never final (default 120)")
-    parser.add_argument("--pilot-ledger", type=Path,
-                        help="live pass: the ledger the running pilot bills (default --ledger), for the provider-key "
-                             "headroom check")
     parser.add_argument("--prefilter-window-count", choices=("on", "off"),
                         help="show the agent's window count in each Haiku screening request (on: the v3 bytes) or not "
                              "(off: what live screening needs). Default: the judge directory's recorded setting, else "
@@ -306,60 +309,69 @@ class RouteRefused(Exception):
     pass
 
 
-def record_age_hours(path):
-    """Age of a judge route pricing record from its ``created_at`` (None when unreadable)."""
-    import datetime
+def pricing_problem(record):
+    """Why ``record`` cannot price a paid judging run now (missing, unreadable, older than 72 h, or
+    no longer valid for the pinned route; ``JudgeRouteSettings.from_pricing_record``), or None."""
+    from research.analysis.judge.route import JudgeRouteSettings
+    if record is None:
+        return "no judge route pricing record"
     try:
-        created = datetime.datetime.fromisoformat(str(json.loads(Path(path).read_text())["created_at"])
-                                                  .replace("Z", "+00:00"))
-        created = created if created.tzinfo else created.replace(tzinfo=datetime.timezone.utc)
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    return (datetime.datetime.now(datetime.timezone.utc) - created).total_seconds() / 3600
+        JudgeRouteSettings.from_pricing_record(record)
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        return f"judge route pricing record {Path(record).name}: {error}"
+    return None
 
 
-def refresh_pricing(args, *, freeze=None, log=None):
+REFRESH_DELAYS_SECONDS = (10, 30)   # waits before the second and third refresh attempts
+
+
+def refresh_pricing(args, *, freeze=None, log=None, sleep=None):
     """Before a paid run: refresh the judge route pricing record (scripts/freeze_judge_route.py,
-    unpaid public catalog, no credential) when the newest one is missing or older than the route's
-    72 h window. An explicit --pricing-record is used as given. Never raises (a failed refresh is
-    reported and the newest record is used). Returns the reason it refreshed, or None."""
-    from research.analysis.judge.route import DEFAULT_MAX_AGE_HOURS
+    unpaid public catalog, no credential) when the newest one cannot price a paid run now
+    (``pricing_problem``: missing, older than the route's 72 h window or no longer valid), trying
+    up to three times. An explicit --pricing-record is used as given (``route_settings`` refuses it
+    when it is stale or invalid). Never raises; returns the reason it refreshed, or None.
+    ``route_settings(paid=True)`` then sends nothing unless the newest record is fresh and valid."""
+    import time
     log = log or (lambda message: print(message, file=sys.stderr, flush=True))
+    sleep = sleep or time.sleep
     if args.pricing_record:
         return None
-    record = pricing_record(args)
-    age = None if record is None else record_age_hours(record)
-    if record is not None and age is not None and 0 <= age <= DEFAULT_MAX_AGE_HOURS:
+    reason = pricing_problem(pricing_record(args))
+    if reason is None:
         return None
-    reason = "no judge route pricing record" if record is None else (
-        f"the newest judge route pricing record is {'of unknown age' if age is None else f'{age:.1f} h old'}")
     log(f"Refreshing the judge route pricing record ({reason}; unpaid public catalog, no credential).")
-    try:
-        if freeze is None:
-            if str(ROOT / "scripts") not in sys.path:
-                sys.path.insert(0, str(ROOT / "scripts"))
-            from freeze_judge_route import main as freeze
-        if freeze([]):
-            log("The refreshed judge route pricing record did not validate (see the record).")
-    except Exception as error:  # e.g. no network: the newest record is used
-        log(f"Judge route pricing refresh failed ({type(error).__name__}: {error}); using the newest record.")
+    if freeze is None:
+        if str(ROOT / "scripts") not in sys.path:
+            sys.path.insert(0, str(ROOT / "scripts"))
+        from freeze_judge_route import main as freeze
+    for attempt, delay in enumerate((0, *REFRESH_DELAYS_SECONDS), start=1):
+        if delay:
+            sleep(delay)
+        try:
+            if not freeze([]) and pricing_problem(pricing_record(args)) is None:
+                return reason
+            log(f"Refresh attempt {attempt}: the new judge route pricing record did not validate (see the record).")
+        except Exception as error:  # e.g. no network
+            log(f"Refresh attempt {attempt} failed ({type(error).__name__}: {error}).")
     return reason
 
 
 def route_settings(args, *, paid):
-    """Frozen route settings. A paid run uses the newest record after ``refresh_pricing`` (a record
-    still stale after a failed refresh is used, with its age in the run's route description);
-    offline modes accept a stale record (prices only) and fall back to the observed defaults only
-    when no record exists. A record that does not validate (for example one predating the Sonnet
-    route) is refused."""
+    """Frozen route settings. A paid run uses the newest record (after ``refresh_pricing``) only
+    when it is fresh (at most 72 h old) and valid for the pinned route; otherwise ``RouteRefused``
+    and nothing is sent. Offline modes accept a stale record (prices only) and fall back to the
+    observed defaults only when no record exists. A record that does not validate (for example one
+    predating the Sonnet route) is refused."""
     from research.analysis.judge.route import JudgeRouteSettings
     record = pricing_record(args)
     try:
         if paid:
-            if record is None:
-                raise RouteRefused("no judge route pricing record (the automatic refresh with "
-                                   "scripts/freeze_judge_route.py did not write one)")
-            return JudgeRouteSettings.from_pricing_record(record, allow_stale=True)
+            problem = pricing_problem(record)
+            if problem is not None:
+                raise RouteRefused(f"{problem} (the automatic unpaid refresh, scripts/freeze_judge_route.py, did not "
+                                   "produce a fresh valid record; the next invocation tries again); nothing was sent")
+            return JudgeRouteSettings.from_pricing_record(record)
         if record is not None:  # frozen prices for the projection/rehearsal; freshness not required offline
             return JudgeRouteSettings.from_pricing_record(record, allow_stale=True)
     except (ValueError, OSError) as error:
@@ -625,45 +637,112 @@ class LimitRefused(ValueError):
     pass
 
 
-def fixed_run_limit(override, judge_config=None, *, prior_usd=None, live_cap=None, live_prior_usd=None):
-    """The invocation's budget without any estimate: ``--run-limit``, else the run config's
-    ``behavior_judge_max_usd`` (``judge_config`` from ``auto_judge.judge_settings``), else
-    DEFAULT_RUN_LIMIT_USD ($50). No cumulative cap clamps it.
+def fixed_run_limit(override, judge_config=None, *, prior_usd=None):
+    """The judging run's budget without any estimate: ``--run-limit``, else the run config's
+    ``behavior_judge_max_usd`` (``judge_config``: ``auto_judge.judge_settings`` of --run-config, or
+    ``recorded_budget_config`` of RUN/settings.json), else DEFAULT_RUN_LIMIT_USD ($50). No
+    cumulative cap clamps it.
 
-    For the whole run (docs/plan.md, "Live behavior judge during the run (October 20, 2026)", as
-    merged into "One per-run budget, no manual approvals (October 20, 2026)"): the config's budget and
-    the $50 default hold for all of a run's judging, so ``prior_usd`` (what the ledger already holds
-    for this run's judging, ``client.committed_for_run``) counts against them: the returned
-    ``limit_usd`` is prior + room, with room = the budget minus prior (``RunLimit(prior_usd=...)``
-    starts at prior, and its ledger run's budget is the room). An explicit --run-limit is that
-    invocation's own budget (prior not counted). A live pass (``live_cap``, the part of the budget
-    the live passes may use, and ``live_prior_usd``, what earlier live passes hold) gets at most
-    live_cap minus live_prior of room. Raises LimitRefused when no room is left."""
+    The budget holds for the judging run (one judge directory, docs/plan.md "One per-run budget, no
+    manual approvals (October 20, 2026)"), whichever way it was given: ``prior_usd`` (what the
+    judging run's earlier invocations committed, ``client.committed_for_judging``) always counts
+    against it, so a resume never gets a fresh budget. The returned ``limit_usd`` is prior + room,
+    with room = the budget minus prior (``RunLimit(prior_usd=...)`` starts at prior, and its ledger
+    run's budget is the room). Raises LimitRefused when no room is left."""
     if override is not None:
         limit, source, basis = Decimal(str(override)), "override", "override"
     elif judge_config is not None and judge_config.get("budget_source") not in (None, "default"):
         limit, source, basis = Decimal(str(judge_config["max_usd"])), "run_config", judge_config["budget_source"]
     else:
         limit, source, basis = DEFAULT_RUN_LIMIT_USD, "default", "default"
-    per_run = override is None
-    prior = Decimal(str(prior_usd or 0)) if per_run else Decimal(0)
+    prior = Decimal(str(prior_usd or 0))
     room = limit - prior
     if prior:
         basis = basis + "_minus_prior"
-    if live_cap is not None:
-        live_room = Decimal(str(live_cap)) - Decimal(str(live_prior_usd or 0))
-        if live_room < room:
-            room, basis = live_room, "live_cap"
     if room <= 0:
-        raise LimitRefused(f"no room under the run limit ({basis}: budget ${limit}, already committed for this run "
-                           f"${prior}" + (f", live share ${live_cap}, live passes hold ${live_prior_usd or 0}"
-                                          if live_cap is not None else "") + "); nothing was sent")
+        raise LimitRefused(f"no room under the judging run's budget ({basis}: budget ${limit}, already committed by "
+                           f"this judge directory's judging ${prior}); nothing was sent. Pass a larger --run-limit to "
+                           "give this judging run a larger budget, or judge into a new --output-dir")
     return {"limit_usd": str(prior + room), "source": source, "basis": basis, "prior_usd": str(prior),
-            "room_usd": str(room), "per_run": per_run}
+            "room_usd": str(room)}
+
+
+def recorded_budget_config(run_dir):
+    """The judge budget the judged run's own launch config sets (``RUN/settings.json`` "config",
+    written when the run started): ``{"max_usd", "budget_source", "track", "config_path"}`` when it
+    names ``behavior_judge_max_usd``, else None. Raises ValueError for an invalid amount."""
+    from research_swarm.auto_judge import MAX_USD_KEY, config_track, judge_budget
+    path = Path(run_dir) / "settings.json"
+    try:
+        config = json.loads(path.read_text(encoding="utf-8")).get("config")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(config, dict) or config.get(MAX_USD_KEY) is None:
+        return None
+    amount, _ = judge_budget(config)
+    return {"max_usd": str(amount), "budget_source": f"run settings.json {MAX_USD_KEY}",
+            "track": config_track(config) or "baseline", "config_path": str(path)}
+
+
+def ledger_binding(judge_dir):
+    """``(ledger_id, ledger path)`` the judge directory's paid spend is counted in: the first budget
+    record (``client.run_budget_records``) naming a ledger id; ``(None, None)`` before any."""
+    from research.analysis.judge.client import run_budget_records
+    for entry in run_budget_records(judge_dir):
+        if entry.get("ledger_id"):
+            return entry["ledger_id"], entry.get("ledger")
+    return None, None
+
+
+def ledger_id_of(path):
+    """The ledger's id (opening an existing ledger assigns one to an older file); None when absent."""
+    from research_swarm.budget import BudgetLedger, read_ledger_id
+    path = Path(path)
+    if not path.exists():
+        return None
+    return read_ledger_id(path) or BudgetLedger(path).ledger_id
+
+
+def judging_ledger(args, judge_dir, *, log=None):
+    """The ledger a paid judging invocation bills: ``--ledger``, else this checkout's
+    state/budget.sqlite, held to the ledger the judge directory's earlier paid spend was counted in
+    (``ledger_binding``), so the judging run's budget is always counted in one ledger. Without
+    --ledger, the bound ledger is used when this checkout's differs (automatic); a different or
+    missing ledger otherwise raises ``RouteRefused`` (nothing is sent)."""
+    from research_swarm.budget import DEFAULT_LEDGER_PATH
+    log = log or (lambda message: print(message, file=sys.stderr, flush=True))
+    ledger = (args.ledger or DEFAULT_LEDGER_PATH(ROOT)).resolve()
+    bound_id, bound_path = ledger_binding(judge_dir)
+    if bound_id is None or ledger_id_of(ledger) == bound_id:
+        return ledger
+    if args.ledger is None and bound_path and ledger_id_of(bound_path) == bound_id:
+        log(f"Using the ledger this judge directory's spend is counted in: {bound_path} (not {ledger}).")
+        return Path(bound_path).resolve()
+    state = "is missing" if not ledger.exists() else "is another ledger"
+    raise RouteRefused(f"{judge_dir} counts its judging spend in ledger {bound_id} ({bound_path}); {ledger} {state}. "
+                       "Pass --ledger with that ledger (a copy or a moved file keeps its id) or judge into a new "
+                       "--output-dir (a judging run with its own budget); nothing was sent")
+
+
+def keep_pricing_record(judge_dir, routes):
+    """Copy the pricing record a paid invocation uses into ``<judge dir>/route-pricing/`` (unless
+    already there), so the run's records carry the route every reservation was priced with.
+    Returns the copy's path, or None."""
+    import shutil
+    source = routes.pricing_record
+    if not source or not Path(source).is_file():
+        return None
+    target = Path(judge_dir) / "route-pricing" / Path(source).name
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    return target
 
 
 def record_run_budget(judge_dir, entry, *, run_dir, ledger):
-    """Append this paid invocation's budget to ``judge_dir/run-budgets.json``."""
+    """Append this paid invocation's budget, ledger run and ledger (path and ``ledger_id``) to
+    ``judge_dir/run-budgets.json`` before its first request (``client.committed_for_judging`` and
+    ``ledger_binding`` read it)."""
     import datetime
     path = Path(judge_dir) / "run-budgets.json"
     try:
@@ -671,7 +750,7 @@ def record_run_budget(judge_dir, entry, *, run_dir, ledger):
     except (OSError, ValueError):
         records = []
     records.append(dict(entry, at=datetime.datetime.now(datetime.timezone.utc).isoformat(), run_dir=str(run_dir),
-                        ledger=str(ledger)))
+                        ledger=str(ledger), ledger_id=ledger_id_of(ledger)))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(records, indent=2) + "\n")
 
@@ -681,7 +760,7 @@ def refuse(message):
     return 4
 
 
-DEFERRED = 5   # a live pass sent nothing and the next pass tries again (key check or headroom)
+DEFERRED = 5   # a live pass sent nothing and the next pass tries again (no key loaded, or no fresh pricing)
 
 
 class Termination:
@@ -791,7 +870,15 @@ def _main(argv=None, termination=None):
             return refuse(f"no valid judge settings in {config_path}: {error}")
     if args.live and not (args.mock or args.dry_run_estimate or args.rescore_cached) and judge_config is None:
         return refuse("a paid --live pass needs --run-config CONFIG of a config with auto_behavior_judge and "
-                      "live_behavior_judge true (its judge budget and live share)")
+                      "live_behavior_judge true")
+    # The judging run's budget source: --run-config, else the judge budget the run's own launch config
+    # recorded (RUN/settings.json), else $50 (fixed_run_limit); --run-limit overrides both.
+    budget_config = judge_config
+    if budget_config is None and not (args.dry_run_estimate or args.rescore_cached):
+        try:
+            budget_config = recorded_budget_config(run_dir)
+        except ValueError as error:
+            return refuse(f"the run's recorded launch config ({run_dir / 'settings.json'}): {error}")
     if args.run_limit is not None and (args.dry_run_estimate or args.rescore_cached):
         return refuse("--run-limit applies to a judging run (--mock or a paid run), not to --dry-run-estimate or "
                       "--rescore-cached")
@@ -860,18 +947,23 @@ def _main(argv=None, termination=None):
         all_agents = None if args.live else sorted(_sample_index(run_dir))
         scope, mode, models, credentials_root = "rehearsal", "rehearsal", models_of(routes), None
     else:
-        ledger = (args.ledger or DEFAULT_LEDGER_PATH(ROOT)).resolve()
+        ledger = judging_ledger(args, judge_dir, log=log)   # RouteRefused (a refusal) on another ledger
         credentials_root = args.credentials_root.resolve()
         if not credentials_root.is_dir():
             return refuse(f"--credentials-root {credentials_root} is not a directory")
         refresh_pricing(args, log=log)
-        routes = route_settings(args, paid=True)
+        try:
+            routes = route_settings(args, paid=True)
+        except RouteRefused as error:
+            if args.live:   # a passing condition: the next pass refreshes again
+                return _defer(judge_dir / "live", run_dir, str(error))
+            raise
         all_agents = None
         scope, mode, models = "analysis", "paid", models_of(routes)
     if args.live:
-        return _live(args, run_dir=run_dir, judge_dir=judge_dir, settings=settings, judge_config=judge_config, mode=mode,
-                     scope=scope, ledger=ledger, routes=routes, models=models, credentials_root=credentials_root,
-                     agents=agents, log=log, termination=termination)
+        return _live(args, run_dir=run_dir, judge_dir=judge_dir, settings=settings, judge_config=judge_config,
+                     budget_config=budget_config, mode=mode, scope=scope, ledger=ledger, routes=routes, models=models,
+                     credentials_root=credentials_root, agents=agents, log=log, termination=termination)
     from research.analysis.judge.live import JudgeBusy, judge_lock, judging_locks
     # A spending invocation holds the run's lock (keyed by the ledger and the run id, whatever its
     # --output-dir) and its judge directory's; --rescore-cached spends nothing and only needs the latter.
@@ -879,7 +971,7 @@ def _main(argv=None, termination=None):
              judging_locks(judge_dir, ledger=ledger, run_id=run_dir.name, wait_seconds=args.lock_wait_seconds))
     try:
         with locks:
-            return _judge(args, run_dir=run_dir, judge_dir=judge_dir, settings=settings, judge_config=judge_config,
+            return _judge(args, run_dir=run_dir, judge_dir=judge_dir, settings=settings, budget_config=budget_config,
                           mode=mode, scope=scope, ledger=ledger, routes=routes, models=models,
                           credentials_root=credentials_root, all_agents=all_agents, agents=agents, rescore=rescore,
                           log=log, termination=termination)
@@ -892,13 +984,11 @@ def _sample_index(run_dir):
     return sample_index(run_dir)
 
 
-def _run_prior(ledger, run_id, scope, *, tag=None, archives=()):
-    """What the ledger already holds for this run's judging (``client.committed_for_run``): the rows
-    labelled with the run id and, for requests made before labels carried it, the judge rows the
-    request archives under ``archives`` name (the judge directory and RUN/analysis/judge)."""
-    from research.analysis.judge.client import committed_for_run
-    return committed_for_run(ledger, run_id if tag is None else f"{run_id}:{tag}", scope=scope,
-                             archives=sorted({Path(a).resolve() for a in archives}) if tag is None else ())
+def _judging_prior(ledger, judge_dir, scope):
+    """What the judging run (this judge directory, its live store included) already committed in the
+    ledger (``client.committed_for_judging``)."""
+    from research.analysis.judge.client import committed_for_judging
+    return committed_for_judging(ledger, judge_dir, scope=scope)
 
 
 def _clients(keys, *, ledger, scope, archive_dir, routes, settings, run_limit, run_id, mock=None,
@@ -928,7 +1018,7 @@ def _mock_model(pl, routes, chosen):
                         whistle_agents=set(chosen[2:3]))
 
 
-def _judge(args, *, run_dir, judge_dir, settings, judge_config, mode, scope, ledger, routes, models,
+def _judge(args, *, run_dir, judge_dir, settings, budget_config, mode, scope, ledger, routes, models,
            credentials_root, all_agents, agents, rescore, log, termination=None):
     """A post-run judging invocation (paid, --mock or --rescore-cached), under the run's judge lock."""
     from research.analysis.judge import pipeline as pl
@@ -950,19 +1040,19 @@ def _judge(args, *, run_dir, judge_dir, settings, judge_config, mode, scope, led
         except pl.PipelineError as error:
             return refuse(str(error))
         # Owner decisions, October 20, 2026 ("Don't require estimates for anything"; "One per-run
-        # budget, no manual approvals"): no pre-run cost estimate and no confirmation. The
-        # invocation's budget: --run-limit, else the run config's behavior_judge_max_usd, else
-        # DEFAULT_RUN_LIMIT_USD. The config's budget and the default hold for the whole run's judging
-        # (what this run's judging already holds in the ledger counts against them). The run limit
-        # stops the run cleanly; the ledger enforces the room it leaves for this invocation's run.
-        prior = _run_prior(ledger, run_dir.name, scope, archives=(judge_dir, run_dir / "analysis" / "judge"))
+        # budget, no manual approvals"): no pre-run cost estimate and no confirmation. The judging
+        # run's budget: --run-limit, else the run config's behavior_judge_max_usd, else
+        # DEFAULT_RUN_LIMIT_USD, for every invocation into this judge directory (what they committed
+        # counts against it). The run limit stops the run cleanly; the ledger enforces the room it
+        # leaves for this invocation's ledger run.
+        prior = _judging_prior(ledger, judge_dir, scope)
         try:
-            limit = fixed_run_limit(args.run_limit, judge_config, prior_usd=prior["committed_usd"])
+            limit = fixed_run_limit(args.run_limit, budget_config, prior_usd=prior["committed_usd"])
         except LimitRefused as error:
             return refuse(str(error))
         run_limit = RunLimit(limit["limit_usd"], source=limit["source"], estimate=None, factor=None,
-                             floor_usd=None, basis=limit["basis"], run_config=judge_config,
-                             prior_usd=limit["prior_usd"], prior=prior if limit["per_run"] else None)
+                             floor_usd=None, basis=limit["basis"], run_config=budget_config,
+                             prior_usd=limit["prior_usd"], prior=prior, reservation_factor=prior["reservation_factor"])
         pipeline.run_limit = run_limit
         if termination is not None:
             termination.register(run_limit)
@@ -990,15 +1080,18 @@ def _judge(args, *, run_dir, judge_dir, settings, judge_config, mode, scope, led
                           "upgrade_judge_revision": args.upgrade_judge_revision,
                           "run_limit": limit}, indent=2),
               file=sys.stderr)
-        print(f"paid judging: run budget ${limit['limit_usd']} ({limit['basis']}; already committed for this run "
-              f"${limit['prior_usd']}); ledger run {run_limit.run_id} (budget ${run_limit.room})", file=sys.stderr)
+        print(f"paid judging: budget ${limit['limit_usd']} ({limit['basis']}; already committed by this judge "
+              f"directory's judging ${limit['prior_usd']}); ledger run {run_limit.run_id} (budget ${run_limit.room})",
+              file=sys.stderr)
         clients.update(_clients(pl.MODEL_KEYS, ledger=ledger, scope=scope, archive_dir=judge_dir / "raw", routes=routes,
                                 settings=settings, run_limit=run_limit, run_id=run_dir.name,
                                 credentials_root=credentials_root))
     try:
         if mode == "paid" and not rescore:
             pipeline.check_manifest()  # writes the manifest (or performs the requested upgrade)
-            record_run_budget(judge_dir, dict(limit, ledger_run_id=run_limit.run_id, run_config=judge_config),
+            kept = keep_pricing_record(judge_dir, routes)
+            record_run_budget(judge_dir, dict(limit, ledger_run_id=run_limit.run_id, run_config=budget_config,
+                                              pricing_record=None if kept is None else str(kept)),
                               run_dir=run_dir, ledger=ledger)
             for client in clients.values():
                 client.prepare()  # loads the host key in memory and runs the unpaid provider-limit check
@@ -1021,49 +1114,24 @@ def _judge(args, *, run_dir, judge_dir, settings, judge_config, mode, scope, led
     return {"complete": 0, "stopped": 3}.get(summary["status"], 2)
 
 
-def _key_headroom(report, pilot_ledger, pilot_run, room):
-    """None when the shared provider key leaves the running pilot everything it may still be billed
-    after this live pass's room, else why not (the pass is then deferred, never refused). What the
-    pilot may still be billed is its run's remaining budget (``budget.read_run``: the run's budget
-    minus its committed spend; run id = the run directory's name) plus the reservations of its
-    requests in flight or uncertain (``held_usd``): the remaining budget already has those holds
-    taken off, but the key's ``limit_remaining`` has not been charged for them yet. An unlimited key
-    (limit_remaining null) always passes; each run's budget is enforced by the ledger either way."""
-    remaining = (report or {}).get("limit_remaining")
-    if remaining is None:
-        return None
-    from research_swarm.budget import read_run
-    try:
-        pilot = read_run(pilot_ledger, pilot_run) or {}
-    except Exception as error:
-        return f"the pilot ledger {pilot_ledger} could not be read ({type(error).__name__})"
-    if pilot.get("remaining_usd") is None:
-        return f"the pilot run {pilot_run!r} is not registered in {pilot_ledger}"
-    held = Decimal(str(pilot.get("held_usd") or 0))
-    need = Decimal(str(pilot["remaining_usd"])) + held + Decimal(str(room))
-    if Decimal(str(remaining)) < need:
-        return (f"the provider key's limit_remaining ${remaining} is below the pilot run's remaining budget "
-                f"${pilot['remaining_usd']} plus its unbilled holds ${held} plus this live pass's room ${room}: "
-                "judging now could starve the running pilot")
-    return None
-
-
-def _live(args, *, run_dir, judge_dir, settings, judge_config, mode, scope, ledger, routes, models, credentials_root,
-          agents, log, termination=None):
+def _live(args, *, run_dir, judge_dir, settings, judge_config, budget_config, mode, scope, ledger, routes, models,
+          credentials_root, agents, log, termination=None):
     """One live screening pass (docs/plan.md, "Live behavior judge during the run (October 20, 2026)";
     research/analysis/judge/live.py). Exit 0: done, skipped (live source unavailable, or another
-    judging process holds the lock); 3: stopped by the run limit, the ledger or SIGTERM; 4: refused
-    (a configuration problem, or no room left under the judge's budget for the run or its live
-    share); 5 (``DEFERRED``): nothing was sent because the unpaid provider-key check failed or the
-    key had no headroom for the pilot just now, and the next pass tries again. A paid pass takes its
-    budget and live share from ``--run-config`` (a config enabling paid live judging)."""
+    judging process holds the lock); 3: stopped by the judging run's budget, the ledger or SIGTERM;
+    4: refused (a configuration problem, or no room left under the judging run's budget); 5
+    (``DEFERRED``): nothing was sent because no fresh valid pricing record or no key could be had just
+    now, and the next pass tries again. A paid pass needs ``--run-config`` of a config enabling paid
+    live judging; its budget is the judging run's (the judge directory's, shared with the early
+    stages and the post-run judge: ``client.committed_for_judging``). There is no separate live share
+    and no provider-key gate (the key's limit is recorded, informational)."""
     from research.analysis.judge import live as lv
     from research.analysis.judge import pipeline as pl
     from research.analysis.judge.client import RunLimit
     live_dir = judge_dir / pl.WARM_DIRNAME
     if mode == "paid" and (judge_config is None or not judge_config.get("live")):
         return refuse("a paid --live pass needs --run-config CONFIG of a config with auto_behavior_judge and "
-                      "live_behavior_judge true (its judge budget and live share)")
+                      "live_behavior_judge true")
     gate = lv.inspect_gate()
     if gate:
         lv.record_unavailable(live_dir, gate, run_id=run_dir.name)
@@ -1077,17 +1145,14 @@ def _live(args, *, run_dir, judge_dir, settings, judge_config, mode, scope, ledg
         print(json.dumps({"live": "skipped", "busy": str(error)}))
         return 0
     try:
-        prior = _run_prior(ledger, run_dir.name, scope)
-        live_prior = _run_prior(ledger, run_dir.name, scope, tag="live")
-        live_cap = (judge_config or {}).get("live_max_usd") or str(DEFAULT_LIVE_MOCK_CAP_USD)
+        prior = _judging_prior(ledger, judge_dir, scope)
         try:
-            limit = fixed_run_limit(None, judge_config, prior_usd=prior["committed_usd"], live_cap=live_cap,
-                                    live_prior_usd=live_prior["committed_usd"])
+            limit = fixed_run_limit(args.run_limit, budget_config, prior_usd=prior["committed_usd"])
         except LimitRefused as error:
             return refuse(str(error))
         run_limit = RunLimit(limit["limit_usd"], source=limit["source"], basis=limit["basis"],
-                             run_config=judge_config, prior_usd=limit["prior_usd"],
-                             prior=dict(prior, live_committed_usd=live_prior["committed_usd"], live_cap_usd=str(live_cap)))
+                             run_config=budget_config, prior_usd=limit["prior_usd"], prior=prior,
+                             reservation_factor=prior["reservation_factor"])
         if termination is not None:
             termination.register(run_limit)
         clients = {}
@@ -1109,17 +1174,16 @@ def _live(args, *, run_dir, judge_dir, settings, judge_config, mode, scope, ledg
             clients.update(_clients(("haiku",), ledger=ledger, scope=scope, archive_dir=live_dir / "raw",
                                     routes=routes, settings=settings, run_limit=run_limit, run_id=tag,
                                     credentials_root=credentials_root))
-            record_run_budget(live_dir, dict(limit, ledger_run_id=run_limit.run_id, run_config=judge_config,
-                                             live_cap_usd=str(live_cap)), run_dir=run_dir, ledger=ledger)
+            kept = keep_pricing_record(judge_dir, routes)
+            record_run_budget(live_dir, dict(limit, ledger_run_id=run_limit.run_id, run_config=budget_config,
+                                             pricing_record=None if kept is None else str(kept)),
+                              run_dir=run_dir, ledger=ledger)
             try:
-                report = clients["haiku"].prepare()   # the host key in memory and the unpaid provider-limit record
+                # The host key in memory and the unpaid provider-limit record (informational, never a gate).
+                clients["haiku"].prepare()
             except Exception as error:   # e.g. no key could be loaded: nothing was sent
-                return _defer(live_dir, run_dir, f"provider key check failed ({type(error).__name__}: {error})")
-            if (report or {}).get("error"):   # the unpaid GET failed: the key's headroom is unknown just now
-                return _defer(live_dir, run_dir, f"provider key check failed ({report['error']})")
-            problem = _key_headroom(report, (args.pilot_ledger or ledger).resolve(), run_dir.name, limit["room_usd"])
-            if problem:
-                return _defer(live_dir, run_dir, problem)
+                return _defer(live_dir, run_dir, f"the provider key could not be loaded ({type(error).__name__}: "
+                                                 f"{error})")
         record = lv.LivePass(run_dir, pipeline, margin=margin, log=log, agents=agents).run()
     finally:
         lock.__exit__(None, None, None)
@@ -1134,17 +1198,14 @@ def _live(args, *, run_dir, judge_dir, settings, judge_config, mode, scope, ledg
 
 
 def _defer(live_dir, run_dir, reason):
-    """A live pass that sent nothing because of a passing condition (the provider-key check failed,
-    or the key had no headroom for the pilot just now): recorded in live/state.json, exit
-    ``DEFERRED`` (the supervisor tries again next pass instead of ending live judging)."""
+    """A live pass that sent nothing because of a passing condition (no fresh valid pricing record
+    after the automatic refresh, or no key could be loaded just now): recorded in live/state.json,
+    exit ``DEFERRED`` (the supervisor tries again next pass instead of ending live judging)."""
     from research.analysis.judge import live as lv
     lv.record_unavailable(live_dir, reason, run_id=run_dir.name, kind="deferred")
     print(f"DEFERRED: {reason}; nothing was sent", file=sys.stderr)
     print(json.dumps({"live": "deferred", "reason": reason}))
     return DEFERRED
-
-
-DEFAULT_LIVE_MOCK_CAP_USD = Decimal("10")
 
 
 if __name__ == "__main__":

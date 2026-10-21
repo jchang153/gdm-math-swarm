@@ -474,6 +474,81 @@ def committed_for_run(ledger_path, run_id, scope=ANALYSIS_SCOPE, *, archives=())
             "legacy_rows": legacy_rows}
 
 
+RUN_BUDGETS_FILE = "run-budgets.json"   # each paid invocation's budget, ledger run and ledger id
+LIVE_DIRNAME = "live"                    # the live store inside a judge directory (pipeline.WARM_DIRNAME)
+
+
+def run_budget_records(judge_dir):
+    """The budget records of every paid invocation that judged into ``judge_dir``: its own
+    ``run-budgets.json`` and its live store's (``live/run-budgets.json``), oldest first. Each names
+    the invocation's ledger run (``ledger_run_id``) and, since the per-judge-directory budget, the
+    ledger it was counted in (``ledger_id``, ``ledger``)."""
+    records = []
+    for path in (Path(judge_dir) / RUN_BUDGETS_FILE, Path(judge_dir) / LIVE_DIRNAME / RUN_BUDGETS_FILE):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        records += [entry for entry in data if isinstance(entry, dict)] if isinstance(data, list) else []
+    return sorted(records, key=lambda entry: str(entry.get("at") or ""))
+
+
+def committed_for_judging(ledger_path, judge_dir, scope=ANALYSIS_SCOPE):
+    """What the ledger holds against one judging run, read only: the judge directory ``judge_dir``
+    (its live store included) of one judged run. docs/plan.md, "One per-run budget, no manual
+    approvals (October 20, 2026)": the judge's budget is per judging run, so every invocation that
+    judges into the same directory (live passes, the early stages, the post-run judge, any resume)
+    counts what the earlier ones committed, and a re-judge into a new ``--output-dir`` is a judging
+    run of its own.
+
+    Counted once each, with ``COALESCE(actual, reserved)`` (exactly what the ledger counts, so an
+    orphaned hold counts at its reservation): every ``scope`` row of a ledger run the directory's
+    budget records name (``run_budget_records``: written before an invocation's first request, so a
+    hold whose request archive was never written is included), and every ``scope`` row a request
+    archive under ``judge_dir`` names (``archived_request_ids``: requests of invocations made before
+    the budget records existed). Returns ``{"committed_usd", "rows", "unresolved_rows",
+    "ledger_runs", "reservation_factor"}`` (the largest reservation factor of those ledger runs:
+    an estimate violation keeps scaling the judging run's reservations across invocations); a
+    missing ledger counts 0."""
+    from research_swarm.budget import usd
+    path = Path(ledger_path)
+    runs = sorted({str(entry["ledger_run_id"]) for entry in run_budget_records(judge_dir)
+                   if entry.get("ledger_run_id")})
+    empty = {"judge_dir": str(judge_dir), "committed_usd": "0", "rows": 0, "unresolved_rows": 0,
+             "ledger_runs": runs, "reservation_factor": "1"}
+    if not path.exists():
+        return empty
+    archived = sorted(archived_request_ids([judge_dir], scope))
+    rows = {}
+    factor = Decimal(1)
+    with closing(sqlite3.connect("file:" + str(path.resolve()) + "?mode=ro", uri=True, timeout=30)) as db:
+        db.execute("PRAGMA busy_timeout=30000")
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        columns = {row[1] for row in db.execute("PRAGMA table_info(calls)")} if "calls" in tables else set()
+        if "calls" not in tables:
+            return empty
+        for field_name, values in (("run_id", runs if "run_id" in columns else []), ("id", archived)):
+            for start in range(0, len(values), 500):
+                chunk = values[start:start + 500]
+                for request_id, amount, state in db.execute(
+                        f"SELECT id, COALESCE(actual, reserved), state FROM calls WHERE scope=? AND {field_name} IN "
+                        f"({','.join('?' * len(chunk))})", (scope, *chunk)):
+                    rows[request_id] = (int(amount or 0), state)
+        if runs and "runs" in tables:
+            for start in range(0, len(runs), 500):
+                chunk = runs[start:start + 500]
+                for (value,) in db.execute(f"SELECT reservation_factor FROM runs WHERE id IN "
+                                           f"({','.join('?' * len(chunk))})", chunk):
+                    try:
+                        factor = max(factor, Decimal(str(value)))
+                    except (ArithmeticError, ValueError):
+                        pass
+    total = sum(amount for amount, _ in rows.values())
+    return dict(empty, committed_usd=str(usd(total)), rows=len(rows),
+                unresolved_rows=sum(state in ("reserved", "uncertain") for _, state in rows.values()),
+                reservation_factor=str(factor))
+
+
 class RunLimit:
     """One judging invocation's own spending limit (judge revision v3, docs/plan.md, "Behavior
     judge iteration specified, October 19, 2026", item 7), shared by the invocation's clients.
@@ -487,27 +562,31 @@ class RunLimit:
     ledger denial (waits while other requests are in flight, else stops cleanly). The ledger
     enforces the same budget for the invocation's own ledger run (``run_id``, registered with the
     ``room`` this limit leaves: ``limit_usd`` minus ``prior_usd``, what earlier invocations of the
-    same judged run already committed). ``estimate`` (the invocation estimate that
+    same judging run already committed, ``committed_for_judging``; and the ``reservation_factor``
+    they reached, so an earlier estimate violation keeps scaling reservations). ``estimate`` (the invocation estimate that
     set the limit), ``source`` (``estimate``: 2x the central estimate, or ``override``:
     ``--run-limit``) and ``basis`` (what set an estimated limit: ``factor``, ``largest_reservation``
     when the largest single reservation needed more room, or ``floor``) are recorded with the
     totals (``record()``)."""
 
     def __init__(self, limit_usd, *, source="estimate", estimate=None, factor=None, floor_usd=None, basis=None,
-                 run_config=None, prior_usd=None, prior=None):
+                 run_config=None, prior_usd=None, prior=None, reservation_factor=None):
         limit = _decimal_or_none(limit_usd)
         if limit is None or limit <= 0:
             raise ValueError("run limit must be a positive amount in USD")
         self.limit = limit
-        # The judge's budget for the whole run (docs/plan.md, "Live behavior judge during the run (October
-        # 20, 2026)", merged into "One per-run budget, no manual approvals (October 20, 2026)"): what
-        # earlier invocations already committed against the same run (``committed_for_run``) counts
-        # against ``limit`` from the start, so a resume or a later stage never gets a fresh budget.
+        # The judging run's budget (docs/plan.md, "One per-run budget, no manual approvals (October 20,
+        # 2026)"): what earlier invocations of the same judging run (the same judge directory) already
+        # committed (``committed_for_judging``) counts against ``limit`` from the start, so a resume, a
+        # later stage or a live pass never gets a fresh budget.
         prior_amount = _decimal_or_none(prior_usd)
         if prior_amount is not None and prior_amount < 0:
             raise ValueError("prior_usd must not be negative")
         self.prior = prior_amount or Decimal(0)
         self.prior_record = prior
+        factor = _decimal_or_none(reservation_factor)
+        # The ledger run starts with the reservation factor earlier invocations reached (never below 1).
+        self.reservation_factor = factor if factor is not None and factor > 1 else Decimal(1)
         self.source = source
         self.estimate = estimate
         self.factor = factor
@@ -562,8 +641,9 @@ class RunLimit:
 
     def admit(self, amount, *, purpose=None, model=None, label=None):
         """A token when ``amount`` (the request's ledger reservation) fits under the limit
-        together with the committed spend, else None (the denial is counted)."""
-        amount = _decimal_or_none(amount) or Decimal(0)
+        together with the committed spend, else None (the denial is counted). Like the ledger, the
+        amount is scaled by ``reservation_factor`` when an earlier invocation raised it."""
+        amount = (_decimal_or_none(amount) or Decimal(0)) * self.reservation_factor
         with self._lock:
             committed = self._committed()
             if self.closed is not None or committed + amount > self.limit:
@@ -618,6 +698,7 @@ class RunLimit:
                     "floor_usd": None if self.floor is None else str(self.floor), "created_at": self.created_at,
                     "estimate": self.estimate, "run_config": self.run_config,
                     "prior_usd": str(self.prior), "room_usd": str(self.room), "prior": self.prior_record,
+                    "reservation_factor": str(self.reservation_factor),
                     "committed_usd": str(self._committed()),
                     "peak_committed_usd": str(self.peak_committed), "settled_usd": str(self._settled),
                     "uncertain_usd": str(self._uncertain), "in_flight_usd": str(held), "requests": self.requests,
@@ -720,9 +801,11 @@ class JudgeClient:
                 raise ValueError(f"Scope {scope!r} (offline rehearsal) needs a run_limit or explicit ledger_caps")
         # The judging run's budget (docs/plan.md "One per-run budget, no manual approvals (October 20,
         # 2026)"): the room the invocation's run limit leaves, else ledger_caps[scope], else $50.
+        factor = None
         if run_limit is not None:
             ledger_run, run_budget, source = (run_limit.run_id, run_limit.room,
                                               f"judge run limit ({run_limit.source})")
+            factor = run_limit.reservation_factor
         elif isinstance(ledger_caps, dict) and ledger_caps.get(scope) is not None:
             ledger_run, run_budget, source = (f"judge-{model_key}-{uuid.uuid4().hex[:12]}", ledger_caps[scope],
                                               "ledger_caps")
@@ -742,9 +825,11 @@ class JudgeClient:
                 from research_swarm.secrets import load_openrouter_key
                 return load_openrouter_key(root)
         self.ledger = BudgetLedger(self.ledger_path)
-        self.ledger.start_run(ledger_run, scope, run_budget, source=source, note=self._run_note(scope, run_id))
-        # The judged run's id goes into every ledger label (``request_label``), so the judge's budget
-        # for the whole run can be computed from the ledger alone (``committed_for_run``).
+        self.ledger.start_run(ledger_run, scope, run_budget, source=source, note=self._run_note(scope, run_id),
+                              reservation_factor=factor)
+        # The judged run's id goes into every ledger label (``request_label``): the ledger's history
+        # of a run's judging (``committed_for_run``). The judging run's budget counts what its judge
+        # directory's invocations committed (``committed_for_judging``).
         self.run_id = run_id
         self.run_limit = run_limit
         self._limit_tokens = {}             # ledger request id -> RunLimit token
@@ -773,7 +858,8 @@ class JudgeClient:
         ledger = getattr(self, "ledger", None)
         if limit is not None and ledger is not None and ledger.run_id != limit.run_id:
             ledger.start_run(limit.run_id, self.scope, limit.room, source=f"judge run limit ({limit.source})",
-                             note=self._run_note(self.scope, getattr(self, "run_id", None)))
+                             note=self._run_note(self.scope, getattr(self, "run_id", None)),
+                             reservation_factor=limit.reservation_factor)
 
     @staticmethod
     def _run_note(scope, judged_run=None):

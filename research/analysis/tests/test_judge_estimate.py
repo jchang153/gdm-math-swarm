@@ -470,13 +470,13 @@ class CommandLineTests(unittest.TestCase):
 
     def test_default_limit_is_fifty_and_never_clamped(self):
         keys = ("limit_usd", "source", "basis")
-        pick = lambda limit: {k: limit[k] for k in keys}  # noqa: E731 (also prior_usd, room_usd, per_run)
+        pick = lambda limit: {k: limit[k] for k in keys}  # noqa: E731 (also prior_usd, room_usd)
         self.assertEqual(pick(self.cli.fixed_run_limit(None)), {"limit_usd": "50", "source": "default", "basis": "default"})
         config = {"max_usd": "120", "budget_source": "config behavior_judge_max_usd"}
         self.assertEqual(pick(self.cli.fixed_run_limit(None, config)),
                          {"limit_usd": "120", "source": "run_config", "basis": "config behavior_judge_max_usd"})
-        self.assertEqual({k: self.cli.fixed_run_limit(None, config)[k] for k in ("prior_usd", "room_usd", "per_run")},
-                         {"prior_usd": "0", "room_usd": "120", "per_run": True})
+        self.assertEqual({k: self.cli.fixed_run_limit(None, config)[k] for k in ("prior_usd", "room_usd")},
+                         {"prior_usd": "0", "room_usd": "120"})
         self.assertEqual(self.cli.fixed_run_limit(Decimal("300"), config)["limit_usd"], "300")  # --run-limit wins
         default = {"max_usd": "50", "budget_source": "default"}
         self.assertEqual(self.cli.fixed_run_limit(None, default)["source"], "default")

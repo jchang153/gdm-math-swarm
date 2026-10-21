@@ -16,8 +16,10 @@ No model calls, network, Docker or credentials; the authoritative ledger is neve
   Sonnet/Opus requests of a post-run-only judge on the same transcripts, and no unit is paid twice
   (a mispredicted window is paid once more and never adopted);
 * adoption guards (binding, route, code, status, replay) and ``live/consistency.json``;
-* the judge's budget for the run (ledger labels with the run id, orphaned holds, ``RunLimit`` prior, live share),
-  the judge lock, the live-safe readers and the live config keys;
+* the judging run's budget (one judge directory, live store included: ``committed_for_judging`` over the
+  ledger runs its ``run-budgets.json`` records and its request archives, orphaned holds, ``RunLimit`` prior
+  and reservation factor, the ledger a judge directory is bound to), the judge lock, the live-safe readers
+  and the live config keys (no live share, no provider-key gate);
 * a mock end to end: a live pass over a real buffer, then the post-run judge on the final ``.eval``.
 
 Run: PYTHONPATH=src:. .venv/bin/python -m unittest discover -s research/analysis/tests
@@ -54,8 +56,8 @@ from research_swarm.inspect_adapter import disable_inspect_dotenv  # noqa: E402
 disable_inspect_dotenv()
 from research.analysis.judge import history, live  # noqa: E402
 from research.analysis.judge import pipeline as pl  # noqa: E402
-from research.analysis.judge.client import (JudgeClient, RunLimit, committed_for_run,  # noqa: E402
-                                            request_label)
+from research.analysis.judge.client import (JudgeClient, RunLimit, committed_for_judging,  # noqa: E402
+                                            committed_for_run, request_label)
 from research.analysis.judge.history import make_item  # noqa: E402
 from research.analysis.judge.windows import make_windows  # noqa: E402
 from research_swarm import auto_judge  # noqa: E402
@@ -879,26 +881,75 @@ class PerRunCapTests(unittest.TestCase):
         with self.assertRaises(BudgetExceeded):
             client.ledger.reserve("rehearsal", request_label("haiku", "prefilter", "a", "run-x"), Decimal("2.5"))
 
-    def test_fixed_run_limit_is_per_run(self):
+    def test_fixed_run_limit_is_per_judging_run(self):
         import run_transcript_judge as cli
         config = {"max_usd": "50", "budget_source": "config behavior_judge_max_usd"}
         limit = cli.fixed_run_limit(None, config, prior_usd="12")
         self.assertEqual((limit["limit_usd"], limit["room_usd"], limit["prior_usd"], limit["source"]),
                          ("50", "38", "12", "run_config"))
-        live_limit = cli.fixed_run_limit(None, config, prior_usd="12", live_cap="10", live_prior_usd="4")
-        self.assertEqual((live_limit["room_usd"], live_limit["basis"]), ("6", "live_cap"))
+        self.assertNotIn("per_run", limit)
         larger = cli.fixed_run_limit(None, dict(config, max_usd="120"), prior_usd="12")   # any amount, never clamped
         self.assertEqual((larger["limit_usd"], larger["room_usd"]), ("120", "108"))
-        with self.assertRaises(cli.LimitRefused):
+        with self.assertRaisesRegex(cli.LimitRefused, "new --output-dir"):
             cli.fixed_run_limit(None, config, prior_usd="50")
+        # --run-limit sets the judging run's budget; what its earlier invocations committed still counts.
+        override = cli.fixed_run_limit(Decimal("60"), config, prior_usd="49")
+        self.assertEqual((override["limit_usd"], override["room_usd"], override["source"]), ("60", "11", "override"))
         with self.assertRaises(cli.LimitRefused):
-            cli.fixed_run_limit(None, config, prior_usd="1", live_cap="10", live_prior_usd="10")
-        override = cli.fixed_run_limit(Decimal("5"), None, prior_usd="49")  # explicit: per invocation
-        self.assertEqual((override["limit_usd"], override["per_run"]), ("5", False))
-        override = cli.fixed_run_limit(Decimal("5"), config, prior_usd="49")  # it overrides the config's budget
-        self.assertEqual((override["limit_usd"], override["source"], override["per_run"]), ("5", "override", False))
-        default = cli.fixed_run_limit(None, None, prior_usd="20")         # the $50 default: per run
+            cli.fixed_run_limit(Decimal("5"), None, prior_usd="49")
+        default = cli.fixed_run_limit(None, None, prior_usd="20")         # the $50 default
         self.assertEqual((default["limit_usd"], default["room_usd"]), ("50", "30"))
+
+    def record_budgets(self, folder, *entries):
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "run-budgets.json").write_text(json.dumps([dict(entry) for entry in entries]))
+
+    def test_committed_for_judging_counts_one_judge_directory(self):
+        """The judging run's committed spend: every row of the ledger runs its budget records name (the judge
+        directory's and its live store's, an orphaned hold with no request archive included), the rows its
+        request archives name, never another judge directory's, and the largest reservation factor."""
+        judge_dir, other_dir = self.tmp / "run-x" / "analysis" / "judge", self.tmp / "rejudge"
+        post, live_run, other = BudgetLedger(self.ledger), BudgetLedger(self.ledger), BudgetLedger(self.ledger)
+        post.start_run("judge-post", "analysis", "50")
+        live_run.start_run("judge-live", "analysis", "10", reservation_factor="1.5")
+        other.start_run("judge-other", "analysis", "50")
+        settled = post.reserve("analysis", request_label("sonnet", "judge", "a", "run-x"), Decimal("2"))
+        post.settle(settled, Decimal("1.25"))
+        live_run.reserve("analysis", request_label("haiku", "prefilter", "b", "run-x:live"), Decimal("0.5"))  # orphan
+        other_call = other.reserve("analysis", request_label("sonnet", "judge", "a", "run-x"), Decimal("4"))
+        other.settle(other_call, Decimal("4"))
+        legacy = self.book.reserve("analysis", "judge-opus:verifier:c", Decimal("3"))   # before the records existed
+        self.book.settle(legacy, Decimal("0.75"))
+        self.record_budgets(judge_dir, {"ledger_run_id": "judge-post", "at": "2026-10-20T01:00:00+00:00"})
+        self.record_budgets(judge_dir / "live", {"ledger_run_id": "judge-live", "at": "2026-10-20T00:30:00+00:00"})
+        self.record_budgets(other_dir, {"ledger_run_id": "judge-other"})
+        (judge_dir / "raw").mkdir(parents=True)
+        (judge_dir / "raw" / "c.request.json").write_text(json.dumps({"ledger_request_id": legacy, "scope": "analysis"}))
+        record = committed_for_judging(self.ledger, judge_dir, scope="analysis")
+        # 1.25 settled + the orphan's hold at its scaled reservation (0.5 x 1.5) + 0.75 named by an archive.
+        self.assertEqual((Decimal(record["committed_usd"]), record["rows"], record["unresolved_rows"]),
+                         (Decimal("2.75"), 3, 1))
+        self.assertEqual((record["ledger_runs"], record["reservation_factor"]), (["judge-live", "judge-post"], "1.5"))
+        self.assertEqual(Decimal(committed_for_judging(self.ledger, other_dir)["committed_usd"]), Decimal("4"))
+        self.assertEqual(committed_for_judging(self.ledger, self.tmp / "new-dir")["committed_usd"], "0")
+        self.assertEqual(committed_for_judging(self.tmp / "missing.sqlite", judge_dir)["committed_usd"], "0")
+
+    def test_run_limit_carries_the_reservation_factor(self):
+        """An estimate violation in an earlier invocation keeps scaling the judging run's reservations: the run
+        limit admits scaled amounts and the invocation's ledger run starts with that factor."""
+        from research.analysis.judge.client import FakeTransport
+        from research.analysis.judge.route import JudgeRouteSettings
+        from research_swarm.budget import read_run
+        limit = RunLimit("10", source="run_config", prior_usd="4", reservation_factor="2")
+        self.assertIsNone(limit.admit(Decimal("3.5")))           # 7 > the 6 left
+        self.assertIsNotNone(limit.admit(Decimal("2.5")))        # 5 fits
+        self.assertEqual(limit.record()["reservation_factor"], "2")
+        self.assertEqual(RunLimit("10", reservation_factor="0.5").reservation_factor, Decimal(1))   # never below 1
+        fresh = RunLimit("10", source="run_config", prior_usd="4", reservation_factor="2")
+        JudgeClient("haiku", self.ledger, scope="rehearsal", archive_dir=self.tmp / "raw",
+                    settings=JudgeRouteSettings.defaults(pricing_verified=True), http=FakeTransport(),
+                    run_limit=fresh, run_id="run-x")
+        self.assertEqual(Decimal(str(read_run(self.ledger, fresh.run_id)["reservation_factor"])), Decimal("2"))
 
     def test_a_resume_never_gets_a_fresh_cap(self):
         """Two --mock invocations of one run: the second starts at what the first committed."""
@@ -1352,26 +1403,6 @@ class ReviewFixTests(unittest.TestCase):
         finally:
             harness.tearDown()
 
-    def test_key_headroom_counts_the_pilots_unbilled_holds(self):
-        """The pilot run's own remaining budget (never a cumulative allowance) plus its unbilled holds."""
-        import run_transcript_judge as cli
-        ledger = self.tmp / "budget.sqlite"
-        book = BudgetLedger(ledger)
-        book.start_run("run-x", "pilot", "58")
-        in_flight = book.reserve("pilot", "agent-001", Decimal("8"))   # remaining $50, the key not yet charged
-        problem = cli._key_headroom({"limit_remaining": "58"}, ledger, "run-x", Decimal("8"))
-        self.assertIsNotNone(problem)   # admitting it would leave the key $42 for the pilot's $50 + $8
-        self.assertIn("unbilled holds $8", problem)
-        book.settle(in_flight, Decimal("8"))
-        self.assertIsNotNone(cli._key_headroom({"limit_remaining": "50"}, ledger, "run-x", Decimal("8")))
-        self.assertIsNone(cli._key_headroom({"limit_remaining": "58"}, ledger, "run-x", Decimal("8")))
-        self.assertIsNone(cli._key_headroom({"limit_remaining": None}, ledger, "run-x", Decimal("8")))
-        other = BudgetLedger(ledger)   # another run's spend never counts against this pilot run
-        other.start_run("run-y", "pilot", "500")
-        other.reserve("pilot", "agent-001", Decimal("100"))
-        self.assertIsNone(cli._key_headroom({"limit_remaining": "58"}, ledger, "run-x", Decimal("8")))
-        self.assertIn("not registered", cli._key_headroom({"limit_remaining": "58"}, ledger, "run-z", Decimal("8")))
-
     # -- a stop request: nothing more is admitted, in-flight requests settle ---------------------
     def test_closed_run_limit_admits_nothing_more(self):
         limit = RunLimit("50", source="run_config")
@@ -1458,7 +1489,11 @@ class ReviewFixTests(unittest.TestCase):
             harness.tearDown()
 
     # -- a transient key-check failure or headroom shortfall defers the pass --------------------
-    def test_key_check_failure_or_no_headroom_defers_the_pass(self):
+    def test_live_pass_defers_only_without_a_key_or_fresh_pricing(self):
+        """One spending control (owner decision, October 20, 2026): the provider key's limit is recorded and never
+        gates a live pass (no headroom deferral); a pass is deferred (exit 5, the next pass tries again) only when
+        no key could be loaded or no fresh valid pricing record could be had. A post-run invocation without a
+        fresh valid pricing record refuses (exit 4) and sends nothing."""
         import run_transcript_judge as cli
         from research.analysis.judge.route import JudgeRouteSettings
         run_dir = self.tmp / "runs" / tjp.RUN_ID
@@ -1476,23 +1511,163 @@ class ReviewFixTests(unittest.TestCase):
                 if isinstance(self.outcome, BaseException):
                     raise self.outcome
                 return self.outcome
-        for outcome, text in ((RuntimeError("no key could be loaded"), "provider key check failed"),
-                              ({"limit_remaining": None, "error": "HTTP 502 from the key endpoint"},
-                               "provider key check failed"),
-                              ({"limit_remaining": "1"}, "below the pilot run's remaining budget")):
-            err = io.StringIO()
+
+        class Pass:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def run(self):
+                return {"requests_planned": 0, "windows_final": 0, "windows_cached": 0, "windows_deferred": 0}
+        stale = cli.RouteRefused("judge route pricing record judge-route-pricing-x.json: Pricing record "
+                                 "judge-route-pricing-x.json is older than 72 h")
+        routes = JudgeRouteSettings.defaults(pricing_verified=True)
+        for outcome, route, text in ((RuntimeError("no key could be loaded"), routes, "could not be loaded"),
+                                     ({"limit_remaining": "1"}, routes, None),          # a nearly spent key: no gate
+                                     ({"limit_remaining": None, "error": "HTTP 502"}, routes, None),
+                                     ({"limit_remaining": None}, stale, "older than 72 h")):
+            err, out = io.StringIO(), io.StringIO()
             with mock.patch.object(cli, "refresh_pricing", return_value=None), \
-                    mock.patch.object(cli, "route_settings",
-                                      return_value=JudgeRouteSettings.defaults(pricing_verified=True)), \
+                    mock.patch.object(cli, "route_settings", side_effect=[route] if isinstance(route, Exception)
+                                      else None, return_value=route), \
                     mock.patch.object(cli, "_clients", return_value={"haiku": Client(outcome)}), \
                     mock.patch.object(live, "inspect_gate", return_value=None), \
-                    contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                    mock.patch.object(live, "LivePass", Pass), \
+                    contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
                 code = cli.main(["--run-dir", str(run_dir), "--live", "--run-config", str(config),
                                  "--ledger", str(ledger), "--credentials-root", str(self.tmp)])
+            if text is None:
+                self.assertEqual(code, 0, err.getvalue())
+                self.assertEqual(json.loads(out.getvalue())["live"], "done")
+                continue
             self.assertEqual(code, cli.DEFERRED, err.getvalue())
             self.assertIn(text, err.getvalue())
             state = json.loads((run_dir / "analysis" / "judge" / "live" / "state.json").read_text())
             self.assertIn(text, state["passes"][-1]["deferred"])
+        # The live passes' budget records name the ledger (and its id) they were counted in.
+        records = json.loads((run_dir / "analysis" / "judge" / "live" / "run-budgets.json").read_text())
+        self.assertTrue(records and all(r["ledger_id"] == cli.ledger_id_of(ledger) for r in records))
+        err = io.StringIO()
+        with mock.patch.object(cli, "refresh_pricing", return_value=None), \
+                mock.patch.object(cli, "route_settings", side_effect=stale), \
+                contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            code = cli.main(["--run-dir", str(run_dir), "--run-config", str(config), "--ledger", str(ledger),
+                             "--credentials-root", str(self.tmp)])
+        self.assertEqual(code, 4, err.getvalue())
+        self.assertIn("older than 72 h", err.getvalue())
+
+
+class OneBudgetJudgeTests(unittest.TestCase):
+    """docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)", review fixes: the judging run's
+    budget source, its one ledger, the automatic pricing refresh and the pricing record kept with the run."""
+
+    def setUp(self):
+        import run_transcript_judge as cli
+        self.cli = cli
+        self.tmp = Path(tempfile.mkdtemp(prefix="judge-one-budget-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def args(self, **values):
+        return SimpleNamespace(**dict({"ledger": None, "pricing_record": None}, **values))
+
+    def test_recorded_budget_config_reads_the_runs_own_launch_config(self):
+        run_dir = self.tmp / "run-x"
+        run_dir.mkdir()
+        self.assertIsNone(self.cli.recorded_budget_config(run_dir))           # no settings.json: $50 default
+        (run_dir / "settings.json").write_text(json.dumps({"config": {"run_budget_usd": 100}}))
+        self.assertIsNone(self.cli.recorded_budget_config(run_dir))           # no judge budget recorded
+        (run_dir / "settings.json").write_text(json.dumps({"config": {"behavior_judge_max_usd": 80,
+                                                                      "budget_track": "ablation"}}))
+        recorded = self.cli.recorded_budget_config(run_dir)
+        self.assertEqual((recorded["max_usd"], recorded["track"]), ("80", "ablation"))
+        limit = self.cli.fixed_run_limit(None, recorded, prior_usd="30")
+        self.assertEqual((limit["limit_usd"], limit["room_usd"], limit["source"]), ("80", "50", "run_config"))
+        (run_dir / "settings.json").write_text(json.dumps({"config": {"behavior_judge_max_usd": "abc"}}))
+        with self.assertRaises(ValueError):
+            self.cli.recorded_budget_config(run_dir)
+
+    def test_a_judge_directory_is_counted_in_one_ledger(self):
+        from research_swarm.budget import read_ledger_id
+        judge_dir = self.tmp / "judge"
+        first, other = self.tmp / "first" / "budget.sqlite", self.tmp / "other" / "budget.sqlite"
+        first.parent.mkdir()
+        other.parent.mkdir()
+        first_id, other_id = BudgetLedger(first).ledger_id, BudgetLedger(other).ledger_id
+        self.assertNotEqual(first_id, other_id)
+        self.assertEqual((read_ledger_id(first), BudgetLedger(first).ledger_id), (first_id, first_id))   # stable
+        self.assertIsNone(read_ledger_id(self.tmp / "absent.sqlite"))
+        # Before any paid invocation: the checkout's (or the given) ledger.
+        self.assertEqual(self.cli.judging_ledger(self.args(ledger=other), judge_dir), other.resolve())
+        self.cli.record_run_budget(judge_dir, {"ledger_run_id": "judge-1"}, run_dir=self.tmp, ledger=first)
+        self.assertEqual(self.cli.ledger_binding(judge_dir), (first_id, str(first)))
+        self.assertEqual(self.cli.judging_ledger(self.args(ledger=first), judge_dir), first.resolve())
+        moved = self.tmp / "copy.sqlite"
+        shutil.copy(first, moved)                                               # a copy keeps its id
+        self.assertEqual(self.cli.judging_ledger(self.args(ledger=moved), judge_dir), moved.resolve())
+        with self.assertRaisesRegex(self.cli.RouteRefused, "is another ledger"):
+            self.cli.judging_ledger(self.args(ledger=other), judge_dir)
+        with self.assertRaisesRegex(self.cli.RouteRefused, "is missing"):
+            self.cli.judging_ledger(self.args(ledger=self.tmp / "missing.sqlite"), judge_dir)
+        # Without --ledger, a checkout whose own ledger differs uses the bound one (automatic, logged).
+        lines = []
+        with mock.patch("research_swarm.budget.DEFAULT_LEDGER_PATH", lambda root: other):
+            self.assertEqual(self.cli.judging_ledger(self.args(), judge_dir, log=lines.append), first.resolve())
+        self.assertIn(str(first), lines[0])
+
+    def pricing_record(self, hours_old):
+        import datetime as dt
+        newest = sorted((REPO / "data" / "validation").glob("judge-route-pricing-*.json"))[-1]
+        record = json.loads(newest.read_text())
+        record["created_at"] = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=hours_old)).isoformat()
+        path = self.tmp / f"judge-route-pricing-{hours_old}h.json"
+        path.write_text(json.dumps(record))
+        return path
+
+    def test_a_paid_judge_never_prices_with_a_stale_record(self):
+        fresh, stale = self.pricing_record(1), self.pricing_record(100)
+        self.assertIsNone(self.cli.pricing_problem(fresh))
+        self.assertIn("older than 72 h", self.cli.pricing_problem(stale))
+        self.assertIn("no judge route pricing record", self.cli.pricing_problem(None))
+        self.assertEqual(Path(self.cli.route_settings(self.args(pricing_record=fresh), paid=True).pricing_record), fresh)
+        with self.assertRaisesRegex(self.cli.RouteRefused, "older than 72 h.*nothing was sent"):
+            self.cli.route_settings(self.args(pricing_record=stale), paid=True)
+        self.assertTrue(self.cli.route_settings(self.args(pricing_record=stale), paid=False).pricing_verified)  # offline
+
+    def test_refresh_pricing_retries_until_a_fresh_valid_record(self):
+        fresh, stale = self.pricing_record(1), self.pricing_record(100)
+        newest = [stale]
+        calls, waits, lines = [], [], []
+
+        def freeze(argv):
+            calls.append(argv)
+            if len(calls) == 2:
+                newest.append(fresh)
+                return 0
+            raise OSError("catalog 503")
+        with mock.patch.object(self.cli, "pricing_record", lambda args: newest[-1]):
+            reason = self.cli.refresh_pricing(self.args(), freeze=freeze, log=lines.append, sleep=waits.append)
+        self.assertIn("older than 72 h", reason)
+        self.assertEqual((len(calls), waits), (2, [10]))
+        calls.clear(), waits.clear()
+        newest[:] = [stale]
+        with mock.patch.object(self.cli, "pricing_record", lambda args: newest[-1]):
+            self.cli.refresh_pricing(self.args(), freeze=lambda argv: calls.append(argv) or 0, log=lines.append,
+                                     sleep=waits.append)
+        self.assertEqual((len(calls), waits), (3, [10, 30]))   # never raises; the paid route then refuses
+        self.assertIn("Refresh attempt 3", lines[-1])
+        # An explicit --pricing-record is used as given (route_settings refuses it when stale).
+        self.assertIsNone(self.cli.refresh_pricing(self.args(pricing_record=stale), freeze=freeze, sleep=waits.append))
+
+    def test_the_pricing_record_used_is_kept_with_the_judging(self):
+        record = self.pricing_record(1)
+        routes = self.cli.route_settings(self.args(pricing_record=record), paid=True)
+        kept = self.cli.keep_pricing_record(self.tmp / "judge", routes)
+        self.assertEqual((kept, kept.read_bytes()), (self.tmp / "judge" / "route-pricing" / record.name,
+                                                     record.read_bytes()))
+        self.assertEqual(self.cli.keep_pricing_record(self.tmp / "judge", routes), kept)   # once
+        from research.analysis.judge.route import JudgeRouteSettings
+        self.assertIsNone(self.cli.keep_pricing_record(self.tmp / "judge", JudgeRouteSettings.defaults()))
 
 
 DRIVER = """import json, sys
@@ -1524,29 +1699,28 @@ class LiveConfigTests(unittest.TestCase):
 
     def test_live_is_on_by_default_for_auto_judge_configs(self):
         self.assertEqual(auto_judge.live_mode(self.CONFIG), "paid")
-        self.assertEqual(auto_judge.live_settings(self.CONFIG),
-                         {"mode": "paid", "max_usd": "10", "interval_seconds": 300})
+        self.assertEqual(auto_judge.live_settings(self.CONFIG), {"mode": "paid", "interval_seconds": 300})
         self.assertIsNone(auto_judge.live_mode(dict(self.CONFIG, live_behavior_judge=False)))
         self.assertEqual(auto_judge.live_mode(dict(self.CONFIG, live_behavior_judge="mock")), "mock")
         self.assertIsNone(auto_judge.live_mode({"live_behavior_judge": True}))   # never without auto_behavior_judge
         settings = auto_judge.judge_settings(self.CONFIG, live=True)
-        self.assertEqual((settings["live"], settings["live_max_usd"], settings["max_usd"]), (True, "10", "50"))
+        self.assertEqual((settings["live"], settings["max_usd"]), (True, "50"))
+        self.assertNotIn("live_max_usd", settings)   # no live share: one budget for the judging run
         self.assertEqual(auto_judge.judge_settings({"auto_behavior_judge": True}, live=True)["max_usd"], "50")
 
     def test_live_key_problems(self):
         for changes, text in (({"live_behavior_judge": "yes"}, 'true, false or "mock"'),
-                              ({"behavior_judge_live_max_usd": 0}, "positive amount"),
-                              ({"behavior_judge_live_max_usd": 60}, "exceeds the judge's budget for the run"),
-                              ({"behavior_judge_max_usd": 5, "behavior_judge_live_max_usd": 6}, "exceeds"),
                               ({"behavior_judge_live_interval_seconds": 30}, "from 60 to 3600"),
                               ({"behavior_judge_live_interval_seconds": True}, "integer")):
             problems = auto_judge.judge_config_problems(dict(self.CONFIG, **changes))
             self.assertTrue(any(text in p for p in problems), (changes, problems))
-        self.assertEqual(auto_judge.judge_config_problems(dict(self.CONFIG, behavior_judge_live_max_usd=5,
-                                                               behavior_judge_live_interval_seconds=120)), [])
-        # No $50 ceiling: a larger judge budget allows a larger live share (any track, no approval note).
+        self.assertEqual(auto_judge.judge_config_problems(dict(self.CONFIG, behavior_judge_live_interval_seconds=120)),
+                         [])
+        # The superseded live share is not read (a warning of the run_budget launch gate, never a refusal).
+        for share in (0, 6, 60, "abc"):
+            self.assertEqual(auto_judge.judge_config_problems(dict(self.CONFIG, behavior_judge_max_usd=5,
+                                                                   behavior_judge_live_max_usd=share)), [])
         self.assertEqual(auto_judge.judge_config_problems(dict(self.CONFIG, behavior_judge_max_usd=120,
-                                                               behavior_judge_live_max_usd=60,
                                                                budget_track="ablation")), [])
         with self.assertRaises(ValueError):
             auto_judge.judge_settings(dict(self.CONFIG, live_behavior_judge="mock"), live=True)

@@ -52,7 +52,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from research_swarm.budget import (DEFAULT_LEDGER_PATH, MANUAL_BASIS, UNRESOLVED_STATES, BudgetLedger,  # noqa: E402
-                                   list_requests, read_snapshot)
+                                   list_requests, owner_gone, read_snapshot)
 from research_swarm.provider import MODEL_ID  # noqa: E402
 
 URL = "https://openrouter.ai/api/v1/generation?id={id}"
@@ -145,6 +145,8 @@ def reconcile_requests(ledger, requests, generation_ids, fetch, *, model_id=MODE
         entry = {**item, "generation_id": generation_ids.get(item["request_id"])}
         if item["state"] == "reserved" and not allow_reserved:
             entry["outcome"] = "skipped_in_flight_or_stale_reserved"
+        elif item["state"] == "reserved" and not owner_gone(item.get("owner"), item.get("created")):
+            entry["outcome"] = "skipped_owner_running"   # its own process settles it
         elif not entry["generation_id"]:
             entry["outcome"] = "no_generation_id"
         else:
@@ -192,6 +194,9 @@ def plan_manual(manual, requests, *, allow_reserved=False):
         elif hold["state"] not in allowed:
             problems.append(f"{request_id}: state {hold['state']} (a 'reserved' hold needs --include-stale-reserved, "
                             "only after its run has fully stopped)")
+        elif hold["state"] == "reserved" and not owner_gone(hold.get("owner"), hold.get("created")):
+            problems.append(f"{request_id}: still reserved by a running process ({hold.get('owner') or 'unknown'}); "
+                            "it settles itself, and its hold is reconcilable once that process is gone")
         else:
             planned.append({**hold, "manual_cost_usd": str(amount)})
         seen.add(request_id)
@@ -250,8 +255,9 @@ def main(argv=None, fetch=None):
     parser.add_argument("--credentials-root", type=Path, default=ROOT,
                         help="checkout whose private .env holds the host key (default: this checkout)")
     parser.add_argument("--include-stale-reserved", action="store_true",
-                        help="also reconcile 'reserved' holds; only after their run has fully stopped (a new run "
-                             "marks the holds of a process that is gone as uncertain automatically)")
+                        help="also reconcile 'reserved' holds whose process is gone (a hold of a running process is "
+                             "never touched; a new run marks the holds of a process that is gone as uncertain "
+                             "automatically)")
     parser.add_argument("--dry-run", action="store_true",
                         help="only list the holds and the planned settlements: nothing fetched, no credential read, "
                              "ledger unchanged")

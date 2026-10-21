@@ -29,18 +29,44 @@ Implementation: `research_swarm.budget` (per-run admission, `start_run`, automat
 `scripts/run_transcript_judge.py`, `scripts/reconcile_ledger.py`, `scripts/check_provider_limit.py`,
 `scripts/preflight.py`, `configs/README.md` ("Run budget") and `AGENTS.md`.
 
-Merged with "Live behavior judge during the run (October 20, 2026)" below (implementer, no new owner
-decision): the judge's budget (`behavior_judge_max_usd`, else $50) holds for the whole run's judging
-(live passes, the early model stages and the post-run judge together). Each invocation counts what the
-ledger already holds for the run (rows labelled with the run id, `client.committed_for_run`) against
-that budget and registers its own ledger run with the room left, so the ledger and the invocation's
-run limit enforce the same amount and a resume never gets a fresh budget. The live passes'
-`behavior_judge_live_max_usd` (default $10) limits how much of that budget the live passes may use
-(a part of the judge's budget, not a second ledger cap). There is no clamp to an analysis allowance, no standing approval and no owner-only track; a paid live pass
-needs only a run config that enables paid live judging (`--run-config`, passed by the supervisor). The
-deferral of a live pass when the shared provider key could not also cover the running pilot reads the
-pilot run's own remaining budget and holds (never a cumulative allowance), and it only postpones that
-pass; it never refuses a run.
+Merged with "Live behavior judge during the run (October 20, 2026)" below, as revised after the
+review of October 20, 2026 (implementer, no new owner decision; no paid call): the judge's budget
+(`--run-limit`, else the run config's `behavior_judge_max_usd`, read from `--run-config` or else from
+the config the run recorded in `RUN/settings.json`, else $50) holds for the *judging run*: one judge
+directory of one judged run, its live store included (live passes, the early model stages, the
+post-run judge and every resume together). Each invocation counts what that directory's earlier
+invocations committed (`client.committed_for_judging`: the ledger runs its `run-budgets.json` records,
+written before any request, and the rows its request archives name) against the budget, whichever way
+the budget was given, and registers its own ledger run with the room left and the largest reservation
+factor reached so far, so the ledger and the run limit enforce the same amount and a resume never gets
+a fresh budget. A re-judge into a new `--output-dir` is a judging run with its own budget, so old spend
+or holds of another judging run never block it. A judge directory's spend is counted in one ledger
+(each ledger now has a `ledger_id`, recorded in `run-budgets.json`): without `--ledger` the judge uses
+that ledger when the checkout's own differs, and it refuses a different or missing one (nothing is
+sent). There is no live share (`behavior_judge_live_max_usd` is no longer read), no provider-key
+headroom deferral (the key's limit is only recorded), no clamp to an analysis allowance, no standing
+approval and no owner-only track; a paid live pass needs only a run config that enables paid live
+judging (`--run-config`, passed by the supervisor).
+
+Review fixes of October 20, 2026 (implementer, no new owner decision; no paid call), so the one budget
+stays automatic and as tight as the approved judge speed allows: (1) the judge speed fix's smaller
+Sonnet holds (12,000 of 48,000 output tokens, owner approved; `route.RESERVATION_OUTPUT_TOKENS`) stay.
+Without the removed acknowledgement, a Sonnet output billed past its hold is recorded and scales the
+judging run's later reservations (across its invocations); only the requests already in flight then
+can bill past the budget, by at most their unreserved output (about 23% of $50 in the worst case of 32
+Sonnet requests all running to 48,000 tokens; the largest measured Sonnet output was 3,181 tokens).
+Proposal for the owner, not decided: reserve Sonnet's full `max_tokens` (an empty
+`RESERVATION_OUTPUT_TOKENS`) if the budget must be a hard bound, at the cost of judge concurrency.
+(2) A paid judge or
+pilot launch refreshes its route-pricing record automatically (unpaid, up to three attempts) when it is
+missing, older than 72 h or no longer valid, and sends nothing with a record that is still stale or
+invalid after that: a live pass is deferred to the next pass, any other invocation refuses (exit 4,
+pilot gate `route_pricing`) and is simply run again later; an explicit `--pricing-record` must be fresh
+and valid. (3) The judge copies the pricing record it used into `RUN/analysis/judge/route-pricing/`
+(the supervisor also packages it as `judge-route-pricing/` in `completed-phase.tgz`). (4)
+`reconcile_ledger.py` (`--include-stale-reserved`, `--manual`) and `BudgetLedger.reconcile` never
+settle a `reserved` hold whose process is still running. (5) `scripts/supervise_run.py` prints the
+run's budget (and the judge's) on its own console before the launch (`launch-budget.json`).
 
 ## Live behavior judge during the run (October 20, 2026)
 
@@ -50,9 +76,10 @@ owner's runs with `auto_behavior_judge` true (same standing approval, same $50 p
 frozen judge revision v3, rubric `gdm-judge-rubric/3`, prompts and model allocation):
 
 Spending parts superseded by "One per-run budget, no manual approvals (October 20, 2026)" (see the
-merge note there): no standing approval, the judge's budget is any positive `behavior_judge_max_usd`
-($50 when absent) for the whole run's judging, the live sub-cap is the part of it the live passes may use, there
-is no analysis-scope clamp, and any track qualifies. The table below records the rule as decided.
+merge note and the review fixes there): no standing approval, the judge's budget is any positive
+`behavior_judge_max_usd` ($50 when absent) for the judging run (the run's judge directory, live passes
+included), there is no live sub-cap, no provider-key deferral and no analysis-scope clamp, and any
+track qualifies. The table below records the rule as decided.
 
 | Item | Rule |
 | --- | --- |

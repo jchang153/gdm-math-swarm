@@ -19,7 +19,7 @@ from pathlib import Path
 from unittest import mock
 
 from research_swarm import launch_gates
-from research_swarm.budget import BudgetLedger, list_runs, read_snapshot
+from research_swarm.budget import BudgetLedger, list_requests, list_runs, read_snapshot
 from research_swarm.dataset import FrozenDataset
 from research_swarm.provider import MODEL_ID, ProviderSettings, frozen_fields, settings_from_config
 
@@ -246,10 +246,11 @@ class LaunchGateTests(GateFixture):
         self.assertTrue(result["evidence"]["route_pricing"]["passed"], result["evidence"]["route_pricing"])
 
     def test_route_pricing_freshness_settings_and_snapshot(self):
-        # A stale freeze is a warning: the launch scripts refresh it automatically (unpaid) first.
+        # The launch scripts refresh a stale freeze automatically (unpaid) first; a freeze still stale after
+        # that refuses the paid launch (reservations from old prices are no upper bound; review finding).
         stale = self.evaluate(now=NOW + datetime.timedelta(hours=80))
-        self.assertTrue(stale["evidence"]["route_pricing"]["passed"], stale["evidence"]["route_pricing"])
-        self.assertTrue(any("refresh it automatically" in w for w in stale["evidence"]["route_pricing"]["warnings"]))
+        self.assertBlocked(stale, "route_pricing", "refresh it automatically")
+        self.assertIn("81.0 h old", stale["evidence"]["route_pricing"]["reason"])   # written an hour before NOW
         lower = pilot_config(provider_settings={"prompt_usd_per_token": "0.00000015"})
         result = self.evaluate(lower)
         self.assertBlocked(result, "route_pricing", "differ from the ProviderSettings")
@@ -271,6 +272,11 @@ class LaunchGateTests(GateFixture):
         self.assertIn("other provider settings", launch_gates.route_pricing_refresh_reason(
             pilot_config(provider_settings={"prompt_usd_per_token": "0.00000015"}), self.validation, now=NOW))
         self.assertIn("no route-pricing", launch_gates.route_pricing_refresh_reason(config, self.tmp / "empty"))
+        # Review finding: a newest freeze that is not valid (e.g. the catalog briefly reported the pinned route
+        # unavailable) is refreshed at the next launch instead of blocking every launch for 72 h.
+        self.write_route(valid=False, reason="Pinned provider route unavailable", when=NOW - datetime.timedelta(minutes=1))
+        self.assertIn("not valid (Pinned provider route unavailable)",
+                      launch_gates.route_pricing_refresh_reason(config, self.validation, now=NOW))
 
     def test_newest_evidence_wins_and_legacy_names_ignored(self):
         (self.validation / "judge-2026-10-13.json").write_text(json.dumps({"all_required_passed": True}))
@@ -433,19 +439,22 @@ class LaunchGateTests(GateFixture):
         default = self.evaluate(dict(config, auto_behavior_judge=True))["evidence"]["behavior_judge"]
         self.assertEqual((default["budget_usd"], default["budget_source"]), ("50", "default"))
         # Live judging (docs/plan.md, "Live behavior judge during the run (October 20, 2026)") is on by
-        # default; its share is part of the judge's budget for the run, which may be any positive amount.
-        self.assertEqual((default["live_mode"], default["live_max_usd"]), ("paid", "10"))
+        # default and spends from the same budget: there is no live share (one spending control only).
+        self.assertEqual(default["live_mode"], "paid")
+        self.assertNotIn("live_max_usd", default)
         self.assertIn("live judging during the run", default["reason"])
-        large = self.evaluate(dict(config, **dict(judge, behavior_judge_max_usd=120,
-                                                  behavior_judge_live_max_usd=60)))["evidence"]["behavior_judge"]
-        self.assertEqual((large["passed"], large["live_max_usd"]), (True, "60"))
+        self.assertIn("from the same budget", default["reason"])
+        # A superseded live share in an older config is not read: a warning in the run_budget gate, never a refusal.
+        old = self.evaluate(dict(config, **dict(judge, behavior_judge_live_max_usd=60)))
+        self.assertTrue(old["evidence"]["behavior_judge"]["passed"])
+        self.assertTrue(any("behavior_judge_live_max_usd" in w for w in old["evidence"]["run_budget"]["warnings"]))
+        self.assertNotIn("live_max_usd", auto_judge.judge_settings(dict(judge, behavior_judge_live_max_usd=60)))
         off = self.evaluate(dict(config, **judge, live_behavior_judge=False))["evidence"]["behavior_judge"]
-        self.assertEqual((off["live_mode"], off["live_max_usd"]), (None, None))
+        self.assertEqual(off["live_mode"], None)
         for bad, text in ((dict(judge, behavior_judge_max_usd=0), "positive"),
                           (dict(judge, behavior_judge_max_usd=True), "not an amount"),
                           (dict(judge, behavior_judge_max_usd="abc"), "not an amount"),
                           (dict(judge, auto_behavior_judge="yes"), "must be a boolean"),
-                          (dict(judge, behavior_judge_live_max_usd=60), "exceeds the judge's budget"),
                           (dict(judge, live_behavior_judge="yes"), 'true, false or "mock"')):
             self.assertBlocked(self.evaluate(dict(config, **bad)), "behavior_judge", text)
             with self.assertRaises(ValueError):
@@ -1004,14 +1013,36 @@ class ScriptTests(GateFixture):
                                                out=lines.append)
         self.assertEqual((fresh, calls), (None, []))  # a fresh freeze for these settings: nothing to do
         stale = freeze_route.refresh_if_needed(config, "cfg.json", self.tmp / "no-freeze",
-                                               freeze=lambda argv: calls.append(argv) or 0, out=lines.append)
+                                               freeze=lambda argv: calls.append(argv) or 0, out=lines.append,
+                                               sleep=lambda seconds: None)
         self.assertIn("no route-pricing freeze", stale)
-        self.assertEqual(calls, [["--config", "cfg.json", "--output-dir", str(self.tmp / "no-freeze")]])
+        # A freeze that wrote no fresh valid record is tried again, three attempts in all.
+        self.assertEqual(calls, [["--config", "cfg.json", "--output-dir", str(self.tmp / "no-freeze")]] * 3)
+        self.assertIn("Refresh attempt 3: still no route-pricing freeze", lines[-1])
 
         def offline(argv):
             raise OSError("network unreachable")
-        freeze_route.refresh_if_needed(config, "cfg.json", self.tmp / "no-freeze", freeze=offline, out=lines.append)
-        self.assertIn("refresh failed (OSError", lines[-1])  # never raises
+        waits = []
+        freeze_route.refresh_if_needed(config, "cfg.json", self.tmp / "no-freeze", freeze=offline, out=lines.append,
+                                       sleep=waits.append)
+        self.assertIn("failed (OSError", lines[-1])  # never raises
+        self.assertEqual((sum("failed (OSError" in line for line in lines), waits), (3, [10, 30]))  # retried
+        # A newest freeze that is not valid is refreshed; the attempts stop once a fresh valid one exists.
+        attempts = []
+
+        def flaky(argv):
+            attempts.append(argv)
+            if len(attempts) == 2:
+                self.write_route(when=datetime.datetime.now(datetime.timezone.utc))
+                return 0
+            raise OSError("catalog 503")
+        self.write_route(valid=False, reason="Pinned provider route unavailable",   # newer than the valid one above
+                         when=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=30))
+        reason = freeze_route.refresh_if_needed(config, "cfg.json", self.validation, freeze=flaky, out=lines.append,
+                                                sleep=lambda seconds: None)
+        self.assertIn("not valid", reason)
+        self.assertEqual(len(attempts), 2)
+        self.assertIsNone(launch_gates.route_pricing_refresh_reason(config, self.validation))
 
     def test_reconcile_script(self):
         module = load_script("reconcile_ledger")
@@ -1101,6 +1132,21 @@ class ScriptTests(GateFixture):
         audit = json.loads(sorted((self.ledger.parent / "reconciliations").glob("reconcile-*.json"))[-1].read_text())
         self.assertEqual((audit["expected_models"], audit["scope"], audit["credential_recorded"]),
                          (["anthropic/claude-opus-5.5"], "analysis", False))
+
+    def test_reconcile_never_touches_a_hold_of_a_running_process(self):
+        """Review finding: settling an in-flight hold would lose the running process's real bill; a 'reserved'
+        hold is reconcilable (with --include-stale-reserved) only once its process is gone."""
+        module = load_script("reconcile_ledger")
+        ledger = ledger_run(self.ledger, "pilot-r", "pilot", 20)       # this process: alive
+        hold = ledger.reserve("pilot", "agent-001", 1)
+        holds = list_requests(self.ledger)
+        planned, problems = module.plan_manual([(hold, "0.2")], holds, allow_reserved=True)
+        self.assertEqual(planned, [])
+        self.assertIn("still reserved by a running process", problems[0])
+        results = module.reconcile_requests(ledger, holds, {hold: "gen-1"}, lambda *a: self.fail("fetched"),
+                                            allow_reserved=True)
+        self.assertEqual(results[0]["outcome"], "skipped_owner_running")
+        self.assertEqual(list_requests(self.ledger)[0]["state"], "reserved")
 
     def test_reconcile_exception_path_hold_listing_and_manual_settlement(self):
         module = load_script("reconcile_ledger")

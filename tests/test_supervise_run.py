@@ -65,8 +65,20 @@ class SuperviseRunTests(unittest.TestCase):
                                      "gdm-run-x", "--root", str(self.tmp), "--retrieval-wait", "0", *extra])
 
     def test_full_cycle_without_shutdown(self):
-        code = supervise.Supervisor(self.args("--no-shutdown")).main()
+        import contextlib
+        import io
+        import tarfile
+        console = io.StringIO()
+        with contextlib.redirect_stdout(console):
+            code = supervise.Supervisor(self.args("--no-shutdown")).main()
         self.assertEqual(code, 0)
+        # The run's budget is printed on the supervisor's own console before the launch and recorded.
+        self.assertIn("Run budget: $40 (config run_budget_usd)", console.getvalue())
+        launch = json.loads((self.phase / "launch-budget.json").read_text())
+        self.assertEqual((launch["run_budget_usd"], launch["run_budget_source"]), ("40", "config run_budget_usd"))
+        self.assertNotIn("judge_budget_usd", launch)   # no behavior judge in this config
+        with tarfile.open(self.phase / "completed-phase.tgz") as tar:
+            self.assertIn("launch-budget.json", tar.getnames())
         for name in ("budget-before-launch.sqlite", "budget-after-pilot.sqlite", "budget-final.sqlite",
                      "completed-run.tgz", "completed-phase.tgz", "completed-checksums.json", "live-checkpoint.json"):
             self.assertTrue((self.phase / name).exists(), name)
@@ -197,7 +209,17 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         return phase, run
 
     def test_judge_runs_after_the_follow_ups_and_is_packaged(self):
-        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        # The pricing record a judge invocation used (it keeps a copy in RUN/analysis/judge/route-pricing/).
+        kept = self.tmp / "runs" / "run-x" / "analysis" / "judge" / "route-pricing" / "judge-route-pricing-x.json"
+        kept.parent.mkdir(parents=True)
+        kept.write_text("{}")
+        import contextlib
+        import io
+        console = io.StringIO()
+        with contextlib.redirect_stdout(console):
+            self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        self.assertIn("Behavior judge budget: $", console.getvalue())
+        self.assertIn("judge_budget_usd", json.loads((self.phase / "launch-budget.json").read_text()))
         self.assertEqual(self.follow_up_order(), ["reconcile_ledger.py", "evaluate_run.py", "evaluate_run.py",
                                                   "timeline.py", "run_transcript_judge.py"])  # the judge refreshes pricing itself
         judge_line = (self.tmp / "order.log").read_text().splitlines()[-1]
@@ -224,6 +246,7 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         self.assertTrue({"behavior-judge.json", "behavior-judge.log", "behavior-judge.exit", "live-judge.json",
                          "behavior-judge-early.log", "behavior-judge-early.exit"} <= phase)
         self.assertIn("runs/run-x/analysis/judge/report.json", run)
+        self.assertIn("judge-route-pricing/judge-route-pricing-x.json", phase)
         status = json.loads((self.phase / "supervisor-status.json").read_text())
         self.assertEqual(status["stage"], "done_vm_left_running")
         self.assertEqual(json.loads((self.phase / "worker.exit").read_text()), 0)
@@ -271,7 +294,7 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
     def test_skips(self):
         cases = (({"behavior_judge_max_usd": "abc"}, (), "invalid judge settings"),
                  ({"behavior_judge_max_usd": 0}, (), "invalid judge settings"),
-                 ({"behavior_judge_live_max_usd": 60}, (), "invalid judge settings"),
+                 ({"live_behavior_judge": "yes"}, (), "invalid judge settings"),
                  ({}, ("--no-postrun",), "--no-postrun"))
         for n, (changes, extra, reason) in enumerate(cases):
             self.phase = self.tmp / "runs" / "phase-b" / f"run-{n}"
