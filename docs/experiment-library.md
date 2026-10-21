@@ -641,7 +641,8 @@ entries with all existing remote entries and lists them newest first by actual s
 (owner request, October 21, 2026; the local `runs/index.html` uses the same order). It
 preserves existing Space configuration and run files, refuses conflicting run IDs,
 requires a private Space, verifies bundle hashes, and screens obvious credential
-filenames and token patterns (including compressed Inspect logs). Pattern scanning
+filenames and token patterns (including compressed Inspect logs). A token pattern counts only at a
+token boundary: GPT runs' encrypted reasoning blobs contain `sk-`/`hf_` runs mid-token, which are not keys. Pattern scanning
 is not a universal secret-detection guarantee; review new data sources before upload.
 
 ### Catalogue page
