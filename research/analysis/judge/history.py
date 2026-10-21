@@ -262,6 +262,7 @@ class AgentHistory:
     source: str | None = None
     persona: str | None = None
     exit: dict | None = None
+    role: str | None = None           # "overseer" for an overseer run's monitoring agent, else None
     _index: dict = field(default_factory=dict, repr=False)
 
     def get(self, item_id):
@@ -278,6 +279,8 @@ class ConferenceRecords:
         self.available = False
         self.posts, self.dms, self.feedback, self.library, self.submissions = {}, {}, {}, {}, {}
         self.tasks = {}
+        # Overseer runs: credits the overseer reverted, keyed by the reverted submission's internal id.
+        self.reversions = {}
         self.events = []            # dicts ordered by seq
         self.events_by_seq = {}
         self.public_to_internal, self.internal_to_public = {}, {}
@@ -414,6 +417,9 @@ def load_conference(run_dir, *, live=False):
             conf.submissions["sub-%06d" % row["submission_id"]] = row
         for row in rows("tasks"):
             conf.tasks[row["task_id"]] = row
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reversions'").fetchone():
+            for row in rows("reversions"):
+                conf.reversions["sub-%06d" % row["submission_id"]] = row
         conf.available = True
     except sqlite3.Error as exc:
         conf.problems.append({"file": str(path), "error": "sqlite:" + type(exc).__name__})
@@ -474,7 +480,8 @@ def _record_items(conf):
                   "task_id": row.get("task_id"), "origin_path": row.get("origin_path"), "sha256": row["sha256"],
                   "submission_id": None if row.get("submission_id") is None else "sub-%06d" % row["submission_id"],
                   # Accepted solutions are published automatically, not by the agent's choice.
-                  "automatic": solution, "event_seq": seq_of.get(lid)})
+                  "automatic": solution, "event_seq": seq_of.get(lid),
+                  **_withdrawn_meta(conf, row)})
     for sid, row in conf.submissions.items():
         conf.items[sid] = make_item(
             sid, row["agent_id"], "conference", "submission", row["source"], time=row["submitted_at"],
@@ -484,7 +491,27 @@ def _record_items(conf):
                   "compile_status": row.get("compile_status"), "sorry_count": row.get("sorry_count"),
                   "file_path": row.get("file_path"), "source_sha256": row["source_sha256"],
                   "task_status_at_submission": row.get("task_status_at_submission"),
-                  "judged_at": iso(row.get("judged_at")), "event_seq": seq_of.get(sid)})
+                  "judged_at": iso(row.get("judged_at")), "event_seq": seq_of.get(sid),
+                  **_reverted_meta(conf.reversions.get(sid))})
+
+
+def _reverted_meta(reversion):
+    """Item meta for a credit the overseer reverted ({} otherwise, so other runs' items are unchanged)."""
+    if not reversion:
+        return {}
+    return {"credit_reverted": {"reverted_by": reversion["reverted_by"], "reason": reversion["reason"],
+                                "reverted_at": iso(reversion["reverted_at"]),
+                                "note": "The overseer reverted this credit: the credit and the library entry were "
+                                        "removed and the problem reopened. Nobody was notified automatically."}}
+
+
+def _withdrawn_meta(conf, row):
+    """Item meta for an accepted solution withdrawn from the library by a reversion ({} otherwise)."""
+    for reversion in conf.reversions.values():
+        if reversion.get("artifact_id") == row["artifact_id"]:
+            return {"withdrawn": {"reverted_by": reversion["reverted_by"], "reason": reversion["reason"],
+                                  "withdrawn_at": iso(reversion["reverted_at"])}}
+    return {}
 
 
 def crosswalk_for(value, conf):
@@ -1055,17 +1082,22 @@ def load_host(run_dir, runtime, conf, problems):
     """Host-only facts and ``HOST.*`` items (``visible_to_agent`` False)."""
     run_dir = Path(run_dir)
     host = {"run_id": run_dir.name, "evaluations": {}, "statement_defects": load_statement_defects(),
-            "exits": {}, "personas": {}, "start_barrier_time": None, "stop_time": None, "stop_reason": None,
+            "exits": {}, "personas": {}, "roles": {}, "overseer": None, "start_barrier_time": None, "stop_time": None, "stop_reason": None,
             "items": []}
     try:
         settings = json.loads((run_dir / "settings.json").read_text(encoding="utf-8"))
         host["personas"] = dict(settings.get("personas") or {})
+        effective = settings.get("effective") or {}
+        host["roles"] = dict(effective.get("roles") or {})
+        host["overseer"] = effective.get("overseer") or (settings.get("config") or {}).get("overseer")
     except (OSError, ValueError):
         problems.append({"file": "settings.json", "error": "missing_or_invalid"})
     for line, record in enumerate(runtime, 1):
         kind, agent = record.get("kind"), record.get("agent_id")
         if kind == "agent_configured" and agent and agent not in host["personas"]:
             host["personas"][agent] = (record.get("payload") or {}).get("persona")
+        if kind == "agent_configured" and agent and (record.get("payload") or {}).get("role"):
+            host["roles"].setdefault(agent, record["payload"]["role"])
         elif kind == "common_start" and host["start_barrier_time"] is None:
             host["start_barrier_time"] = iso(record.get("timestamp"))
             host["start_barrier_line"] = line
@@ -1237,7 +1269,16 @@ def build_agent(sample, run, *, include_files=True, log_name=None):
                  files_excluded=excluded, segments=len(rebuilt["segments"]))
     return AgentHistory(agent_id=agent, code=code, items=items, exposure_ledger=ledger, host_context=host_context,
                         harness_items=rebuilt["harness"], segments=rebuilt["segments"], stats=stats,
-                        persona=run.host["personas"].get(agent), exit=exit_record)
+                        persona=run.host["personas"].get(agent), exit=exit_record,
+                        role=agent_role(run.host, agent))
+
+
+def agent_role(host, agent):
+    """"overseer" for an overseer run's monitoring agent; None for every other agent (solvers keep the
+    package shape of runs without an overseer)."""
+    overseer = (host.get("overseer") or {}).get("agent_id")
+    role = (host.get("roles") or {}).get(agent) or ("overseer" if agent == overseer else None)
+    return role if role == "overseer" else None
 
 
 def run_item_turn(item_id):

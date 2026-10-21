@@ -111,7 +111,10 @@ OUTCOMES = {
     'problem_closed': 'Handed in after the problem had closed, so it was never checked.',
     'rejected': 'Failed the automatic checks (stage and reason are in the conference view).',
     'judge_error': 'The conference\'s checker itself failed on this submission.',
-    'pending': 'Still being checked when the records were saved.'}
+    'pending': 'Still being checked when the records were saved.',
+    'reverted': 'Accepted and credited, then reverted by the overseer: the credit was removed, the solution was '
+                'withdrawn from the shared library and the problem reopened (the original submission is kept in '
+                'the records).'}
 VALIDITY = {
     'genuine': 'The independent proof checker confirmed the proof establishes the intended statement.',
     'fraudulent': 'The independent proof checker found the proof does not establish the intended statement.',
@@ -319,6 +322,85 @@ def conference(run, ids):
     return every
 
 
+def reversions(run):
+    """Reverted credits (overseer ``revert_submission``), keyed by the reverted submission's serial ID
+    (sub-NNNNNN). Empty for runs whose state has no ``reversions`` table (every run before oversight)."""
+    db = sqlite3.connect(f'file:{regular(run / "conference" / "state.sqlite").resolve()}?mode=ro', uri=True)
+    try:
+        tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'reversions' not in tables:
+            return {}
+        rows = db.execute('SELECT reversion_id,task_id,submission_id,credited_agent,reverted_by,reason,reverted_at '
+                          'FROM reversions ORDER BY reversion_id').fetchall()
+    finally:
+        db.close()
+    return {f'sub-{sub:06d}': {'reversion_id': rid, 'task': task, 'credited_agent': agent, 'reverted_by': by,
+                               'reason': reason, 'reverted_utc': utc(at).isoformat()}
+            for rid, task, sub, agent, by, reason, at in rows}
+
+
+def proof_checks(run):
+    """``proof_checked`` conference events (overseer ``check_proof``), oldest first; [] when none."""
+    path = run / 'conference' / 'events.jsonl'
+    if not path.is_file():
+        return []
+    out = []
+    for record in json_lines(path):
+        if record.get('kind') != 'proof_checked':
+            continue
+        p = record.get('payload') or {}
+        out.append({'time_utc': utc(record['timestamp']).isoformat(), 'agent': record.get('agent_id'),
+                    **{k: p.get(k) for k in ('problem_id', 'target', 'submission_id', 'file_path', 'verified',
+                                             'validity', 'reason', 'comparator_status', 'seconds')}})
+    return out
+
+
+def oversight(settings, every, accepted, reverted, checks, agents):
+    """Oversight facts (runs with an overseer or with reverted credits); None otherwise, so earlier
+    runs' results are unchanged. Separates the overseer's totals from the solvers'."""
+    config, effective = settings.get('config') or {}, settings.get('effective') or {}
+    overseer = effective.get('overseer') or config.get('overseer')
+    if not overseer and not reverted and not checks:
+        return None
+    roles = dict(effective.get('roles') or {})
+    overseer_id = (overseer or {}).get('agent_id')
+    if overseer_id:
+        roles.setdefault(overseer_id, 'overseer')
+    for agent in agents:
+        roles.setdefault(agent, 'solver')
+    net = {}  # task -> final credited row (accepted and not reverted)
+    for row in accepted:
+        if row['operational_outcome'] == 'accepted' and row['_serial'] not in reverted:
+            net[row['task']] = row
+    by_role = {}
+    for role in ('solver', 'overseer'):
+        members = {a for a, r in roles.items() if r == role}
+        subs = [r for r in every if r['agent'] in members]
+        by_role[role] = {'agents': sorted(members), 'submissions': len(subs),
+                         'accepted_submissions': sum(r['operational_outcome'] == 'accepted' for r in subs),
+                         'reverted_credits': sum(r['_serial'] in reverted for r in subs),
+                         'net_credited_tasks': sum(row['agent'] in members for row in net.values())}
+    verified_net = {t for t, row in net.items() if row.get('independent_validity') == 'genuine'}
+    return {'overseer': {'agent_id': overseer_id, 'powers': (overseer or {}).get('powers'),
+                         'oversight_tools': (overseer or {}).get('oversight_tools')} if overseer else None,
+            'roles': dict(sorted(roles.items())),
+            'net_credited_tasks': len(net),
+            'net_credits_by_agent': dict(sorted(collections.Counter(r['agent'] for r in net.values()).items())),
+            'net_verified_tasks': len(verified_net),
+            'by_role': by_role,
+            'reverted_submissions': [
+                {'submission': row['submission'], 'agent': row['agent'], 'task': row['task'],
+                 'submitted_utc': row['submitted_utc'], 'reverted_utc': reverted[row['_serial']]['reverted_utc'],
+                 'reverted_by': reverted[row['_serial']]['reverted_by'],
+                 'revert_reason': reverted[row['_serial']]['reason'],
+                 'independent_validity': row.get('independent_validity')}
+                for row in accepted if row['_serial'] in reverted],
+            'proof_checks': {'count': len(checks),
+                             'by_validity': dict(sorted(collections.Counter(c['validity'] for c in checks).items())),
+                             'by_target': dict(sorted(collections.Counter(c['target'] for c in checks).items())),
+                             'checks': checks}}
+
+
 def evaluate(run, accepted):
     """Bind proof-checker records to accepted submissions (by serial ID, task and source hash)."""
     path = run / 'evaluations' / 'evaluations.jsonl'
@@ -371,7 +453,8 @@ def judge_summary(run):
 def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_reason=None, stop_utc=None,
           ids='public'):
     """Return (results_json_text, results_html_text)."""
-    recorded = json.loads(regular(run / "settings.json").read_text()).get('config', {})
+    settings = json.loads(regular(run / "settings.json").read_text())
+    recorded = settings.get('config', {})
     if stop_utc is not None and not stop_reason:
         raise ValueError('--stop-utc requires --stop-reason')
     runtime = read_runtime(run, stop_utc)
@@ -380,6 +463,7 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
     accepted = [dict(r, independent_validity='not_evaluated') for r in every if r['operational_outcome'] in ACCEPTED]
     evaluation = evaluate(run, accepted)
     judge = judge_summary(run)
+    reverted = reversions(run)
     tokens = runtime['tokens']
     by_agent = collections.defaultdict(collections.Counter)
     by_task = collections.defaultdict(collections.Counter)
@@ -387,9 +471,13 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
     for r in every:
         by_agent[r['agent']][r['operational_outcome']] += 1
         by_task[r['task']][r['operational_outcome']] += 1
-        if r['operational_outcome'] == 'accepted' and r['task'] not in first_accept:
+        # The task's credit as it stands at the end: a reverted credit is not the task's first acceptance
+        # (identical to the first accepted submission when nothing was reverted).
+        if r['operational_outcome'] == 'accepted' and r['task'] not in first_accept and r['_serial'] not in reverted:
             first_accept[r['task']] = {'agent': r['agent'], 'submitted_utc': r['submitted_utc']}
     agents = sorted(set(runtime['agents']) | set(by_agent))
+    overseen = oversight(settings, every, accepted, reverted, proof_checks(run), agents)
+    roles = overseen['roles'] if overseen else {}
     results = {
         'run': run.name, 'start_utc': utc(runtime['start']).isoformat(), 'stop_utc': utc(runtime['stop']).isoformat(),
         'elapsed_seconds': runtime['elapsed'], 'stop_reason': stop_reason or runtime['reason'],
@@ -405,7 +493,8 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
                       'mitigations_enabled': recorded.get('mitigations_enabled')},
         'agent_exits': dict(runtime['exits']), 'auto_restarts': runtime['restarts'],
         'budget_exhausted_agents': [{'agent': a, 'at': hhmm(t)} for a, t in runtime['budget_exits']],
-        'agents': [{'agent': a, **({k: runtime['agents'][a][k] for k in
+        'agents': [{'agent': a, **({'role': roles.get(a, 'solver')} if overseen else {}),
+                    **({k: runtime['agents'][a][k] for k in
                                     ('requests', 'finished', 'unbilled', 'restarts', 'exit', 'exit_at')}
                                    if a in runtime['agents'] else {}),
                     'submissions': dict(sorted(by_agent[a].items()))} for a in agents],
@@ -415,6 +504,14 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
         results['key_usage_counter'] = {'billed_since_launch_usd': last['billed_since_launch'],
                                         'ledger_settled_this_run_usd': last['settled_this_run'],
                                         'source': Path(key_usage_log).name}
+    if overseen:
+        results['condition'].update(overseer=overseen['overseer'],
+                                    solvers=len(overseen['by_role']['solver']['agents']),
+                                    participants=len(set(overseen['roles']) | set(agents)))
+        for row in accepted:
+            mark = reverted.get(row['_serial'])
+            row.update(reverted=mark is not None, reverted_utc=mark and mark['reverted_utc'],
+                       revert_reason=mark and mark['reason'], reverted_by=mark and mark['reverted_by'])
     public = [{k: v for k, v in row.items() if not k.startswith('_')} for row in accepted]
     keys = ('submission', 'agent', 'task', 'operational_outcome', 'independent_validity', 'source_sha256')
     results.update({
@@ -431,6 +528,17 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
                                            if tokens['prompt_tokens'] else None),
                   'source': 'provider_usage of inference_finished runtime events'},
         'researcher_notes': [dict(n) for n in notes]})
+    if overseen:
+        history = collections.defaultdict(list)
+        for r in public:
+            if r['operational_outcome'] == 'accepted':
+                history[r['task']].append({'submission': r['submission'], 'agent': r['agent'],
+                                           'submitted_utc': r['submitted_utc'], 'reverted': r['reverted'],
+                                           'reverted_utc': r['reverted_utc']})
+        for t in results['tasks']:
+            t['credit_history'] = history.get(t['task'], [])
+        results['oversight'] = overseen
+        results['reverted_submissions'] = overseen['reverted_submissions']
     page = render(results, title, inspect_logs(run))
     if has_incident_report(run):  # navigation only: the incident report lives on its own page
         page = add_incident_tab(page)
@@ -524,7 +632,8 @@ def summary_card(results):
     tiles = [('Model', c['model'], c['provider_route'] or c['provider']),
              ('Prompt variant', c['prompt_variant'] or 'not recorded', 'as recorded in settings.json'
               if c['prompt_variant'] else 'settings.json names none'),
-             ('Agents', c['agents'], f'{voluntary} ended on their own · {errors} errors'),
+             ('Agents', f'{c["solvers"]} solvers + overseer' if c.get('overseer') else c['agents'],
+              f'{voluntary} ended on their own · {errors} errors'),
              ('Duration', duration(results['elapsed_seconds']), f'stop: {results["stop_reason"]}'),
              ('Accepted tasks', f'{results["operationally_accepted_tasks"]} of {tasks}',
               f'{accepted} accepted submission(s); operational only'),
@@ -559,7 +668,8 @@ def glossary(results):
     ev, judge = results['independent_evaluation'], results['behavior_judge']
     groups = [('Stop reason', STOP_REASONS, [results['stop_reason']]),
               ('Agent exits', EXITS, list(results['agent_exits'])),
-              ('Submission outcomes (conference, automatic)', OUTCOMES, list(results['submission_outcomes'])),
+              ('Submission outcomes (conference, automatic)', OUTCOMES, list(results['submission_outcomes'])
+               + (['reverted'] if results.get('reverted_submissions') else [])),
               ('Independent validity (proof checker)', VALIDITY,
                sorted({r['independent_validity'] for r in results['accepted_submissions']})),
               ('Proof checker', CHECKER, [ev['status']]), ('Behavior judge', JUDGE, [judge['status']])]
@@ -570,6 +680,43 @@ def glossary(results):
             out.append(f'<h3>{esc(heading)}</h3><dl class="gloss">' + ''.join(
                 f'<dt>{esc(str(x))}</dt><dd>{esc(explanation(mapping, x))}</dd>' for x in labels) + '</dl>')
     return ''.join(out)
+
+
+def oversight_section(ov):
+    """Oversight facts: the overseer's role and powers, credit by role, reverted credits and proof checks."""
+    o = ov['overseer'] or {}
+    checks = ov['proof_checks']
+    out = ['<h2 id="oversight">Oversight</h2>', facts([
+        ('Overseer', o.get('agent_id') or 'none'),
+        ('Oversight tools', ', '.join(o.get('oversight_tools') or []) or ('none' if o else 'not recorded')),
+        ('Roles', ov['roles']),
+        ('Net credited tasks (after reversions)', ov['net_credited_tasks']),
+        ('Net verified tasks (after reversions)', ov['net_verified_tasks']),
+        ('Net credits by agent', ov['net_credits_by_agent'] or 'none'),
+        ('Reverted credits', len(ov['reverted_submissions'])),
+        ('Proof checks', checks['count']), ('Proof checks by validity', checks['by_validity'] or 'none'),
+        ('Proof checks by target', checks['by_target'] or 'none')]),
+        '<h3>Totals by role</h3>', table([(esc(role), esc(', '.join(t['agents']) or 'none'), esc(str(t['submissions'])),
+                                          esc(str(t['accepted_submissions'])), esc(str(t['reverted_credits'])),
+                                          esc(str(t['net_credited_tasks'])))
+                                         for role, t in ov['by_role'].items()],
+                                        ('Role', 'Agents', 'Submissions', 'Accepted', 'Reverted credits',
+                                         'Net credited tasks')),
+        '<h3>Reverted credits</h3>']
+    out.append(table([(esc(r['submission']), esc(r['agent']), esc(r['task']), esc(r['reverted_by']),
+                       esc(r['reverted_utc']), esc(r['revert_reason']), badge(r['independent_validity'] or 'not_evaluated'))
+                      for r in ov['reverted_submissions']],
+                     ('Submission', 'Credited agent', 'Task', 'Reverted by', 'Reverted (UTC)', 'Reason',
+                      'Independent validity')) if ov['reverted_submissions'] else '<p>No credit was reverted.</p>')
+    out.append('<h3>Proof checks</h3>')
+    out.append(table([(esc(c['time_utc']), esc(value(c['agent'])), esc(value(c['problem_id'])),
+                       esc(value(c['target'])), esc(value(c.get('submission_id') or c.get('file_path'))),
+                       badge('verified' if c['verified'] else 'not verified'), esc(value(c['validity'])),
+                       esc(value(c['reason'])))
+                      for c in checks['checks']],
+                     ('Time (UTC)', 'Agent', 'Problem', 'Target', 'Submission or file', 'Result', 'Validity',
+                      'Reason')) if checks['checks'] else '<p>No proof checks were run.</p>')
+    return out
 
 
 def render(results, title, inspect_logs=()):
@@ -598,8 +745,10 @@ def render(results, title, inspect_logs=()):
                 ('Model', c['model']), ('Provider', c['provider']), ('Provider route', c['provider_route']),
                 ('Prompt variant', c['prompt_variant']), ('Auto-restart', c['auto_restart']),
                 ('Max run seconds', c['max_run_seconds']), ('Budget track', c['budget_track']),
-                ('Seeded contagion', c['seeded_contagion_enabled']), ('Mitigations', c['mitigations_enabled'])]),
-            '<h2>Agents</h2>', table([(esc(a['agent']),
+                ('Seeded contagion', c['seeded_contagion_enabled']), ('Mitigations', c['mitigations_enabled'])]
+                + ([('Solvers', c['solvers']), ('Participants', c['participants']),
+                    ('Overseer', c['overseer'])] if 'overseer' in c else [])),
+            '<h2>Agents</h2>', table([(esc(a['agent'] + (f' ({a["role"]})' if a.get('role') == 'overseer' else '')),
                                        *(esc(value(a.get(k))) for k in ('requests', 'finished', 'unbilled', 'restarts')),
                                        badge(a['exit']) if a.get('exit') else esc(value(None)),
                                        *(esc(value(a.get(k))) for k in ('exit_at', 'submissions')))
@@ -618,9 +767,17 @@ def render(results, title, inspect_logs=()):
             cell += '<br><small>' + esc(row['evaluator_reason'] + (': ' + row['evaluator_details']
                                                                     if row.get('evaluator_details') else '')) + '</small>'
         return cell
-    body.append(table([(esc(r['submission']), esc(r['agent']), esc(r['task']), badge(r['operational_outcome']),
+    def conference_cell(row):
+        cell = badge(row['operational_outcome'])
+        if row.get('reverted'):
+            cell += ' ' + badge('reverted') + '<br><small>' + esc(
+                f'by {row["reverted_by"]} at {row["reverted_utc"]}: {row["revert_reason"]}') + '</small>'
+        return cell
+    body.append(table([(esc(r['submission']), esc(r['agent']), esc(r['task']), conference_cell(r),
                         esc(r['submitted_utc']), validity(r)) for r in results['accepted_submissions']],
                       ('Submission', 'Agent', 'Task', 'Conference', 'Submitted (UTC)', 'Independent validity')))
+    if 'oversight' in results:
+        body += oversight_section(results['oversight'])
     if ev['status'] == 'not_run':
         body.append('<p>Proof checker: not run</p>')
     else:

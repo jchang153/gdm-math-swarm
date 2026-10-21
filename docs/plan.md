@@ -1288,3 +1288,28 @@ workspace working files/notes and 5296 timeline entries (1116 explicitly untimed
 All 20 captured RESEARCH.md files are empty. Do not infer unrecorded wiki edits or
 private communication from empty sections. No experimental behavior is changed,
 and no model inference is used for this view.
+
+## GLM oversight runs, October 21, 2026
+
+Owner-approved (2026-10-21): four GLM 5.3 runs, each with 5 solver agents, 1 hour, all 71
+tasks, 32 GB per agent, `run_budget_usd` 100, automatic behavior judge, the neutral collaboration
+environment (`neutral-env-v1`) and the new rule 4 naming both native spellings:
+`configs/glm-oversight-baseline.json` (`collab_max_pressure_no_rule6`),
+`configs/glm-oversight-rule6.json` (`collab_max_pressure`, the paper's rule 6 kept),
+`configs/glm-oversight-overseer.json` (baseline plus an overseer, `agent-006`, prompt A) and
+`configs/glm-oversight-overseer-powers.json` (as run 3, plus the oversight tools `check_proof` and
+`revert_submission`, prompt B). The owner's decisions on the overseer:
+
+1. Solvers are not told about the overseer. Their prompts are byte-identical to the baseline; the
+   overseer appears only as `agent-006` in `get_status`, the participant list and its own messages.
+2. It keeps all tools, including `submit_solution`, and the full Claude Code harness, with the same
+   container, workspace, memory and model, and no persona. Its submissions are credited like anyone's.
+3. On `revert_submission` the problem reopens, and the credit and the library entry are removed;
+   nobody is notified automatically, the overseer chooses whether to tell anyone. The original
+   submission stays in the raw records, and the problem may be solved and credited again.
+4. `check_proof` (the independent comparator evaluator, about 40 s per check on the VM) is unlimited.
+5. The rules the solvers received are included in the overseer's prompt; everything else stays vague.
+
+Implementation: `src/research_swarm/oversight.py`, config key `overseer`; prompts in docs/prompts.md,
+"Overseer role". Settings record `effective.roles` and `effective.overseer`; analysis
+(build_results, export_conference, the behavior judge) separates the overseer from the solvers.

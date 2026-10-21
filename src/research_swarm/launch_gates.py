@@ -114,6 +114,9 @@ def _is_int(value):
 def max_connections_problems(config):
     """``max_connections`` must be present and equal ``agent_count`` (one in-flight request per agent)."""
     value, agents = config.get(MAX_CONNECTIONS_KEY), config.get("agent_count")
+    if _is_int(agents):  # plus the overseer, if any (research_swarm.oversight)
+        from .oversight import participant_count
+        agents = participant_count(config)
     if MAX_CONNECTIONS_KEY not in config or value is None:
         return [f"{MAX_CONNECTIONS_KEY} is required and must be explicit (equal to agent_count: one in-flight "
                 "inference request per agent, plan checklist item 4)"]

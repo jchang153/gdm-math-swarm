@@ -371,12 +371,22 @@ def _ids(payload):
     return ids
 
 
+_OVERSIGHT_SUMMARY_KEYS = {
+    "submission_reverted": ("credited_agent", "reverted_by", "library_path"),
+    "proof_checked": ("target", "file_path", "verified", "validity", "comparator_status"),
+}
+
+
 def _summary(kind, payload, limit=160):
     payload = payload if isinstance(payload, dict) else {}
     parts = []
     for key in ("submission_id", "problem_id", "outcome", "stage", "reason", "post_id", "intent_type",
                 "message_id", "recipient", "feedback_id", "artifact_id", "path", "revision", "author",
                 "status", "error", "persona", "elapsed_seconds", "tool"):
+        if payload.get(key) is not None:
+            parts.append(f"{key}={payload[key]}")
+    # Oversight events (overseer runs only; other kinds keep their summaries unchanged).
+    for key in _OVERSIGHT_SUMMARY_KEYS.get(kind, ()):
         if payload.get(key) is not None:
             parts.append(f"{key}={payload[key]}")
     text = payload.get("message")

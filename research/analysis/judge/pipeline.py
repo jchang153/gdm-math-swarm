@@ -1155,6 +1155,7 @@ def plan_candidates(history, structural, sources, settings, *, meta=None):
     agent_id = _get(history, "agent_id")
     code = _get(history, "code") or agent_code(agent_id)
     header = {"agent_id": agent_id, "agent_code": code, "persona": _get(history, "persona"),
+              **prompts.role_meta(history),
               "candidates_total": len(ids), "candidate_requests": len(batches), **(meta or {})}
     requests = []
     for index, batch in enumerate(batches, 1):
@@ -1245,7 +1246,8 @@ def plan_samples(history, structural, windows, sampled, candidate_ids, *, views,
     views = views or {}
     agent_id = _get(history, "agent_id")
     code = _get(history, "code") or agent_code(agent_id)
-    header = {"agent_id": agent_id, "agent_code": code, "persona": _get(history, "persona"), **(meta or {})}
+    header = {"agent_id": agent_id, "agent_code": code, "persona": _get(history, "persona"),
+              **prompts.role_meta(history), **(meta or {})}
     requests, covered = [], []
     for window_id in sampled:
         window = by_window[window_id]
@@ -2552,6 +2554,7 @@ class Pipeline:
         stats = _get(history, "stats", {}) or {}
         summary = {"schema": HISTORY_SCHEMA, "agent_id": agent_id, "code": _get(history, "code"), "digest": digest,
                    "source": _get(history, "source"), "persona": _get(history, "persona"),
+                   **({"role": _get(history, "role")} if _get(history, "role") else {}),
                    "window_tokens": self.settings.window_tokens, "items": len(items),
                    "tokens": sum(estimate_tokens(i.get("text")) for i in items),
                    "stats": {k: stats.get(k) for k in ("turns", "summary_turns", "compactions", "items",

@@ -237,6 +237,26 @@ def _closed_request_problems(merged, requests):
     return problems
 
 
+def read_reversions(run_dir):
+    """{internal submission id: reversion} for credits the overseer reverted; None when the conference
+    state has no reversions table (every run before oversight). A reverted submission keeps its
+    ``accepted`` outcome and is evaluated like any other accepted submission."""
+    path = Path(run_dir) / 'conference' / 'state.sqlite'
+    if not path.exists():
+        return None
+    db = sqlite3.connect('file:%s?mode=ro' % path, uri=True, timeout=30)
+    db.row_factory = sqlite3.Row
+    try:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reversions'").fetchone() is None:
+            return None
+        return {_submission_id(row['submission_id']): {'reverted_by': row['reverted_by'], 'reason': row['reason'],
+                                                       'reverted_at': row['reverted_at']}
+                for row in db.execute('SELECT submission_id, reverted_by, reason, reverted_at FROM reversions '
+                                      'ORDER BY reversion_id')}
+    finally:
+        db.close()
+
+
 def collect_submissions(run_dir, include_rejected=False, closed=None, request_meta=None):
     """Merge SQLite and queue records by submission_id. Returns (submissions, tasks, notes).
 
@@ -279,6 +299,9 @@ def collect_submissions(run_dir, include_rejected=False, closed=None, request_me
         selected += [dict(merged[sid], closed_request=dict(request)) for sid, request in closed.items()]
     if closed is not None:
         notes['closed_requests'] = {'requested': sorted(closed), 'request_file': request_meta}
+    reverted = read_reversions(run_dir)
+    if reverted is not None:  # overseer runs: reverted credits are evaluated, and flagged in the summary
+        notes['reverted_submissions'] = sorted(reverted)
     selected.sort(key=lambda s: s['submission_id'])
     return selected, tasks, notes
 
@@ -533,7 +556,7 @@ def summarize(latest, notes, answer=None):
     for e in sorted(entries, key=lambda e: e['submission']['submission_id']):
         for flag in e.get('review_flags') or []:
             candidates.setdefault(flag, []).append(e['submission']['submission_id'])
-    return {'schema': 'gdm-evaluation-summary/1', 'updated_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+    summary = {'schema': 'gdm-evaluation-summary/1', 'updated_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
             'evaluated_submissions': len(entries),
             'by_validity': dict(Counter(e['validity'] for e in entries)),
             'by_outcome_and_validity': dict(Counter('%s/%s' % (e['submission'].get('outcome'), e['validity'])
@@ -551,6 +574,14 @@ def summarize(latest, notes, answer=None):
                 'by_validity': dict(Counter(e['validity'] for e in entries if e.get('closed_submission_request')))},
             'answer_review': answer,
             'sources': notes}
+    if 'reverted_submissions' in notes:
+        reverted = set(notes['reverted_submissions'])
+        summary['reverted_credits'] = {
+            'submission_ids': sorted(reverted),
+            'evaluated': sorted(e['submission']['submission_id'] for e in entries
+                                if e['submission']['submission_id'] in reverted),
+            'by_validity': dict(Counter(e['validity'] for e in entries if e['submission']['submission_id'] in reverted))}
+    return summary
 
 
 def evaluate_run(run_dir, backend, dataset=None, include_rejected=False, retry_unresolved=False, limit=None,

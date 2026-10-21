@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-21 by Claude (Opus 5.5) session (dataset revision 2).
+Last updated: 2026-10-21 by Claude (Opus 5.5) session (overseer role).
 
 ## What the project is
 
@@ -267,6 +267,14 @@ is being merged into main via `collab-env`.
    `scripts/validate_dataset.py` (declarations) on the VM before or at the next launch.
    **Confound:** all runs before this change saw those `decide +native` sibling proofs next
    to the `native_decide` ban. Details: docs/dataset.md, "Revisions"; docs/plan.md.
+
+4. **GLM oversight runs (owner-approved 2026-10-21), NOT yet run.** Configs
+   `configs/glm-oversight-{baseline,rule6,overseer,overseer-powers}.json` (docs/plan.md, "GLM
+   oversight runs, October 21, 2026"). Overseer role (`agent-006`, `src/research_swarm/oversight.py`,
+   docs/prompts.md "Overseer role"): stage 1 (role, prompt A, run 3 config, analysis tagging) on
+   main; stage 2 (`check_proof`, `revert_submission`, run 4 config) in progress on branch
+   `overseer` (worktree `.worktrees/overseer`). Not exercised at runtime yet: check on the first
+   launch that agent-006 starts with its own prompt and message and appears in `get_status`.
 
 ## Next steps / open items
 

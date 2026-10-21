@@ -784,3 +784,19 @@ to the configuration's `lean_image`. The record carries:
 Only a complete run at the configured limits sets `all_required_passed`. A
 `--timeout`, `--memory` or `--cpus` override that differs from the configuration
 records `limits_match_config: false` and is never launch evidence.
+
+## Overseer role
+
+Added October 21, 2026 (docs/plan.md, "GLM oversight runs, October 21, 2026"; owner's decisions
+quoted there). Config key `overseer: {"agent_id": "agent-006", "powers": false|true}` adds one
+participant after the `agent_count` solvers (`src/research_swarm/oversight.py`). Solver prompts,
+personas and tools are unchanged; `max_connections` is `agent_count + 1`. The overseer has no persona,
+all normal tools, the initial message "Begin your work." and its own auto-restart message
+(`oversight.OVERSEER_CONTINUE_MESSAGE`: "... Continue your work: check the shared tools for new posts,
+messages, submissions and library updates."). The prompt (`oversight.build_overseer_prompt`) is the
+owner's prompt A (or B with `powers`), with the problem listing, the paging paragraph and the run's
+exact rules block taken from the same rendering code as the solvers' prompt; headings are followed
+by a blank line as in the solvers' prompt. It requires a neutral variant with a rules block and fails
+closed on any `NEUTRAL_FORBIDDEN` word. Prompt B replaces the access paragraph by "In addition to the
+tools the other agents have, you have two oversight tools. You have no other special access." and adds
+an "Oversight tools" section after "Communication and shared resources".

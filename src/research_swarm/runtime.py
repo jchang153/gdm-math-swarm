@@ -525,8 +525,13 @@ def restart_delay(consecutive_quick):
 
 def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, run_dir, record, clock,
                 system_prompt_mode="replace", auto_memory=True, in_flight_grace=IN_FLIGHT_GRACE_SECONDS,
-                auto_restart=False, neutral=False):
+                auto_restart=False, neutral=False, roles=None, definitions_for=None, continue_for=None):
     """Solver running one genuine Claude Code peer inside its own sandbox.
+
+    ``roles`` ({agent_id: "solver"|"overseer"}, oversight.roles), ``definitions_for(agent_id)``
+    and ``continue_for(agent_id)`` (per-agent tool definitions and continuation message; None
+    returns the defaults) serve the overseer role (research_swarm.oversight). An agent without
+    a persona (the overseer) is recorded with persona None.
 
     ``neutral`` (neutral collaborative environment, prompts.NEUTRAL_VARIANTS): neutral
     tool names and replies (``definitions`` should be ``tools.tool_definitions(True)``),
@@ -553,10 +558,12 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
         async def execute(state, generate):
             agent_id = str(state.sample_id)
             sbox = sandbox()
-            prompt = prompt_for(agent_id, personas[agent_id])
+            persona = personas.get(agent_id)
+            role = (roles or {}).get(agent_id)
+            prompt = prompt_for(agent_id, persona)
             (run_dir / "prompts").mkdir(parents=True, exist_ok=True)
             (run_dir / "prompts" / f"{agent_id}.txt").write_text(prompt)
-            record("agent_configured", agent_id, {"persona": personas[agent_id],
+            record("agent_configured", agent_id, {"persona": persona, **({"role": role} if role else {}),
                                                   "appended_prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                                                   "system_prompt_mode": system_prompt_mode,
                                                   "claude_auto_memory": auto_memory,
@@ -572,7 +579,8 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
                     record("neutral_settings_error", agent_id, {"type": type(ex).__name__})
                 record("neutral_settings", agent_id, {"written": written})
             neutral_args = {"neutral": True} if neutral else {}  # unchanged calls outside the neutral environment
-            tools = conference_tools(conference, agent_id, definitions, sbox=sbox, record=record, stop=clock.stop,
+            agent_definitions = (definitions_for(agent_id) if definitions_for else None) or definitions
+            tools = conference_tools(conference, agent_id, agent_definitions, sbox=sbox, record=record, stop=clock.stop,
                                      **neutral_args)
             gen_filter = filter_for(agent_id)
             agent = build_claude_agent(prompt, tools, gen_filter, system_prompt_mode=system_prompt_mode,
@@ -580,7 +588,8 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
             agent_state = AgentState(messages=state.messages)
             snapshots = Snapshotter(run_dir / "snapshots", agent_id, record,
                                     roots=NEUTRAL_SNAPSHOT_ROOTS if neutral else SNAPSHOT_ROOTS)
-            continue_message = NEUTRAL_CONTINUE_MESSAGE if neutral else CONTINUE_MESSAGE
+            continue_message = ((continue_for(agent_id) if continue_for else None)
+                                or (NEUTRAL_CONTINUE_MESSAGE if neutral else CONTINUE_MESSAGE))
             outcome = {"status": None, "error": None, "harness_after_stop": None}
 
             def budget_refused():
@@ -690,7 +699,8 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
     return gdm_peer()
 
 
-def build_task(*, agent_ids, files, solver, compose, metadata, initial_message, name="gdm_math_swarm"):
+def build_task(*, agent_ids, files, solver, compose, metadata, initial_message, name="gdm_math_swarm",
+               initial_messages=None):
     """The Inspect task (one sample per peer). Disables Inspect's .env loading first
     (``inspect_adapter.disable_inspect_dotenv``): every evaluation of this task, paid
     or mock, must never load the host .env into the process environment."""
@@ -699,7 +709,8 @@ def build_task(*, agent_ids, files, solver, compose, metadata, initial_message, 
     from .inspect_adapter import disable_inspect_dotenv
     disable_inspect_dotenv()
     return Task(name=name,
-                dataset=[Sample(id=a, input=initial_message, files=dict(files)) for a in agent_ids],
+                dataset=[Sample(id=a, input=(initial_messages or {}).get(a, initial_message), files=dict(files))
+                         for a in agent_ids],
                 solver=solver, sandbox=("docker", compose), metadata=metadata)
 
 
@@ -1037,9 +1048,12 @@ def _max_connections_blocker(config):
         value = max_connections(config)
     except LaunchBlocked as ex:
         return str(ex)
-    if value != config.get("agent_count"):
-        return (f"max_connections {value} differs from agent_count {config.get('agent_count')} (one in-flight "
-                "request per agent; a different value needs a recorded decision in docs/plan.md)")
+    from .oversight import participant_count
+    expected = participant_count(config) if isinstance(config.get("agent_count"), int) else config.get("agent_count")
+    if value != expected:
+        return (f"max_connections {value} differs from agent_count {config.get('agent_count')}"
+                + (" plus the overseer" if expected != config.get("agent_count") else "")
+                + " (one in-flight request per agent; a different value needs a recorded decision in docs/plan.md)")
     return None
 
 
@@ -1105,6 +1119,8 @@ def preflight(config, repo_root):
     from .prompts import persona_reviewing_problems, prompt_variant_problems
     blockers.extend(prompt_variant_problems(config))  # docs/prompts.md, "Prompt ablation variants"
     blockers.extend(persona_reviewing_problems(config))  # docs/prompts.md, "Persona reviewing lines"
+    from .oversight import overseer_problems
+    blockers.extend(overseer_problems(config))  # docs/prompts.md, "Overseer role"
     allocation = None
     try:
         allocation = persona_counts(assign_personas(int(config.get("agent_count", APPROVED_AGENT_COUNT)),
@@ -1524,7 +1540,12 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     # the same settings_from_config object (route-pricing gate compares frozen_fields).
     settings = settings_from_config(config, pricing_verified=True, live_compatibility_verified=True)
     personas = assign_personas(agent_count, persona_seed)
-    agent_ids = list(personas)
+    # Overseer role (research_swarm.oversight): one more participant after the solvers, no persona.
+    from . import oversight
+    overseer = oversight.overseer_config(config)
+    solver_ids = list(personas)
+    agent_ids = solver_ids + ([overseer["agent_id"]] if overseer else [])
+    roles = oversight.roles(solver_ids, overseer)
     from .dataset import task_set_of
     task_set = task_set_of(config)
     listing, task_files = export_public_tasks(repo_root, task_set=task_set)
@@ -1563,7 +1584,10 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "fixed_task_manifest": config.get("fixed_task_manifest"), "inspect_dotenv": dotenv,
             "provider_limit": provider_limit, "in_flight_grace_seconds": in_flight_grace,
             "max_connections": connections, "track": getattr(conference, "track", config.get("track")),
-            "auto_restart": config.get("auto_restart") is True}
+            "auto_restart": config.get("auto_restart") is True,
+            "roles": roles, "participant_count": len(agent_ids),
+            "overseer": None if overseer is None else {
+                **overseer, "oversight_tools": [d["name"] for d in oversight.overseer_extra_definitions(overseer)]}}
         (run_dir / "settings.json").write_text(json.dumps({"config": config, "effective": effective,
                                                             "model": asdict(settings), "personas": personas,
                                                             "tasks": listing, "budget": ledger.snapshot(),
@@ -1572,8 +1596,15 @@ async def _run_pilot(config, repo_root, conference_factory=None):
         barrier = StartBarrier(len(agent_ids), record)
         clock = RunClock(barrier)
         archive = InstructionArchive(run_dir / "instructions", record)
+        def prompt_for(agent, persona):
+            if overseer is not None and agent == overseer["agent_id"]:
+                return oversight.build_overseer_prompt(agent, solver_ids, listing, variant, overseer["powers"])
+            return build_prompt(agent, persona, listing, variant, reviewing)
+
         solver = peer_solver(conference=conference, definitions=tool_definitions(neutral), personas=personas,
-                             prompt_for=lambda a, p: build_prompt(a, p, listing, variant, reviewing),
+                             prompt_for=prompt_for, roles=roles if overseer else None,
+                             definitions_for=lambda a: oversight.definitions_for(a, overseer, tool_definitions(neutral)),
+                             continue_for=lambda a: oversight.continue_message_for(a, overseer),
                              filter_for=lambda a: budget_filter(a, ledger, settings, barrier, record, "pilot", archive,
                                                                 clock.stop, **neutral_args),
                              run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,
@@ -1583,8 +1614,10 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                           metadata={"condition": condition_label(variant, track), "prompt_variant": variant,
                                     "persona_reviewing": reviewing, "personas": personas, "persona_seed": persona_seed,
                                     **({"neutral_environment": NEUTRAL_ENVIRONMENT_VERSION} if neutral else {})},
-                          initial_message=initial_message(variant))
-        return await supervise(eval_async(task, model=model, **eval_options(agent_count, run_dir, config)),
+                          initial_message=initial_message(variant),
+                          initial_messages=({overseer["agent_id"]: oversight.OVERSEER_INITIAL_MESSAGE}
+                                            if overseer else None))
+        return await supervise(eval_async(task, model=model, **eval_options(len(agent_ids), run_dir, config)),
                                clock, conference, record, config)
     finally:
         await asyncio.to_thread(conference.close)

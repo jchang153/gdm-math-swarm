@@ -91,7 +91,17 @@ def export(run):
     db.execute('BEGIN')
     tables = {name: [dict(row) for row in db.execute('SELECT * FROM ' + name)]
               for name in ('posts', 'messages', 'feedback', 'submissions', 'library', 'events')}
+    # Reverted credits (overseer runs); runs before oversight have no reversions table.
+    present = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    reversions = ([dict(row) for row in db.execute('SELECT * FROM reversions ORDER BY reversion_id')]
+                  if 'reversions' in present else [])
     db.close()
+    settings_path = run / 'settings.json'
+    settings = json.loads(settings_path.read_text()) if settings_path.is_file() else {}
+    overseer = ((settings.get('effective') or {}).get('overseer') or (settings.get('config') or {}).get('overseer'))
+    reverted_submissions = {row['submission_id']: row for row in reversions}
+    withdrawn_artifacts = {row['artifact_id']: row for row in reversions if row.get('artifact_id') is not None}
+    proof_checks = [e for e in events if e['kind'] == 'proof_checked']
     if [x['seq'] for x in tables['events']] != [x['seq'] for x in events]:
         raise ValueError('Database/event-log sequence mismatch')
     for row, event in zip(tables['events'], events):
@@ -123,8 +133,14 @@ def export(run):
     for row in tables['library']:
         if hashlib.sha256(row['content'].encode()).hexdigest() != row['sha256']:
             raise ValueError('Library source hash mismatch')
-        records.append(record('library', 'library-' + str(row['artifact_id']), row['path'], row['content'], row['published_at'],
-                       [row['author']], row['task_id'], detail={k: v for k, v in row.items() if k != 'content'}))
+        detail = {k: v for k, v in row.items() if k != 'content'}
+        withdrawn = withdrawn_artifacts.get(row['artifact_id'])
+        if withdrawn:
+            detail['withdrawn'] = {'by': withdrawn['reverted_by'], 'reason': withdrawn['reason'],
+                                   'at': withdrawn['reverted_at'], 'reversion_id': withdrawn['reversion_id']}
+        records.append(record('library', 'library-' + str(row['artifact_id']),
+                              row['path'] + (' · withdrawn' if withdrawn else ''), row['content'], row['published_at'],
+                       [row['author']], row['task_id'], detail=detail))
     # A run whose independent evaluation has not run yet (e.g. refused) shows every submission as
     # "not independently evaluated" and records the evaluation source as absent.
     evaluations_path = run / 'evaluations/evaluations.jsonl'
@@ -142,9 +158,30 @@ def export(run):
         detail = {k: v for k, v in row.items() if k != 'source'}
         detail['independent_evaluation'] = ({'validity': evaluation['validity'], 'reason': evaluation['reason']}
                                             if evaluation else {'validity': 'not independently evaluated'})
-        records.append(record('submissions', sid, sid + ' · ' + row['outcome'], row['source'], row['submitted_at'],
+        reverted = reverted_submissions.get(row['submission_id'])
+        if reverted:
+            detail['reverted'] = {'by': reverted['reverted_by'], 'reason': reverted['reason'],
+                                  'at': reverted['reverted_at'], 'reversion_id': reverted['reversion_id']}
+        records.append(record('submissions', sid, sid + ' · ' + row['outcome'] + (' · credit reverted' if reverted else ''),
+                              row['source'], row['submitted_at'],
                        [row['agent_id']], row['task_id'], detail=detail,
                        links=[['Evaluation records', '../evaluations/evaluations.jsonl']]))
+
+    # Oversight (overseer runs): reverted credits and proof checks, with the overseer's stated reasons.
+    for row in reversions:
+        sid = f"sub-{row['submission_id']:06d}"
+        records.append(record('oversight', 'reversion-' + str(row['reversion_id']),
+                              f"Credit reverted · {row['task_id']}",
+                              f"{row['reverted_by']} reverted {row['credited_agent']}'s credit for {row['task_id']} "
+                              f"({sid}). Reason: {row['reason']}", row['reverted_at'],
+                              [row['reverted_by'], row['credited_agent']], row['task_id'], detail=row))
+    for event in proof_checks:
+        p = event.get('payload') or {}
+        target = p.get('submission_id') if p.get('target') == 'accepted_submission' else p.get('file_path')
+        records.append(record('oversight', 'proof-check-' + str(event['seq']),
+                              f"Proof check · {p.get('problem_id')} · {'verified' if p.get('verified') else 'not verified'}",
+                              f"{p.get('target')}: {target}. {p.get('reason') or ''}", event['timestamp'],
+                              [event.get('agent_id')], p.get('problem_id'), detail=p))
 
     # Browse only workspace working files and notes; SDK sessions are in the Inspect logs.
     versions = defaultdict(list)
@@ -201,7 +238,10 @@ def export(run):
         task = payload.get('problem_id') or payload.get('task_id') or entry.get('ids', {}).get('problem_id') or ''
         records.append(record('activity', 'activity-' + str(entry['order']), entry['kind'], text,
                        entry.get('timestamp'), [agent], task=task, detail=detail))
-    counts = {category: 0 for category in ('board', 'dms', 'library', 'submissions', 'feedback', 'files', 'activity')}
+    categories = ('board', 'dms', 'library', 'submissions', 'feedback', 'files', 'activity')
+    if overseer or reversions or proof_checks:  # the Oversight section exists only in overseer runs
+        categories = categories[:5] + ('oversight',) + categories[5:]
+    counts = {category: 0 for category in categories}
     counts.update(Counter(r['category'] for r in records))
     warnings = ['Private files are researcher-only and were not automatically shared with peers.',
                 'Board records have no reply relationship; posts are shown chronologically.',
@@ -224,12 +264,12 @@ def export(run):
 '''
     script = r'''
 const data=JSON.parse(document.getElementById('data').textContent);
-const sections={board:['Bulletin board','Posts shown in posting order. The conference did not store a reply-thread relationship.','No bulletin-board posts were recorded.'],dms:['Direct messages','Private conversations grouped by the two participants.','No direct messages were saved in this run. Inbox checks are visible under All activity.'],library:['Shared library','Published artifacts and revisions. Complete accepted proofs were published automatically; private notes required deliberate publication.','No shared artifacts were recorded.'],submissions:['Submissions & judging','Conference outcomes and independently bound evaluations. “problem_closed” does not mean a proof was mathematically rejected.','No submissions were recorded.'],feedback:['Organizer feedback','Private feedback submitted to the conference organizers.','No organizer feedback was recorded.'],files:['Private notes & files','Captured versions of RESEARCH.md and private workspace working files. These are observations, not a complete edit history.','No private workspace file captures were recorded.'],activity:['All activity','Saved timeline in recorded chronological order, followed by entries without known timestamps. Filter by agent, task or event type; open details for provenance.','No timeline records were available.']};
-let selected=sections[location.hash.slice(1)]?location.hash.slice(1):'board',pageNo=0;const size=40;
+const sections={board:['Bulletin board','Posts shown in posting order. The conference did not store a reply-thread relationship.','No bulletin-board posts were recorded.'],dms:['Direct messages','Private conversations grouped by the two participants.','No direct messages were saved in this run. Inbox checks are visible under All activity.'],library:['Shared library','Published artifacts and revisions. Complete accepted proofs were published automatically; private notes required deliberate publication.','No shared artifacts were recorded.'],submissions:['Submissions & judging','Conference outcomes and independently bound evaluations. “problem_closed” does not mean a proof was mathematically rejected.','No submissions were recorded.'],feedback:['Organizer feedback','Private feedback submitted to the conference organizers.','No organizer feedback was recorded.'],oversight:['Oversight','Credits the overseer reverted (with its stated reason) and the proof checks it ran. A reverted credit removed the credit and the library entry and reopened the problem; the original submission stays in the records.','No credit was reverted and no proof check was run.'],files:['Private notes & files','Captured versions of RESEARCH.md and private workspace working files. These are observations, not a complete edit history.','No private workspace file captures were recorded.'],activity:['All activity','Saved timeline in recorded chronological order, followed by entries without known timestamps. Filter by agent, task or event type; open details for provenance.','No timeline records were available.']};
+let selected=sections[location.hash.slice(1)]&&(location.hash.slice(1) in data.counts)?location.hash.slice(1):'board',pageNo=0;const size=40;
 const el=id=>document.getElementById(id);const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n;};
 el('run').textContent=data.run+' · '+data.conference_events+' conference events · '+data.timeline_entries+' timeline entries';
 function timestamp(value){return value==null?'Time unknown':new Date(value*1000).toLocaleString(undefined,{timeZone:'America/Los_Angeles',dateStyle:'medium',timeStyle:'medium'})+' America/Los_Angeles';}
-for(const [id,[label]] of Object.entries(sections)){const b=node('button',label+' ('+(data.counts[id]||0)+')');b.onclick=()=>{selected=id;location.hash=id;pageNo=0;options();render();};b.dataset.section=id;el('tabs').append(b);}
+for(const [id,[label]] of Object.entries(sections)){if(!(id in data.counts))continue;const b=node('button',label+' ('+(data.counts[id]||0)+')');b.onclick=()=>{selected=id;location.hash=id;pageNo=0;options();render();};b.dataset.section=id;el('tabs').append(b);}
 function options(){const rows=data.records.filter(x=>x.category===selected);for(const [id,values,label] of [['agent',rows.flatMap(x=>x.agents),'All agents'],['task',rows.map(x=>x.task).filter(Boolean),'All tasks'],['kind',selected==='activity'?rows.map(x=>x.title):[],'All activity types']]){const old=el(id).value;el(id).replaceChildren(new Option(label,''));for(const v of [...new Set(values)].sort())el(id).append(new Option(v,v));if([...el(id).options].some(o=>o.value===old))el(id).value=old;}el('kind').hidden=selected!=='activity';el('task').hidden=el('task').options.length===1;}
 function render(){document.querySelectorAll('[data-section]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.section===selected)));el('intro').textContent=sections[selected][1];const q=el('search').value.toLowerCase(),agent=el('agent').value,task=el('task').value,kind=el('kind').value;
 let rows=data.records.filter(x=>x.category===selected&&(!agent||x.agents.includes(agent))&&(!task||x.task===task)&&(!kind||x.title===kind)&&(!q||JSON.stringify(x).toLowerCase().includes(q)));
@@ -239,7 +279,7 @@ const main=el('records');main.replaceChildren();if(!rows.length)main.append(node
 for(const r of rows.slice(pageNo*size,(pageNo+1)*size)){const card=node('article');card.id=r.id;card.append(node('h2',r.title),node('p',[timestamp(r.timestamp),...r.agents,r.task].filter(Boolean).join(' · '),'muted'));
 if(r.text){if(['library','submissions'].includes(selected)){const d=node('details');d.append(node('summary','Complete source'),node('pre',r.text));card.append(d);}else card.append(node('div',r.text,'text'));}
 if(selected==='dms'&&r.detail){for(const m of r.detail.messages){const d=node('article');d.append(node('strong',m.sender+' → '+m.recipient),node('p',timestamp(m.sent_at),'muted'),node('div',m.body,'text'));card.append(d);}}
-if(selected==='submissions'){card.append(node('p','Conference judge: '+(r.detail.reason||r.detail.outcome)));if(r.detail.compile_status)card.append(node('p','Compilation: '+r.detail.compile_status));const v=r.detail.independent_evaluation;card.append(node('p','Independent validity: '+v.validity,'badge'));if(v.reason)card.append(node('p',v.reason));}
+if(selected==='submissions'){card.append(node('p','Conference judge: '+(r.detail.reason||r.detail.outcome)));if(r.detail.reverted)card.append(node('p','Credit reverted by '+r.detail.reverted.by+': '+r.detail.reverted.reason,'badge'));if(r.detail.compile_status)card.append(node('p','Compilation: '+r.detail.compile_status));const v=r.detail.independent_evaluation;card.append(node('p','Independent validity: '+v.validity,'badge'));if(v.reason)card.append(node('p',v.reason));}
 const links=node('p');for(const [label,url] of r.links){if(!url)continue;const a=node('a',label);a.href=url;links.append(a,document.createTextNode(' · '));}card.append(links);
 if(r.detail){const d=node('details');d.append(node('summary',selected==='submissions'?'Judge feedback & evidence':'Record details & provenance'),node('pre',JSON.stringify(r.detail,null,2)));card.append(d);}main.append(card);}}
 for(const id of ['search','agent','task','kind'])el(id).addEventListener(id==='search'?'input':'change',()=>{pageNo=0;render();});el('previous').onclick=()=>{pageNo--;render();};el('next').onclick=()=>{pageNo++;render();};window.addEventListener('hashchange',()=>{if(sections[location.hash.slice(1)]&&selected!==location.hash.slice(1)){selected=location.hash.slice(1);pageNo=0;options();render();}});options();render();

@@ -140,6 +140,9 @@ class _Context:
                 info["outcome"] = payload.get("outcome") or info["outcome"]
             elif kind == "submission_resolved":
                 info["outcome"] = info["outcome"] or payload.get("outcome")
+            elif kind == "submission_reverted":  # overseer runs: the credit was later removed
+                info["credit_reverted"] = {"reverted_by": _get(event, "agent_id"), "reason": payload.get("reason"),
+                                           "seq": _get(event, "seq")}
         return info
 
     def evaluation(self, sid):
@@ -418,6 +421,11 @@ def _attempts(ctx, finding, facts, interpretation, attributes, emit):
                       "no evaluator verdict (judge_only; queued for unpaid comparator evaluation)")
             extra["judge_only"] = True
         sub_facts = facts + [f"{sid}: outcome {info.get('outcome')}, evaluator validity {validity or 'none'}"]
+        if info.get("credit_reverted"):  # only in overseer runs; other runs' labels are unchanged
+            reverted = info["credit_reverted"]
+            sub_facts.append(f"{sid}: credit later reverted by {reverted['reverted_by']} "
+                             f"(reason: {reverted['reason']})")
+            extra["credit_reverted"] = True
         emit("exploitation_attempt", status, evidence, sub_facts, interpretation,
              dict(attributes, **extra, status_reason=reason), source=f"{finding['id']}/{sid}")
         if info.get("outcome") != "accepted":
