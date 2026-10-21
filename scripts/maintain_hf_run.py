@@ -46,6 +46,15 @@ new entry is the published entry with only those links changed (never the bundle
 bundle's other Inspect View files must equal the published ones, and the rules of the results scope
 apply otherwise.
 
+--scope incident adds or replaces a published run's incident report (only
+RUN/analysis/incident/{report.html, report.md, evidence.json} from the bundle; raw/, units/,
+route-pricing/, digest.json, run-budgets.json and state.json stay local), adds the Incident report
+tab to the published RUN/results.html (the published page plus the tab only) and the Incident
+report link to the published catalogue entry, and updates archive-manifest.json digests for exactly
+those files, in one guarded commit pinned to the planned revision. A published incident file the
+bundle lacks is refused, no planned file may be or become LFS and .gitattributes must stay
+unchanged. Running it again after a failure continues from the current state (no --resume-from).
+
 --scope site regenerates the presentation of a published run with the current site generators
 (owner request, October 21, 2026: run page summary card and tabs, shared light/dark theme, phone
 layout, conference view without custom transcript links): it replaces only generated HTML/JSON views
@@ -92,11 +101,12 @@ import tempfile
 from types import SimpleNamespace
 
 from build_experiment_index import INSPECT_LOGS, inspect_log_links, newest_first, unlisted_runs, write_index
+from incident_site import INCIDENT_DIR, INCIDENT_REPORT, add_incident_tab, incident_excluded, with_incident_link
 from prepare_hf_library import judge_excluded
 from publish_hf_library import (DEFAULT_REPO, RUN_ID, batches, digest, load_bundle, matches,
                                 merge_entries, payload, remote_files, validate_lfs_additions)
 
-SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'site', 'unlist', 'snapshots')
+SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'site', 'unlist', 'snapshots', 'incident')
 NO_BUNDLE = ('unlist', 'snapshots')
 REPLACEABLE = ('results.html', 'results.json')
 INSPECT_VIEW = 'inspect-view/'
@@ -108,6 +118,7 @@ SITE_THEME_MARKER = 'id="site-theme"'
 INSPECT_REDIRECT_MARKER = "redirect:'follow'"
 JUDGE_PREFIX = 'analysis/judge/'
 TRANSCRIPTS_PREFIX = 'transcripts/'
+INCIDENT_PREFIX = INCIDENT_DIR + '/'
 EVALUATIONS_PREFIX = 'evaluations/'
 CONFERENCE_PREFIX = 'conference-view/'
 REGENERATED = ('index.html', 'experiments.json')
@@ -290,6 +301,8 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
     if scope not in SCOPES or scope in NO_BUNDLE:
         raise ValueError('Unknown maintenance scope: ' + str(scope) + ' (unlist uses unlist_run, snapshots '
                          'archive_snapshots)')
+    if scope == 'incident':
+        raise ValueError('The incident scope uses maintain_incident')
     if replace_judge and scope != 'judge':
         raise ValueError('--replace-judge applies only to the judge scope')
     if run in unlisted_runs():
@@ -1064,6 +1077,188 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
     return result
 
 
+def maintain_incident(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=None,
+                      backup_dir=None, operation=None):
+    """--scope incident: add or replace one published run's incident report files (only
+    RUN/analysis/incident/{report.html, report.md, evidence.json} from the bundle), add the
+    Incident report tab to the published RUN/results.html (the published page plus the tab, never the
+    bundle's page) and the Incident report link to the published catalogue entry (only that link
+    changes), and update archive-manifest.json digests for exactly those files.
+
+    Everything is one guarded commit pinned to the planned revision, so a failure leaves nothing
+    partly applied; running the scope again continues from the current state (every change is
+    idempotent). A published incident file the bundle lacks is refused (nothing is deleted); no
+    planned file may be stored as LFS, be named by an LFS rule or come close to HF's automatic LFS
+    size, and .gitattributes must stay unchanged.
+    """
+    bundle = Path(bundle)
+    if not isinstance(run, str) or not RUN_ID.fullmatch(run):
+        raise ValueError('Invalid run ID')
+    if run in unlisted_runs():
+        raise ValueError('Run is unlisted by data/library-unlisted.json; its catalogue entry is not maintained: '
+                         + str(run))
+    check_outputs(bundle, receipt, backup_dir, commit, operation)
+    manifest, incoming = load_bundle(bundle)
+    if manifest['runs'] != [run] or [x['run'] for x in incoming] != [run]:
+        raise ValueError('Maintenance needs a bundle prepared for exactly one run: ' + run)
+    prefix = run + '/'
+    incident = sorted(n for n in manifest['files'] if n.startswith(prefix + INCIDENT_PREFIX))
+    for name in incident:
+        if incident_excluded(name[len(prefix):]):
+            raise ValueError('Bundle incident file outside the publication allowlist: ' + name)
+    recorded = (manifest.get('incident_report') or {}).get(run) or {}
+    if prefix + INCIDENT_REPORT not in incident:
+        raise ValueError('The bundle has no incident report: ' + prefix + INCIDENT_REPORT)
+    if sorted(prefix + n for n in recorded.get('included', [])) != incident:
+        raise ValueError('Bundle incident files do not match the preparation record (incident_report)')
+    page_name = prefix + 'results.html'
+
+    info = api.repo_info(repo, repo_type='space', files_metadata=True)
+    if not info.private:
+        raise ValueError('Maintenance requires a private Space')
+    base = info.sha
+    remote = remote_files(api, repo, base)  # the current state is pinned to this revision
+    current = inventory(remote)
+    cache = {}
+
+    def fetch(name, revision=base, listing=None):
+        listing = remote if listing is None else listing
+        if (name, revision) not in cache:
+            data = Path(download(repo, name, repo_type='space', revision=revision)).read_bytes()
+            if not matches(data, listing[name]):
+                raise ValueError('Remote metadata mismatch: ' + name)
+            cache[name, revision] = data
+        return cache[name, revision]
+
+    if not any(name.startswith(prefix) for name in remote):
+        raise ValueError('Run is not published; use publish_hf_library.py for new runs: ' + run)
+    for name in [page_name, *REGENERATED, MANIFEST]:
+        if name not in remote:
+            raise ValueError('Remote file required for maintenance is missing: ' + name)
+    stale = sorted(n for n in remote if n.startswith(prefix + INCIDENT_PREFIX) and n not in incident)
+    if stale:
+        raise ValueError(f'{len(stale)} published incident file(s) are not in the bundle; review them, nothing is '
+                         'deleted automatically: ' + ', '.join(stale[:EXAMPLES]))
+
+    index_bytes, catalogue_html = fetch('experiments.json'), fetch('index.html')
+    index, archive = json.loads(index_bytes), json.loads(fetch(MANIFEST))
+    if index.get('warnings') or archive.get('warnings'):
+        raise ValueError('Remote catalogue or manifest has warnings; review before maintenance')
+    if archive.get('schema') != 'gdm-private-space/1' or run not in archive.get('runs', []):
+        raise ValueError('Remote archive manifest does not list the run: ' + run)
+    listed = [x.get('run') for x in index.get('experiments', [])]
+    if listed.count(run) != 1 or len(set(listed)) != len(listed):
+        raise ValueError('Remote catalogue must list the run exactly once among unique entries')
+    if regenerate(index['experiments']) != {'experiments.json': index_bytes, 'index.html': catalogue_html}:
+        raise ValueError('The current generator does not reproduce the remote catalogue byte for byte; '
+                         'regenerating it would change other catalogue entries')
+    old_entry = next(x for x in index['experiments'] if x['run'] == run)
+    new_entry = {**old_entry, 'links': with_incident_link(old_entry['links'], run)}
+    regenerated = regenerate(merge_entries(others(index, run), [new_entry]))
+    new_index = json.loads(regenerated['experiments.json'])
+    if (others(new_index, run) != others(index, run) or len(new_index['experiments']) != len(listed)
+            or [x for x in new_index['experiments'] if x['run'] == run] != [new_entry]):
+        raise ValueError('Another catalogue entry would change')
+
+    page = add_incident_tab(fetch(page_name).decode('utf-8')).encode('utf-8')  # published page + the tab
+    planned = {**{name: (bundle / name).read_bytes() for name in incident}, page_name: page, **regenerated}
+    files = dict(archive['files'])
+    for name, data in planned.items():
+        files[name] = digest(data)
+    new_archive = {**archive, 'files': files, 'total_bytes': sum(x['bytes'] for x in files.values())}
+    planned[MANIFEST] = fetch(MANIFEST) if new_archive == archive else json.dumps(new_archive, indent=2).encode()
+    final_names = set(remote) | set(planned)
+    for label, target in new_entry['links'].items():
+        if not (any(n.startswith(target) for n in final_names) if target.endswith('/') else target in final_names):
+            raise ValueError(f'Catalogue link {label} would point to a missing file: {target}')
+
+    # No planned file may be (or become) LFS: HF serves LFS-tracked HTML as a download.
+    names = sorted(planned)
+    stored_lfs = sorted(n for n in names if n in remote and remote[n].lfs)
+    ruled = lfs_rule_matches(fetch(ATTRIBUTES), names) if ATTRIBUTES in remote else []
+    large = [f'{n} ({len(planned[n])} bytes)' for n in names if len(planned[n]) >= LFS_SAFE_BYTES]
+    if stored_lfs or ruled or large:
+        raise ValueError('Planned file(s) stored as LFS, named by an LFS rule or close to the size HF stores as '
+                         'LFS; the incident scope uploads only regular files: '
+                         + ', '.join([*stored_lfs, *ruled, *large][:EXAMPLES]))
+    uploads = [(n, planned[n]) for n in names if n not in remote or not matches(planned[n], remote[n])]
+    added = [n for n, _ in uploads if n not in remote]
+    result = {'operation': 'maintain-run', 'scope': 'incident', 'repo': repo, 'private': True, 'run': run,
+              'base_revision': base, 'committed': False,
+              'incident_files': incident, 'to_add': added,
+              'to_replace': [n for n, _ in uploads if n in remote],
+              'results_page_tab': 'added' if page_name in dict(uploads) else 'already present',
+              'catalogue': {'entry_diff': entry_diff(old_entry, new_entry),
+                            'other_entries_unchanged': len(listed) - 1},
+              'archive_manifest': {'changed_digests': sorted(n for n in files if archive['files'].get(n) != files[n]),
+                                   'total_bytes_before': archive.get('total_bytes'),
+                                   'total_bytes_after': new_archive['total_bytes']},
+              'local_incident_exclusions': recorded.get('excluded'),
+              'uploads': len(uploads), 'already_applied': not uploads}
+    if not commit or not uploads:
+        return result
+
+    backup_dir, receipt = Path(backup_dir), Path(receipt)
+    revision = base
+
+    def write_receipt(status):
+        write_json(receipt, {**result, 'last_revision': revision, 'status': status})
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    write_receipt('writing backups; nothing uploaded')  # an unwritable receipt fails before any upload
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        write_json(backup_dir / INVENTORY, {'operation': 'maintain-run', 'scope': 'incident', 'repo': repo,
+                                            'run': run, 'revision': base, 'origin_revision': base,
+                                            'resume_from': None, 'files': current})
+        saved = sorted(n for n in [*planned, ATTRIBUTES] if n in remote)
+        for name in saved:
+            target = backup_dir / ORIGINAL / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(fetch(name))
+        write_json(backup_dir / PLAN, result)
+        result.update(backup_dir=str(backup_dir), backups=saved)
+        write_receipt('backups written; nothing uploaded')
+        latest = api.repo_info(repo, repo_type='space')
+        if not latest.private or latest.sha != base:
+            raise ValueError('Space changed concurrently or is no longer private; rerun the dry run '
+                             'against the latest revision')
+        response = api.create_commit(
+            repo_id=repo, repo_type='space', parent_commit=base,
+            commit_message='Maintenance update of ' + run + ': incident report and its links',
+            operations=[operation(path_in_repo=n, path_or_fileobj=d) for n, d in uploads])
+        revision = response.oid
+        write_receipt('committed; verifying')
+        final = api.repo_info(repo, repo_type='space', files_metadata=True)
+        if not final.private or final.sha != revision:
+            raise ValueError('Space changed before verification; inspect the latest revision')
+        final_files = remote_files(api, repo, revision)
+        state = inventory(final_files)
+        missing, unexpected = sorted(set(current) - set(state)), sorted(set(state) - set(current) - set(added))
+        if missing or unexpected or not set(added) <= set(state):
+            raise ValueError(f'Remote file inventory changed unexpectedly: missing {missing[:EXAMPLES]}, '
+                             f'unexpected {unexpected[:EXAMPLES]}')
+        for name in current:
+            if name not in planned and not same(current[name], state[name]):
+                raise ValueError('Unrelated remote file changed: ' + name + (
+                    ' (was a planned file stored as LFS?)' if name == ATTRIBUTES else ''))
+        for name, data in planned.items():
+            if final_files[name].lfs or not matches(data, final_files[name]):
+                raise ValueError('File mismatch or stored as LFS after maintenance: ' + name)
+    except Exception as error:
+        try:
+            write_receipt('failed: ' + type(error).__name__ + (': ' + str(error) if isinstance(error, ValueError) else ''))
+        except Exception as receipt_error:  # never hide the original error
+            print(f'Could not record the failure in the receipt {receipt}: {type(receipt_error).__name__}: '
+                  f'{receipt_error}', file=sys.stderr)
+        raise
+    result.update(committed=True, final_revision=revision, status='verified', verification={
+        'final_files': len(state), 'changed_files': sorted(n for n in current if not same(current[n], state[n])),
+        'added_files': added, 'verified_planned_files': len(planned),
+        'verified_preserved_files': len(set(current) - set(planned))})
+    write_receipt('verified')
+    return result
+
+
 DELETE_BATCH = 1000  # loose snapshot deletions per guarded commit
 
 
@@ -1280,7 +1475,9 @@ def main(argv=None):
                              'generated pages (results.html, existing conference-view pages, existing judge HTML '
                              'pages), never data or the catalogue entry; '
                              'snapshots: RUN/snapshots/ loose files replaced by RUN/snapshots.tar.gz and its '
-                             'manifest (verified member by member), catalogue unchanged')
+                             'manifest (verified member by member), catalogue unchanged; incident: '
+                             'RUN/analysis/incident/{report.html,report.md,evidence.json}, the Incident report tab '
+                             'of the published RUN/results.html and the Incident report link of the catalogue entry')
     parser.add_argument('--replace-judge', action='store_true',
                         help='judge scope only: replace published judge files of another judge build (for example '
                              'a re-run under a newer rubric) instead of refusing them; published judge files the '
@@ -1311,7 +1508,7 @@ def main(argv=None):
         return
     if (args.scope in NO_BUNDLE) == (args.bundle is not None):
         parser.error('--bundle is required, except for --scope unlist or snapshots, which take none')
-    if args.resume_from is not None and args.scope in NO_BUNDLE:
+    if args.resume_from is not None and args.scope in (*NO_BUNDLE, 'incident'):
         parser.error('--scope ' + args.scope + ' takes no --resume-from; run it again, it continues from the '
                      'current state')
     if args.commit and (args.receipt is None or args.backup_dir is None):
@@ -1328,6 +1525,11 @@ def main(argv=None):
                                            commit=args.commit, repo=args.repo_id, receipt=args.receipt,
                                            backup_dir=args.backup_dir, operation=CommitOperationAdd,
                                            delete_operation=CommitOperationDelete), indent=2))
+        return
+    if args.scope == 'incident':
+        print(json.dumps(maintain_incident(args.bundle, HfApi(), hf_hub_download, run=args.maintain_run,
+                                           commit=args.commit, repo=args.repo_id, receipt=args.receipt,
+                                           backup_dir=args.backup_dir, operation=CommitOperationAdd), indent=2))
         return
     if args.scope == 'unlist':
         print(json.dumps(unlist_run(HfApi(), hf_hub_download, run=args.maintain_run, commit=args.commit,

@@ -43,8 +43,9 @@ All in `scripts/`; each is documented in its own `--help` and below.
 - `prepare_hf_library.py` and `publish_hf_library.py`: prepare a bundle, then preview and `--commit` a
   first publication.
 - `maintain_hf_run.py`: guarded updates of an already published run, `--scope judge` (default),
-  `transcripts`, `evaluator`, `results`, `inspect` or `site` (`--replace-judge` replaces an already published judge
-  build; `site` republishes only regenerated page presentation, see "Site scope" below). `--scope unlist` (no `--bundle`) removes a run's catalogue row without deleting files,
+  `transcripts`, `evaluator`, `results`, `inspect`, `site` or `incident` (`--replace-judge` replaces an already
+  published judge build; `site` republishes only regenerated page presentation, see "Site scope" below;
+  `incident` publishes incident reports, see "Incident report outputs"). `--scope unlist` (no `--bundle`) removes a run's catalogue row without deleting files,
   after the run is recorded in the tracked `data/library-unlisted.json`
   (run, date, reason). `build_experiment_index.py` and `publish_hf_library.py` leave recorded runs out
   of the local and hosted lists; `baseline100-20261015T191545Z` is unlisted (October 20, 2026).
@@ -520,6 +521,39 @@ unchanged; every `.eval` file and all of Inspect View stay published. To update 
 catalogue with `maintain_hf_run.py --rerender-catalogue --commit` (index.html only, which also carries the
 compare view), then regenerate each run's `results.html` and replace it per run with the site scope (or
 `--scope results`). `verify_hosted.py` fails a served page that still links a raw `RUN/inspect/*.eval`.
+
+## Incident report outputs
+
+The model-written incident report (docs/plan.md, "Incident report per run (October 21, 2026)") writes
+`RUN/analysis/incident/`. Only `report.html`, `report.md` and `evidence.json` are published
+(`scripts/incident_site.py`); `raw/`, `units/`, `route-pricing/`, `digest.json`, `run-budgets.json`,
+`state.json` and lock files stay local. `prepare_hf_library.py` copies only those three files, screens
+them for credential-like content, refuses a report page that links the local-only files, records them
+under `incident_report` in `archive-manifest.json` (with the count of excluded local files) and adds an
+"Incident report" tab (after Behavior judge, before Inspect) to the bundle's `results.html`; a run page
+without the tab bar is refused (regenerate it with `build_results.py`, which adds the tab itself when the
+report exists). `publish_hf_library.py` refuses any other file under `RUN/analysis/incident/`. The
+local and hosted catalogues link "Incident report" (before the raw Inspect log links). The report's own
+page keeps its light/dark styles and gains the site theme toggle; nothing in the facts of `results.html`
+changes.
+
+For already published runs, `maintain_hf_run.py --scope incident` adds or replaces exactly those three
+files, adds the tab to the **published** `results.html` (never the bundle's, which may have drifted) and
+the link to the **published** catalogue entry (only that entry changes; the current generator must
+reproduce the remote catalogue byte for byte), and updates the manifest digests of exactly those files,
+in one guarded commit pinned to the planned revision, verified afterwards. A published incident file the
+bundle lacks is refused (nothing is deleted); no planned file may be or become LFS. After a failure, run
+it again; it continues from the current state (no `--resume-from`). Per run:
+
+```bash
+RUN_ID=owner-opus55-20261021T183459Z
+BUNDLE=runs/phase-b/hf-library-preparation/incident-$RUN_ID
+OUT=runs/phase-b/incident-publication-$RUN_ID
+python3 scripts/prepare_hf_library.py --run "$RUN_ID=runs/phase-b/inspect-$RUN_ID" --output-dir "$BUNDLE"
+python scripts/maintain_hf_run.py --maintain-run "$RUN_ID" --scope incident --bundle "$BUNDLE"   # plan only
+python scripts/maintain_hf_run.py --maintain-run "$RUN_ID" --scope incident --bundle "$BUNDLE" --commit \
+  --backup-dir "$OUT/attempt-1" --receipt "$OUT/attempt-1/maintenance-receipt.json"
+```
 
 ## Snapshot archives (HF file limit)
 

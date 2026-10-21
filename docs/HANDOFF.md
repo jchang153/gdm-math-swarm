@@ -241,9 +241,11 @@ is being merged into main via `collab-env`.
      transcript view is wanted.
 
    Once it lands:
-   - add an "Incident report" tab per run, publishing only `report.html`,
-     `report.md` and `evidence.json` (never `raw/` or `units/`);
-   - publish the 5 incident reports;
+   - "Incident report" tab and catalogue link: implemented on main (2026-10-21,
+     branch `site-incident`; `scripts/incident_site.py`). Only `report.html`,
+     `report.md` and `evidence.json` are published, never `raw/` or `units/`;
+   - publish the 5 incident reports with `maintain_hf_run.py --scope incident`
+     (commands in `docs/experiment-library.md`, "Incident report outputs");
    - remove the "Inspect logs" link or tab, which is only a download. Keep the
      `.eval` files, since Inspect View needs them.
 

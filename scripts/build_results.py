@@ -20,7 +20,8 @@ evidence browser, linked separately from the catalogue); the report carries only
 link line ("Behavior judge: see analysis/judge/report.html" or "Behavior judge: not run").
 
 Page layout: a summary card (model, prompt variant, agents, duration, accepted and genuine tasks,
-cost, judge status), tabs Report / Conference / Behavior judge / Inspect with one-line
+cost, judge status), tabs Report / Conference / Behavior judge / Incident report (only when
+RUN/analysis/incident/report.html exists; scripts/incident_site.py) / Inspect with one-line
 explanations (agent transcripts are read in Inspect View; the site has no custom transcript viewer), the facts sections, and plain explanations of every status label shown. Raw Inspect
 logs are not linked (they were only downloads); Inspect View reads them. Light and dark mode, phone width.
 
@@ -62,6 +63,7 @@ import sys
 if str(Path(__file__).resolve().parent) not in sys.path:  # shared site theme lives beside this script
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 from site_style import themed  # noqa: E402
+from incident_site import add_incident_tab, has_incident_report  # noqa: E402
 from site_theme import BASE as STYLE, badge_class  # noqa: E402
 
 NANO = Decimal('1e-9')
@@ -429,7 +431,10 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
                                            if tokens['prompt_tokens'] else None),
                   'source': 'provider_usage of inference_finished runtime events'},
         'researcher_notes': [dict(n) for n in notes]})
-    return json.dumps(results, indent=1) + '\n', render(results, title, inspect_logs(run))
+    page = render(results, title, inspect_logs(run))
+    if has_incident_report(run):  # navigation only: the incident report lives on its own page
+        page = add_incident_tab(page)
+    return json.dumps(results, indent=1) + '\n', page
 
 
 def inspect_logs(run):

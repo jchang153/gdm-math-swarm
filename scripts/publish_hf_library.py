@@ -97,6 +97,10 @@ def load_bundle(bundle):
             raise ValueError('Unexpected root file')
         if '/' in name and name.split('/')[0] not in runs:
             raise ValueError('File outside selected runs')
+        if '/' in name:
+            from incident_site import incident_excluded
+            if incident_excluded(name.split('/', 1)[1]):  # only report.html, report.md, evidence.json
+                raise ValueError('Incident file outside the publication allowlist: ' + name)
         path = bundle / name
         if digest(path.read_bytes()) != info:
             raise ValueError('Bundle checksum mismatch: ' + name)
