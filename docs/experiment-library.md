@@ -41,7 +41,11 @@ All in `scripts/`; each is documented in its own `--help` and below.
 - `prepare_hf_library.py` and `publish_hf_library.py`: prepare a bundle, then preview and `--commit` a
   first publication.
 - `maintain_hf_run.py`: guarded updates of an already published run, `--scope judge` (default),
-  `transcripts`, `evaluator` or `results`.
+  `transcripts`, `evaluator` or `results` (`--replace-judge` replaces an already published judge
+  build). `--scope unlist` (no `--bundle`) removes a run's catalogue row without deleting files,
+  after the run is recorded in the tracked `data/library-unlisted.json`
+  (run, date, reason). `build_experiment_index.py` and `publish_hf_library.py` leave recorded runs out
+  of the local and hosted lists; `baseline100-20261015T191545Z` is unlisted (October 20, 2026).
 - `monitor_run.py`: read-only live progress of a run on its VM (elapsed time, spending against the
   launch baseline, requests, cache, restarts, submissions and solved tasks).
 - `verify_hosted.py`: read-only check, at a given Space revision, that a published run's pages are
@@ -287,6 +291,20 @@ or addition, a broader LFS rule, another catalogue entry or manifest record), so
 commits are verified rather than accepted as the new starting point. Identical uploaded files
 are skipped, and the final verification is again against the original revision. Check the
 hosted report and judge links afterwards.
+
+To replace a run's already published judge outputs with another judge build (for example a
+re-run under a newer rubric), after a user decision, add `--replace-judge` to the judge-scope dry
+run and commit. Keep the earlier build locally under another name inside the run (for example
+`analysis/judge-v3-first-run/`; `prepare_hf_library.py` publishes only `analysis/judge/`, and the
+renamed directory appears among the skipped local differences, never uploaded) and put the new
+build in `analysis/judge/`. Published judge files that differ from the bundle are then replaced
+(listed in `replaced`, their originals saved under `original/`), new ones are added, identical ones
+kept (`judge_already_present`). A published judge file that the bundle lacks is still refused and
+nothing is deleted. Before any write it refuses a replacement at or above 9.5 MiB that no LFS rule
+already names (HF would newly store it as LFS). The manifest is uploaded last, so a published
+target whose bytes differ from the published manifest's record shows an interrupted attempt
+(`already_applied`, `resume_required`). Resume as above, with `--replace-judge` again, since records
+written in the other mode are refused. The mode refuses a run with no published judge files.
 
 `--scope transcripts` republishes regenerated transcript exports of an already published run,
 for example the full-history exports regenerated on October 18; use it only after a user
@@ -612,3 +630,23 @@ reproduced byte for byte. Verification against the base revision found 18,248 fi
 These are SDK checks, not interactive browser tests. The before-inventory, original copies, plan
 and receipt are in the ignored `runs/phase-b/evaluator-publication-gemini10-20261020T054602Z/attempt-1/`
 directory.
+
+The plain-language behavior-judge re-run of `gemini10-20261020T054602Z` (rubric `gdm-judge-rubric/3.1`,
+$6.8073941 settled over 362 requests per its `report.json`), requested by the owner ("re-run the
+behavior judge for gemini (the new one)"), replaced that run's published v3 judge outputs at private
+revision `311af2f7b9d294e128f86856ec91ab5e7628ba3d`, made with the judge scope and `--replace-judge` from
+base revision `cc8f49b1465d56b300bbd3a912dc50b84a1e224f` in 3 guarded commits. All 34 published judge
+files were replaced and 2 evidence-browser agent pages added (`review/agents/agent-004.html`,
+`agent-008.html`); no judge file was dropped, so nothing needed deleting. `results.html` and
+`results.json` were identical (status line only) and the catalogue entry was unchanged, so only
+`archive-manifest.json` changed at the root. Verification against the base revision found 18,284
+files: 37 uploads, 41 planned files matched, 18,242 preserved unchanged, `.gitattributes` unchanged.
+The next commit, `6f35f8d23f87d8d190c19f8cc3bb638b8473dce5`, is the baseline100 unlisting by another
+workflow. At that revision `scripts/verify_hosted.py` passed all 32 checks for the run report, the judge
+report, the evidence-browser index and three agent pages (private, regular files, bundle bytes,
+HTTP 200 inline HTML). An SDK check confirmed the 36 judge files equal the bundle, the hosted
+`report.html` has the "In plain words" section and no file of another run changed. These are
+SDK/HTTP checks, not interactive browser tests. Locally the first (v3) build is kept, unpublished, in
+`runs/gemini10-20261020T054602Z/analysis/judge-v3-first-run/`. Before-inventory, original copies of
+the replaced files, plan, receipt and checks are in the ignored
+`runs/phase-b/judge-plain-publication-gemini10-20261020T054602Z/attempt-1/` directory.
