@@ -48,6 +48,8 @@ All in `scripts/`; each is documented in its own `--help` and below.
   of the local and hosted lists; `baseline100-20261015T191545Z` is unlisted (October 20, 2026).
 - `monitor_run.py`: read-only live progress of a run on its VM (elapsed time, spending against the
   launch baseline, requests, cache, restarts, submissions and solved tasks).
+- `live_mirror.py`: near-live mirror of running runs to the Space's `live/` area and the catalogue's
+  "Live now" list (owner choice "option 1", October 21, 2026); see "Near-live mirror" below.
 - `verify_hosted.py`: read-only check, at a given Space revision, that a published run's pages are
   stored as regular files and served as HTML (not LFS downloads) with their exact stored bytes.
 
@@ -438,6 +440,75 @@ otherwise it follows the results scope (no LFS, `.gitattributes` unchanged, cata
 resume and verification). Prepare each run's bundle with the viewer of its original publication and run
 it per run, plan first, as for the other scopes. Published `results.html` pages still link `inspect/`
 until their reports are regenerated and republished.
+
+## Near-live mirror
+
+The owner chose near-live transcripts on the website while runs are going ("option 1 (near-live)",
+October 21, 2026). `scripts/live_mirror.py` runs on the operator's own computer, never on a VM, with the
+operator's own gcloud login and HF login (`pip install -e '.[publication]'`, `hf auth login`):
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/live_mirror.py --vm collab-vm-1 --vm owner-vm
+# one pass without uploading (the bundle is written under runs/phase-b/live-mirror/bundle/RUN/):
+PYTHONPATH=src .venv/bin/python scripts/live_mirror.py --vm collab-vm-1 --once --no-upload
+```
+
+Every `--interval` seconds (default 300) it checks each VM's status and skips a VM that is not RUNNING
+(it never starts, stops or provisions one). On a running VM it lists the runs under
+`REMOTE_ROOT/runs` (`--vm NAME=REMOTE_ROOT`, default `~/gdm-math-swarm`) whose `runtime.jsonl` changed
+within `--max-age` (default 1 hour) and has no `run_stop`; `--run RUN` restricts it to named runs. A
+mirrored run that has just stopped gets one final pass and is then left alone. For each run it pulls a
+read-only snapshot over IAP SSH: a small stdlib-only program is sent inside the SSH command (nothing is
+installed or left on the VM) and streams back a tar archive with its own SHA-256 manifest. The archive
+holds the complete lines of `runtime.jsonl`, `settings.json`, SQLite online backups of
+`conference/state.sqlite` and of Inspect's realtime sample buffer (`~/.local/share/inspect_ai/samplebuffer`,
+`--remote-buffer-dir`; the same buffer the live behavior judge reads), the `.eval` logs when their size or
+modification time changed, and the private-file snapshot blobs referenced since the previous pass.
+Claude Code's own session JSONL snapshots are not transferred: they duplicate the Inspect transcript and
+no view renders them. No HF token, provider key or host environment reaches the VM: the SSH command
+contains only that program and its arguments, and gcloud is started without any token, key or `HF_*`
+variable. The VM program runs under `nice`.
+
+Locally (Git-ignored `runs/phase-b/live-mirror/`: `work/RUN/` source copies, `bundle/RUN/` the upload,
+`state.json`) it rebuilds the views with the publication code itself: each agent's history with the
+unchanged `history.build_agent`, read through `research.analysis.judge.live.LiveSource` (buffer, or the
+`.eval` once Inspect flushed the sample), rendered by `export_transcripts.render_agent`; the conference
+view with `export_conference.export`, after rebuilding `conference/events.jsonl` from the snapshot's
+events table (the conference's own rebuild) and the timeline from conference and runtime records
+(Inspect events are left out of the live timeline). It adds a live summary page (state, snapshot time,
+elapsed time, model, condition, agents, exits and restarts, tasks solved and submissions by conference
+outcome, with plain explanations) and a transcript index. Every page carries a "Live snapshot, not final"
+banner: conference (operational) outcomes only, no independent evaluation, no behavior judge. Links to
+files the mirror does not carry (the report, raw records) become plain text; the library link still works.
+A view that cannot be built from a snapshot is listed under "Mirror notes" on the summary page.
+
+Privacy screening is that of a normal publication: `publish_hf_library.safe_path` and `screen` for every
+uploaded file, plus the same credential pattern over the records behind the views (`runtime.jsonl`, the
+conference database and event log) and over every page before compression, since the conference view and
+the transcript pages are stored compressed. A match refuses that run's update. Every page gets the
+private-Space navigation. The mirror refuses a public Space.
+
+Upload: one commit per pass that touches only `live/` (enforced: any other path is refused). Changed files
+are added, files of the previous snapshot that no longer exist are deleted, `live/index.json` (schema
+`gdm-live-mirror/1`) is updated, and the whole `live/RUN/` folder and the entry of a run that now appears in
+the published `experiments.json` are removed (its live entry is retired once it is published normally). A
+pass with nothing new makes no commit. Unchanged files are never uploaded again, and transcript pages are
+stored gzip-compressed inside a small page that decompresses them in the browser (as the conference view
+already does), which keeps them far below the 9.5 MiB LFS limit; a page that would still reach it is
+replaced by a notice. This bounds history growth to the compressed changes; the Space history is never
+squashed (its revisions are cited in this document). The mirror's commits start with `Live mirror: `
+and are pinned to the revision they were planned on. A pass is deferred while the Space's head is not one of the
+mirror's own commits (recorded in `state.json`) and changed less than `--quiet-seconds` ago (default 600),
+so a publication or maintenance in progress is not interrupted. If a live commit still lands between a publisher's planning and its first batch, the
+publisher refuses with its usual concurrent-change message; rerun it. A failed maintenance attempt resumed
+with `--resume-from` compares the whole Space with its original state, so let it finish before the next
+live pass changes `live/` (the quiet period normally covers this).
+
+The hosted catalogue (`write_index(..., hosted=True)`) has a hidden "Live now" section that reads
+`live/index.json` in the browser and lists each run that is not already in the catalogue, with its state,
+model, agents, solved count and update time and links to its live summary, transcripts and conference view.
+The catalogue page itself does not change when the mirror runs, so the maintenance tools still reproduce it
+byte for byte. The local `runs/index.html` has no live section.
 
 ## Uploading and preserving other collaborators' experiments
 
