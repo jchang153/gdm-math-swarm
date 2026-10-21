@@ -39,15 +39,16 @@ the authoritative record of user decisions.
   Real runtime, strict isolation and the ten-minute 20-agent capacity test passed at
   the approved `2g` per-agent memory cap, with zero memory kills. The initial `1g`
   failure and all corrections remain in the [setup record](docs/vm-setup-2026-10-14.md).
-  The VM is stopped and confirmed `TERMINATED`. Paid compatibility and pilot launches
-  retain their approval checkpoints.
+  The VM is stopped and confirmed `TERMINATED`. Paid compatibility checks and pilot
+  launches now need no approval step: each run's own budget (`run_budget_usd`, $100 by
+  default, printed at launch) is the one spending control.
 * **Initial pilot complete:** Fireworks US compatibility passed all nine required
   checks; cumulative compatibility cost is $0.250809222. The approved 20-agent pilot
   ran for 12 minutes 48 seconds and settled at $19.636804044 of its shared $20 cap,
   with no holds or violations. Four accepted submissions independently verified as
   genuine, covering three distinct tasks. Nineteen peers stopped at budget admission;
   one suffered a container-memory-related harness failure. The VM is confirmed
-  `TERMINATED`; the consumed launch flag is disabled. Paid analysis remains $0.
+  `TERMINATED`. Paid analysis remains $0.
   See [the outcome record](docs/plan.md#initial-pilot-outcome-october-15-2026).
 
 ## Saved experiments

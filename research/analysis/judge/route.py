@@ -59,8 +59,8 @@ by the allowance), capped at the context length, priced at the highest price amo
 the price tiers that bound could reach (Haiku 5.5 bills prompts of at least 100,000
 tokens at a higher prompt AND completion price), plus ``max_tokens`` at that
 completion price (adaptive thinking and the visible reply share ``max_tokens`` and
-thinking bills as output), except that a Sonnet request reserves 12,000 output tokens
-(``RESERVATION_OUTPUT_TOKENS``, the owner-approved judge speed fix). The byte bound is
+thinking bills as output; ``RESERVATION_OUTPUT_TOKENS`` is empty, so every model reserves its
+full ``max_tokens`` and the judging run's budget is a hard bound). The byte bound is
 unverified until the first paid request: a bill above the reservation settles as
 ``estimate_violation`` (recorded, no acknowledgement), and the ledger scales the judging run's
 later reservations up by the observed ratio, also across the run's later invocations
@@ -120,24 +120,16 @@ FRAMING_TOKEN_ALLOWANCE = 8192
 # (judge revision v3, item 7).
 MAX_TOKENS_CEILING = 64000
 # Output tokens (thinking + reply) a request's ledger reservation assumes, at most its max_tokens:
-# ((model key, tokens), ...); a model not listed reserves its full max_tokens (judge speed fix,
-# October 20, 2026, owner approved: smaller in-flight holds). Sonnet only: its 48,000-token output
-# limit made two thirds of each Sonnet reservation ($0.48 of ~$0.70), so 32 Sonnet requests in flight
-# held ~$22 of a $50 budget. 12,000 is the largest Sonnet completion measured over the gemini10 paid
-# run (3,181 tokens, reasoning included, 39 units) times ~3.8; the prompt stays bounded by its UTF-8
-# bytes plus framing at the highest price it can reach (measured Sonnet tokens per byte <= 0.53),
-# which leaves roughly another 10,000 output tokens of slack per typical request. Haiku (16,000) and
-# Opus (6,000 / 8,000) keep their full max_tokens: reducing them saves at most $0.04 per request. A
-# request is still sent with its full max_tokens and settles at its reported cost. Under the one
-# per-run budget (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)") a
-# request billed above its reservation (e.g. a Sonnet output that runs to its 48,000-token limit) is
-# recorded as an estimate_violation without any acknowledgement, and the ledger scales the judging
-# run's later reservations up by the observed ratio, also across its later invocations: only the
-# requests already in flight when that happens can bill past the budget (at most their unreserved
-# output; about 23% of $50 in the worst case of 32 Sonnet requests all running to 48,000 tokens).
-# Tests and rehearsals may set another allowance (``JudgeRouteSettings(reservation_output_tokens=())``
-# reserves every model's full max_tokens).
-RESERVATION_OUTPUT_TOKENS = (("sonnet", 12000),)
+# ((model key, tokens), ...); a model not listed reserves its full max_tokens. Empty: every model
+# reserves its full max_tokens, so every reservation is an upper bound and the judging run's budget
+# is a hard bound (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)", review
+# fixes). The judge speed fix (October 20, 2026) reserved Sonnet at 12,000 of its 48,000 output
+# tokens for smaller in-flight holds; without the removed acknowledgement, the requests in flight
+# could then bill up to ~$0.36 each past the budget (a fixed amount, about twice a $10 budget in the
+# worst case). Full Sonnet holds (~$0.70) only lower concurrency once less than about 32 x $0.70 of the
+# budget is left; a typical full judging run costs ~$5 of $50. Tests and rehearsals may set an
+# allowance (``JudgeRouteSettings(reservation_output_tokens=(("sonnet", 12000),))``).
+RESERVATION_OUTPUT_TOKENS = ()
 # Advisory per-purpose defaults for callers (the client takes max_tokens per call); judge revision v3
 # (item 5): verifier 6,000 and run level 8,000 (pipeline.DEFAULT_MAX_TOKENS binds them).
 DEFAULT_MAX_TOKENS = {"prefilter": 16000, "judge": 48000, "verifier": 6000, "runlevel": 8000}

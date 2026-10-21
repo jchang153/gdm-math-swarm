@@ -493,56 +493,74 @@ def run_budget_records(judge_dir):
     return sorted(records, key=lambda entry: str(entry.get("at") or ""))
 
 
-def committed_for_judging(ledger_path, judge_dir, scope=ANALYSIS_SCOPE):
-    """What the ledger holds against one judging run, read only: the judge directory ``judge_dir``
-    (its live store included) of one judged run. docs/plan.md, "One per-run budget, no manual
-    approvals (October 20, 2026)": the judge's budget is per judging run, so every invocation that
-    judges into the same directory (live passes, the early stages, the post-run judge, any resume)
-    counts what the earlier ones committed, and a re-judge into a new ``--output-dir`` is a judging
-    run of its own.
+def committed_for_judging(ledger_path, judge_dir, scope=ANALYSIS_SCOPE, *, run_id=None):
+    """What the ledger(s) hold against one judging run, read only. docs/plan.md, "One per-run
+    budget, no manual approvals (October 20, 2026)": the behavior judge keeps its own fixed
+    *per-run* limit, so every invocation that judges the same judged run counts what the earlier
+    ones committed: live passes, the early stages, the post-run judge, any resume, and a re-judge
+    into another ``--output-dir`` alike.
 
-    Counted once each, with ``COALESCE(actual, reserved)`` (exactly what the ledger counts, so an
-    orphaned hold counts at its reservation): every ``scope`` row of a ledger run the directory's
-    budget records name (``run_budget_records``: written before an invocation's first request, so a
-    hold whose request archive was never written is included), and every ``scope`` row a request
-    archive under ``judge_dir`` names (``archived_request_ids``: requests of invocations made before
-    the budget records existed). Returns ``{"committed_usd", "rows", "unresolved_rows",
-    "ledger_runs", "reservation_factor"}`` (the largest reservation factor of those ledger runs:
-    an estimate violation keeps scaling the judging run's reservations across invocations); a
-    missing ledger counts 0."""
+    ``ledger_path`` is one ledger or a list of them (the ledger this invocation bills and every
+    ledger the judge directory's earlier spend was counted in; a request found in several, e.g. a
+    ledger and its copy, counts once, at its largest amount). Counted with ``COALESCE(actual,
+    reserved)`` (exactly what the ledger counts, so an orphaned hold counts at its reservation):
+    every ``scope`` row of a ledger run the directory's budget records name (``run_budget_records``:
+    written before an invocation's first request, so a hold whose request archive was never
+    written is included), every ``scope`` row a request archive under ``judge_dir`` names
+    (``archived_request_ids``: requests made before the budget records existed) and, with
+    ``run_id`` (the judged run), every judge row whose label names that run (``request_label``),
+    whatever judge directory it was made for. Returns ``{"committed_usd", "rows",
+    "unresolved_rows", "ledger_runs", "reservation_factor", "ledgers"}`` (the largest reservation
+    factor of those ledger runs: an estimate violation keeps scaling the judging run's
+    reservations across invocations); a missing ledger counts 0."""
     from research_swarm.budget import usd
-    path = Path(ledger_path)
+    paths = [ledger_path] if isinstance(ledger_path, (str, Path)) else list(ledger_path or ())
+    paths = list(dict.fromkeys(Path(p).resolve() for p in paths))
     runs = sorted({str(entry["ledger_run_id"]) for entry in run_budget_records(judge_dir)
                    if entry.get("ledger_run_id")})
-    empty = {"judge_dir": str(judge_dir), "committed_usd": "0", "rows": 0, "unresolved_rows": 0,
-             "ledger_runs": runs, "reservation_factor": "1"}
-    if not path.exists():
-        return empty
-    archived = sorted(archived_request_ids([judge_dir], scope))
+    empty = {"judge_dir": str(judge_dir), "judged_run_id": run_id, "committed_usd": "0", "rows": 0,
+             "unresolved_rows": 0, "ledger_runs": runs, "reservation_factor": "1",
+             "ledgers": [str(p) for p in paths]}
+    archived = None
     rows = {}
     factor = Decimal(1)
-    with closing(sqlite3.connect("file:" + str(path.resolve()) + "?mode=ro", uri=True, timeout=30)) as db:
-        db.execute("PRAGMA busy_timeout=30000")
-        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        columns = {row[1] for row in db.execute("PRAGMA table_info(calls)")} if "calls" in tables else set()
-        if "calls" not in tables:
-            return empty
-        for field_name, values in (("run_id", runs if "run_id" in columns else []), ("id", archived)):
-            for start in range(0, len(values), 500):
-                chunk = values[start:start + 500]
-                for request_id, amount, state in db.execute(
-                        f"SELECT id, COALESCE(actual, reserved), state FROM calls WHERE scope=? AND {field_name} IN "
-                        f"({','.join('?' * len(chunk))})", (scope, *chunk)):
-                    rows[request_id] = (int(amount or 0), state)
-        if runs and "runs" in tables:
-            for start in range(0, len(runs), 500):
-                chunk = runs[start:start + 500]
-                for (value,) in db.execute(f"SELECT reservation_factor FROM runs WHERE id IN "
-                                           f"({','.join('?' * len(chunk))})", chunk):
-                    try:
-                        factor = max(factor, Decimal(str(value)))
-                    except (ArithmeticError, ValueError):
-                        pass
+    marker = f":{run_id}:" if run_id else None
+    for path in paths:
+        if not path.exists():
+            continue
+        if archived is None:
+            archived = sorted(archived_request_ids([judge_dir], scope))
+        with closing(sqlite3.connect("file:" + str(path) + "?mode=ro", uri=True, timeout=30)) as db:
+            db.execute("PRAGMA busy_timeout=30000")
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if "calls" not in tables:
+                continue
+            columns = {row[1] for row in db.execute("PRAGMA table_info(calls)")}
+
+            def add(found):
+                for request_id, amount, state in found:
+                    amount = int(amount or 0)
+                    if request_id not in rows or amount > rows[request_id][0]:
+                        rows[request_id] = (amount, state)
+
+            for field_name, values in (("run_id", runs if "run_id" in columns else []), ("id", archived)):
+                for start in range(0, len(values), 500):
+                    chunk = values[start:start + 500]
+                    add(db.execute(f"SELECT id, COALESCE(actual, reserved), state FROM calls WHERE scope=? AND "
+                                   f"{field_name} IN ({','.join('?' * len(chunk))})", (scope, *chunk)))
+            if marker:
+                add(db.execute("SELECT id, COALESCE(actual, reserved), state FROM calls WHERE scope=? AND "
+                               "substr(agent, 1, ?)=? AND instr(agent, ?) > 0",
+                               (scope, len(LABEL_PREFIX), LABEL_PREFIX, marker)))
+            if runs and "runs" in tables:
+                for start in range(0, len(runs), 500):
+                    chunk = runs[start:start + 500]
+                    for (value,) in db.execute(f"SELECT reservation_factor FROM runs WHERE id IN "
+                                               f"({','.join('?' * len(chunk))})", chunk):
+                        try:
+                            factor = max(factor, Decimal(str(value)))
+                        except (ArithmeticError, ValueError):
+                            pass
     total = sum(amount for amount, _ in rows.values())
     return dict(empty, committed_usd=str(usd(total)), rows=len(rows),
                 unresolved_rows=sum(state in ("reserved", "uncertain") for _, state in rows.values()),
@@ -660,6 +678,15 @@ class RunLimit:
             self._row(purpose, model)["requests"] += 1
             self.peak_committed = max(self.peak_committed, committed + amount)
             return token
+
+    def raise_factor(self, value):
+        """Follow the ledger run's reservation factor after an estimate violation within this
+        invocation (``BudgetLedger.settle`` raised it), so this limit and the ledger keep admitting
+        the same amounts (never lowers it)."""
+        factor = _decimal_or_none(value)
+        if factor is not None and factor > self.reservation_factor:
+            with self._lock:
+                self.reservation_factor = factor
 
     def settle(self, token, cost, *, uncertain=False):
         """Replace the hold of ``token`` by its settled ``cost``; an uncertain request keeps its
@@ -1104,6 +1131,9 @@ class JudgeClient:
             if token is not None:
                 self.run_limit.settle(token, cost)
             state = next((r["state"] for r in self._request_state(request_id)), "settled")
+            if state == "estimate_violation" and self.run_limit is not None:
+                # The ledger raised its run's reservation factor; the run limit follows it.
+                self.run_limit.raise_factor((self.ledger.run_snapshot() or {}).get("reservation_factor"))
             return {"request_id": request_id, "state": state, "cost_usd": str(cost), "basis": basis}
         except BaseException:
             if token is not None:

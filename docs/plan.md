@@ -18,7 +18,7 @@ pilot and analysis caps, the standing approval of the automatic judge and the au
 | --- | --- |
 | The one spending control | Every paid invocation is one run with its own budget, specified before it starts: a pilot run on any track (the owner's and collaborators' alike) and the live compatibility check read `run_budget_usd` from their config, $100 when absent (the launch prints the budget it uses); the behavior judge's budget is its fixed run limit (`--run-limit`, else the run config's `behavior_judge_max_usd`, else $50). A request is admitted only if this run's committed spend (its own in-flight reservations, settled costs and uncertain holds, tagged by run id) plus the request's reservation fits the run's budget; the run then stops cleanly (`research_swarm.budget.BudgetLedger.reserve`). |
 | The shared ledger | `state/budget.sqlite` stays the record of every request of every run (cumulative history per scope, reconciliation, the `runs` table with each run's budget). There is no cumulative cap to raise and no top-up; the caps of older ledgers are kept as history only. |
-| Removed | Audited cap raises and their lineage checks; the separate compatibility allowance and its approval; the cap-equality and repeat-snapshot launch bindings; the `verified_integration` and `paid_launch_enabled` attestations; approval notes; `--i-have-user-approval`, `--yes` and every typed confirmation or interactive-terminal requirement (pilot, compatibility check, provider-limit check, reconciliation, judge); the provider-key limit as a refusal; the judge's owner-only track restriction and its $50 ceiling. |
+| Removed | Audited cap raises and their lineage checks; the separate compatibility allowance and its approval; the cap-equality and repeat-snapshot launch bindings; the `verified_integration` and `paid_launch_enabled` attestations; approval notes; `--i-have-user-approval`, `--yes` and every typed confirmation or interactive-terminal requirement (pilot, compatibility check, provider-limit check, reconciliation, judge); the provider-key limit as a refusal; the judge's $50 ceiling. Recorded reading, not a separate owner statement: the owner's "generalize to amelie's too, they should be repo-wide" (restated on October 20, 2026 as repo-wide, the collaborator's ablation track included) also lifts the judge's owner-only track restriction. |
 | Handled automatically | Route-pricing records (pilot and judge) refresh automatically (unpaid public catalog) when missing or older than 72 h, instead of refusing; the provider-side key limit is recorded (unpaid) at every paid launch, never refused; holds left by a process that is gone are marked `uncertain` at the next run's start, stay counted against their own run and never block a new run; an estimate violation is recorded, needs no acknowledgement, and scales the rest of that run's reservations up by the observed ratio; the post-run reconciliation settles uncertain holds from OpenRouter's generation records without a flag. |
 | Kept (research integrity, not spending) | Frozen tasks and dataset, approved design settings, `max_connections`, the seeded-track refusal, the recorded `prompt_cache_normalization`, Lean/runtime/isolation/capacity/evaluator evidence, the live compatibility evidence (model, route, settings, agent image), a route-pricing freeze that must validate against the config's reservation prices, the launch interlock, credential presence and host-only keys, judge directory bindings, label checks and held agents. |
 | Collaborators | The same rules apply to every track and every checkout; a collaborator specifies their own run budgets and uses their own provider key ("Collaborator budgets and keys"). |
@@ -34,7 +34,8 @@ review of October 20, 2026 (implementer, no new owner decision; no paid call): t
 (`--run-limit`, else the run config's `behavior_judge_max_usd`, read from `--run-config` or else from
 the config the run recorded in `RUN/settings.json`, else $50) holds for the *judging run*: one judge
 directory of one judged run, its live store included (live passes, the early model stages, the
-post-run judge and every resume together). Each invocation counts what that directory's earlier
+post-run judge and every resume together). Superseded by the second review fixes below: the budget
+holds for all judging of one judged run, whatever its `--output-dir`. Each invocation counts what that directory's earlier
 invocations committed (`client.committed_for_judging`: the ledger runs its `run-budgets.json` records,
 written before any request, and the rows its request archives name) against the budget, whichever way
 the budget was given, and registers its own ledger run with the room left and the largest reservation
@@ -67,6 +68,35 @@ and valid. (3) The judge copies the pricing record it used into `RUN/analysis/ju
 `reconcile_ledger.py` (`--include-stale-reserved`, `--manual`) and `BudgetLedger.reconcile` never
 settle a `reserved` hold whose process is still running. (5) `scripts/supervise_run.py` prints the
 run's budget (and the judge's) on its own console before the launch (`launch-budget.json`).
+
+Second review fixes of October 20, 2026 (implementer, no new owner decision; no paid call), so the
+one per-run budget is a hard bound that nothing manual, stale or concurrent can bypass:
+(1) Every judge model reserves its full `max_tokens` (`route.RESERVATION_OUTPUT_TOKENS` is empty),
+which adopts the proposal above: with 12,000-token Sonnet holds, requests in flight could bill up
+to ~$0.36 each past the budget, a fixed amount that could double a $10 budget. Full Sonnet holds
+(~$0.70) lower concurrency only in the last ~$22 of a budget; a typical full judging run costs ~$5.
+The judge speed fix's other parts (concurrency, transports) are unchanged. (2) The judge keeps its
+own fixed per-run limit per *judged run* (the owner's wording), not per judge directory: every
+judge request labelled with the run counts (`client.committed_for_judging(run_id=...)`), so a
+re-judge into another `--output-dir` (or one adopting live units with `--warm-from`) counts what
+the run's judging already committed; a larger total takes a larger `--run-limit`. (3) A judging
+invocation bills `--ledger`, else this checkout's ledger, and counts the earlier spend of its judge
+directory in every ledger it was recorded in, read under the judging locks
+(`run_transcript_judge.judging_ledgers`): the recorded ledger when it is still there, else copies
+with its `ledger_id` that together hold every recorded ledger run (the run directory is searched,
+e.g. for the supervisor's `budget-final.sqlite` retrieved from a stopped VM). A stale copy alone is
+never enough, a ledger chosen before another process wrote the binding still counts that spend,
+and nothing refuses for being "another ledger"; only when a recorded ledger run is in no available
+file does the invocation refuse (exit 4, nothing sent). (4) A pilot relaunched into a reused run
+directory name registers a fresh ledger run (`<name>-r<N>`, `budget.fresh_run_id`) instead of
+inheriting the old run's spend and holds or crashing on its fixed budget. (5) After an estimate
+violation within one invocation, its run limit follows the ledger's raised reservation factor. (6)
+The live pass's automatic key-headroom deferral is restored (not a spending control): a paid live
+pass is deferred (exit 5, the next pass tries again) when the provider key's `limit_remaining` is
+below the running pilot's remaining budget plus its holds plus the pass's room. Not changed: the
+compatibility check still treats an estimate violation as a failed required check (its evidence
+shows that pilot reservations are upper bounds, a research-integrity check; a passing check is
+simply rerun).
 
 ## Live behavior judge during the run (October 20, 2026)
 

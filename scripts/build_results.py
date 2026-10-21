@@ -162,7 +162,9 @@ def recorded_run_budget(run, db=None):
     if db is not None:
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if 'runs' in tables:
-            row = db.execute('SELECT budget FROM runs WHERE id=?', (run.name,)).fetchone()
+            # The run directory's name, or its newest relaunch id <name>-r<N> (budget.fresh_run_id).
+            row = db.execute('SELECT budget FROM runs WHERE id=? OR id GLOB ? ORDER BY created DESC, rowid DESC',
+                             (run.name, run.name + '-r[0-9]*')).fetchone()
             if row is not None:
                 return Decimal(row[0]) * NANO
     path = run / 'run-budget.json'

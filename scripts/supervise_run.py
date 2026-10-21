@@ -174,10 +174,11 @@ class Supervisor:
         return read_snapshot(self.ledger) or {}
 
     def run_budget(self):
-        """This run's budget and committed spend from the ledger (run id = the run directory's name)."""
+        """This run's budget and committed spend from the ledger (run id = the run directory's name, or
+        its newest relaunch id ``<name>-r<N>``, ``budget.latest_run_id``)."""
         sys.path.insert(0, str(self.root / "src"))
-        from research_swarm.budget import read_run
-        return read_run(self.ledger, self.run.name)
+        from research_swarm.budget import latest_run_id, read_run
+        return read_run(self.ledger, latest_run_id(self.ledger, self.run.name) or self.run.name)
 
     def live_checkpoint(self):
         events = []

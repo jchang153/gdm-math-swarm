@@ -890,7 +890,7 @@ class PerRunCapTests(unittest.TestCase):
         self.assertNotIn("per_run", limit)
         larger = cli.fixed_run_limit(None, dict(config, max_usd="120"), prior_usd="12")   # any amount, never clamped
         self.assertEqual((larger["limit_usd"], larger["room_usd"]), ("120", "108"))
-        with self.assertRaisesRegex(cli.LimitRefused, "new --output-dir"):
+        with self.assertRaisesRegex(cli.LimitRefused, "larger --run-limit"):
             cli.fixed_run_limit(None, config, prior_usd="50")
         # --run-limit sets the judging run's budget; what its earlier invocations committed still counts.
         override = cli.fixed_run_limit(Decimal("60"), config, prior_usd="49")
@@ -1490,10 +1490,11 @@ class ReviewFixTests(unittest.TestCase):
 
     # -- a transient key-check failure or headroom shortfall defers the pass --------------------
     def test_live_pass_defers_only_without_a_key_or_fresh_pricing(self):
-        """One spending control (owner decision, October 20, 2026): the provider key's limit is recorded and never
-        gates a live pass (no headroom deferral); a pass is deferred (exit 5, the next pass tries again) only when
-        no key could be loaded or no fresh valid pricing record could be had. A post-run invocation without a
-        fresh valid pricing record refuses (exit 4) and sends nothing."""
+        """One spending control (owner decision, October 20, 2026): the provider key's limit is never a launch
+        gate; a live pass is deferred (exit 5, automatic: the next pass tries again) when no key could be loaded,
+        when no fresh valid pricing record could be had, or when the key shared with the running pilot lacks
+        headroom for the pilot's remaining budget (review fix: live judging never starves the experiment). A
+        post-run invocation without a fresh valid pricing record refuses (exit 4) and sends nothing."""
         import run_transcript_judge as cli
         from research.analysis.judge.route import JudgeRouteSettings
         run_dir = self.tmp / "runs" / tjp.RUN_ID
@@ -1522,7 +1523,8 @@ class ReviewFixTests(unittest.TestCase):
                                  "judge-route-pricing-x.json is older than 72 h")
         routes = JudgeRouteSettings.defaults(pricing_verified=True)
         for outcome, route, text in ((RuntimeError("no key could be loaded"), routes, "could not be loaded"),
-                                     ({"limit_remaining": "1"}, routes, None),          # a nearly spent key: no gate
+                                     ({"limit_remaining": "1"}, routes, "starve the pilot"),   # nearly spent key
+                                     ({"limit_remaining": "500"}, routes, None),
                                      ({"limit_remaining": None, "error": "HTTP 502"}, routes, None),
                                      ({"limit_remaining": None}, stale, "older than 72 h")):
             err, out = io.StringIO(), io.StringIO()
@@ -1587,33 +1589,84 @@ class OneBudgetJudgeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.cli.recorded_budget_config(run_dir)
 
-    def test_a_judge_directory_is_counted_in_one_ledger(self):
+    def spend(self, path, ledger_run, amount, *, label="judge-sonnet:run-x:judge:A01"):
+        ledger = BudgetLedger(path)
+        ledger.start_run(ledger_run, "analysis", "50")
+        ledger.settle(ledger.reserve("analysis", label, amount), amount)
+        return ledger
+
+    def prior(self, billing, judge_dir, run_dir):
+        return self.cli._judging_prior(billing, judge_dir, "analysis", run_dir=run_dir, log=lambda line: None)
+
+    def test_earlier_judging_spend_is_counted_in_every_ledger_it_was_recorded_in(self):
+        """Review fixes: the judging budget's prior spend is read from every ledger the judge directory's spend
+        was counted in (under the judging locks), so another, stale or missing ledger never gives a fresh
+        budget, and judging continues automatically in the ledger this invocation bills."""
         from research_swarm.budget import read_ledger_id
-        judge_dir = self.tmp / "judge"
+        run_dir, judge_dir = self.tmp / "run-x", self.tmp / "run-x" / "analysis" / "judge"
+        run_dir.mkdir()
         first, other = self.tmp / "first" / "budget.sqlite", self.tmp / "other" / "budget.sqlite"
         first.parent.mkdir()
         other.parent.mkdir()
-        first_id, other_id = BudgetLedger(first).ledger_id, BudgetLedger(other).ledger_id
-        self.assertNotEqual(first_id, other_id)
-        self.assertEqual((read_ledger_id(first), BudgetLedger(first).ledger_id), (first_id, first_id))   # stable
-        self.assertIsNone(read_ledger_id(self.tmp / "absent.sqlite"))
-        # Before any paid invocation: the checkout's (or the given) ledger.
-        self.assertEqual(self.cli.judging_ledger(self.args(ledger=other), judge_dir), other.resolve())
-        self.cli.record_run_budget(judge_dir, {"ledger_run_id": "judge-1"}, run_dir=self.tmp, ledger=first)
-        self.assertEqual(self.cli.ledger_binding(judge_dir), (first_id, str(first)))
-        self.assertEqual(self.cli.judging_ledger(self.args(ledger=first), judge_dir), first.resolve())
-        moved = self.tmp / "copy.sqlite"
-        shutil.copy(first, moved)                                               # a copy keeps its id
-        self.assertEqual(self.cli.judging_ledger(self.args(ledger=moved), judge_dir), moved.resolve())
-        with self.assertRaisesRegex(self.cli.RouteRefused, "is another ledger"):
-            self.cli.judging_ledger(self.args(ledger=other), judge_dir)
-        with self.assertRaisesRegex(self.cli.RouteRefused, "is missing"):
-            self.cli.judging_ledger(self.args(ledger=self.tmp / "missing.sqlite"), judge_dir)
-        # Without --ledger, a checkout whose own ledger differs uses the bound one (automatic, logged).
+        BudgetLedger(first)
+        stale = self.tmp / "budget-after-pilot.sqlite"
+        shutil.copy(first, stale)                                               # an older copy keeps the id
+        self.assertEqual(read_ledger_id(stale), read_ledger_id(first))
+        BudgetLedger(other)
+        # Before any paid invocation: only the billing ledger.
+        self.assertEqual(self.cli.judging_ledgers(other, judge_dir), [other.resolve()])
+        self.spend(first, "judge-1", "45")
+        self.cli.record_run_budget(judge_dir, {"ledger_run_id": "judge-1"}, run_dir=run_dir, ledger=first)
+        # Billing another ledger (e.g. an invocation that chose its ledger before the binding existed):
+        # the first ledger's $45 still counts.
+        self.assertEqual(self.prior(other, judge_dir, run_dir)["committed_usd"], "45")
+        self.assertEqual(self.cli.fixed_run_limit(None, prior_usd="45")["room_usd"], "5")
+        # A stale copy of the bound ledger (it lacks judge-1) is never enough on its own ...
+        self.assertEqual(self.prior(stale, judge_dir, run_dir)["committed_usd"], "45")
+        moved = self.tmp / "vm" / "budget.sqlite"
+        moved.parent.mkdir()
+        shutil.move(first, moved)
+        with self.assertRaisesRegex(self.cli.RouteRefused, "judge-1"):
+            self.prior(stale, judge_dir, run_dir)
+        with self.assertRaisesRegex(self.cli.RouteRefused, "judge-1"):
+            self.prior(other, judge_dir, run_dir)
+        # ... while a complete copy retrieved with the run (the supervisor's budget-final.sqlite) is found.
+        (run_dir / "phase").mkdir()
+        shutil.copy(moved, run_dir / "phase" / "budget-final.sqlite")
         lines = []
-        with mock.patch("research_swarm.budget.DEFAULT_LEDGER_PATH", lambda root: other):
-            self.assertEqual(self.cli.judging_ledger(self.args(), judge_dir, log=lines.append), first.resolve())
-        self.assertIn(str(first), lines[0])
+        sources = self.cli.judging_ledgers(other, judge_dir, search=(run_dir,), log=lines.append)
+        self.assertEqual(sources, [other.resolve(), (run_dir / "phase" / "budget-final.sqlite").resolve()])
+        self.assertIn("budget-final.sqlite", lines[0])
+        self.assertEqual(self.prior(other, judge_dir, run_dir)["committed_usd"], "45")
+        self.assertEqual(self.prior(stale, judge_dir, run_dir)["committed_usd"], "45")
+
+    def test_the_judging_budget_is_per_judged_run_whatever_the_output_dir(self):
+        """The judge keeps its own fixed per-run limit: a re-judge of the same run into another --output-dir
+        counts the run's earlier judging spend (by the run id in every judge request's label)."""
+        run_dir = self.tmp / "run-x"
+        run_dir.mkdir()
+        ledger = self.tmp / "budget.sqlite"
+        self.spend(ledger, "judge-1", "50")
+        self.spend(ledger, "judge-2", "1", label="judge-sonnet:run-y:judge:A01")       # another judged run
+        self.cli.record_run_budget(run_dir / "analysis" / "judge", {"ledger_run_id": "judge-1"}, run_dir=run_dir,
+                                   ledger=ledger)
+        prior = self.prior(ledger, self.tmp / "judge2", run_dir)
+        self.assertEqual(prior["committed_usd"], "50")
+        with self.assertRaises(self.cli.LimitRefused):
+            self.cli.fixed_run_limit(None, prior_usd=prior["committed_usd"])
+        self.assertEqual(self.cli.fixed_run_limit("60", prior_usd=prior["committed_usd"])["room_usd"], "10")
+
+    def test_a_live_pass_defers_when_the_shared_key_would_starve_the_pilot(self):
+        ledger = BudgetLedger(self.tmp / "budget.sqlite")
+        ledger.start_run("run-x", "pilot", "100")
+        ledger.reserve("pilot", "agent-001", "10")                              # $10 held, $90 remaining
+        path = self.tmp / "budget.sqlite"
+        self.assertIsNone(self.cli._key_headroom({"limit_remaining": None}, path, "run-x", "50"))
+        self.assertIsNone(self.cli._key_headroom({"limit_remaining": 150}, path, "run-x", "50"))
+        self.assertIn("starve", self.cli._key_headroom({"limit_remaining": 149}, path, "run-x", "50"))
+        self.assertIsNone(self.cli._key_headroom({"limit_remaining": 1}, path, "run-z", "50"))   # no such pilot
+        ledger.end_run()
+        self.assertIsNone(self.cli._key_headroom({"limit_remaining": 1}, path, "run-x", "50"))   # pilot ended
 
     def pricing_record(self, hours_old):
         import datetime as dt

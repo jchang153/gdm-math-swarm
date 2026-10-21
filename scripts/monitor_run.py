@@ -28,7 +28,7 @@ import time
 import urllib.parse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from research_swarm.budget import read_run, read_snapshot  # noqa: E402
+from research_swarm.budget import latest_run_id, read_run, read_snapshot  # noqa: E402
 
 
 def _json(path):
@@ -99,7 +99,7 @@ def summarize(run_dir, phase_dir=None, ledger=None, scope="pilot", now=None):
 
     ledger_path = ledger or checkpoint.get("ledger")
     exists = bool(ledger_path) and Path(ledger_path).exists()
-    live_run = read_run(ledger_path, run_dir.name) if exists else None
+    live_run = read_run(ledger_path, latest_run_id(ledger_path, run_dir.name) or run_dir.name) if exists else None
     final_run = _json(run_dir / "run-budget.json")
     run = live_run or checkpoint.get("run_budget") or final_run
     rate_settled = None

@@ -377,6 +377,24 @@ class LeftoverHoldTests(unittest.TestCase):
         live.settle(in_flight, "0.5")
         self.assertEqual(ledger_actions(self.path), ["orphaned_hold"])
 
+    def test_a_relaunch_into_a_reused_run_name_gets_a_fresh_run(self):
+        """Review fix: a relaunch whose run directory reuses a failed run's name never inherits that run's
+        spend or holds and never collides with its fixed budget (budget.fresh_run_id)."""
+        self.assertEqual(budget.fresh_run_id(self.path, "gemini10-x"), "gemini10-x")       # no ledger yet
+        self.assertIsNone(budget.latest_run_id(self.path, "gemini10-x"))
+        crashed = run(self.path, "gemini10-x", amount=100, owner=dead_owner())
+        for _ in range(3):
+            crashed.reserve("pilot", "a", 30)
+        BudgetLedger(self.path).start_run("gemini10-xy", "pilot", 100)                  # an unrelated name
+        first = budget.fresh_run_id(self.path, "gemini10-x")
+        self.assertEqual(first, "gemini10-x-r2")
+        ledger = BudgetLedger(self.path)
+        ledger.start_run(first, "pilot", 150)                                            # another budget: fine
+        ledger.reserve("pilot", "b", 20)                                                 # the full budget is free
+        self.assertEqual(budget.latest_run_id(self.path, "gemini10-x"), "gemini10-x-r2")
+        self.assertEqual(budget.fresh_run_id(self.path, "gemini10-x"), "gemini10-x-r3")
+        self.assertEqual(read_run(self.path, "gemini10-x")["committed_usd"], "90")      # the old run keeps its holds
+
     def test_late_settlement_by_the_owning_process_is_recorded(self):
         ledger = run(self.path, amount=5)
         call = ledger.reserve("pilot", "a", 1)

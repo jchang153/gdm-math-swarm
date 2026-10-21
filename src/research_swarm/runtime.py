@@ -25,7 +25,7 @@ from collections import Counter
 from dataclasses import asdict
 from decimal import Decimal
 from pathlib import Path
-from .budget import BudgetLedger, run_budget
+from .budget import BudgetLedger, fresh_run_id, run_budget
 from .provider import ProviderSettings, settings_from_config  # noqa: F401 (ProviderSettings re-exported)
 from .prompt_cache import TOKEN_COUNTER_NORMALIZATION_VERSION
 
@@ -1197,7 +1197,8 @@ async def run_pilot(config, repo_root, conference_factory=None):
     recorded in settings.json. Image tags are pinned to local image IDs once; a Lean
     warm-up runs before the start barrier. No substitute custom agent loop exists.
     Every request is admitted against this run's own budget (``run_budget_usd``, else $100),
-    registered in the shared ledger as run ``<run_dir name>`` (``BudgetLedger.start_run``);
+    registered in the shared ledger as run ``<run_dir name>`` (``<name>-r<N>`` when an earlier run
+    already holds that id, ``budget.fresh_run_id``; ``BudgetLedger.start_run``);
     the run's final state is written to ``run-budget.json``.
     """
     report = preflight(config, repo_root)
@@ -1229,9 +1230,12 @@ async def run_pilot(config, repo_root, conference_factory=None):
     budget, budget_source = run_budget(config)
     ledger_file = ledger_path(repo_root)
     ledger = BudgetLedger(ledger_file)
-    started = ledger.start_run(run_dir.name, "pilot", budget, source=budget_source,
+    # A fresh ledger run id (the run directory's name, or ``<name>-r<N>`` when an earlier run holds
+    # it): a relaunch never inherits an old run's spend or holds, nor conflicts with its budget.
+    ledger_run_id = fresh_run_id(ledger_file, run_dir.name)
+    started = ledger.start_run(ledger_run_id, "pilot", budget, source=budget_source,
                                note=f"pilot run {run_dir}")
-    record("run_budget", None, {"run_id": run_dir.name, "budget_usd": str(budget), "budget_source": budget_source,
+    record("run_budget", None, {"run_id": ledger_run_id, "budget_usd": str(budget), "budget_source": budget_source,
                                 "ledger": str(ledger_file), "orphaned_holds": started["orphaned_holds"]})
     # Pricing and compatibility evidence were checked by launch_gates above, against
     # the same settings_from_config object (route-pricing gate compares frozen_fields).
@@ -1263,7 +1267,7 @@ async def run_pilot(config, repo_root, conference_factory=None):
             "lean_warm_up": warm_up, "system_prompt_mode": mode, "claude_auto_memory": auto_memory,
             "prompt_cache_normalization": TOKEN_COUNTER_NORMALIZATION_VERSION,
             "claude_code_env": claude_code_env(auto_memory), "ledger_path": str(ledger_file), "budget_scope": "pilot",
-            "run_id": run_dir.name, "run_budget_usd": str(budget), "run_budget_source": budget_source,
+            "run_id": ledger_run_id, "run_budget_usd": str(budget), "run_budget_source": budget_source,
             "evaluator_observer": None if observer is None else "queue",
             "fixed_task_manifest": config.get("fixed_task_manifest"), "inspect_dotenv": dotenv,
             "provider_limit": provider_limit, "in_flight_grace_seconds": in_flight_grace,

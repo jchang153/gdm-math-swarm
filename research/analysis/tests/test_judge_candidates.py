@@ -1318,11 +1318,11 @@ class EarlyStopEndToEndTests(unittest.TestCase):
 
     def rehearse(self, tmp, *, expect="complete", allowance=False, **designations):
         # The full max_tokens reserved for every model unless ``allowance``: a mock output that runs to its
-        # limit bills all of it, which a Sonnet output allowance (route.RESERVATION_OUTPUT_TOKENS) records as
+        # limit bills all of it, which a Sonnet output allowance (``allowance``) records as
         # an estimate_violation (test_truncated_sonnet_output_past_its_allowance_is_recorded_and_continues).
         routes = JudgeRouteSettings.defaults(pricing_verified=True,
-                                             reservation_output_tokens=JudgeRouteSettings.defaults()
-                                             .reservation_output_tokens if allowance else ())
+                                             reservation_output_tokens=(("sonnet", 12000),) if allowance
+                                             else ())
         r = Rehearsal(tmp, judge_mode="candidates", agents=("agent-004",), model=pl.MockModel(routes, **designations))
         r.routes = routes
         explicit = next(i for i in r.run.agents["agent-004"].items if i["id"] == "A04.t0005.r")
@@ -1334,7 +1334,7 @@ class EarlyStopEndToEndTests(unittest.TestCase):
         return r, read(r.judge_dir / "agents" / "agent-004.json")
 
     def test_truncated_sonnet_output_past_its_allowance_is_recorded_and_continues(self):
-        """With the default Sonnet output allowance (12,000 of 48,000 tokens reserved), a candidate output
+        """With a Sonnet output allowance (12,000 of 48,000 tokens reserved; the default reserves all), a candidate output
         that runs to its output limit is billed above its reservation: the ledger records an
         estimate_violation, scales the judging run's later reservations up and the run continues
         (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)"); its budget still

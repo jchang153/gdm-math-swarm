@@ -97,7 +97,7 @@ def run_lock_path(ledger, run_id):
     by every spending judging invocation of the run in that ledger whatever its ``--output-dir`` (and
     whichever copy of the run directory it judges), so two of them never read a judging run's
     committed spend (``client.committed_for_judging``) and spend at once. A judge directory's paid
-    spend is always counted in one ledger (``run_transcript_judge.judging_ledger``), and its
+    spend so far is read from every ledger it was counted in (``run_transcript_judge.judging_ledgers``), and its
     ``.judge.lock`` (``judge_lock``) also keeps two processes out of one judge directory."""
     ledger = Path(ledger).resolve()
     name = re.sub(r"[^A-Za-z0-9._-]", "_", f"{ledger.stem}-{run_id}")

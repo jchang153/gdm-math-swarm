@@ -415,18 +415,15 @@ C-level corruption is not identified; the fix removes that code path:
 * `scripts/run_transcript_judge.py` enables `faulthandler`: a native crash prints every thread's
   Python traceback.
 * Defaults: Haiku 48, Sonnet 32, Opus 16 requests and 20 agents at once.
-* Smaller Sonnet reservations (owner approved): a Sonnet request reserves 12,000 output tokens
-  (`route.RESERVATION_OUTPUT_TOKENS`; `JudgeRouteSettings.reserved_output_tokens`) instead of its
-  48,000-token max_tokens (still sent), so 32 Sonnet requests hold about $11 rather than $22 in flight
-  against the judging run's budget. The largest Sonnet completion measured on the gemini10 paid run was
-  3,181 tokens, and the prompt bound (UTF-8 bytes plus framing at the highest price) leaves further
-  slack. Haiku and Opus keep their full max_tokens (at most $0.04 a request to gain). A request billed
-  above its reservation is an `estimate_violation`: under the one per-run budget (docs/plan.md, "One
-  per-run budget, no manual approvals (October 20, 2026)") it is recorded without any acknowledgement
-  and the judging run's later reservations are scaled up by the observed ratio, in later invocations
-  too. Only requests already in flight at that moment can bill past the budget (at most their
-  unreserved output: about 23% of $50 in the worst case of 32 Sonnet requests all running to 48,000
-  tokens). The request archive records `reserved_output_tokens`.
+* Full reservations (docs/plan.md, "Second review fixes of October 20, 2026"): every model reserves
+  its full max_tokens (`route.RESERVATION_OUTPUT_TOKENS` is empty), so the judging run's budget is a
+  hard bound. The judge speed fix's smaller Sonnet holds (12,000 of 48,000 output tokens) let requests
+  in flight bill up to ~$0.36 each past the budget; full Sonnet holds (~$0.70) lower concurrency only in
+  the last ~$22 of a budget (a typical full judging run costs ~$5). An allowance can still be set for
+  rehearsals (`JudgeRouteSettings(reservation_output_tokens=(("sonnet", 12000),))`). A request billed
+  above its reservation is an `estimate_violation`, recorded without any acknowledgement, and the
+  judging run's later reservations are scaled up by the observed ratio, in later invocations too. The
+  request archive records `reserved_output_tokens`.
 
 Measured on the gemini10 paid run (defaults of that time, 24/16/8, 8 agents; VM, 23:05:15 to 23:08:08):
 histories rebuilt serially in the pipeline (48 s; agents started 0 to 76 s apart), Haiku prefilter

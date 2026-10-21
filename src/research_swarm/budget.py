@@ -300,6 +300,46 @@ def read_run(path, run_id):
         return _run_record(db, run_id)
 
 
+RELAUNCH_SEPARATOR = "-r"   # ``<run dir name>-r2``: a relaunch into a reused run directory name
+
+
+def _relaunch_ids(db, base):
+    """Registered run ids of ``base`` and its relaunches (``base-r<N>``), newest first."""
+    if "runs" not in _tables(db):
+        return []
+    rows = db.execute("SELECT id FROM runs WHERE id=? OR id GLOB ? ORDER BY created DESC, rowid DESC",
+                      (base, f"{base}{RELAUNCH_SEPARATOR}[0-9]*")).fetchall()
+    return [row[0] for row in rows if row[0] == base or row[0][len(base) + len(RELAUNCH_SEPARATOR):].isdigit()]
+
+
+def fresh_run_id(path, base):
+    """A run id not yet registered in the ledger: ``base`` (normally the run directory's name), or
+    ``base-r2``, ``base-r3``, ... when an earlier run (e.g. a failed launch whose directory was moved
+    away and reused) already holds it, so a new run never inherits an old run's spend or holds and
+    never collides with its fixed budget."""
+    path = Path(path)
+    taken = set()
+    if path.exists():
+        with closing(_read_only(path)) as db:
+            taken = set(_relaunch_ids(db, base))
+    if base not in taken:
+        return base
+    number = 2
+    while f"{base}{RELAUNCH_SEPARATOR}{number}" in taken:
+        number += 1
+    return f"{base}{RELAUNCH_SEPARATOR}{number}"
+
+
+def latest_run_id(path, base):
+    """The newest registered run id of ``base`` or its relaunches (``fresh_run_id``), else None."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    with closing(_read_only(path)) as db:
+        ids = _relaunch_ids(db, base)
+    return ids[0] if ids else None
+
+
 def list_runs(path, scope=None):
     """Read-only list of the recorded runs (oldest first), each as ``read_run`` returns it."""
     path = Path(path)
