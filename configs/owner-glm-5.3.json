@@ -60,5 +60,12 @@
   "prompt_variant": "max_pressure_no_rule6",
   "auto_restart": true,
   "auto_behavior_judge": true,
-  "behavior_judge_max_usd": 50
+  "behavior_judge_max_usd": 50,
+  "waived_evidence_gates": [
+    "evaluator",
+    "runtime-e2e",
+    "runtime-isolation",
+    "runtime-capacity"
+  ],
+  "evidence_waiver_approval": "Repository owner, October 21, 2026 (chat): \"yes, waive runtime checks\". The evaluator, runtime-e2e, runtime-isolation and runtime-capacity evidence was measured for other agent counts and memory limits (5 agents at 32 GiB here); waived as for the Gemini 3.1 Pro run (docs/plan.md, \"Owner multi-model max-pressure runs, October 21, 2026\")."
 }
