@@ -134,6 +134,8 @@ ABLATION_BUDGET_TRACK = "ablation"
 ABLATION_LEDGER_RELATIVE = Path("state") / "ablation-budget.sqlite"
 GEMINI_BUDGET_TRACK = "gemini"
 GEMINI_LEDGER_RELATIVE = Path("state") / "gemini-budget.sqlite"
+GPT_BUDGET_TRACK = "gpt"
+GPT_LEDGER_RELATIVE = Path("state") / "gpt-budget.sqlite"
 # History only (never read for admission): the cumulative caps these ledgers had before the per-run
 # budget (ablation pilot $160, later $310 on seeded-ablation; Gemini pilot $462.38, compatibility
 # $10). Their ``scopes`` rows stay in the ledger files as ``legacy_cap_usd``.
@@ -149,6 +151,8 @@ BUDGET_TRACKS = {
                             "concurrent_run": False, "plan_section": "Prompt ablation track, October 19, 2026"},
     GEMINI_BUDGET_TRACK: {"ledger": GEMINI_LEDGER_RELATIVE, "agent_counts": frozenset({10}), "concurrent_run": True,
                           "plan_section": "Gemini 3.1 Pro collaboration run authorized, October 19, 2026"},
+    GPT_BUDGET_TRACK: {"ledger": GPT_LEDGER_RELATIVE, "agent_counts": frozenset({5}), "concurrent_run": False,
+                       "plan_section": "GPT 5.6 Sol track, October 21, 2026"},
 }
 
 

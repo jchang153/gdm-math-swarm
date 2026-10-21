@@ -1,5 +1,29 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## GPT 5.6 Sol track, October 21, 2026
+
+Owner request (relayed by the integrating session): run the harness with OpenAI GPT 5.6 Sol
+via OpenRouter as the agents' model; a 5-agent, 1-hour run is planned. Recorded here as the
+request; the launch itself still needs the owner's per-run budget and the steps below.
+
+- Model `openai/gpt-5.6-sol` (OpenRouter catalog, October 21, 2026; endpoint
+  `openai/gpt-5.6-sol-20260709`), allowed only on the new budget track `gpt`
+  (`provider.TRACK_MODEL_IDS`), own ledger `state/gpt-budget.sqlite`, 5 agents,
+  `max_run_seconds` 3600, no concurrent-run override (configs/gpt-sol.json).
+- Route pinned to `openai` (standard tier, no fallbacks): $4/$20 per million prompt/completion
+  tokens, $8/$30 at 272K+ prompt tokens; cache read $0.40/$0.80, cache write $5/$10.
+  Reservation prices $10/$30 per million: the prompt bound must also cover the upper-tier cache
+  write (`validate_catalog`). `max_tokens` 16384, reasoning effort `high`.
+- Proposed, not yet approved: `run_budget_usd` "100" in the config is the repository default,
+  a placeholder for the owner's own figure; no prompt variant (baseline wording), no
+  automatic behavior judge and no evidence waivers (waivers remain gemini-track only).
+- Engineering: GPT reasoning (format `openai-responses-v1`: summaries plus an encrypted
+  `rs_` item) travels through `research_swarm.reasoning_bridge` unchanged; the model is in
+  `provider.SIGNED_REASONING_MODEL_IDS`, so the paid compatibility check must show
+  `signed_reasoning_tool_call_replay`. `research_swarm.openrouter_params` keeps OpenRouter's
+  `max_tokens` (Inspect renames it to `max_completion_tokens` for GPT-5 families, which the
+  pinned route does not list under `require_parameters`).
+
 ## One per-run budget, no manual approvals (October 20, 2026)
 
 The repository owner (Jonathan) decided in chat on October 20, 2026, verbatim: "one budget limit is

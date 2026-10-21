@@ -549,6 +549,8 @@ class _Gates:
             approved["task_count"] = 71  # owner decision: the whole parent pool on this track
         if track == "gemini":
             approved["max_run_seconds"] = 21600  # owner decision, October 20, 2026: a 6-hour clock
+        if track == "gpt":
+            approved["max_run_seconds"] = 3600  # owner request, October 21, 2026: a 1-hour run
         if track is None:
             # The provider settings decide the model actually called: on the baseline they
             # must name the pinned MODEL_ID as well (not only candidate_model_id).

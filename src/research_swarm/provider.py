@@ -12,15 +12,21 @@ ABLATION_MODEL_IDS = (MODEL_ID, GLM_MODEL_ID)
 # 19, 2026"): the paper's model, allowed on budget track "gemini" and nowhere else.
 GEMINI_MODEL_ID = "google/gemini-3.1-pro-preview"
 GEMINI_MODEL_IDS = (GEMINI_MODEL_ID,)
+# The owner's GPT track (docs/plan.md, "GPT 5.6 Sol track, October 21, 2026"): OpenAI's
+# reasoning model via OpenRouter, allowed on budget track "gpt" and nowhere else. Its reasoning
+# comes back as OpenRouter reasoning_details in format openai-responses-v1 (summaries plus an
+# encrypted reasoning item), which the reasoning bridge carries through Claude Code's replay.
+GPT_SOL_MODEL_ID = "openai/gpt-5.6-sol"
+GPT_MODEL_IDS = (GPT_SOL_MODEL_ID,)
 # Models each budget track (budget.BUDGET_TRACKS) may run; the launch gates check this table.
-TRACK_MODEL_IDS = {"ablation": ABLATION_MODEL_IDS, "gemini": GEMINI_MODEL_IDS}
+TRACK_MODEL_IDS = {"ablation": ABLATION_MODEL_IDS, "gemini": GEMINI_MODEL_IDS, "gpt": GPT_MODEL_IDS}
 # Every model any track may call (request_options refuses all others).
 KNOWN_MODEL_IDS = tuple(dict.fromkeys(m for ids in ((MODEL_ID,), *TRACK_MODEL_IDS.values()) for m in ids))
 # Models whose reasoning is signed (OpenRouter reasoning_details formats with a signature or an
 # encrypted payload, e.g. Gemini thought signatures) and must be passed back on later turns with
 # tool calls. Their live compatibility check must show such a replay accepted
 # (``signed_reasoning_tool_call_replay``, scripts/compat_check.py).
-SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID,)
+SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID, GPT_SOL_MODEL_ID)
 
 # Chat-template and provider framing allowance added to the byte bound below.
 FRAMING_TOKEN_ALLOWANCE = 8192
@@ -54,7 +60,7 @@ class ProviderSettings:
         are covered by FRAMING_TOKEN_ALLOWANCE. Capped at the route context length.
         The same argument is assumed for the other tracks' models (GLM's BPE vocabulary;
         Gemini's SentencePiece vocabulary with byte fallback, whose pieces also cover at
-        least one byte each). Replayed reasoning, including Gemini's encrypted thought
+        least one byte each; GPT's byte-level o200k BPE). Replayed reasoning, including Gemini's encrypted thought
         signatures, is part of the serialized request and so of the bound. An
         unexpected excess shows up as an estimate_violation, which blocks the scope.
         """
