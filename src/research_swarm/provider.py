@@ -14,7 +14,10 @@ GEMINI_MODEL_ID = "google/gemini-3.1-pro-preview"
 # The owner's multi-model runs (docs/plan.md, "Owner multi-model max-pressure runs, October 21,
 # 2026"): four models, one 5-agent run each, on the same owner track (budget track "gemini").
 # IDs verified in the public OpenRouter catalog on October 21, 2026.
-OWNER_MULTIMODEL_IDS = ("google/gemini-4-argon", "anthropic/claude-opus-5.5", "openai/gpt-5.6-sol", GLM_MODEL_ID)
+# Gemini 4 Argon: OpenRouter lists it flat at $2/$10 per million prompt/completion tokens on
+# google-vertex/global (no >200K tier).
+GEMINI4_MODEL_ID = "google/gemini-4-argon"
+OWNER_MULTIMODEL_IDS = (GEMINI4_MODEL_ID, "anthropic/claude-opus-5.5", "openai/gpt-5.6-sol", GLM_MODEL_ID)
 GEMINI_MODEL_IDS = (GEMINI_MODEL_ID, *OWNER_MULTIMODEL_IDS)
 # Models each budget track (budget.BUDGET_TRACKS) may run; the launch gates check this table.
 # Budget track "gemini" is the owner's track (its name predates the multi-model runs).
@@ -25,7 +28,7 @@ KNOWN_MODEL_IDS = tuple(dict.fromkeys(m for ids in ((MODEL_ID,), *TRACK_MODEL_ID
 # encrypted payload, e.g. Gemini thought signatures) and must be passed back on later turns with
 # tool calls. Their live compatibility check must show such a replay accepted
 # (``signed_reasoning_tool_call_replay``, scripts/compat_check.py).
-SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID,)
+SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID, GEMINI4_MODEL_ID)
 
 # Chat-template and provider framing allowance added to the byte bound below.
 FRAMING_TOKEN_ALLOWANCE = 8192

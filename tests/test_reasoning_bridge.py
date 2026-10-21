@@ -254,6 +254,48 @@ class ReasoningBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(assistant["reasoning_details"], details)
         self.assertNotIn(transport._PREFIX, str(assistant))
 
+    async def test_gemini4_argon_thought_signatures_survive_a_multi_turn_tool_call(self):
+        """Gemini 4 Argon through the same path. Its reasoning_details shape is not yet observed live;
+        Inspect stores the raw details array, so the transport is format-agnostic: the google-gemini-v1
+        shape of 3.1 Pro and an unrecognized future format or detail type both replay verbatim."""
+        from inspect_ai.model import get_model
+        from research_swarm.inspect_adapter import replayed_signed_reasoning
+        api = get_model("openrouter/google/gemini-4-argon", api_key="unpaid-offline-test-placeholder").api
+        cases = {
+            "google-gemini-v1": [{"type": "reasoning.text", "text": "Bound the sum by telescoping.",
+                                  "signature": "EpgB-signature-not-a-secret", "format": "google-gemini-v1",
+                                  "index": 0},
+                                 {"type": "reasoning.encrypted", "data": "CiQB-signature-not-a-secret",
+                                  "id": "tool_Bash_d1", "format": "google-gemini-v1", "index": 0}],
+            "new format": [{"type": "reasoning.encrypted", "data": "CiQB-signature-not-a-secret",
+                            "id": "tool_Bash_d1", "format": "google-gemini-v2", "index": 0}],
+            "new detail type": [{"type": "reasoning.thought_signature", "data": "CiQB-signature-not-a-secret",
+                                 "format": "google-gemini-v2", "index": 0}],
+        }
+        for name, details in cases.items():
+            with self.subTest(case=name):
+                completion = self.gemini_completion(details, ["tool_Bash_d1"])
+                completion.model = "google/gemini-4-argon"
+                message = api.chat_choices_from_completion(completion, [])[0].message
+                blocks = await self.blocks(message)
+                # Opaque payloads (including details Inspect cannot parse) are never shown as thinking text.
+                self.assertNotIn("signature-not-a-secret", str(blocks))
+                self.assertEqual(blocks[0].type, "thinking" if name == "google-gemini-v1" else "redacted_thinking")
+                raw = [{"role": "user", "content": "Begin your conference research."},
+                       {"role": "assistant", "content": [b.model_dump(exclude_none=True) for b in blocks]},
+                       {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tool_Bash_d1",
+                                                     "content": "ok"}]}]
+                with transport._bridge_scope(self.bridge):
+                    replayed = await self.impl.messages_from_anthropic_input(raw, [])
+                self.assertEqual(replayed[1].content[0], message.content[0])
+                # An unknown detail type is not counted as signed, so the live compatibility check's
+                # signed_reasoning_tool_call_replay fails closed until the new shape is reviewed.
+                if name != "new detail type":
+                    self.assertEqual(replayed_signed_reasoning(replayed)["replayed_signed_tool_call_turns"], 1)
+                assistant = (await api.messages_to_openai(replayed))[1]
+                self.assertEqual(assistant["reasoning_details"], details)
+                self.assertEqual([c["id"] for c in assistant["tool_calls"]], ["tool_Bash_d1"])
+
     async def test_without_the_transport_gemini_signatures_would_be_lost(self):
         """The pinned SDK alone renders OpenRouter reasoning as text for Claude Code, so the next request
         carries no reasoning_details: the reason research_swarm.reasoning_bridge is installed."""
