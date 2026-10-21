@@ -46,6 +46,18 @@ new entry is the published entry with only those links changed (never the bundle
 bundle's other Inspect View files must equal the published ones, and the rules of the results scope
 apply otherwise.
 
+--scope site regenerates the presentation of a published run with the current site generators
+(owner request, October 21, 2026: run page summary card and tabs, shared light/dark theme, phone
+layout, conference view without custom transcript links): it replaces only generated HTML/JSON views
+that differ from the bundle, namely RUN/results.html, the existing RUN/conference-view/ pages and the
+existing HTML pages of a published behavior judge build under RUN/analysis/judge/. It never changes
+data: RUN/results.json and every non-HTML judge file must equal the published ones, the conference
+and judge page sets must equal the published ones (nothing is added or deleted), and the catalogue
+entry stays the published one (re-render the catalogue page first with --rerender-catalogue). Raw
+records, Inspect logs and Inspect View, evaluator records and published transcript pages are never
+touched. Otherwise the rules of the results scope apply (no LFS, unchanged .gitattributes, guarded
+batches with the manifest last, backups, resume and verification).
+
 --scope unlist (no --bundle) removes the run's row from the catalogue after the owner's request
 (docs/plan.md, October 20, 2026) without deleting any file: the run must first be recorded in the
 tracked data/library-unlisted.json. Exactly index.html, experiments.json and archive-manifest.json
@@ -76,11 +88,13 @@ from prepare_hf_library import judge_excluded
 from publish_hf_library import (DEFAULT_REPO, RUN_ID, batches, digest, load_bundle, matches,
                                 merge_entries, payload, remote_files, validate_lfs_additions)
 
-SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'unlist')
+SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'site', 'unlist')
 REPLACEABLE = ('results.html', 'results.json')
 INSPECT_VIEW = 'inspect-view/'
 INSPECT_PAGE = INSPECT_VIEW + 'index.html'
 INSPECT_LOGS_DIR = 'inspect/'
+# Present in every page passed through site_style.themed() (the shared site theme).
+SITE_THEME_MARKER = 'id="site-theme"'
 # Present only in Inspect View pages built with the redirect-following Space navigation.
 INSPECT_REDIRECT_MARKER = "redirect:'follow'"
 JUDGE_PREFIX = 'analysis/judge/'
@@ -273,8 +287,9 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
                          + str(run))
     judge_scope = scope == 'judge'
     inspect_scope = scope == 'inspect'
+    site_scope = scope == 'site'  # presentation only: generated pages, never data or the catalogue entry
     results_scope = scope in ('results', 'inspect')  # inspect: the results scope with another report file
-    evaluator_scope = scope in ('evaluator', 'results', 'inspect')  # results: without records or pages
+    evaluator_scope = scope in ('evaluator', 'results', 'inspect', 'site')  # results: without records or pages
     catalogue_scope = scope != 'transcripts'  # judge and evaluator: reports and the catalogue entry change
     if not isinstance(run, str) or not RUN_ID.fullmatch(run):
         raise ValueError('Invalid run ID')
@@ -290,6 +305,7 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
         if not page.is_file() or INSPECT_REDIRECT_MARKER not in page.read_text(encoding='utf-8', errors='replace'):
             raise ValueError('The bundle has no Inspect View page built with the redirect-following Space '
                              'navigation: ' + replaceable[0])
+    judge_pages = []  # site scope only
     if judge_scope:
         judge = sorted(name for name in files if name.startswith(prefix + JUDGE_PREFIX))
         for name in judge:
@@ -308,17 +324,26 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
         # Evaluator scope: the reports, the bundle's RUN/evaluations/ records and its
         # RUN/conference-view/ pages; everything else is an ordinary (skipped) bundle file.
         judge, recorded, transcripts = [], None, []
-        evaluations = [] if results_scope else sorted(
+        evaluations = [] if results_scope or site_scope else sorted(
             name for name in files if name.startswith(prefix + EVALUATIONS_PREFIX))
         conference = [] if results_scope else sorted(
             name for name in files if name.startswith(prefix + CONFERENCE_PREFIX))
-        if not evaluations and not results_scope:
+        # Site scope: the HTML pages of the bundle's judge build (its data files must equal the published ones).
+        judge_pages = sorted(name for name in files if site_scope and name.startswith(prefix + JUDGE_PREFIX)
+                             and name.endswith('.html'))
+        if not evaluations and not results_scope and not site_scope:
             raise ValueError('The bundle has no evaluator records under ' + prefix + EVALUATIONS_PREFIX)
-        targets = set(replaceable) | set(evaluations) | set(conference)
+        if site_scope:
+            for name in [replaceable[0], *(n for n in [*conference, *judge_pages] if n.endswith('.html'))]:
+                text = (bundle / name).read_text(encoding='utf-8', errors='replace')
+                if SITE_THEME_MARKER not in text:
+                    raise ValueError('Site scope: a bundle page lacks the shared site theme (regenerate it with the '
+                                     'current generators and prepare_hf_library.py): ' + name)
+        targets = set(replaceable) | set(evaluations) | set(conference) | set(judge_pages)
 
         def required(original_files):  # the first attempt saved the reports and every file it replaced
             return [*replaceable, *REGENERATED, MANIFEST,
-                    *(name for name in [*evaluations, *conference] if name in original_files
+                    *(name for name in [*evaluations, *conference, *judge_pages] if name in original_files
                       and not record_matches((bundle / name).read_bytes(), original_files[name]))]
     else:
         # Transcripts scope: exactly the bundle's RUN/transcripts/ files; judge files and reports
@@ -376,6 +401,21 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
     elif results_scope:
         pass  # only the two reports are targets: no record or page set to compare
     elif evaluator_scope:
+        if site_scope:
+            # Presentation only: the report data and the judge build must be the published ones.
+            data = prefix + 'results.json'
+            if not matches((bundle / data).read_bytes(), remote[data]):
+                raise ValueError(f'Site scope: {data} differs from revision {base}; this scope changes presentation '
+                                 'only (use --scope results for regenerated report data)')
+            published_judge = {n for n in remote if n.startswith(prefix + JUDGE_PREFIX)}
+            bundled_judge = {n for n in files if n.startswith(prefix + JUDGE_PREFIX)}
+            pages_differ = sorted({n for n in published_judge if n.endswith('.html')} ^ set(judge_pages))
+            data_differ = sorted(n for n in published_judge if not n.endswith('.html') and (
+                n not in bundled_judge or not matches((bundle / n).read_bytes(), remote[n])))
+            if pages_differ or data_differ:
+                raise ValueError(f'Site scope: the behavior judge build of the bundle and revision {base} differ; this '
+                                 f'scope only restyles published judge pages: page sets differ {pages_differ[:EXAMPLES]}, '
+                                 f'data files differ or missing {data_differ[:EXAMPLES]}')
         stale = sorted(n for n in remote if n.startswith(prefix + EVALUATIONS_PREFIX) and n not in targets)
         if stale:
             raise ValueError(f'{len(stale)} published evaluator record(s) are not in the bundle; review them, '
@@ -454,6 +494,8 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
     current_entry = next(x for x in current_index['experiments'] if x['run'] == run)
     if inspect_scope:  # never the bundle's own entry, which may have drifted from the published one
         incoming = [inspect_links_entry(old_entry, run, remote)]
+    elif site_scope:  # the published entry, unchanged (the catalogue page reads newer fields itself)
+        incoming = [old_entry]
     if catalogue_scope:
         regenerated = regenerate(merge_entries(others(old_index, run), incoming))
         new_index = json.loads(regenerated['experiments.json'])
@@ -479,7 +521,7 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
     if judge_scope:
         replace_names = replaceable
     elif evaluator_scope:
-        replace_names = [*replaceable, *conference, *(n for n in evaluations if n in remote)]
+        replace_names = [*replaceable, *conference, *judge_pages, *(n for n in evaluations if n in remote)]
     else:
         replace_names = transcripts
     for name in replace_names:
@@ -504,7 +546,7 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
     if catalogue_scope:
         replaced = [name for name in (
             [*replaceable, *(n for n in judge if replace_judge and n in origin_files)] if judge_scope else
-            [*replaceable, *conference, *(n for n in evaluations if n in origin_files)])
+            [*replaceable, *conference, *judge_pages, *(n for n in evaluations if n in origin_files)])
                     if not record_matches((bundle / name).read_bytes(), origin_files[name])]
     else:  # a transcript missing from the original inventory is refused by verify() below
         replaced = [name for name in transcripts if name not in origin_files
@@ -744,6 +786,9 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
             'evaluation_files': len(evaluations), 'evaluation_files_added': len(added),
             'conference_view': {'files': len(conference), 'file_sets_equal': True,
                                 'replaced': sum(n.startswith(prefix + CONFERENCE_PREFIX) for n in replaced)},
+            **({'judge_pages': {'files': len(judge_pages), 'file_sets_equal': True,
+                                'replaced': sum(n in judge_pages for n in replaced)},
+                'results_json_unchanged': True} if site_scope else {}),
             'largest_upload_bytes': max([files[n]['bytes'] for n, _ in replacements + additions] or [0]),
             'lfs_safe_limit_bytes': LFS_SAFE_BYTES}} if evaluator_scope else {}),
         **({} if catalogue_scope else {
@@ -811,6 +856,7 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
                     ': results and replaced behavior judge outputs' if replace_judge else
                     ': results and behavior judge outputs' if judge_scope else
                     ': Inspect View log loading and Inspect log links' if inspect_scope else
+                    ': regenerated site pages (presentation only)' if site_scope else
                     ': regenerated results report' if results_scope else
                     ': results and independent evaluator outputs' if evaluator_scope else
                     ': regenerated transcript exports'),
@@ -1017,7 +1063,9 @@ def main(argv=None):
                              'RUN/conference-view/ pages and the catalogue entry; results: only '
                              'results.html/results.json and the catalogue entry; unlist: only the catalogue row '
                              'is removed (index.html, experiments.json, archive-manifest.json), no file deleted; inspect: only '
-                             'RUN/inspect-view/index.html and the Inspect log links of the catalogue entry')
+                             'RUN/inspect-view/index.html and the Inspect log links of the catalogue entry; site: only the '
+                             'generated pages (results.html, existing conference-view pages, existing judge HTML '
+                             'pages), never data or the catalogue entry')
     parser.add_argument('--replace-judge', action='store_true',
                         help='judge scope only: replace published judge files of another judge build (for example '
                              'a re-run under a newer rubric) instead of refusing them; published judge files the '

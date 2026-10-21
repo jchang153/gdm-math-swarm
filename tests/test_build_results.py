@@ -200,6 +200,24 @@ class BuildResultsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'does not match'):
             build_results.build(run)
 
+    def test_rerender_html_keeps_results_json(self):
+        run = make_run(self.tmp.name)
+        generate(run, '--caveat', 'Kept note')
+        data_bytes = (run / 'results.json').read_bytes()
+        (run / 'results.html').write_text('<!doctype html><html><a href="transcripts/index.html">old</a></html>')
+        with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
+            build_results.main(['--run-dir', str(run), '--rerender-html'])  # no --overwrite
+        with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
+            build_results.main(['--run-dir', str(run), '--rerender-html', '--overwrite', '--caveat', 'x'])
+        with contextlib.redirect_stdout(io.StringIO()):
+            build_results.main(['--run-dir', str(run), '--rerender-html', '--overwrite'])
+        page = (run / 'results.html').read_text()
+        self.assertEqual((run / 'results.json').read_bytes(), data_bytes)
+        self.assertIn('Kept note', page)
+        self.assertIn('id="site-theme"', page)
+        self.assertNotIn('transcripts/', page)
+        self.assertEqual(page, build_results.render(json.loads(data_bytes), None, build_results.inspect_logs(run)))
+
     def test_ledger_counts_only_this_runs_requests(self):
         run = make_run(self.tmp.name)
         ledger = Path(self.tmp.name) / 'ledger.sqlite'
