@@ -10,20 +10,65 @@ from decimal import Decimal
 import html
 import json
 from pathlib import Path
+import re
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 from space_navigation import private_space_navigation
 
 ROOT = Path(__file__).resolve().parents[1]
+# Runs the owner removed from the library lists (docs/plan.md, October 20, 2026). Their files
+# stay where they are; only the catalogue rows are hidden. Delete a record to list the run again.
+UNLISTED = ROOT / 'data' / 'library-unlisted.json'
+UNLISTED_SCHEMA = 'gdm-library-unlisted/1'
+RUN_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]*')
+INSPECT_LOGS = 'Inspect logs'
 
 
-def build(runs, hosted=False):
+def inspect_log_links(run, names):
+    """Catalogue links to a run's raw Inspect logs (file names under RUN/inspect/).
+
+    A static host cannot list a directory (the hosted Space redirects RUN/inspect/ off-site), so
+    each .eval file is linked directly: 'Inspect logs' for a single log, else one numbered link
+    per log in name order.
+    """
+    logs = sorted(n for n in names if n.endswith('.eval') and '/' not in n)
+    targets = [quote(run, safe='') + '/inspect/' + quote(n, safe='') for n in logs]
+    if len(targets) == 1:
+        return {INSPECT_LOGS: targets[0]}
+    return {f'Inspect log {i}': t for i, t in enumerate(targets, 1)}
+
+
+def unlisted_runs(path=UNLISTED):
+    """Run ID -> record ({run, date, reason}) of the tracked unlisted-runs file; empty if absent."""
+    path = Path(path)
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict) or data.get('schema') != UNLISTED_SCHEMA or not isinstance(data.get('runs'), list):
+        raise ValueError(f'{path} is not a {UNLISTED_SCHEMA} file')
+    records = {}
+    for row in data['runs']:
+        if (not isinstance(row, dict) or not isinstance(row.get('run'), str) or not RUN_NAME.fullmatch(row['run'])
+                or not isinstance(row.get('date'), str) or not isinstance(row.get('reason'), str)):
+            raise ValueError(f'{path}: every record needs a valid run, a date and a reason')
+        if row['run'] in records:
+            raise ValueError(f'{path}: duplicate record for {row["run"]}')
+        records[row['run']] = row
+    return records
+
+
+def build(runs, hosted=False, unlisted=None):
+    """unlisted: run IDs left out of the catalogue (default: the tracked unlisted-runs file)."""
     runs = Path(runs).resolve()
     runs.mkdir(parents=True, exist_ok=True)
-    entries, warnings = [], []
+    unlisted = set(unlisted_runs() if unlisted is None else unlisted)
+    entries, warnings, hidden = [], [], []
     for path in sorted(runs.glob('*/results.json')):
         if path.is_symlink() or path.parent.is_symlink():
             warnings.append(f'Skipped linked run: {path.parent.name}')
+            continue
+        if path.parent.name in unlisted:
+            hidden.append(path.parent.name)  # files kept; only the catalogue row is left out
             continue
         try:
             data = json.loads(path.read_text())
@@ -51,14 +96,17 @@ def build(runs, hosted=False):
                                  ('Inspect View', 'inspect-view/index.html'),
                                  ('Timeline', 'analysis/timeline.md'),
                                  # Researcher-only post-hoc transcript judge (docs/plan.md, Oct 17).
-                                 ('Behavior judge', 'analysis/judge/report.html'),
-                                 ('Inspect logs', 'inspect/')]:
+                                 ('Behavior judge', 'analysis/judge/report.html')]:
                 if (path.parent / target).exists():
                     entry['links'][name] = quote(path.parent.name, safe='') + '/' + target
+            logs = path.parent / 'inspect'
+            if logs.is_dir():
+                entry['links'].update(inspect_log_links(path.parent.name, [
+                    p.name for p in logs.iterdir() if p.is_file() and not p.is_symlink()]))
             entries.append(entry)
         except (ValueError, KeyError, TypeError, OSError) as error:
             warnings.append(f'{path.parent.name}: {type(error).__name__}')
-    return write_index(runs, entries, warnings, hosted=hosted)
+    return {**write_index(runs, entries, warnings, hosted=hosted), 'unlisted': hidden}
 
 
 def write_index(runs, entries, warnings=(), *, hosted=False):

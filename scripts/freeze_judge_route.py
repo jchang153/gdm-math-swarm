@@ -18,6 +18,8 @@ derives prices from it. Prices include each tier (Haiku 5.5 bills prompts of at 
     .venv/bin/python scripts/freeze_judge_route.py [--output-dir data/validation]
 
 Exit 0 when every requirement passed, 1 otherwise (the record is written either way).
+scripts/run_transcript_judge.py runs it automatically (``main``) when the newest record is
+missing or older than 72 h, before a judging run.
 """
 import argparse
 import datetime
@@ -153,10 +155,10 @@ def model_record(key, catalog, endpoints_raw, endpoints_url):
     return record, route
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--output-dir", type=Path, default=ROOT / "data" / "validation")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     now = datetime.datetime.now(datetime.timezone.utc)
     catalog_raw = fetch(CATALOG_URL)
     catalog = json.loads(catalog_raw)

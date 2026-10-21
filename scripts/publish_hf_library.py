@@ -14,7 +14,7 @@ import re
 import tempfile
 import zipfile
 
-from build_experiment_index import write_index
+from build_experiment_index import unlisted_runs, write_index
 
 DEFAULT_REPO = 'gdm-math-swarm/gdm-math-swarm-experiments'
 ROOT_FILES = {'README.md', 'robots.txt', 'index.html', 'experiments.json'}
@@ -175,8 +175,13 @@ def validate_lfs_additions(old, new, selected, changed, final_files):
 
 
 def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=None,
-            operation=None):
+            operation=None, unlisted=None):
     manifest, incoming = load_bundle(bundle)
+    unlisted = set(unlisted_runs() if unlisted is None else unlisted)
+    hidden = sorted(set(manifest['runs']) & unlisted)
+    if hidden:
+        raise ValueError('Run(s) unlisted by data/library-unlisted.json; remove the record to publish them: '
+                         + ', '.join(hidden))
     bundle = Path(bundle)
     info = api.repo_info(repo, repo_type='space', files_metadata=True)
     if not info.private:
@@ -193,7 +198,8 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
     old_manifest = read_json('archive-manifest.json', {'files': {}, 'runs': []})
     if old_index.get('warnings'):
         raise ValueError('Existing catalogue requires review')
-    entries = merge_entries(old_index['experiments'], incoming)
+    # Unlisted runs keep their files but never return to the catalogue (docs/plan.md, October 20, 2026).
+    entries = [x for x in merge_entries(old_index['experiments'], incoming) if x['run'] not in unlisted]
     # Never remove an existing run or alter an existing run file. Matching partial
     # uploads can resume after a failed batch; conflicting IDs fail closed.
     selected = set(manifest['runs'])
@@ -224,8 +230,9 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
         root_uploads = [(name, (tmp / name).read_bytes()) for name in ('index.html', 'experiments.json')]
     for name, data in root_uploads:
         files[name] = digest(data)
-    merged_manifest = {**old_manifest, 'schema': 'gdm-private-space/1',
-                       'runs': [x['run'] for x in entries], 'files': files,
+    listed = [x['run'] for x in entries]
+    merged_manifest = {**old_manifest, 'schema': 'gdm-private-space/1',  # unlisted runs stay recorded
+                       'runs': listed + [x for x in old_manifest['runs'] if x not in listed], 'files': files,
                        'total_bytes': sum(x['bytes'] for x in files.values())}
     root_uploads.append(('archive-manifest.json', json.dumps(merged_manifest, indent=2).encode()))
     root_uploads = [(n, d) for n, d in root_uploads if n not in remote or not matches(d, remote[n])]

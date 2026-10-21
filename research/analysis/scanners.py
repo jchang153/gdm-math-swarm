@@ -199,20 +199,21 @@ else:  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
-# Model-judged scanning: NOT ENABLED.
+# Model-judged scanning: NOT IMPLEMENTED (disabled).
 #
 # Plug-in point for Scout ``llm_scanner`` screens (for example "does this message
-# report suspected invalid work?"). It must not run without explicit user launch
-# approval. When approved, every model request must be reserved and settled in
-# the shared BudgetLedger under scope "analysis" (approved $5 cap; separate from
-# the $20 pilot), by wrapping the scan model the same way
+# report suspected invalid work?"). If it is ever built, it follows the repo-wide
+# spending rule (docs/plan.md, "One per-run budget, no manual approvals (October 20,
+# 2026)"): each scan is one paid invocation with its own budget specified before it
+# starts, registered with BudgetLedger.start_run in scope "analysis", and every model
+# request is reserved and settled against that run (wrap the scan model the same way
 # research_swarm.inspect_adapter.budget_filter wraps pilot requests, with a frozen
-# provider route and price record. Its output only adds candidates for human
-# review; it never confirms a label.
+# provider route and price record refreshed automatically). No cumulative cap,
+# approval note, flag or typed confirmation. Its output only adds candidates for
+# human review; it never confirms a label.
 
 def model_judged_scan(*_args, **_kwargs):
-    raise PermissionError("Model-judged scanning is disabled: it needs explicit user approval and "
-                          "BudgetLedger admission under the 'analysis' scope ($5). Structural scanning is free.")
+    raise PermissionError("Model-judged scanning is not implemented (disabled); structural scanning is free.")
 
 
 # ---------------------------------------------------------------------------

@@ -2,10 +2,11 @@
 
 docs/plan.md "Transcript behavior judge specified, October 17, 2026" (with the
 "downsized model allocation" decision): OpenRouter with the main host key, provider
-pinned to Anthropic with no fallbacks, real-time requests, the shared ledger's
-``analysis`` scope enforcing the analysis allowance (``budget.JUDGE_ANALYSIS_CAP_USD``, $200
-after the five audited raises $5 -> $40 -> $50 -> $100 -> $110 -> $200; the pilot's
-unlimited-key exception extends to this analysis), a refused request retried once and then
+pinned to Anthropic with no fallbacks, real-time requests, every request recorded in the shared
+ledger's ``analysis`` scope and admitted against the judging run's own budget (owner decisions,
+docs/plan.md "One per-run budget, no manual approvals (October 20, 2026)": the invocation's
+``RunLimit``, registered in the ledger as one run; no cumulative analysis cap), a refused
+request retried once and then
 ``ungraded`` (never a negative), and a judge model that never silently changes. One client
 serves one model:
 ``"haiku"`` (screening), ``"sonnet"`` (per-agent judging) or ``"opus"`` (verification, one
@@ -13,10 +14,10 @@ finding per request, and the run level); see route.MODEL_ALLOCATION. Judge revis
 (docs/plan.md, "Behavior judge iteration specified, October 19, 2026", items 6, 7 and 10): a
 multi-item request is never resent after a refusal (``refusal_retry=False``), the provider's
 refusal message is recorded, an HTTP 429 is resent with growing delays, and a ``RunLimit``
-holds one judging invocation to its own limit beside the ledger's cap.
-Paid judging stays gated: offline tests and the rehearsal inject ``FakeTransport``;
-the real HTTPS path exists only with ``paid_authorized=True``, which the orchestrator
-passes after the user confirms immediately before the first paid request.
+holds one judging invocation to its own limit (the same budget the ledger enforces for its run).
+Offline tests and the rehearsal inject ``FakeTransport``; the real HTTPS path exists only with
+``paid_authorized=True``, the programmatic switch scripts/run_transcript_judge.py passes for a
+paid judging run (no confirmation is asked).
 
 Prompt caching (``complete(cache_system=...)``, default on for Sonnet and Opus, off for
 Haiku; route.JudgeRouteSettings.prompt_cache can override): the system prompt, which is
@@ -79,8 +80,8 @@ Per request (``complete``), under an ``asyncio.Semaphore(max_concurrency)``:
 
 The host key is loaded only on the paid path, at first use, through
 ``research_swarm.secrets.load_openrouter_key(credentials_root)``, followed by the
-unpaid provider-limit check with the approved unlimited-key exception
-(``provider_limit.verify_key_limit``, ``allow_unlimited=True``). ``credentials_root``
+unpaid, informational provider-limit record (``provider_limit.key_limit_record``; it never
+refuses the key). ``credentials_root``
 is the directory whose private ``.env`` holds the key (default: this checkout's root),
 so a separate checkout on the VM can use the main checkout's ``.env`` without copying
 it; it is accepted only on the paid path and nothing is read from it before the first
@@ -108,7 +109,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
-from research_swarm.budget import BudgetExceeded, BudgetLedger, JUDGE_ANALYSIS_CAP_USD, judge_analysis_problems
+from research_swarm.budget import DEFAULT_JUDGE_RUN_BUDGET_USD, BudgetExceeded, BudgetLedger
 from research_swarm.inspect_adapter import openrouter_reported_cost
 
 from .route import (CACHE_CONTROL, CACHE_TTL, DEFAULT_CONCURRENCY, MODEL_KEYS, PROVIDER_NAME, STANDARD_SERVICE_TIERS,
@@ -176,12 +177,38 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class UrllibTransport:
-    """Real HTTPS POST (stdlib), run in a worker thread; no proxies, no redirects."""
-    def __init__(self):
-        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+    """Real HTTPS POST (stdlib), run in a worker thread; no proxies, no redirects.
+
+    Each transport owns a bounded thread pool of ``max_workers`` threads (the client's
+    ``max_concurrency``: a request admitted by the client's semaphore always has a thread, never
+    queued behind other clients' requests in asyncio's shared default executor, which holds at most
+    min(32, CPUs + 4) threads) and one verified TLS context shared by its connections (created
+    once, not per request)."""
+    def __init__(self, max_workers=8):
+        if isinstance(max_workers, bool) or not isinstance(max_workers, int) or max_workers < 1:
+            raise ValueError("max_workers must be a positive integer")
+        self.max_workers = max_workers
+        self._context = ssl.create_default_context()
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                                   urllib.request.HTTPSHandler(context=self._context), _NoRedirect())
+        self._executor = None
+        self._executor_lock = threading.Lock()
+
+    def _pool(self):
+        with self._executor_lock:
+            if self._executor is None:
+                from concurrent.futures import ThreadPoolExecutor
+                self._executor = ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix="judge-http")
+            return self._executor
+
+    def close(self):
+        with self._executor_lock:
+            executor, self._executor = self._executor, None
+        if executor is not None:
+            executor.shutdown(wait=True)
 
     async def post(self, url, headers, body, timeout):
-        return await asyncio.to_thread(self._post, url, headers, body, timeout)
+        return await asyncio.get_running_loop().run_in_executor(self._pool(), self._post, url, headers, body, timeout)
 
     def _post(self, url, headers, body, timeout):
         if not str(url).startswith("https://"):
@@ -360,6 +387,184 @@ def rate_limit_delay(rate_limited, retry_after=None, jitter=0.0):
 
 RUN_LIMIT_REASON = "run_limit"
 RUN_LIMIT_SCHEMA = "gdm-judge-run-limit/1"
+LABEL_PREFIX = "judge-"
+LABEL_LENGTH = 200
+
+
+def request_label(model_key, purpose, unit_id, run_id=None):
+    """The ledger label of one judge request (the ``calls.agent`` column):
+    ``judge-<model>:<run id>:<purpose>:<unit id>``, or ``judge-<model>:<purpose>:<unit id>``
+    without a run id (requests made before the per-run cap existed). The run id comes before
+    anything long, so truncation to ``LABEL_LENGTH`` characters never cuts it."""
+    parts = [f"{LABEL_PREFIX}{model_key}"] + ([str(run_id)] if run_id else []) + [str(purpose), str(unit_id)]
+    return ":".join(parts)[:LABEL_LENGTH]
+
+
+_ARCHIVE_ID = re.compile(rb'"ledger_request_id":\s*"([^"]+)"')
+_ARCHIVE_SCOPE = re.compile(rb'"scope":\s*"([^"]+)"')
+ARCHIVE_HEAD_BYTES = 4096
+
+
+def archived_request_ids(folders, scope=None):
+    """The ledger request ids named by the request archives (``*.request.json``, the first file a
+    request writes after its ledger row) under ``folders``, optionally of one ``scope``. Only the
+    head of each archive is read (the id and scope come before the request body)."""
+    found = set()
+    for folder in folders or ():
+        folder = Path(folder)
+        if not folder.is_dir():
+            continue
+        for path in folder.rglob("*.request.json"):
+            try:
+                with path.open("rb") as handle:
+                    head = handle.read(ARCHIVE_HEAD_BYTES)
+            except OSError:
+                continue
+            match = _ARCHIVE_ID.search(head)
+            if match is None:
+                continue
+            named = _ARCHIVE_SCOPE.search(head)
+            if scope is not None and named is not None and named.group(1).decode("utf-8", "replace") != scope:
+                continue
+            found.add(match.group(1).decode("utf-8", "replace"))
+    return found
+
+
+def committed_for_run(ledger_path, run_id, scope=ANALYSIS_SCOPE, *, archives=()):
+    """What the ledger holds against one run's judging, read only (docs/plan.md, "Live behavior
+    judge during the run (October 20, 2026)"): the sum over every ``scope`` row whose label names
+    ``run_id`` (``request_label``) of its billed amount, or its full reservation while it is
+    reserved or uncertain (``COALESCE(actual, reserved)``, exactly what the ledger counts). The
+    ledger row is the first durable record of a request (written before its request archive),
+    so a hold orphaned by a killed process is counted too.
+
+    Requests made before the run id was put into the labels (``judge-<model>:<purpose>:<unit>``)
+    cannot be found by label: ``archives`` (judge directories) adds every judge row of ``scope``
+    that their request archives name (``archived_request_ids``) and whose label carries no run id
+    (``legacy_usd``, ``legacy_rows``), so a run judged before the per-run cap still has that spend
+    counted. Returns ``{"run_id", "committed_usd", "rows", "unresolved_rows", "legacy_usd",
+    "legacy_rows"}``; a missing ledger counts 0."""
+    from research_swarm.budget import usd
+    path = Path(ledger_path)
+    empty = {"run_id": run_id, "committed_usd": "0", "rows": 0, "unresolved_rows": 0, "legacy_usd": "0",
+             "legacy_rows": 0}
+    if not run_id or not path.exists():
+        return empty
+    marker = f":{run_id}:"
+    legacy_ids = sorted(archived_request_ids(archives, scope)) if archives else []
+    with closing(sqlite3.connect("file:" + str(path.resolve()) + "?mode=ro", uri=True, timeout=30)) as db:
+        db.execute("PRAGMA busy_timeout=30000")
+        row = db.execute("SELECT COALESCE(SUM(COALESCE(actual, reserved)), 0), COUNT(*), "
+                         "COALESCE(SUM(CASE WHEN state IN ('reserved', 'uncertain') THEN 1 ELSE 0 END), 0) "
+                         "FROM calls WHERE scope=? AND substr(agent, 1, ?)=? AND instr(agent, ?) > 0",
+                         (scope, len(LABEL_PREFIX), LABEL_PREFIX, marker)).fetchone()
+        legacy, legacy_rows, legacy_unresolved = 0, 0, 0
+        for start in range(0, len(legacy_ids), 500):
+            chunk = legacy_ids[start:start + 500]
+            for amount, state, agent in db.execute(
+                    f"SELECT COALESCE(actual, reserved), state, agent FROM calls WHERE scope=? AND id IN "
+                    f"({','.join('?' * len(chunk))})", (scope, *chunk)):
+                if not str(agent).startswith(LABEL_PREFIX) or marker in str(agent):
+                    continue   # not a judge row, or already counted by its label
+                legacy += int(amount or 0)
+                legacy_rows += 1
+                legacy_unresolved += state in ("reserved", "uncertain")
+    return {"run_id": run_id, "committed_usd": str(usd(int(row[0]) + legacy)), "rows": int(row[1]) + legacy_rows,
+            "unresolved_rows": int(row[2]) + legacy_unresolved, "legacy_usd": str(usd(legacy)),
+            "legacy_rows": legacy_rows}
+
+
+RUN_BUDGETS_FILE = "run-budgets.json"   # each paid invocation's budget, ledger run and ledger id
+LIVE_DIRNAME = "live"                    # the live store inside a judge directory (pipeline.WARM_DIRNAME)
+
+
+def run_budget_records(judge_dir):
+    """The budget records of every paid invocation that judged into ``judge_dir``: its own
+    ``run-budgets.json`` and its live store's (``live/run-budgets.json``), oldest first. Each names
+    the invocation's ledger run (``ledger_run_id``) and, since the per-judge-directory budget, the
+    ledger it was counted in (``ledger_id``, ``ledger``)."""
+    records = []
+    for path in (Path(judge_dir) / RUN_BUDGETS_FILE, Path(judge_dir) / LIVE_DIRNAME / RUN_BUDGETS_FILE):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        records += [entry for entry in data if isinstance(entry, dict)] if isinstance(data, list) else []
+    return sorted(records, key=lambda entry: str(entry.get("at") or ""))
+
+
+def committed_for_judging(ledger_path, judge_dir, scope=ANALYSIS_SCOPE, *, run_id=None):
+    """What the ledger(s) hold against one judging run, read only. docs/plan.md, "One per-run
+    budget, no manual approvals (October 20, 2026)": the behavior judge keeps its own fixed
+    *per-run* limit, so every invocation that judges the same judged run counts what the earlier
+    ones committed: live passes, the early stages, the post-run judge, any resume, and a re-judge
+    into another ``--output-dir`` alike.
+
+    ``ledger_path`` is one ledger or a list of them (the ledger this invocation bills and every
+    ledger the judge directory's earlier spend was counted in; a request found in several, e.g. a
+    ledger and its copy, counts once, at its largest amount). Counted with ``COALESCE(actual,
+    reserved)`` (exactly what the ledger counts, so an orphaned hold counts at its reservation):
+    every ``scope`` row of a ledger run the directory's budget records name (``run_budget_records``:
+    written before an invocation's first request, so a hold whose request archive was never
+    written is included), every ``scope`` row a request archive under ``judge_dir`` names
+    (``archived_request_ids``: requests made before the budget records existed) and, with
+    ``run_id`` (the judged run), every judge row whose label names that run (``request_label``),
+    whatever judge directory it was made for. Returns ``{"committed_usd", "rows",
+    "unresolved_rows", "ledger_runs", "reservation_factor", "ledgers"}`` (the largest reservation
+    factor of those ledger runs: an estimate violation keeps scaling the judging run's
+    reservations across invocations); a missing ledger counts 0."""
+    from research_swarm.budget import usd
+    paths = [ledger_path] if isinstance(ledger_path, (str, Path)) else list(ledger_path or ())
+    paths = list(dict.fromkeys(Path(p).resolve() for p in paths))
+    runs = sorted({str(entry["ledger_run_id"]) for entry in run_budget_records(judge_dir)
+                   if entry.get("ledger_run_id")})
+    empty = {"judge_dir": str(judge_dir), "judged_run_id": run_id, "committed_usd": "0", "rows": 0,
+             "unresolved_rows": 0, "ledger_runs": runs, "reservation_factor": "1",
+             "ledgers": [str(p) for p in paths]}
+    archived = None
+    rows = {}
+    factor = Decimal(1)
+    marker = f":{run_id}:" if run_id else None
+    for path in paths:
+        if not path.exists():
+            continue
+        if archived is None:
+            archived = sorted(archived_request_ids([judge_dir], scope))
+        with closing(sqlite3.connect("file:" + str(path) + "?mode=ro", uri=True, timeout=30)) as db:
+            db.execute("PRAGMA busy_timeout=30000")
+            tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if "calls" not in tables:
+                continue
+            columns = {row[1] for row in db.execute("PRAGMA table_info(calls)")}
+
+            def add(found):
+                for request_id, amount, state in found:
+                    amount = int(amount or 0)
+                    if request_id not in rows or amount > rows[request_id][0]:
+                        rows[request_id] = (amount, state)
+
+            for field_name, values in (("run_id", runs if "run_id" in columns else []), ("id", archived)):
+                for start in range(0, len(values), 500):
+                    chunk = values[start:start + 500]
+                    add(db.execute(f"SELECT id, COALESCE(actual, reserved), state FROM calls WHERE scope=? AND "
+                                   f"{field_name} IN ({','.join('?' * len(chunk))})", (scope, *chunk)))
+            if marker:
+                add(db.execute("SELECT id, COALESCE(actual, reserved), state FROM calls WHERE scope=? AND "
+                               "substr(agent, 1, ?)=? AND instr(agent, ?) > 0",
+                               (scope, len(LABEL_PREFIX), LABEL_PREFIX, marker)))
+            if runs and "runs" in tables:
+                for start in range(0, len(runs), 500):
+                    chunk = runs[start:start + 500]
+                    for (value,) in db.execute(f"SELECT reservation_factor FROM runs WHERE id IN "
+                                               f"({','.join('?' * len(chunk))})", chunk):
+                        try:
+                            factor = max(factor, Decimal(str(value)))
+                        except (ArithmeticError, ValueError):
+                            pass
+    total = sum(amount for amount, _ in rows.values())
+    return dict(empty, committed_usd=str(usd(total)), rows=len(rows),
+                unresolved_rows=sum(state in ("reserved", "uncertain") for _, state in rows.values()),
+                reservation_factor=str(factor))
 
 
 class RunLimit:
@@ -372,28 +577,48 @@ class RunLimit:
     keeps it until ``reconcile()``). ``admit`` refuses a request whose reservation would push the
     committed spend past ``limit_usd``; the client then answers ``grading_failed`` with reason
     ``run_limit`` without touching the ledger or the network, and the pipeline treats it like a
-    ledger denial (waits while other requests are in flight, else stops cleanly). The ledger's
-    own cap still applies to every admitted request. ``estimate`` (the invocation estimate that
+    ledger denial (waits while other requests are in flight, else stops cleanly). The ledger
+    enforces the same budget for the invocation's own ledger run (``run_id``, registered with the
+    ``room`` this limit leaves: ``limit_usd`` minus ``prior_usd``, what earlier invocations of the
+    same judging run already committed, ``committed_for_judging``; and the ``reservation_factor``
+    they reached, so an earlier estimate violation keeps scaling reservations). ``estimate`` (the invocation estimate that
     set the limit), ``source`` (``estimate``: 2x the central estimate, or ``override``:
     ``--run-limit``) and ``basis`` (what set an estimated limit: ``factor``, ``largest_reservation``
     when the largest single reservation needed more room, or ``floor``) are recorded with the
     totals (``record()``)."""
 
     def __init__(self, limit_usd, *, source="estimate", estimate=None, factor=None, floor_usd=None, basis=None,
-                 standing_approval=None):
+                 run_config=None, prior_usd=None, prior=None, reservation_factor=None):
         limit = _decimal_or_none(limit_usd)
         if limit is None or limit <= 0:
             raise ValueError("run limit must be a positive amount in USD")
         self.limit = limit
+        # The judging run's budget (docs/plan.md, "One per-run budget, no manual approvals (October 20,
+        # 2026)"): what earlier invocations of the same judging run (the same judge directory) already
+        # committed (``committed_for_judging``) counts against ``limit`` from the start, so a resume, a
+        # later stage or a live pass never gets a fresh budget.
+        prior_amount = _decimal_or_none(prior_usd)
+        if prior_amount is not None and prior_amount < 0:
+            raise ValueError("prior_usd must not be negative")
+        self.prior = prior_amount or Decimal(0)
+        self.prior_record = prior
+        factor = _decimal_or_none(reservation_factor)
+        # The ledger run starts with the reservation factor earlier invocations reached (never below 1).
+        self.reservation_factor = factor if factor is not None and factor > 1 else Decimal(1)
         self.source = source
         self.estimate = estimate
         self.factor = factor
         self.floor = _decimal_or_none(floor_usd)
         self.basis = basis
-        # Source ``standing_approval`` (docs/plan.md, "Automatic post-run behavior judge for the owner's
-        # runs (October 20, 2026)"): the config's approval note, path and per-run cap, recorded as given.
-        self.standing_approval = standing_approval
+        # Source ``run_config`` (docs/plan.md, "One per-run budget, no manual approvals (October 20,
+        # 2026)"): the judged run's config path, track and budget (``auto_judge.judge_settings``), as given.
+        self.run_config = run_config
+        if self.prior >= self.limit:
+            raise ValueError(f"no room under the run limit ${self.limit}: ${self.prior} is already committed for "
+                             "this run's judging")
         self.created_at = _now()
+        # The ledger run this invocation's clients register (budget = ``room``: the limit minus prior).
+        self.run_id = f"judge-{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:8]}"
         self._lock = threading.Lock()
         self._held = {}                  # token -> (reserved USD, purpose, model key)
         self._uncertain = Decimal(0)
@@ -404,13 +629,29 @@ class RunLimit:
         self.first_denial = None
         self.peak_committed = Decimal(0)
         self.by_purpose = {}
+        self.closed = None               # {"reason", "at"} once ``close`` was called
+
+    def close(self, reason):
+        """Admit nothing more (the invocation was asked to stop, e.g. SIGTERM): every later
+        ``admit`` is denied like a request past the limit, so the pipeline waits for its in-flight
+        requests to settle (their ledger rows are settled as usual, never left ``reserved``) and
+        then stops cleanly (stop reason ``run_limit``; a resume pays nothing twice). Takes no lock:
+        safe from a signal handler."""
+        if self.closed is None:
+            self.closed = {"reason": str(reason), "at": _now()}
+
+    @property
+    def room(self):
+        """What this invocation may still commit: the limit minus ``prior`` (the budget of its ledger run)."""
+        return self.limit - self.prior
 
     def committed(self):
         with self._lock:
             return self._committed()
 
     def _committed(self):
-        return sum((held for held, _, _ in self._held.values()), Decimal(0)) + self._uncertain + self._settled
+        return (sum((held for held, _, _ in self._held.values()), Decimal(0)) + self._uncertain + self._settled
+                + self.prior)
 
     def _row(self, purpose, model):
         return self.by_purpose.setdefault(purpose or "?", {"model_key": model, "requests": 0, "settled_usd": Decimal(0),
@@ -418,15 +659,17 @@ class RunLimit:
 
     def admit(self, amount, *, purpose=None, model=None, label=None):
         """A token when ``amount`` (the request's ledger reservation) fits under the limit
-        together with the committed spend, else None (the denial is counted)."""
-        amount = _decimal_or_none(amount) or Decimal(0)
+        together with the committed spend, else None (the denial is counted). Like the ledger, the
+        amount is scaled by ``reservation_factor`` when an earlier invocation raised it."""
+        amount = (_decimal_or_none(amount) or Decimal(0)) * self.reservation_factor
         with self._lock:
             committed = self._committed()
-            if committed + amount > self.limit:
+            if self.closed is not None or committed + amount > self.limit:
                 self.denied += 1
                 if self.first_denial is None:
                     self.first_denial = {"at": _now(), "label": label, "reserved_usd": str(amount),
-                                         "committed_usd": str(committed), "limit_usd": str(self.limit)}
+                                         "committed_usd": str(committed), "limit_usd": str(self.limit),
+                                         "closed": self.closed}
                 return None
             self._next += 1
             token = self._next
@@ -435,6 +678,15 @@ class RunLimit:
             self._row(purpose, model)["requests"] += 1
             self.peak_committed = max(self.peak_committed, committed + amount)
             return token
+
+    def raise_factor(self, value):
+        """Follow the ledger run's reservation factor after an estimate violation within this
+        invocation (``BudgetLedger.settle`` raised it), so this limit and the ledger keep admitting
+        the same amounts (never lowers it)."""
+        factor = _decimal_or_none(value)
+        if factor is not None and factor > self.reservation_factor:
+            with self._lock:
+                self.reservation_factor = factor
 
     def settle(self, token, cost, *, uncertain=False):
         """Replace the hold of ``token`` by its settled ``cost``; an uncertain request keeps its
@@ -461,20 +713,23 @@ class RunLimit:
     def denial_detail(self, amount):
         with self._lock:
             return {"run_limit_usd": str(self.limit), "committed_usd": str(self._committed()),
-                    "reserved_usd": str(_decimal_or_none(amount) or Decimal(0))}
+                    "reserved_usd": str(_decimal_or_none(amount) or Decimal(0)), "closed": self.closed}
 
     def record(self):
         """The limit, how it was set and this invocation's own totals (JSON-ready)."""
         with self._lock:
             held = sum((h for h, _, _ in self._held.values()), Decimal(0))
             return {"schema": RUN_LIMIT_SCHEMA, "limit_usd": str(self.limit), "source": self.source,
+                    "ledger_run_id": self.run_id,
                     "basis": self.basis, "factor": None if self.factor is None else str(self.factor),
                     "floor_usd": None if self.floor is None else str(self.floor), "created_at": self.created_at,
-                    "estimate": self.estimate, "standing_approval": self.standing_approval,
+                    "estimate": self.estimate, "run_config": self.run_config,
+                    "prior_usd": str(self.prior), "room_usd": str(self.room), "prior": self.prior_record,
+                    "reservation_factor": str(self.reservation_factor),
                     "committed_usd": str(self._committed()),
                     "peak_committed_usd": str(self.peak_committed), "settled_usd": str(self._settled),
                     "uncertain_usd": str(self._uncertain), "in_flight_usd": str(held), "requests": self.requests,
-                    "denied": self.denied, "first_denial": self.first_denial,
+                    "denied": self.denied, "first_denial": self.first_denial, "closed": self.closed,
                     "by_purpose": {k: dict(v, settled_usd=str(v["settled_usd"]), uncertain_usd=str(v["uncertain_usd"]))
                                    for k, v in sorted(self.by_purpose.items())}}
 
@@ -506,17 +761,18 @@ class JudgeClient:
     ``http``: a transport with ``async post(url, headers, body, timeout)`` (tests and
     the rehearsal pass ``FakeTransport``). ``http=None`` builds the real HTTPS
     transport and is refused unless ``paid_authorized=True``, ``scope="analysis"`` and
-    the settings come from a verified freeze record. The ``analysis`` scope requires
-    the existing ledger with every applied audited judge raise (``budget.judge_analysis_problems``:
-    all five, the last $110 -> $200 bound to docs/plan.md, "Behavior judge iteration specified,
-    October 19, 2026"), and opens it at ``budget.JUDGE_ANALYSIS_CAP_USD``; any other scope (offline rehearsal) needs
-    explicit ``ledger_caps`` and a fake transport. ``max_concurrency`` defaults to
+    the settings come from a verified freeze record. The client opens (or creates) the ledger and
+    registers its judging run there (``BudgetLedger.start_run``): run ``run_limit.run_id`` with the
+    run limit as its budget (shared by the invocation's clients), else its own run with budget
+    ``ledger_caps[scope]`` or $50 (``budget.DEFAULT_JUDGE_RUN_BUDGET_USD``). Any scope other than
+    ``analysis`` (offline rehearsal) needs a fake transport and, without a run limit, explicit
+    ``ledger_caps``. ``max_concurrency`` defaults to
     ``route.DEFAULT_CONCURRENCY`` (haiku 24, sonnet 16, opus 8; judge revision v3, item 10).
     The delay before resending a rate-limited (HTTP 429) request is awaited outside the
     concurrency semaphore through ``self.sleep`` (``asyncio.sleep``; tests replace it).
     ``run_limit`` (a ``RunLimit`` shared by the invocation's three clients; judge revision v3,
     item 7) refuses any request whose reservation would push the invocation's committed spend
-    past its limit (reason ``run_limit``); the ledger's cap applies independently.
+    past its limit (reason ``run_limit``); the ledger enforces the same budget for the run.
 
     ``credentials_root`` (paid path only; ``repo_root`` is an accepted alias): the
     directory whose private ``.env`` holds the host key, default this checkout's root.
@@ -525,7 +781,7 @@ class JudgeClient:
     """
     def __init__(self, model_key, ledger_path, scope=ANALYSIS_SCOPE, archive_dir=None, settings=None, http=None,
                  max_concurrency=None, *, paid_authorized=False, ledger_caps=None, key_loader=None, verify_limit=None,
-                 credentials_root=None, repo_root=None, run_limit=None):
+                 credentials_root=None, repo_root=None, run_limit=None, run_id=None):
         if model_key not in MODEL_KEYS:
             raise ValueError(f"Unknown judge model {model_key!r}; expected one of {MODEL_KEYS}")
         if run_limit is not None and not isinstance(run_limit, RunLimit):
@@ -558,25 +814,31 @@ class JudgeClient:
         self._paid = http is None
         if self._paid:
             if paid_authorized is not True:
-                raise RuntimeError("Paid judging is gated: pass paid_authorized=True only after the user confirms "
-                                   "immediately before the first paid request (docs/plan.md, October 17, 2026)")
+                raise RuntimeError("The real HTTPS transport needs paid_authorized=True (the paid judging run passes "
+                                   "it); offline paths inject a fake transport")
             if scope != ANALYSIS_SCOPE:
                 raise RuntimeError("Paid judge requests are admitted only through the ledger's analysis scope")
             if not self.settings.pricing_verified or not self.settings.pricing_record:
                 raise RuntimeError("Paid judging requires settings from a fresh freeze record "
                                    "(JudgeRouteSettings.from_pricing_record)")
-        if scope == ANALYSIS_SCOPE:
-            # Never create a replacement ledger, and require both applied audited raises.
-            problems = judge_analysis_problems(self.ledger_path)
-            if problems:
-                raise ValueError("Judge analysis ledger refused: " + "; ".join(problems))
-            caps = {ANALYSIS_SCOPE: JUDGE_ANALYSIS_CAP_USD}
-        else:
+        if scope != ANALYSIS_SCOPE:
             if self._paid:
                 raise RuntimeError("Non-analysis scopes are for offline rehearsals with a fake transport")
-            if not isinstance(ledger_caps, dict) or scope not in ledger_caps:
-                raise ValueError(f"Scope {scope!r} (offline rehearsal) needs explicit ledger_caps including it")
-            caps = {scope: ledger_caps[scope]}
+            if run_limit is None and (not isinstance(ledger_caps, dict) or scope not in ledger_caps):
+                raise ValueError(f"Scope {scope!r} (offline rehearsal) needs a run_limit or explicit ledger_caps")
+        # The judging run's budget (docs/plan.md "One per-run budget, no manual approvals (October 20,
+        # 2026)"): the room the invocation's run limit leaves, else ledger_caps[scope], else $50.
+        factor = None
+        if run_limit is not None:
+            ledger_run, run_budget, source = (run_limit.run_id, run_limit.room,
+                                              f"judge run limit ({run_limit.source})")
+            factor = run_limit.reservation_factor
+        elif isinstance(ledger_caps, dict) and ledger_caps.get(scope) is not None:
+            ledger_run, run_budget, source = (f"judge-{model_key}-{uuid.uuid4().hex[:12]}", ledger_caps[scope],
+                                              "ledger_caps")
+        else:
+            ledger_run, run_budget, source = (f"judge-{model_key}-{uuid.uuid4().hex[:12]}",
+                                              DEFAULT_JUDGE_RUN_BUDGET_USD, "default")
         self.credentials_root = None
         if self._paid and key_loader is None:
             # Only the directory is checked here; its .env is read at prepare().
@@ -589,10 +851,16 @@ class JudgeClient:
             def key_loader():
                 from research_swarm.secrets import load_openrouter_key
                 return load_openrouter_key(root)
-        self.ledger = BudgetLedger(self.ledger_path, caps)
+        self.ledger = BudgetLedger(self.ledger_path)
+        self.ledger.start_run(ledger_run, scope, run_budget, source=source, note=self._run_note(scope, run_id),
+                              reservation_factor=factor)
+        # The judged run's id goes into every ledger label (``request_label``): the ledger's history
+        # of a run's judging (``committed_for_run``). The judging run's budget counts what its judge
+        # directory's invocations committed (``committed_for_judging``).
+        self.run_id = run_id
         self.run_limit = run_limit
         self._limit_tokens = {}             # ledger request id -> RunLimit token
-        self.http = UrllibTransport() if self._paid else http
+        self.http = UrllibTransport(max_workers=max_concurrency) if self._paid else http
         self._key_loader = key_loader
         self._verify_limit = verify_limit
         self._key = None
@@ -603,14 +871,35 @@ class JudgeClient:
         self.sleep = asyncio.sleep          # HTTP 429 back-off (outside the semaphore)
         self.jitter = random.random         # spreads the back-off of concurrent requests
 
+    @property
+    def run_limit(self):
+        return self._run_limit
+
+    @run_limit.setter
+    def run_limit(self, limit):
+        """A run limit given after construction (``pipeline.Pipeline`` attaches the invocation's) also
+        rebinds the ledger to that judging run, so the ledger enforces the same budget."""
+        if limit is not None and not isinstance(limit, RunLimit):
+            raise ValueError("run_limit must be a RunLimit (shared by the invocation's clients) or None")
+        self._run_limit = limit
+        ledger = getattr(self, "ledger", None)
+        if limit is not None and ledger is not None and ledger.run_id != limit.run_id:
+            ledger.start_run(limit.run_id, self.scope, limit.room, source=f"judge run limit ({limit.source})",
+                             note=self._run_note(self.scope, getattr(self, "run_id", None)),
+                             reservation_factor=limit.reservation_factor)
+
+    @staticmethod
+    def _run_note(scope, judged_run=None):
+        return f"behavior judge ({scope})" + (f" of run {judged_run}" if judged_run else "")
+
     # -- paid-path preparation ----------------------------------------------
     def prepare(self):
         """Load the key (paid path only) and run the unpaid provider-limit check once.
 
-        Without a key loader (fake transports) this does nothing. The limit check uses
-        the approved unlimited-key exception (plan, Route and key): the ledger, not a
-        provider cap, enforces the analysis allowance. The report (never the key) is
-        archived as ``provider-limit-<model>.json``.
+        Without a key loader (fake transports) this does nothing. The limit record is
+        informational (``provider_limit.key_limit_record`` never refuses the key): the judging
+        run's budget is the spending control. The report (never the key) is archived as
+        ``provider-limit-<model>.json``.
         """
         with self._prepare_lock:
             if self._prepared:
@@ -621,10 +910,10 @@ class JudgeClient:
                     raise RuntimeError("Key loader returned no key")
                 verify = self._verify_limit
                 if verify is None and self._paid:
-                    from research_swarm.provider_limit import verify_key_limit as verify
+                    from research_swarm.provider_limit import key_limit_record as verify
                 if verify is not None:
-                    remaining = Decimal(self.ledger.snapshot()[self.scope]["remaining_usd"])
-                    report = verify(key, remaining, allow_unlimited=True)
+                    budget = Decimal(self.ledger.run_snapshot()["budget_usd"])
+                    report = verify(key, budget)
                     self.limit_report = json.loads(self._scrub_text(json.dumps(report, default=str), key))
                     # One file per model: the three clients share one archive directory.
                     self._write_json(self.archive_dir / f"provider-limit-{self.model_key}.json",
@@ -842,6 +1131,9 @@ class JudgeClient:
             if token is not None:
                 self.run_limit.settle(token, cost)
             state = next((r["state"] for r in self._request_state(request_id)), "settled")
+            if state == "estimate_violation" and self.run_limit is not None:
+                # The ledger raised its run's reservation factor; the run limit follows it.
+                self.run_limit.raise_factor((self.ledger.run_snapshot() or {}).get("reservation_factor"))
             return {"request_id": request_id, "state": state, "cost_usd": str(cost), "basis": basis}
         except BaseException:
             if token is not None:
@@ -880,14 +1172,16 @@ class JudgeClient:
             body = self.body(system, user, max_tokens, effort, response_format, cache_system=cache_system)
             data = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             reservation = self.settings.reservation(self.model_key, data, max_tokens, cache_system=cache_system)
-            label = f"judge-{self.model_key}:{purpose}:{unit_id}"[:200]
+            label = request_label(self.model_key, purpose, unit_id, self.run_id)
             token = None
             if self.run_limit is not None:
                 # This invocation's own limit (judge revision v3, item 7), checked before the ledger.
                 token = self.run_limit.admit(reservation, purpose=purpose, model=self.model_key, label=label)
                 if token is None:
                     detail = self.run_limit.denial_detail(reservation)
-                    message = (f"run limit: reserving ${reservation} would take this invocation's committed spend "
+                    message = (f"run limit closed ({detail['closed']['reason']}): nothing more is admitted"
+                               if detail.get("closed") else
+                               f"run limit: reserving ${reservation} would take this invocation's committed spend "
                                f"(${detail['committed_usd']}) past its run limit ${detail['run_limit_usd']}")
                     path = self._denial_record(unit_id, purpose, attempt, reservation, message, kind="run_limit_denied")
                     return _Outcome("budget_denied", RUN_LIMIT_REASON, paths=[path], dispatched=False,
@@ -914,8 +1208,10 @@ class JudgeClient:
                     "schema": ARCHIVE_SCHEMA, "kind": "request", "created_at": _now(), "unit_id": unit_id,
                     "purpose": purpose, "attempt": attempt, "model_key": self.model_key, "scope": self.scope,
                     "ledger_request_id": request_id, "reserved_usd": str(reservation),
-                    "reservation_basis": ("prompt bound at max(prompt, cache write, cache read) price; no cache "
-                                          "discount assumed") if cache_system else "prompt bound at prompt price",
+                    "reservation_basis": (("prompt bound at max(prompt, cache write, cache read) price; no cache "
+                                           "discount assumed") if cache_system else "prompt bound at prompt price")
+                                         + "; output at the model's reservation allowance (at most max_tokens)",
+                    "reserved_output_tokens": self.settings.reserved_output_tokens(self.model_key, max_tokens),
                     "cache_system": bool(cache_system),
                     "cache_control": dict(CACHE_CONTROL) if cache_system else None,
                     "prompt_token_bound": self.settings.prompt_token_bound(self.model_key, data),

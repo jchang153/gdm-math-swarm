@@ -1,34 +1,37 @@
 #!/usr/bin/env python3
 """PAID live compatibility check: one genuine Claude Code agent on the frozen route.
 
-docs/plan.md "Live compatibility check (October 13, 2026)": a separate $2 allowance
-(ledger scope ``compatibility`` in the shared state/budget.sqlite), outside the $20
-pilot and $5 analysis allowances, for one agent running a few turns on the frozen
-OpenRouter route with explicit abort criteria (tool-call parsing, reasoning replay,
-provider cost reporting, truncation behavior). The user must confirm immediately
-before the paid call. Do not run it during the execution hold (docs/plan.md).
+docs/plan.md "Live compatibility check (October 13, 2026)": one agent running a few turns on the
+frozen OpenRouter route with explicit abort criteria (tool-call parsing, reasoning replay,
+provider cost reporting, truncation behavior), reserving and settling in ledger scope
+``compatibility`` of the shared state/budget.sqlite. Spending (owner decisions, docs/plan.md
+"One per-run budget, no manual approvals (October 20, 2026)"): the check is one run with its own
+budget, ``run_budget_usd`` from ``--config`` (else the $100 default; printed before it starts),
+registered in the ledger as run ``compat-<UTC>``. A request is admitted only while the run's
+committed spend plus its reservation fits that budget. There is no separate allowance, approval
+flag, typed confirmation or interactive terminal.
 
-Refusals (nothing is spent and no credential is read):
+Before the gates it refreshes the route-pricing freeze automatically when it is missing, stale or
+frozen for other settings (scripts/freeze_route.py; unpaid public catalog). Refusals (nothing is
+spent and no credential is read):
 
-* without ``--i-have-user-approval``;
-* while another paid launcher of this checkout (a pilot or another compatibility check)
-  holds the launch lock (``runtime.launch_lock``, state/launch.lock next to the ledger),
-  which this check then holds until it ends;
-* unless the ledger scope ``compatibility`` (budget.DEFAULT_LEDGER_PATH, opened with
-  budget.DEFAULT_CAPS) exists with the approved $2 cap, has no unacknowledged
-  estimate violation and at least ``--min-remaining`` left;
-* unless the launch gates in ``REQUIRED_GATES`` pass (frozen manifest/dataset,
-  approved settings, caps, a fresh route-pricing freeze equal to the launch
-  settings, credential presence, and the unpaid runtime-e2e and runtime-isolation
-  evidence), the pinned Inspect packages are installed, the launch interlock is clear
-  (``runtime.launch_interlock``: no leftover judge container, no running comparator
-  container, no agent sandbox of another run; no command-line override for this paid
-  check, only the config's recorded concurrent-run override on a track that allows it,
-  which turns another checkout's agent sandboxes and judge compilers into warnings recorded
-  in the evidence as ``concurrent_run_override``; comparators and this checkout's own
-  sandboxes still block), and both image tags resolve to local image IDs;
-* unless the operator types the remaining compatibility allowance (``--yes`` skips
-  the prompt and may be used only when the user approved this exact run).
+* unless ``run_budget_usd`` is absent or a positive amount;
+* unless the launch gates in ``REQUIRED_GATES`` pass (frozen manifest/dataset, approved
+  settings, the run budget, a route-pricing freeze valid for the launch settings, credential
+  presence, and the unpaid runtime-e2e and runtime-isolation evidence), the pinned Inspect
+  packages are installed, the launch interlock is clear (``runtime.launch_interlock``: no
+  leftover judge container, no running comparator container, no agent sandbox of another run;
+  only the config's recorded concurrent-run override on a track that allows it, which turns
+  another checkout's agent sandboxes and judge compilers into warnings recorded in the evidence as
+  ``concurrent_run_override``; comparators and this checkout's own sandboxes still block), and both
+  image tags resolve to local image IDs;
+* while another paid launcher of this checkout (a pilot or another compatibility check) holds
+  the launch lock (``runtime.launch_lock``, state/launch.lock next to the ledger), which this
+  check then holds until it ends.
+
+A config with ``budget_track`` reserves in that track's own ledger (``budget.ledger_path_for``,
+e.g. state/gemini-budget.sqlite) instead of the shared state/budget.sqlite, with the same per-run
+budget.
 
 What runs is the production path (runtime helpers shared with ``run_pilot``):
 pinned image IDs in the compose file and judge, the Lean warm-up before the start
@@ -40,11 +43,8 @@ OpenRouter model from ``runtime.build_openrouter_model`` (same
 credential is read only inside that builder, via ``secrets.load_openrouter_key``;
 Inspect's own .env loading is disabled first (``disable_inspect_dotenv``), and the
 evidence records ``credentials_in_environment`` measured after the run. Right after
-loading the key the builder verifies, unpaid, that the key has a non-resetting
-provider-side limit whose ``limit_remaining`` does not exceed the remaining
-compatibility allowance (``provider_limit.verify_key_limit``); otherwise nothing is
-spent. The explicit, documented unlimited-key configuration also applies here;
-it waives only the provider cap, never the separate compatibility ledger cap.
+loading the key the builder records the key's provider-side limit (unpaid, informational:
+``provider_limit.key_limit_record``); it never refuses the key.
 
 Reasoning-cap probe (required check ``reasoning_cap_enforced``): before the agent
 runs, one researcher-side request (never shown to any agent) goes through the same
@@ -60,14 +60,14 @@ If the probe does not pass, the agent run is skipped (abort reason
 
 Abort criteria: no request is admitted after ``--max-requests`` (default 12)
 admitted agent requests; ``--max-minutes`` (default 10) after the first inference;
-``allowance_exhausted``: the ledger refused the next request only because the remaining
-compatibility allowance cannot cover its reservation (``BudgetExceeded`` without an
-estimate violation; with $4/$18 reservation prices this can come before
-``--max-requests``). These three end the check normally, and the checks are judged on what
-ran. Failures: any other admission refusal (``admission_refused``);
-the first permanent provider HTTP 4xx (excluding transient 408/429), converted
-pre-generation rejection, tool-call parse failure or provider output error; any
-estimate violation in the compatibility scope. An abort stops admission at once;
+``allowance_exhausted``: the ledger refused the next request only because what is left of the
+check's run budget cannot cover its reservation (``BudgetExceeded`` without an estimate
+violation; with high reservation prices this can come before ``--max-requests``). These three
+end the check normally, and the checks are judged on what ran. Failures: any other admission
+refusal (``admission_refused``); the first permanent provider HTTP 4xx (excluding transient
+408/429), converted pre-generation rejection, tool-call parse failure or provider output error;
+any estimate violation among this check's own requests.
+An abort stops admission at once;
 a request already admitted may finish (the solver waits up to the config's
 ``in_flight_grace_seconds``, default 120, for it to settle with its reported cost
 before cancelling the agent; one still running then is cancelled and stays an
@@ -75,11 +75,10 @@ uncertain hold to reconcile).
 
 Transient HTTP 408/429, server and transport failures propagate to the existing
 bounded Claude Code retry mechanism without stopping the check. There is no extra
-retry loop here; the request/time/allowance limits still apply. These preflight
+retry loop here; the request/time/budget limits still apply. These preflight
 criteria do not change the pilot's retry policy. Known transient attempt errors
 are allowed in the final evidence only after a later successful provider-priced
-inference by that agent; unknown or terminal errors still fail the check, and
-unresolved billing holds still block launch until reconciled.
+inference by that agent; unknown or terminal errors still fail the check.
 
 Signed reasoning (``provider.SIGNED_REASONING_MODEL_IDS``, e.g. Gemini thought signatures in
 OpenRouter ``reasoning_details``): the required check ``signed_reasoning_tool_call_replay``
@@ -89,12 +88,12 @@ accepted it (finished, provider-priced). For other models the check is informati
 
 Writes data/validation/compatibility-<UTC YYYYMMDDTHHMMSSZ>.json (schema
 ``gdm-compatibility/1``), read by the launch gate ``compatibility``. ``request_ids``
-lists every ledger request the check admitted (agent and probe); the gate checks the
-ledger's current state of exactly those ids, so reconciling a hold afterwards is
-supported. ``spent_usd`` is their committed total at run end (uncertain holds at
-their full reservation).
+lists every ledger request the check admitted (agent and probe); the gate reports the
+ledger's current state of exactly those ids (informational). ``spent_usd`` is their
+committed total at run end (uncertain holds at their full reservation); ``run_budget_usd``
+and ``run_id`` record the check's budget.
 
-    PYTHONPATH=src .venv/bin/python scripts/compat_check.py --i-have-user-approval
+    PYTHONPATH=src .venv/bin/python scripts/compat_check.py [--config configs/pilot.json]
 """
 from __future__ import annotations
 import argparse
@@ -107,7 +106,7 @@ import sys
 import time
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -115,25 +114,23 @@ sys.path.insert(0, str(ROOT / "src"))
 os.environ.setdefault("INSPECT_DISPLAY", "plain")  # eval_async has no display argument
 
 from research_swarm import runtime  # noqa: E402
-from research_swarm.budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, BudgetExceeded, BudgetLedger,  # noqa: E402
-                                   caps_for, ledger_path_for, list_requests)
+from research_swarm.budget import (DEFAULT_LEDGER_PATH, BudgetExceeded, BudgetLedger, describe_budget,  # noqa: E402
+                                   ledger_path_for, list_requests, run_budget)
 from research_swarm.inspect_adapter import _rejected_without_generation, classify_generate_error  # noqa: E402
 from research_swarm.provider import SIGNED_REASONING_MODEL_IDS, frozen_fields, settings_from_config  # noqa: E402
 
 SCHEMA = "gdm-compatibility/1"
 PREFIX = "compatibility"
 SCOPE = "compatibility"
-APPROVED_CAP_USD = Decimal("2")  # docs/plan.md "Live compatibility check (October 13, 2026)"
 VALIDATION_DIR = ROOT / "data" / "validation"
 DEFAULT_CONFIG = ROOT / "configs" / "pilot.json"
 AGENT_ID = "agent-001"
 COMPAT_MAX_CONNECTIONS = 1  # one agent, one in-flight request (as in the pilot: max_connections == agent count)
 DEFAULT_MAX_REQUESTS = 12
 DEFAULT_MAX_MINUTES = 10
-DEFAULT_MIN_REMAINING_USD = "0.50"
 CONFERENCE_PREFIX = "mcp__conference__"
 # Launch gates (research_swarm.launch_gates.evaluate) that must pass before any paid call.
-REQUIRED_GATES = ("fixed_task_manifest", "frozen_dataset", "approved_settings", "budget_track", "config_caps",
+REQUIRED_GATES = ("fixed_task_manifest", "frozen_dataset", "approved_settings", "budget_track", "run_budget",
                   "route_pricing", "credential_presence", "runtime-e2e", "runtime-isolation")
 # Shared interface with launch_gates' ``compatibility`` gate: every name below is a
 # required check in the evidence; the optional ones are informational.
@@ -182,38 +179,6 @@ def rel(path):
 # ---------------------------------------------------------------------------
 # Refusal checks (unpaid; no credential)
 
-def approved_cap(caps):
-    """The approved compatibility allowance for these caps: $2 for the baseline and the
-    ablation track; a budget track's own recorded allowance otherwise (gemini: $10, owner
-    decision, docs/plan.md "Gemini 3.1 Pro collaboration run authorized")."""
-    from research_swarm.budget import BUDGET_TRACKS
-    for spec in BUDGET_TRACKS.values():
-        if caps is spec["caps"] or caps == spec["caps"]:
-            return Decimal(str(spec["caps"][SCOPE]))
-    return APPROVED_CAP_USD
-
-
-def ledger_problems(snapshot, min_remaining, caps=DEFAULT_CAPS):
-    """Reasons to refuse based on the compatibility scope of a ledger snapshot."""
-    problems = []
-    approved = approved_cap(caps)
-    default = caps.get(SCOPE)
-    if default is None or Decimal(str(default)) != approved:
-        problems.append(f"budget.DEFAULT_CAPS[{SCOPE!r}] is {default}, not the approved ${approved}")
-    data = (snapshot or {}).get(SCOPE)
-    if data is None:
-        problems.append(f"ledger scope {SCOPE!r} does not exist")
-        return problems
-    if Decimal(data["cap_usd"]) != approved:
-        problems.append(f"ledger scope {SCOPE!r} cap is ${data['cap_usd']}, not the approved ${approved}")
-    if data.get("violation"):
-        problems.append(f"ledger scope {SCOPE!r} has an unacknowledged estimate_violation")
-    if Decimal(data["remaining_usd"]) < Decimal(str(min_remaining)):
-        problems.append(f"remaining compatibility allowance ${data['remaining_usd']} is below the minimum "
-                        f"${min_remaining}")
-    return problems
-
-
 def gate_problems(report, required=REQUIRED_GATES):
     evidence = (report or {}).get("evidence") or {}
     problems = []
@@ -261,29 +226,14 @@ def environment_check(config, interlock=None, *, override_record=None):
     return problems, images
 
 
-def render_snapshot(path, snapshot):
-    lines = [f"Compatibility allowance (ledger {rel(path)}, scope {SCOPE!r}, read before any paid call):"]
-    data = (snapshot or {}).get(SCOPE)
-    if data is None:
-        lines.append("  scope not present")
-    else:
-        lines.append(f"  cap ${data['cap_usd']}  prior known costs ${data['settled_usd']}  "
-                     f"unresolved holds ${data['held_usd']} ({data['unresolved_requests']})  "
-                     f"remaining ${data['remaining_usd']}" + ("  VIOLATION" if data.get("violation") else ""))
-    return "\n".join(lines)
-
-
-def confirm(remaining, settings, args, ask=input):
-    """True only if the operator types the remaining compatibility allowance exactly."""
-    answer = ask(f"PAID compatibility check: one reasoning-cap probe request (max_tokens {args.cap_probe_max_tokens}), "
-                 f"then one Claude Code agent on {settings.model_id} via route {settings.provider_route!r}, at most "
-                 f"{args.max_requests} admitted agent requests and {args.max_minutes} minutes. Remaining compatibility "
-                 f"allowance is ${remaining}. Type that amount in USD to start, anything else "
-                 "aborts: ")
-    try:
-        return Decimal(str(answer).strip().lstrip("$").replace(",", "")) == Decimal(str(remaining))
-    except (InvalidOperation, AttributeError):
-        return False
+def render_run(path, run):
+    """The check's run budget and committed spend (ledger ``path``, scope ``compatibility``)."""
+    if run is None:
+        return f"Compatibility run (ledger {rel(path)}, scope {SCOPE!r}): not started"
+    return (f"Compatibility run {run['run_id']} (ledger {rel(path)}, scope {SCOPE!r}): budget ${run['budget_usd']}, "
+            f"committed ${run['committed_usd']} (known costs ${run['settled_usd']}, unresolved holds "
+            f"${run['held_usd']} ({run['unresolved_requests']})), remaining ${run['remaining_usd']}"
+            + (f", estimate violations {run['estimate_violations']}" if run["estimate_violations"] else ""))
 
 
 # ---------------------------------------------------------------------------
@@ -334,8 +284,9 @@ class AbortGuard:
         self.clock.request_stop(reason, self.record)
 
     def _violation(self):
-        data = self.ledger.snapshot().get(self.scope) or {}
-        return bool(data.get("violation"))
+        """An estimate violation among this check's own requests (its run in the ledger)."""
+        run = self.ledger.run_snapshot() or {}
+        return bool(run.get("estimate_violations"))
 
     async def __call__(self, model, messages, tools, tool_choice, config):
         admitted = (self.state or {}).get("requests", 0)
@@ -364,8 +315,8 @@ class AbortGuard:
                              "reason": info.get("reason")})
             elif type(ex).__name__ == "LimitExceededError" and not self.clock.stop.is_set():
                 if isinstance(ex.__cause__, BudgetExceeded) and not await asyncio.to_thread(self._violation):
-                    # The ledger refused only because the remaining allowance cannot cover this
-                    # request's reservation: the cap working as intended, a normal end.
+                    # The ledger refused only because the rest of the run budget cannot cover this
+                    # request's reservation: the budget working as intended, a normal end.
                     self.abort("allowance_exhausted", error=str(ex.__cause__)[:300], admitted=admitted)
                 else:
                     self.abort("admission_refused", error=str(ex)[:300])
@@ -628,7 +579,7 @@ def build_checks(*, agent_id, events, conference_events, activity, settings, abo
         "reasoning_cap_enforced": _check(probe_passed, probe_detail),
         "no_estimate_violation": _check(
             not violation_ids and not scope_violation and abort_reason != "estimate_violation",
-            f"{len(violation_ids)} request(s) of this check in estimate_violation; scope violation flag "
+            f"{len(violation_ids)} request(s) of this check in estimate_violation; violation flag of this check's run "
             f"{bool(scope_violation)}"),
         "route_pinned": _check(
             bool(finished) and not off_route,
@@ -719,10 +670,11 @@ def summarize_run(result, settings, ledger_path, provider_name=None):
     abort_reason = result.get("abort_reason")
     checks = build_checks(agent_id=AGENT_ID, events=events, conference_events=result["conference_events"],
                           activity=result["activity"], settings=settings, abort_reason=abort_reason,
-                          violation_ids=violations, scope_violation=bool(after.get("violation")),
+                          violation_ids=violations, scope_violation=bool((after or {}).get("estimate_violations")),
                           provider_name=provider_name)
     states = Counter(rows[i]["state"] for i in request_ids if i in rows)
-    details = {"committed_delta_usd": str(Decimal(after["committed_usd"]) - Decimal(before["committed_usd"])),
+    details = {"committed_delta_usd": str(Decimal((after or {}).get("committed_usd", "0"))
+                                          - Decimal((before or {}).get("committed_usd", "0"))),
                "request_states": dict(states), "missing_request_ids": [i for i in request_ids if i not in rows]}
     return checks, spent, request_ids, violations, details
 
@@ -795,7 +747,7 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path, provide
     if not args.no_warm_up:
         warm_up = await asyncio.to_thread(runtime.warm_up_lean, images["lean"]["id"], record,
                                           **runtime.warm_up_options(config))
-    before = ledger.snapshot()[SCOPE]
+    before = ledger.run_snapshot()  # this check's run (registered by main with its budget)
     conference, compiler, observer = runtime.make_conference(ROOT, run_dir, [AGENT_ID], config, record,
                                                              lean_image=images["lean"]["id"])
     guards, logs, cancelled, probe_error, provider_limit = {}, None, False, None, None
@@ -819,16 +771,16 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path, provide
                                                              "personas": personas},
                                   initial_message=INITIAL_MESSAGE)
         # The credential is read here (inside the shared builder) and nowhere else; the
-        # key's provider-side limit is verified against the remaining compatibility
-        # allowance (unpaid) before any paid request.
+        # key's provider-side limit is recorded (unpaid, informational) before any paid request.
         # One agent: one in-flight request (the pilot's rule, max_connections == agent count).
         model, provider_limit = runtime.build_openrouter_model(settings, ROOT, COMPAT_MAX_CONNECTIONS,
-                                                               max_remaining_usd=before["remaining_usd"],
-                                                               record=record,
-                                                               allow_unlimited=config.get("allow_unlimited_provider_key") is True)
+                                                               run_budget_usd=before["budget_usd"], record=record,
+                                                               record_dir=args.output_dir)
         (run_dir / "settings.json").write_text(json.dumps({
             "config": config, "model": frozen_fields(settings), "personas": personas, "tasks": listing,
             "effective": {"images": images, "lean_warm_up": warm_up, "budget_scope": SCOPE,
+                          "run_id": before["run_id"], "run_budget_usd": before["budget_usd"],
+                          "run_budget_source": before["budget_source"],
                           "ledger_path": str(ledger_path), "system_prompt_mode": mode, "claude_auto_memory": auto_memory,
                           "claude_code_env": claude_code_env(auto_memory),
                           "compose_sha256": runtime.compose_fingerprint(config, images["agent"]["id"]),
@@ -864,7 +816,8 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path, provide
                 cancelled = True
     finally:
         await asyncio.to_thread(conference.close)
-        after = ledger.snapshot()[SCOPE]
+        after = ledger.end_run()
+        (run_dir / "run-budget.json").write_text(json.dumps(after, indent=2))
         (run_dir / "budget-final.json").write_text(json.dumps(ledger.snapshot(), indent=2))
         credentials = credentials_in_environment()  # measured after the run (presence only)
     log = _read_log(run_dir, logs)
@@ -888,14 +841,10 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path, provide
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--i-have-user-approval", action="store_true",
-                        help="required: the user approved this paid check immediately before it runs")
-    parser.add_argument("--yes", action="store_true", help="skip the typed confirmation (user-approved run only)")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG))
+    parser.add_argument("--config", default=str(DEFAULT_CONFIG),
+                        help="run config: provider settings and run_budget_usd (this check's budget; default $100)")
     parser.add_argument("--max-requests", type=int, default=DEFAULT_MAX_REQUESTS)
     parser.add_argument("--max-minutes", type=float, default=DEFAULT_MAX_MINUTES)
-    parser.add_argument("--min-remaining", default=DEFAULT_MIN_REMAINING_USD,
-                        help="refuse unless at least this much compatibility allowance remains (USD)")
     parser.add_argument("--persona", choices=runtime.PERSONA_NAMES,
                         help="default: agent-001's persona in the pilot allocation")
     parser.add_argument("--no-warm-up", action="store_true")
@@ -911,18 +860,8 @@ def parse_args(argv=None):
     return args
 
 
-def main(argv=None, *, ask=input, gates=None, environment=None, run=None, ledger_file=None, isatty=None):
+def main(argv=None, *, gates=None, environment=None, run=None, ledger_file=None, refresh=None):
     args = parse_args(argv)
-    if not args.i_have_user_approval:
-        print("Refusing: this check makes PAID OpenRouter calls from the $2 compatibility allowance. Pass "
-              "--i-have-user-approval only after the user approved this run. Nothing was spent and no credential "
-              "was read.")
-        return 2
-    try:
-        min_remaining = Decimal(str(args.min_remaining))
-    except InvalidOperation:
-        print(f"Refusing: --min-remaining {args.min_remaining!r} is not a USD amount.")
-        return 2
     config = json.loads(Path(args.config).read_text())
     try:
         settings = settings_from_config(config, pricing_verified=True)
@@ -930,8 +869,7 @@ def main(argv=None, *, ask=input, gates=None, environment=None, run=None, ledger
         print(f"Refusing: provider settings in {args.config} are invalid ({ex}). Nothing was spent.")
         return 2
     try:
-        path = Path(ledger_file) if ledger_file else ledger_path_for(config, ROOT)  # ablation track: its own ledger
-        caps = caps_for(config)
+        path = Path(ledger_file) if ledger_file else ledger_path_for(config, ROOT)  # a budget track: its own ledger
     except ValueError as ex:
         print(f"Refusing: {ex}. Nothing was spent and no ledger was opened.")
         return 2
@@ -944,24 +882,26 @@ def main(argv=None, *, ask=input, gates=None, environment=None, run=None, ledger
         print(f"Refusing: {ex}. Nothing was spent and no credential was read.")
         return 2
     try:
-        return checked_run(args, config, settings, path, caps, min_remaining, ask=ask, gates=gates,
-                           environment=environment, run=run, isatty=isatty)
+        return checked_run(args, config, settings, path, gates=gates, environment=environment, run=run,
+                           refresh=refresh)
     finally:
         lock.__exit__(None, None, None)
 
 
-def checked_run(args, config, settings, path, caps, min_remaining, *, ask, gates, environment, run, isatty):
-    """``main`` after the launch lock is held: the refusal checks, the confirmation, the paid run
+def checked_run(args, config, settings, path, *, gates, environment, run, refresh):
+    """``main`` after the launch lock is held: the refusal checks, the run's budget, the paid run
     and its evidence."""
-    problems, ledger, snapshot = [], None, None
+    problems = []
     try:
-        ledger = BudgetLedger(path, caps=caps)  # creates the approved scopes; refuses a differing cap
-        snapshot = ledger.snapshot()
-    except ValueError as ex:  # e.g. a ledger created while the compatibility cap was $0
-        problems.append(f"ledger {rel(path)}: {ex} (an approved cap change is applied with scripts/preflight.py "
-                        "--raise-ledger-cap, never by resetting the ledger)")
-    if ledger is not None:
-        problems += ledger_problems(snapshot, min_remaining, caps=caps)
+        budget, budget_source = run_budget(config)
+    except ValueError as ex:
+        budget = budget_source = None
+        problems.append(f"{ex} (set run_budget_usd to a positive amount, or remove it for the $100 default)")
+    if gates is None:
+        if refresh is None:
+            sys.path.insert(0, str(ROOT / "scripts"))
+            from freeze_route import refresh_if_needed as refresh
+        refresh(config, args.config)
     report = (gates or evaluate_gates)(config)
     problems += gate_problems(report)
     # The pinned endpoint's catalog name, from the route freeze the route_pricing gate checked.
@@ -973,7 +913,6 @@ def checked_run(args, config, settings, path, caps, min_remaining, *, ask, gates
     if concurrent_run_override is not None and concurrent_run_override["applied"]:
         print("WARNING: concurrent-run override (" + concurrent_run_override["approval"] + "): starting while "
               + "; ".join(concurrent_run_override["warnings"]) + ". Recorded in the evidence.")
-    print(render_snapshot(path, snapshot))
     if args.cap_probe_max_tokens >= settings.max_tokens:
         problems.append(f"--cap-probe-max-tokens {args.cap_probe_max_tokens} must be below the frozen max_tokens "
                         f"{settings.max_tokens} (the probe must truncate below the agent's cap)")
@@ -981,22 +920,19 @@ def checked_run(args, config, settings, path, caps, min_remaining, *, ask, gates
         print("Refusing (nothing was spent and no credential was read):")
         print("\n".join(f"  - {p}" for p in problems))
         return 2
-    remaining = snapshot[SCOPE]["remaining_usd"]
-    if not args.yes:
-        if not (isatty or sys.stdin.isatty)() and ask is input:
-            print("Refusing: confirmation needs an interactive terminal (or --yes after user approval).")
-            return 2
-        if not confirm(remaining, settings, args, ask):
-            print("Not running: confirmation did not match. Nothing was spent.")
-            return 2
+    print(describe_budget(budget, budget_source))
     stamp = utc_stamp()
+    ledger = BudgetLedger(path)
+    ledger.start_run(f"compat-{stamp}", SCOPE, budget, source=budget_source,
+                     note=f"live compatibility check ({rel(args.config)})")
+    print(render_run(path, ledger.run_snapshot()))
     started = time.time()
     try:
         result = asyncio.run((run or run_check)(config, args, stamp, images=images, ledger=ledger, ledger_path=path,
                                                 **({"provider_name": provider_name} if provider_name else {})))
-    except Exception as ex:  # no evidence without a finished run; show what the scope now holds
+    except Exception as ex:  # no evidence without a finished run; show what the run now holds
         print(f"Compatibility check aborted before evidence could be written: {type(ex).__name__}: {ex}")
-        print(render_snapshot(path, ledger.snapshot()))
+        print(render_run(path, ledger.end_run()))
         return 1
     checks, spent, request_ids, violations, ledger_details = summarize_run(result, result.get("settings") or settings,
                                                                            path, provider_name)
@@ -1010,8 +946,9 @@ def checked_run(args, config, settings, path, caps, min_remaining, *, ask, gates
         kind="paid live compatibility check (one genuine Claude Code agent, frozen OpenRouter route)",
         agent_id=AGENT_ID, persona=result.get("persona"), abort_reason=result.get("abort_reason"),
         evaluation_cancelled=bool(result.get("cancelled")), agent_exit=result.get("agent_exit"),
+        run_id=f"compat-{stamp}", run_budget_usd=str(budget), run_budget_source=budget_source,
         limits={"max_requests": args.max_requests, "max_minutes": args.max_minutes,
-                "min_remaining_usd": str(min_remaining), "cap_probe_max_tokens": args.cap_probe_max_tokens},
+                "run_budget_usd": str(budget), "cap_probe_max_tokens": args.cap_probe_max_tokens},
         ledger={"path": rel(path), "scope": SCOPE, "before": result["ledger_before"],
                 "after": result["ledger_after"], "estimate_violation_requests": violations, **ledger_details},
         run_dir=rel(result["run_dir"]), inspect_log=result.get("inspect_log"), lean_warm_up=result.get("warm_up"),
@@ -1022,7 +959,7 @@ def checked_run(args, config, settings, path, caps, min_remaining, *, ask, gates
         frozen_provider_name=provider_name, concurrent_run_override=concurrent_run_override)
     out = write_evidence(args.output_dir, stamp, record)
     print(json.dumps({k: (v["passed"], v["required"]) for k, v in record["checks"].items()}, indent=2))
-    print(f"spent ${record['spent_usd']} in {record['requests']} admitted request(s); "
+    print(f"spent ${record['spent_usd']} in {record['requests']} admitted request(s) of run budget ${budget}; "
           f"abort reason {record['abort_reason']!r}")
     print(f"wrote {rel(out)}; all_required_passed={record['all_required_passed']}")
     return 0 if record["all_required_passed"] else 1

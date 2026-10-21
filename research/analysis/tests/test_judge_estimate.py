@@ -229,6 +229,11 @@ class RunLimitPipelineTests(unittest.TestCase):
             self.assertEqual((summary["status"], summary["stop"]["reason"]), ("stopped", "run_limit"))
             self.assertLess(len(first.transport.requests), full)
             self.assertLessEqual(Decimal(limit.record()["committed_usd"]), Decimal("0.05"))
+            # The ledger registered the invocation as one run with the same budget and enforced it too.
+            from research_swarm.budget import read_run
+            run = read_run(first.root / "ledger.sqlite", limit.run_id)
+            self.assertEqual((run["scope"], run["budget_usd"]), ("rehearsal", "0.05"))
+            self.assertLessEqual(Decimal(run["committed_usd"]), Decimal("0.05"))
             state = read(first.judge_dir / "state.json")["invocations"][-1]
             self.assertEqual((state["run_limit"]["limit_usd"], state["run_limit"]["source"]), ("0.05", "override"))
             self.assertGreater(state["run_limit"]["denied"], 0)
@@ -251,7 +256,10 @@ class RunLimitPipelineTests(unittest.TestCase):
                               cost["invocations_without_estimate"]), (1, 1, 0))
             self.assertEqual(cost["compared"]["estimate_central_usd"], resume["central_usd"])
             settled = sum(Decimal(row["settled_usd"]) for row in cost["invocations"])
-            self.assertEqual(settled, Decimal(cost["settled_usd"]))
+            # Each row and the total are rounded to $0.0001 separately, so they agree within a rounding
+            # step per row (the rehearsal's synthetic costs are not round numbers).
+            self.assertLessEqual(abs(settled - Decimal(cost["settled_usd"])),
+                                 Decimal("0.0001") * len(cost["invocations"]))
             self.assertAlmostEqual(float(cost["settled_usd"]), float(cost["judge_dir_settled_usd"]), places=4)
             for stage in ("sonnet_candidates", "opus_verifier", "opus_runlevel"):
                 self.assertIn(stage, cost["by_stage"])
@@ -384,7 +392,12 @@ class CommandLineTests(unittest.TestCase):
         index = {agent: (self.run_dir / "inspect" / "synthetic.eval", agent, 1) for agent in AGENTS}
         patches = [mock.patch("research.analysis.judge.history.sample_index", return_value=index),
                    mock.patch("research.analysis.judge.history.build_run",
-                              lambda run_dir, agents=None, **kwargs: self.run)]
+                              lambda run_dir, agents=None, **kwargs: self.run),
+                   # Rebuild in this process (worker processes would not see the patched build_run).
+                   mock.patch("research.analysis.judge.history.default_history_workers", return_value=1),
+                   # The paid path's automatic pricing refresh is unpaid but networked: recorded, never run.
+                   mock.patch.object(self.cli, "refresh_pricing",
+                                     lambda args, **kwargs: getattr(self, "refreshes", []).append(args))]
         with contextlib.ExitStack() as stack:
             for patch in patches:
                 stack.enter_context(patch)
@@ -442,24 +455,33 @@ class CommandLineTests(unittest.TestCase):
             def prepare(self):
                 raise Stop()
 
-        snapshot = {"analysis": {"remaining_usd": "150.000000000", "cap_usd": "200"}}
+        self.refreshes = []
         with mock.patch.object(sys.stdin, "isatty", return_value=False), \
-                mock.patch("research_swarm.budget.judge_analysis_problems", return_value=[]), \
-                mock.patch("research_swarm.budget.read_snapshot", return_value=snapshot), \
                 mock.patch.object(self.cli, "route_settings", return_value=JudgeRouteSettings.defaults(
                     pricing_verified=True)), \
                 mock.patch("research.analysis.judge.client.JudgeClient", FakeClient), \
                 mock.patch("builtins.input", side_effect=AssertionError("no typed confirmation")), \
                 mock.patch.object(est, "plan_invocation", side_effect=AssertionError("no estimate")):
-            with self.assertRaises(Stop):
-                self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"),
-                          "--output-dir", str(self.judge_dir))
+            with self.assertRaises(Stop):  # paid judging is the default mode: no approval flag
+                self.call("--ledger", str(self.tmp / "ledger.sqlite"), "--output-dir", str(self.judge_dir))
         limit = created[0]["run_limit"]
         self.assertEqual((limit.limit, limit.source), (Decimal("50"), "default"))
+        self.assertEqual(len(self.refreshes), 1)  # the route pricing record is refreshed automatically when needed
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            self.cli.parse_args(["--run-dir", str(self.run_dir), "--i-have-user-approval"])
 
-    def test_default_limit_is_clamped_to_the_remaining_allowance(self):
-        limit = self.cli.fixed_run_limit(None, None, {"analysis": {"remaining_usd": "12.5"}})
-        self.assertEqual((limit["limit_usd"], limit["basis"]), ("12.5", "analysis_remaining"))
+    def test_default_limit_is_fifty_and_never_clamped(self):
+        keys = ("limit_usd", "source", "basis")
+        pick = lambda limit: {k: limit[k] for k in keys}  # noqa: E731 (also prior_usd, room_usd)
+        self.assertEqual(pick(self.cli.fixed_run_limit(None)), {"limit_usd": "50", "source": "default", "basis": "default"})
+        config = {"max_usd": "120", "budget_source": "config behavior_judge_max_usd"}
+        self.assertEqual(pick(self.cli.fixed_run_limit(None, config)),
+                         {"limit_usd": "120", "source": "run_config", "basis": "config behavior_judge_max_usd"})
+        self.assertEqual({k: self.cli.fixed_run_limit(None, config)[k] for k in ("prior_usd", "room_usd")},
+                         {"prior_usd": "0", "room_usd": "120"})
+        self.assertEqual(self.cli.fixed_run_limit(Decimal("300"), config)["limit_usd"], "300")  # --run-limit wins
+        default = {"max_usd": "50", "budget_source": "default"}
+        self.assertEqual(self.cli.fixed_run_limit(None, default)["source"], "default")
 
     def test_paid_clients_share_the_run_limit(self):
         created = []
@@ -474,16 +496,11 @@ class CommandLineTests(unittest.TestCase):
             def prepare(self):
                 raise Stop()
 
-        snapshot = {"analysis": {"remaining_usd": "150.000000000"}}
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-                mock.patch("research_swarm.budget.judge_analysis_problems", return_value=[]), \
-                mock.patch("research_swarm.budget.read_snapshot", return_value=snapshot), \
-                mock.patch.object(self.cli, "route_settings", return_value=JudgeRouteSettings.defaults(
+        with mock.patch.object(self.cli, "route_settings", return_value=JudgeRouteSettings.defaults(
                     pricing_verified=True)), \
-                mock.patch("research.analysis.judge.client.JudgeClient", FakeClient), \
-                mock.patch("builtins.input", return_value="150.000000000"):
+                mock.patch("research.analysis.judge.client.JudgeClient", FakeClient):
             with self.assertRaises(Stop):
-                self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"), "--output-dir",
+                self.call("--ledger", str(self.tmp / "ledger.sqlite"), "--output-dir",
                           str(self.judge_dir), "--run-limit", "9")
         limits = {id(kwargs["run_limit"]) for kwargs in created}
         self.assertEqual(len(created), 3)

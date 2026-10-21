@@ -4,13 +4,17 @@ For the supplied GCP project, SSH, transfer, kernel setup, and standing requirem
 to stop the VM after use, read [gcp-vm.md](gcp-vm.md) before remote operations.
 
 Ordered procedure for host preparation, unpaid Docker validation, then the
-approval-gated steps up to the paid pilot launch. Initially written October 13, 2026;
+paid steps up to the pilot launch. Initially written October 13, 2026;
 see [the October 14 setup record](vm-setup-2026-10-14.md) for measured progress.
 
 **VM setup and unpaid validation were authorized on October 14, 2026** (docs/plan.md,
 "VM setup and unpaid validation authorized"). The earlier hold is lifted for those
-steps. Steps marked **USER APPROVAL** still need the user's explicit approval in chat,
-given for that step; setup approval does not authorize a paid compatibility check or pilot.
+steps. Spending (docs/plan.md, "One per-run budget, no manual approvals (October 20,
+2026)"): every paid step is one run with its own budget, specified before it starts
+(`run_budget_usd` in the config, $100 when absent; the behavior judge's run limit, $50 by
+default), enforced by the ledger on every request. No step needs a typed confirmation, an
+approval flag or an interactive terminal; stale pricing and provider-limit records are
+refreshed automatically.
 
 Conventions:
 
@@ -28,8 +32,8 @@ Conventions:
   so a failed, partial or debugging run blocks its gate until a complete passing run is
   written after it. Never edit or delete evidence to pass a gate.
 * To keep a console log, append `2>&1 | tee runs/phase-b/<step>.log` (create
-  `runs/phase-b/` first; `runs/` is git-ignored). Do not pipe the paid steps; they prompt
-  for a typed confirmation.
+  `runs/phase-b/` first; `runs/` is git-ignored). Every step, paid ones included, runs
+  unattended (nothing prompts).
 * **Refuse-while-live interlock** (docs/interfaces.md, "S1"). The scripts check running
   containers themselves (`docker ps` only; they never remove anything):
   * Runtime-side launchers (`run_pilot.py`, `compat_check.py`, `validate_runtime.py`,
@@ -61,7 +65,7 @@ Conventions:
 
 ## Overview
 
-| # | Step | Writes | Gate | Duration (VM) | Paid / approval |
+| # | Step | Writes | Gate | Duration (VM) | Paid |
 | --- | --- | --- | --- | --- | --- |
 | 0.1 | Host checks: architecture, kernel and Landlock, Docker | `runs/phase-b/host.txt` | — | ~10 min (longer if the kernel or Docker must be installed) | kernel change: agree with the user |
 | 0.2 | Transfer the reviewed repository (clone, bundle, or sanitized copy) | — | — | minutes | — |
@@ -79,15 +83,15 @@ Conventions:
 | 9 | `isolation_probes.py` | `runtime-isolation-<UTC>.json` | `runtime-isolation` | ~10–20 min | — |
 | 10 | `capacity_probe.py` (choose `judge_max_concurrent`, re-run) | `runtime-capacity-<UTC>.json` | `runtime-capacity` | ~20–30 min per probe | config change via integrator |
 | 11 | Interim preflight | — | report only | ~1 min | — |
-| 12 | `check_provider_limit.py` (compatibility key) | `provider-limit-<UTC>.json` | `provider_limit` | seconds | **USER APPROVAL** (loads the key) |
+| 12 | `check_provider_limit.py` (optional) | `provider-limit-<UTC>.json` | `provider_limit` (informational) | seconds | — (loads the key; unpaid) |
 | 13 | `freeze_route.py` | `route-pricing-<UTC>.json` | `route_pricing` | seconds | — (public catalog, no key) |
 | 13a | Freeze and record inference concurrency | config (already set) | `approved_settings` | minutes | report to the user |
 | 14 | `project_cost.py` | stdout (projection) | — | seconds | — |
-| 15 | `compat_check.py` | `compatibility-<UTC>.json` | `compatibility` | warm-up + ≤ 10 min | **PAID ≤ $2; USER CONFIRMATION immediately before** |
-| 16 | Review; `verified_integration`; pilot key limit | config; `provider-limit-<UTC>.json` | `verified_integration`, `provider_limit` | — | **USER DECISION / APPROVAL** |
+| 15 | `compat_check.py` | `compatibility-<UTC>.json` | `compatibility` | warm-up + ≤ 10 min | **PAID** (its own run budget) |
+| 16 | Review the compatibility evidence | — | — | — | report to the user |
 | 17 | `preflight.py` and spending checkpoint | — | all | ~1 min | shown to the user |
-| 18 | `run_pilot.py --launch-paid-pilot` | `runs/pilot-<UTC>/` | — | warm-up + ≤ 90 min + grace | **PAID ≤ $20; USER APPROVAL** |
-| 19 | Reconcile, evaluate, analyze | `RUN/evaluations/`, `RUN/analysis/` | — | evaluation ~hours | reconciliation with the key needs approval |
+| 18 | `run_pilot.py --launch-paid-pilot` (or `supervise_run.py`) | `runs/pilot-<UTC>/` | — | warm-up + ≤ 90 min + grace | **PAID** (its own run budget) |
+| 19 | Reconcile, evaluate, analyze | `RUN/evaluations/`, `RUN/analysis/` | — | evaluation ~hours | reconciliation unpaid; the behavior judge has its own run budget |
 
 Durations marked "estimate" have no measurement behind them; the others come from the
 scripts or from docs/runtime.md. Record actual durations in the step logs.
@@ -595,33 +599,27 @@ PYTHONPATH=src .venv/bin/python scripts/preflight.py
 
 It reads evidence, the ledger (read-only), local image IDs and running containers; it never
 reads a credential. At this point every evidence gate from steps 2–10 should pass, and so
-should `approved_settings` (including `max_connections` equal to `agent_count`) and
-`seeded_track`. Expected remaining blockers: `provider_limit`, `compatibility`,
-`credential_presence` (until the user creates `.env`), `verified_integration` and
-`paid_launch_enabled`. `route_pricing` passes only while the newest freeze is under 72
-hours old: the gate accepts the October 13 freeze (`route-pricing-20261013T221232Z.json`)
-until it ages out about 72 hours after its 22:12 UTC retrieval, so on the VM it will most
-likely be stale; step 13 replaces it either way. Anything else: fix before continuing.
+should `approved_settings` (including `max_connections` equal to `agent_count`),
+`seeded_track` and `run_budget`. Expected remaining blockers: `compatibility` and
+`credential_presence` (until the user creates `.env`). A route-pricing freeze older than 72
+hours is only a warning (the paid launchers refresh it automatically); step 13 refreshes it
+by hand. Anything else: fix before continuing.
 
-## 12. Provider-side key limit, compatibility key — USER APPROVAL
+## 12. Provider-side key limit (optional, informational)
 
-The ledger enforces every allowance; a provider-side OpenRouter key limit is the additional
-safeguard. The **user** sets, on OpenRouter, a non-resetting credit limit on the key to be
-used, then creates the host `.env` (`cp .env.example .env && chmod 600 .env`, key filled
-in by the user; never read, printed or copied by an agent). With the user's approval of
-this specific check:
+The run's budget is the spending control; the key's provider-side OpenRouter limit is only
+recorded. The **user** creates the host `.env` (`cp .env.example .env && chmod 600 .env`, key
+filled in by the user; never read, printed or copied by an agent). Every paid launch records
+the limit of the key it loads automatically; to record it now:
 
 ```sh
-PYTHONPATH=src .venv/bin/python scripts/check_provider_limit.py --i-have-user-approval --max-limit-usd 2
+PYTHONPATH=src .venv/bin/python scripts/check_provider_limit.py
 ```
 
 * Unpaid (`GET /api/v1/key`), but it loads the credential in this process. Writes
-  `provider-limit-<UTC>.json` with numbers and check results only.
-* Requires: `limit` set, `limit_reset` null, `limit_remaining` ≤ $2 (the compatibility
-  allowance), not expired. The paid check (step 15) re-verifies the key it actually loads
-  against the remaining compatibility allowance, so a key limited for the $20 pilot is
-  refused there.
-* **On failure.** The user adjusts the key's limit; re-run with approval.
+  `provider-limit-<UTC>.json` with numbers, informational checks and warnings only (a key
+  without a limit, a resetting limit or a remaining amount above the run's budget is a
+  warning, never a refusal).
 
 ## 13. Route re-freeze
 
@@ -633,10 +631,11 @@ Unpaid; fetches OpenRouter's public endpoint catalog for `deepseek/deepseek-v4.1
 reads no credential, validates the `deepseek` route against `settings_from_config` (maximum
 time-dependent prices, extra price components, context, tool and reasoning support), and
 archives the catalog under `data/validation/catalog-snapshots/`. Writes
-`route-pricing-<UTC>.json`. **Gate:** `route_pricing`, which expires after 72 hours: re-run
-it before step 15 and again before step 18 if older. **On failure** (`valid: false`): the
-route's prices or parameters changed; report to the user, since the reservation prices
-in `ProviderSettings` may need a recorded decision.
+`route-pricing-<UTC>.json`. **Gate:** `route_pricing`. Steps 15 and 18 re-run it
+automatically when the newest record is older than 72 hours or was made for other settings.
+**On failure** (`valid: false`): the route's prices or parameters changed, so the config's
+reservation prices no longer bound them; the gate blocks until `ProviderSettings` are
+updated (report to the user).
 
 ## 13a. Inference concurrency: freeze and record
 
@@ -672,83 +671,59 @@ per-request floor: Claude Code's built-in prompt, the appended conference prompt
 schemas), the compaction threshold recorded by step 8 (`compaction_threshold_tokens`; the
 160,000-token assumption only if none was recorded) and explicit **assumptions** (turn
 rate, output and tool-result tokens, cache hit rate) to project `agent_count` agents × 90
-minutes against the $20 pilot cap. `assumption_sources` in the output names where each
-input came from. It is a projection, not a measurement; `--output` may write JSON outside
-`data/validation/`. Show it to the user with step 15's request.
+minutes against the run's budget (`run_budget_usd`, else $100). `assumption_sources` in the
+output names where each input came from. It is a projection, not a measurement, and never
+required; `--output` may write JSON outside `data/validation/`.
 
-## 15. Live compatibility check — PAID (≤ $2), USER CONFIRMATION IMMEDIATELY BEFORE
+## 15. Live compatibility check — PAID (its own run budget)
 
-Preconditions: steps 8–9 pass on the current agent image, step 13 is fresh, step 12 passed
-for the key the shell will load (an exported `OPENROUTER_API_KEY` takes precedence over
-`.env`), nothing else is running on Docker, and the user confirms in chat immediately
-before the call.
+Preconditions: steps 8–9 pass on the current agent image and nothing else is running on
+Docker. The check's budget is `run_budget_usd` of the config it reads (default
+`configs/pilot.json`; $100 when absent); with 12 requests at most it spends a few dollars at
+most.
 
 ```sh
-PYTHONPATH=src .venv/bin/python scripts/compat_check.py --i-have-user-approval
+PYTHONPATH=src .venv/bin/python scripts/compat_check.py
 ```
 
-* Before spending, it refuses unless ledger scope `compatibility` exists at exactly $2 (a
-  new ledger is created with the approved caps) with no unacknowledged violation and at
-  least $0.50 left; unless no comparator, leftover judge or other agent sandbox container
-  is present (S1; no command-line override, only the config's recorded concurrent-run
-  override); unless the gates `fixed_task_manifest`, `frozen_dataset`,
-  `approved_settings`, `config_caps`, `route_pricing`, `credential_presence`,
-  `runtime-e2e`, `runtime-isolation` pass; and unless the operator types the remaining
-  compatibility allowance (`--yes` only for a user-approved run).
+* Before spending, it refreshes the route-pricing freeze when needed (unpaid) and refuses
+  unless `run_budget_usd` is valid; unless no comparator, leftover judge or other agent
+  sandbox container is present (S1; no command-line override, only the config's recorded concurrent-run override); and unless the gates `fixed_task_manifest`,
+  `frozen_dataset`, `approved_settings`, `run_budget`, `route_pricing`, `credential_presence`,
+  `runtime-e2e`, `runtime-isolation` pass. It prints the budget, registers the run
+  `compat-<UTC>` in the config's ledger (a budget track's own, if any) and starts; nothing prompts.
 * Then: warm-up, one researcher-side reasoning-cap probe (about $0.002, `max_tokens`
   1024), and one agent on the frozen route for a few turns. Aborts after 12 admitted
   requests, 10 minutes after the first inference, the first provider 4xx, tool-call parse
-  failure or output error, or any estimate violation.
+  failure or output error, an estimate violation among its own requests, or when its run
+  budget refuses a request.
 * **Writes** `compatibility-<UTC>.json` (`gdm-compatibility/1`) and `runs/compat-<UTC>/`.
   **Gate:** `compatibility` (required checks `tool_call_parsed`, `conference_tool_call`,
   `reasoning_replay_accepted`, `provider_cost_reported`, `completion_within_max_tokens`,
   `reasoning_cap_enforced`, `no_estimate_violation`, `route_pinned`, `no_sample_error`;
   `truncation_observed` and `compaction_observed` are informational).
-* **Uncertain holds.** If the ledger keeps unresolved compatibility holds, list them
-  (no credential, no network):
+* **Uncertain holds** count against the check's own run and never block anything. To settle
+  them from OpenRouter's unpaid generation records (it loads the key only when a hold has a
+  generation id):
 
   ```sh
   PYTHONPATH=src .venv/bin/python scripts/reconcile_ledger.py --run-dir runs/compat-<UTC>
   ```
 
-  Fetching OpenRouter's generation cost needs the user's approval
-  (`--i-have-user-approval`); a hold without a generation id can be settled only with
-  `--manual REQUEST_ID COST --note TEXT --i-have-user-approval` after the user identifies
-  the charge. Nothing is released automatically. For a budget track's check or run, add
-  `--ledger state/<track ledger>` (e.g. `state/gemini-budget.sqlite`); the accepted
-  generation model then defaults to the track's (`provider.TRACK_MODEL_IDS`).
-* **On failure.** Do not re-run automatically: a second paid attempt needs a new
-  confirmation, and the $2 scope is never reset. A failed required check is a material
-  incompatibility to bring to the user (plan row "Remaining model-setting authority").
+  `--dry-run` only lists. A hold without a generation id is settled with
+  `--manual REQUEST_ID COST [--note TEXT]` once its charge is identified.
+  For a budget track's check or run, add `--ledger state/<track ledger>` (e.g.
+  `state/gemini-budget.sqlite`; the supervisor does); the accepted generation model then defaults
+  to the track's (`provider.TRACK_MODEL_IDS`).
+* **On failure.** A failed required check is a material incompatibility to bring to the
+  user (plan row "Remaining model-setting authority").
 
-## 16. Integration confirmation and the pilot key — USER DECISION / APPROVAL
+## 16. Review the compatibility evidence
 
-**Recorded exception, October 14:** after reviewing the passing repaired check,
-the user confirmed integration and the initial pilot launch, then explicitly
-authorized the main unlimited OpenRouter key. The current config records that
-exception and its approval note. Once the user privately supplies that key, run
-the unpaid check with `--i-have-user-approval --allow-unlimited`; do not fabricate
-provider-cap evidence. The paid pilot repeats the live key check using the same
-explicit policy, while retaining the unchanged shared $20 ledger. Compatibility
-checks default to their strict policy. On October 15 the user separately authorized
-the Fireworks US compatibility check with the approved main unlimited key; that
-explicit config policy now applies to its builder too, while the separate cumulative
-$2 compatibility ledger remains enforced. Automatic approval review blocked copying either
-literal key values or the local credential file; no such transfer succeeded.
-Private user entry on October 15 resolved the credential step. The original
-`fireworks` endpoint then became unavailable; `fireworks/us` and a fresh paid check
-were explicitly authorized, with unchanged dollar caps and published US prices.
-
-1. The user reviews the compatibility evidence and, if satisfied, the integrator sets
-   `verified_integration: true` in `configs/pilot.json` at the user's direction.
-2. The pilot key limit: the live check at launch requires `limit_remaining` ≤ the remaining
-   pilot allowance ($20 before any pilot spend; `limit_remaining` is the key's limit minus
-   its usage). Use a separate key, or have the user raise this key's limit to its usage so
-   far plus $20. With approval:
-
-   ```sh
-   PYTHONPATH=src .venv/bin/python scripts/check_provider_limit.py --i-have-user-approval
-   ```
+Report the compatibility evidence to the user. No attestation key is set: the
+`compatibility` gate checks the evidence itself. (Historical, October 14-15: the user
+authorized the main unlimited OpenRouter key and the Fireworks US check; since October 20,
+2026 the provider-side limit is recorded for every key and never enforced.)
 
 ## 17. Preflight and spending checkpoint
 
@@ -756,40 +731,37 @@ were explicitly authorized, with unchanged dollar caps and published US prices.
 PYTHONPATH=src .venv/bin/python scripts/preflight.py
 ```
 
-Show the user the spending checkpoint it prints (prior known costs, unresolved holds and
-remaining allowance for `pilot`, `analysis` and `compatibility`; plan row "Spending cap
-checkpoint") and the gate list. The only acceptable remaining blocker is
-`paid_launch_enabled`. Re-run step 13 (route freeze) or step 16's key check if either
-record is older than 72 hours.
+Show the user the spending checkpoint it prints (the run budget the config sets, and the
+ledger's known costs and unresolved holds per scope and recent runs) and the gate list.
+No blocker should remain.
 
-## 18. Paid pilot launch — PAID (≤ $20), USER APPROVAL
+## 18. Paid pilot launch — PAID (its own run budget)
 
-1. The user approves this launch; the integrator sets `paid_launch_enabled: true` at the
-   user's direction.
+1. Set the run's budget before the run: `run_budget_usd` in the config (absent means $100).
 2. Confirm nothing else uses Docker. The runtime's preflight refuses while any comparator,
    leftover judge or other agent sandbox container is present (S1); `run_pilot.py` has no
    override. Remove only identified leftovers; never start an evaluation or validation
    during the run.
-3. Launch:
+3. Launch (or use `scripts/supervise_run.py` for an unattended run, docs/gcp-vm.md):
 
    ```sh
    PYTHONPATH=src .venv/bin/python scripts/run_pilot.py --launch-paid-pilot
    ```
 
-   It prints the gates, asks the operator to type the remaining pilot allowance (`--yes`
-   only when the user approved this exact launch), and prints the log locations. The
-   runtime re-runs preflight, pins images, warms the page cache, loads the key, verifies
-   its provider limit against the remaining pilot allowance (a refusal exits 2 before any
-   paid request), and starts 20 peers. The run lasts at most 90 minutes from the common
-   start, plus up to 120 s in-flight grace and 180 s stop grace.
-4. During the run, watch `RUN/runtime.jsonl`, `RUN/conference/events.jsonl` and
-   `docker stats`; do not start other Docker work. The ledger stops new requests when the
-   allowance cannot cover them.
+   It refreshes the route-pricing freeze when needed, prints the gates, the run's budget and
+   the log locations, and starts; nothing prompts. The runtime re-runs preflight, pins
+   images, registers the run and its budget in the ledger, warms the page cache, loads the
+   key, records its provider-side limit (informational) and starts 20 peers. The run lasts at
+   most `max_run_seconds` from the common start, plus up to 120 s in-flight grace and 180 s
+   stop grace.
+4. During the run, watch `RUN/runtime.jsonl`, `RUN/conference/events.jsonl`, `docker stats`
+   and `scripts/monitor_run.py`; do not start other Docker work. The ledger stops new
+   requests when the run's remaining budget cannot cover them.
 
 ## 19. After the run
 
 ```sh
-PYTHONPATH=src .venv/bin/python scripts/reconcile_ledger.py --run-dir runs/pilot-<UTC>       # dry run
+PYTHONPATH=src .venv/bin/python scripts/reconcile_ledger.py --run-dir runs/pilot-<UTC>       # settles from generation records
 PYTHONPATH=src .venv/bin/python scripts/evaluate_run.py --run-dir runs/pilot-<UTC> --dry-run
 PYTHONPATH=src .venv/bin/python scripts/evaluate_run.py --run-dir runs/pilot-<UTC>           # serial, resumable
 PYTHONPATH=src .venv/bin/python research/analysis/timeline.py --run-dir runs/pilot-<UTC>
@@ -800,8 +772,9 @@ Report actual costs to the user. Compare `RUN/instructions/` with the step 8a ca
 Browse Inspect logs only from outside the repository
 (`cd /tmp && <repo>/.venv/bin/inspect view --log-dir <absolute RUN>/inspect`): Inspect
 loads any `.env` it finds above its working directory. Follow research/analysis/README.md
-for the rubric review. Model-judged analysis is disabled and would need the separate $5
-`analysis` scope and the user's approval.
+for the rubric review. The behavior judge (`scripts/run_transcript_judge.py`; automatic after
+a supervised run when the config sets `auto_behavior_judge`) runs with its own budget
+(`--run-limit`, else `behavior_judge_max_usd`, else $50).
 
 ## Capacity
 
@@ -876,7 +849,8 @@ synchronized scheduling silently.
   `--force-while-live`, `--fake-lean`, `--only`, `--skip-*`, `--tasks` or limit overrides for
   a gate run.
 * Changing the 120 s limit, judge or agent resources, the population, the model route,
-  inference concurrency, the spending caps or any approved setting needs a user decision
-  recorded in docs/plan.md first.
-* Unset `OPENROUTER_API_KEY` in the shell for unpaid steps; only steps 12, 15, 16, 18 (and
-  an approved reconciliation) load the key.
+  inference concurrency or any approved setting needs a user decision recorded in
+  docs/plan.md first. A run's budget (`run_budget_usd`) is specified before each run and is
+  not such a setting.
+* Unset `OPENROUTER_API_KEY` in the shell for unpaid steps; only steps 12, 15, 18 and the
+  reconciliation of holds with generation ids load the key.

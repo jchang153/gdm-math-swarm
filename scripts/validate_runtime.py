@@ -16,9 +16,9 @@ from the operator's shell) before and after the run, as measured presence only.
 
 Budget: reservations and settlements run through the production BudgetLedger
 code, but in a throwaway ledger (<run_dir>/validation-budget.sqlite, scope
-"validation", notional cap 1000). Never the authoritative state/budget.sqlite
-and never the "compatibility" scope: mock reservations are positive and would
-consume a real cap, while mockllm reports no provider cost.
+"validation", one run with a notional budget of 1000). Never the authoritative
+state/budget.sqlite: mock reservations are positive, while mockllm reports no
+provider cost.
 
 Agents: agent-001 exercises tools, the real judge, notebooks (absolute and
 relative publish_notebook paths; a ~40,000-character Unicode-heavy notebook read
@@ -447,7 +447,11 @@ async def run_eval(task, model, *, agents, log_dir, max_subprocesses=None):
 
 
 def validation_ledger(run_dir):
-    return BudgetLedger(Path(run_dir) / "validation-budget.sqlite", {VALIDATION_SCOPE: VALIDATION_CAP})
+    """Throwaway ledger with one validation run (notional budget ``VALIDATION_CAP``)."""
+    ledger = BudgetLedger(Path(run_dir) / "validation-budget.sqlite")
+    ledger.start_run(f"validation-{Path(run_dir).name}", VALIDATION_SCOPE, VALIDATION_CAP,
+                     source="notional validation budget")
+    return ledger
 
 
 def add_interlock_argument(parser):
@@ -601,7 +605,7 @@ def scenario_scripts(run_dir, background_lean=False):
                                                                "description": "Print a marker"})
             output.usage = ModelUsage(input_tokens=tokens, output_tokens=50, total_tokens=tokens + 50)
             # Fabricated tokens would exceed the byte-bound reservation (an estimate
-            # violation blocks the scope); report a provider cost instead.
+            # violation); report a provider cost instead.
             output.metadata = {"openrouter_usage": {"cost": 0.0001}}
             return output
         return make
@@ -1117,7 +1121,7 @@ def main():
         compose_sha256=result["compose"]["compose_sha256"], compose=result["compose"],
         background_lean_check=result["background_lean_check"], lean_wrappers=LEAN_WRAPPERS,
         disallowed_tools=list(DISALLOWED_TOOLS), interlock=interlock,
-        budget={"ledger": "throwaway", "scope": VALIDATION_SCOPE, "notional_cap_usd": VALIDATION_CAP}, **details,
+        budget={"ledger": "throwaway", "scope": VALIDATION_SCOPE, "notional_run_budget_usd": VALIDATION_CAP}, **details,
         limitations=[
             "mockllm scripted outputs establish harness, bridge, tool, logging and isolation plumbing only; they say "
             "nothing about DeepSeek V4.1's tool-call reliability, reasoning replay through the Anthropic dialect, "

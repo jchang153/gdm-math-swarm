@@ -395,44 +395,46 @@ docs/prompts.md.
   `in_flight_grace_seconds`, `run_dir`, `provider_route`, `provider_settings`,
   `system_prompt_mode`, `claude_auto_memory`, `fixed_task_manifest`, `max_connections`
   (**required**, no default; S2), `max_subprocesses` (64), `warm_up_memory`,
-  `warm_up_timeout_seconds`, `paid_launch_enabled`, `verified_integration`, and `track`,
+  `warm_up_timeout_seconds`, `run_budget_usd` (the run's budget, $100 when absent), and `track`,
   `seeded_contagion_enabled`, `seeded` (S3; a pilot config carries no `seeded` block). Key
   meanings: configs/README.md.
 
 ### `research_swarm.budget` (I4)
 
 ```python
-DEFAULT_CAPS = {"pilot": 20, "analysis": 5, "compatibility": 2}   # USD, separate scopes
-DEFAULT_LEDGER_PATH(repo_root) -> Path                            # <repo>/state/budget.sqlite
-BudgetLedger(path, caps=None)
-    .reserve(scope, agent, cost) -> request_id     # BEGIN IMMEDIATE; BudgetExceeded when it cannot cover
+RUN_BUDGET_KEY = "run_budget_usd"; DEFAULT_RUN_BUDGET_USD = Decimal("100"); DEFAULT_JUDGE_RUN_BUDGET_USD = Decimal("50")
+run_budget(config) -> (Decimal, source)          # config run_budget_usd, else ($100, "default"); invalid -> ValueError
+DEFAULT_LEDGER_PATH(repo_root) -> Path           # <repo>/state/budget.sqlite
+BudgetLedger(path, *, owner=None)                # creates or migrates the file; never refuses on history
+    .start_run(run_id, scope, budget_usd, *, source=None, note=None) -> {run, orphaned_holds}
+    .reserve(scope, agent, cost) -> request_id     # BEGIN IMMEDIATE; BudgetExceeded when the run's budget cannot cover it
     .settle(request_id, cost=None, basis="provider_reported_cost")
     .reconcile(request_id, cost, basis="provider_reported_cost", note="", *, allow_reserved=False)
-    .acknowledge_violation(request_id, note)
-    .can_cover(scope, cost) -> bool; .snapshot() -> dict; .audit_log() -> list
-read_snapshot(path); list_requests(path, states=UNRESOLVED_STATES, scope=None); cap_changes(path)
-raise_cap(path, scope, new_cap, approval_note)
+    .end_run() -> run; .run_snapshot() -> run; .can_cover(cost) -> bool; .snapshot() -> dict; .audit_log() -> list
+read_snapshot(path); read_run(path, run_id); list_runs(path, scope=None)
+list_requests(path, states=UNRESOLVED_STATES, scope=None, run_id=None); cap_changes(path)   # legacy history
 ```
 
-* All participant calls in a scope share one allowance; there is no per-agent allowance.
-  The pilot's $20, analysis's $5 and the live compatibility check's $2 are separate scopes
-  (plan rows "Approved spending limits" and "Live compatibility check"). Admission counts
-  every settled cost plus every unresolved reservation:
-  $\sum_i c_i + r \le \text{cap}$, where $c_i$ is a recorded actual cost or, for an
-  unresolved request, its full reservation.
+* The one spending control (docs/plan.md, "One per-run budget, no manual approvals (October 20,
+  2026)"): each paid invocation registers one run with its budget (`start_run`) and every
+  request is admitted only if that run's committed spend plus the reservation fits:
+  $\sum_{i \in \text{run}} c_i + f\,r \le B$, where $c_i$ is a recorded actual cost or, for an
+  unresolved request of the run, its full reservation, $f$ the run's reservation factor (1
+  until a violation) and $B$ the run's budget. Requests of other runs never count.
 * States: `reserved` → `settle()` → `settled` | `uncertain` | `estimate_violation`;
   `uncertain` (and, with `allow_reserved=True`, a stale `reserved` hold) → `reconcile()` →
-  `settled` | `estimate_violation`; `estimate_violation` → `acknowledge_violation()` →
-  `violation_acknowledged`. An unacknowledged violation blocks new admissions in its scope;
-  its cost stays counted.
+  `settled` | `estimate_violation`. An estimate violation is recorded and raises the run's
+  reservation factor to the observed `actual / requested` ratio; it never blocks and needs no
+  acknowledgement. `start_run` marks `reserved` holds of a process that is gone as `uncertain`
+  (basis `orphaned_hold`, still counted against their own run); `end_run` does the same for the
+  run's own unsettled holds.
 * Settlement bases (`SETTLEMENT_BASES`): `provider_reported_cost`,
   `usage_priced_upper_bound`, `unbilled_error` (cost exactly 0). `reconcile()` also accepts
-  `manual_reconciliation` (user-approved amount with a note). `settle(cost=None)` means
+  `manual_reconciliation` (an amount entered by hand, with a note). `settle(cost=None)` means
   uncertain and keeps the full reservation.
-* Spending is never reset. A ledger whose cap differs from `DEFAULT_CAPS` refuses to open.
-  The only cap change is `raise_cap`: an increase to exactly the approved value, with a note
-  recording the user's approval, audited in `cap_changes`. A ledger at the legacy path
-  `runs/budget.sqlite` blocks launch.
+* Spending is never reset; the ledger keeps every request of every run. Older ledgers' scope
+  caps and `cap_changes` rows are history only (`legacy_cap_usd`); nothing reads them for
+  admission. There are no cap raises.
 
 ### `research_swarm.provider`
 
@@ -457,12 +459,13 @@ live_compatibility_verified=False, reasoning_effort="high")`.
 
 ### `research_swarm.provider_limit` (X2)
 
-`verify_key_limit(api_key, max_remaining_usd, *, http_get=None, now=None) -> report` makes
-one unpaid `GET https://openrouter.ai/api/v1/key` and raises `ProviderLimitError` unless
-`limit` is set, `limit_reset` is null, `limit_remaining <= max_remaining_usd` (plus
-$10^{-9}$) and the key is not expired. The report never holds the key, a key hash, the
-`label` field or headers. `key_limit_report` is the non-raising form used by
-`scripts/check_provider_limit.py`.
+`key_limit_record(api_key, run_budget_usd=None, *, http_get=None, now=None) -> record` makes
+one unpaid `GET https://openrouter.ai/api/v1/key` and returns an informational record: the
+limit fields, `checks` (limit set, no reset, not expired, remaining within the run's budget)
+and `warnings`. It never raises for the key's policy or a failed query and never refuses a key
+(the run's budget is the spending control). The record never holds the key, a key hash, the
+`label` field or headers. `write_record(validation_dir, record, source=...)` writes it as
+`provider-limit-<UTC>.json`.
 
 ### `research_swarm.secrets`
 
@@ -471,8 +474,8 @@ permissions only (`environment_variable_set`, `env_file_present`, `env_file_regu
 `env_file_private`, `credentials_read: False`). `load_openrouter_key(repo_root)` prefers
 the exported variable, else parses only that key from a regular, non-symlink `.env` with
 mode 600. Callers: `runtime.build_openrouter_model` (paid launch and compatibility check),
-`scripts/check_provider_limit.py` and `scripts/reconcile_ledger.py` (both need
-`--i-have-user-approval`). Preflight and gates never call it.
+the judge client, `scripts/check_provider_limit.py` and `scripts/reconcile_ledger.py` (only
+when a hold has a generation id to look up). Preflight and gates never call it.
 
 ### `research_swarm.launch_gates` (I3)
 
@@ -487,8 +490,9 @@ the ledger opened read-only and `docker image inspect`. A gate that raises is a 
 | `frozen_dataset` | same | `FrozenDataset` loads and all 14 pilot templates hash-verify |
 | `approved_settings` | `configs/pilot.json` | every `APPROVED_SETTINGS` key equals the plan value with the same type (track, seeding and mitigations off, 20 agents from `runtime.APPROVED_AGENT_COUNT`, 14 tasks, 5400 s, 600 s, 120 s, replace prompt, auto-memory, no internet, OpenRouter, model id), and `max_connections` is present, a positive integer and equal to `agent_count` (S2) |
 | `seeded_track` | config | track `spontaneous`, `seeded_contagion_enabled` false and no `seeded` block at all, enabled or not (S3) |
-| `config_caps` | config | `max_pilot_usd`, `max_analysis_usd`, `max_compatibility_usd` equal `DEFAULT_CAPS` |
-| `route_pricing` | `route-pricing-<UTC>.json` + `catalog-snapshots/<sha256>.json` | `valid`, `credential_used: false`, age at most `route_pricing_max_age_hours` (72), frozen settings equal `frozen_fields(settings_from_config(config))`, archived catalog re-validates offline |
+| `run_budget` | config | `run_budget_usd` absent (the $100 default) or a positive amount; superseded spending keys are reported as a warning |
+| `behavior_judge` | config | `auto_behavior_judge` a boolean and `behavior_judge_max_usd`, when present, a positive amount |
+| `route_pricing` | `route-pricing-<UTC>.json` + `catalog-snapshots/<sha256>.json` | `valid`, `credential_used: false`, frozen settings equal `frozen_fields(settings_from_config(config))`, archived catalog re-validates offline; an age above `route_pricing_max_age_hours` (72) is a warning (the paid launchers refresh it automatically) |
 | `declarations`, `judge`, `timing` | `<prefix>-<UTC>.json` | `all_required_passed`, lean image ID current, `complete: true`, `limits` equal the config's judge limits (X5) |
 | `reuse` | `reuse-<UTC>.json` | `all_required_passed`, lean image ID current |
 | `conference-race` | `conference-race-<UTC>.json` | `all_required_passed`; lean image checked if recorded; `complete: true` and `limits` equal to the config's judge limits (S4, as X5) |
@@ -496,15 +500,13 @@ the ledger opened read-only and `docker image inspect`. A gate that raises is a 
 | `runtime-e2e` | `runtime-e2e-<UTC>.json` | `all_required_passed`, agent image current (lean if recorded), every `REQUIRED_EVIDENCE_CHECKS` name present and passed, `compose_sha256` equal to `compose_fingerprint(config, agent image ID)` |
 | `runtime-isolation` | `runtime-isolation-<UTC>.json` | as e2e, plus every `ISOLATION_AGENT_CHECKS` name for at least 2 agents |
 | `runtime-capacity` | `runtime-capacity-<UTC>.json` | `all_required_passed`, agent image current, compose binding, `validated_config` has and equals the config's `agent_count`, `agent_memory`, `agent_cpus`, `judge_max_concurrent`, `judge_memory`, `judge_cpus`, `compilation_timeout_seconds`, `max_subprocesses`, `startup_timeout_seconds`, `max_connections`, `warm_up_memory`, `warm_up_timeout_seconds`; required capacity checks by name (warm-up success remains informational) |
-| `ledger` | `state/budget.sqlite` (read-only) | no legacy `runs/budget.sqlite`; caps equal the plan (a lower cap asks for the audited raise); no unresolved pilot holds; no unacknowledged pilot violation; pilot allowance remaining |
-| `compatibility` | `compatibility-<UTC>.json` + ledger | schema `gdm-compatibility/1`, all required checks passed, model/route/settings equal the launch settings, `spent_usd` at most $2, `requests >= 1` and equal to the distinct `request_ids`, agent image current; in the ledger's current state every id is known, in scope `compatibility`, resolved and never violated, their settled sum is at most $2, and the scope has no unresolved hold or unacknowledged violation (X4) |
-| `provider_limit` | `provider-limit-<UTC>.json` | `all_required_passed`, age at most `provider_limit_max_age_hours` (72), no credential-like text, `limit_remaining` at most the remaining pilot allowance |
+| `ledger` | `state/budget.sqlite` (read-only) | always (informational): reports each scope's history and, as warnings, earlier runs' unresolved holds and a legacy `runs/budget.sqlite` |
+| `compatibility` | `compatibility-<UTC>.json` + ledger | schema `gdm-compatibility/1`, all required checks passed, model/route/settings equal the launch settings, `spent_usd` a nonnegative amount, `requests >= 1`, agent image current; the ledger's current state of the `request_ids` (unknown ids, other scopes, unresolved holds, violations) is reported as warnings (X4) |
+| `provider_limit` | `provider-limit-<UTC>.json` | always (informational): reports the newest record and its warnings |
 | `credential_presence` | environment / `.env` metadata | a key source exists; `.env`, if present, is a regular file with mode 600 (never read) |
-| `verified_integration` | config | `true`, set only after the user reviews passing compatibility evidence |
-| `paid_launch_enabled` | config | `true`, set only by the user |
 
 `scripts/compat_check.py` requires a subset before its paid call: `fixed_task_manifest`,
-`frozen_dataset`, `approved_settings`, `config_caps`, `route_pricing`,
+`frozen_dataset`, `approved_settings`, `run_budget`, `route_pricing`,
 `credential_presence`, `runtime-e2e`, `runtime-isolation`.
 
 ## Evidence files (I6)
@@ -521,7 +523,7 @@ Every record has `schema`, `created_at`, `all_required_passed` (bool) and `image
 | Prefix | Writer | Schema | Further keys the gates read |
 | --- | --- | --- | --- |
 | `route-pricing` | `scripts/freeze_route.py` | `route-pricing/v1` | `valid`, `reason`, `credential_used`, `settings`, `catalog_sha256`, `retrieved_utc` |
-| `provider-limit` | `scripts/check_provider_limit.py` | `provider-limit/v1` | `checks`, `limit`, `limit_remaining`, `limit_reset`, `warnings` |
+| `provider-limit` | every paid launch (`runtime.build_openrouter_model`) and `scripts/check_provider_limit.py` | `provider-limit/v1` | `limit`, `limit_remaining`, `limit_reset`, `warnings` (reported only) |
 | `declarations` | `scripts/validate_dataset.py declarations` | `gdm-declarations-validation/1` | `complete`, `limits {timeout_seconds, memory, cpus}` (`limits_match_config`, `incomplete_reasons` informational) |
 | `timing` | `scripts/validate_dataset.py timing` | `gdm-compile-timing/1` | `complete`, `limits` |
 | `reuse` | `scripts/validate_dataset.py reuse` | `gdm-dependency-reuse/1` | (`complete`, `limits` recorded, not gated) |
@@ -670,7 +672,7 @@ Conference event kinds: `service_started`, `run_start_marked`, `agent_registered
 in the compatibility check also `reasoning_cap_probe_started`, `reasoning_cap_probe`,
 `compaction_request` and `compatibility_abort`.
 
-Host-side state outside runs: `state/budget.sqlite` (tables `scopes`, `calls`,
+Host-side state outside runs: `state/budget.sqlite` (tables `runs`, `calls`, `scopes` (legacy caps),
 `reconciliations`, `cap_changes`; never deleted or reset) and
 `state/reconciliations/reconcile-<UTC>.json` (audits from `scripts/reconcile_ledger.py`).
 
@@ -683,7 +685,8 @@ Host-side state outside runs: `state/budget.sqlite` (tables `scopes`, `calls`,
 * **X2** `provider_limit.verify_key_limit(api_key, max_remaining_usd)`: the unpaid
   `GET /api/v1/key` inside `runtime.build_openrouter_model`, which returns
   `(model, provider_limit)` and requires `max_remaining_usd` (the calling scope's remaining
-  allowance).
+  allowance). Superseded October 20, 2026: `provider_limit.key_limit_record(api_key,
+  run_budget_usd)`, informational, called with the run's budget (`run_budget_usd=`).
 * **X3** `runtime.compose_fingerprint(config, agent_image_id)`: runtime-e2e,
   runtime-isolation and runtime-capacity evidence record `compose_sha256`; the gates compare
   it with the current agent image and config.

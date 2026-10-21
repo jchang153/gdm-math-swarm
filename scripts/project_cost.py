@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""PROJECTION (not a measurement) of pilot model spend against the $20 pilot cap.
+"""PROJECTION (not a measurement) of pilot model spend against the run's budget.
+
+Optional and never required (owner decision, October 20, 2026: no estimates are required for
+any run). The budget compared with is ``run_budget_usd`` from ``--config``, else the $100 default
+(docs/plan.md "One per-run budget, no manual approvals (October 20, 2026)").
 
 Measured input: request sizes from an unpaid run directory (default: the run named by
 the newest data/validation/runtime-e2e-*.json). Each ``inference_admitted`` event in
@@ -44,7 +48,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from research_swarm.budget import DEFAULT_CAPS  # noqa: E402
+from research_swarm.budget import run_budget  # noqa: E402
 from research_swarm.launch_gates import newest_evidence  # noqa: E402
 from research_swarm.provider import FRAMING_TOKEN_ALLOWANCE, ProviderSettings  # noqa: E402
 
@@ -81,6 +85,14 @@ def resolve_compaction_threshold(explicit, evidence_path):
             return value, f"runtime-e2e evidence {Path(evidence_path).name} ({THRESHOLD_KEY})"
     return DEFAULT_COMPACTION_THRESHOLD, (f"ASSUMPTION: default {DEFAULT_COMPACTION_THRESHOLD} (no runtime-e2e evidence "
                                           f"records {THRESHOLD_KEY}; verify live)")
+
+
+def resolve_budget(config_path):
+    """(run budget, source): the config's run_budget_usd, else the $100 default."""
+    path = Path(config_path) if config_path else None
+    config = json.loads(path.read_text()) if path is not None and path.is_file() else {}
+    amount, source = run_budget(config)
+    return amount, (f"{path.name} {source[len('config '):]}" if source != "default" else "default $100")
 
 
 def resolve_agents(explicit, config_path):
@@ -180,7 +192,7 @@ def project(sizes, args, prices):
     floor = int(max(firsts) / args.bytes_per_token)
     deltas = [b - a for s in sizes.values() for a, b in zip(s, s[1:]) if b > a]
     growth = args.output_tokens + args.tool_result_tokens
-    cap = Decimal(str(DEFAULT_CAPS["pilot"]))
+    cap = Decimal(str(args.run_budget))
     scenarios = []
     for rate in args.rates:
         turns = max(1, round(rate * args.minutes))
@@ -191,8 +203,8 @@ def project(sizes, args, prices):
         for label, series in (("without_caching", no_cache), ("with_caching", cache)):
             total = series[-1] * args.agents
             exhausted = next((i for i, value in enumerate(series) if value * args.agents >= cap), None)
-            row[label] = {"projected_total_usd": f"{total:.2f}", "exceeds_pilot_cap": total > cap,
-                          "minutes_until_cap": None if exhausted is None else round((exhausted + 1) / rate, 1)}
+            row[label] = {"projected_total_usd": f"{total:.2f}", "exceeds_run_budget": total > cap,
+                          "minutes_until_budget": None if exhausted is None else round((exhausted + 1) / rate, 1)}
         scenarios.append(row)
     settings = ProviderSettings(pricing_verified=True)
     hold = lambda tokens: settings.reservation("x" * int(tokens * args.bytes_per_token))  # noqa: E731
@@ -205,7 +217,7 @@ def project(sizes, args, prices):
         "ledger_holds": {"reservation_at_floor_usd": f"{hold(floor):.4f}",
                          "reservation_at_compaction_threshold_usd": f"{hold(args.compaction_threshold):.4f}",
                          "note": f"Up to {args.agents} such holds are in flight at once; admission stops when the "
-                                 "remaining allowance cannot cover the next one."},
+                                 "run's remaining budget cannot cover the next one."},
         "scenarios": scenarios,
     }
 
@@ -217,7 +229,7 @@ def main(argv=None):
     source.add_argument("--evidence", type=Path, help="runtime-e2e evidence naming a run_dir")
     parser.add_argument("--validation-dir", type=Path, default=ROOT / "data" / "validation")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG,
-                        help="run config supplying agent_count (default: configs/pilot.json)")
+                        help="run config supplying agent_count and run_budget_usd (default: configs/pilot.json)")
     parser.add_argument("--agents", type=int, default=None, help="default: agent_count from --config")
     parser.add_argument("--minutes", type=float, default=90)
     parser.add_argument("--rates", type=lambda s: [float(x) for x in s.split(",")], default=[0.5, 1.0, 2.0],
@@ -239,11 +251,12 @@ def main(argv=None):
         run_dir = json.loads(Path(evidence).read_text())["run_dir"]
         args.run_dir = Path(run_dir) if Path(run_dir).is_absolute() else ROOT / run_dir
     args.agents, agents_source = resolve_agents(args.agents, args.config)
+    args.run_budget, budget_source = resolve_budget(args.config)
     args.compaction_threshold, threshold_source = resolve_compaction_threshold(args.compaction_threshold, evidence)
     prompt, completion, cache_read, pricing_path = route_prices(args.validation_dir)
     result = {"kind": "cost_projection", "is_projection": True,
               "warning": "PROJECTION from unpaid request sizes and stated assumptions; not measured spend.",
-              "run_dir": str(args.run_dir), "pilot_cap_usd": str(DEFAULT_CAPS["pilot"]),
+              "run_dir": str(args.run_dir), "run_budget_usd": str(args.run_budget), "run_budget_source": budget_source,
               "prices_usd_per_token": {"prompt_max": format(prompt, "f"), "completion_max": format(completion, "f"),
                                        "cache_read_max": format(cache_read, "f"),
                                        "source": pricing_path or "ProviderSettings"},
@@ -261,9 +274,9 @@ def main(argv=None):
     for row in result["scenarios"]:
         print(f"PROJECTION {row['turns_per_agent_per_minute']} turns/agent/min: "
               f"no caching ${row['without_caching']['projected_total_usd']} "
-              f"(cap reached at {row['without_caching']['minutes_until_cap']} min), "
+              f"(budget reached at {row['without_caching']['minutes_until_budget']} min), "
               f"with caching ${row['with_caching']['projected_total_usd']} "
-              f"(cap reached at {row['with_caching']['minutes_until_cap']} min); cap ${DEFAULT_CAPS['pilot']}")
+              f"(budget reached at {row['with_caching']['minutes_until_budget']} min); run budget ${args.run_budget}")
     return 0
 
 

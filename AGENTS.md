@@ -25,10 +25,19 @@ These are separate from experimental agents; agree interfaces and file ownership
 Do not read, print, copy, mount, or commit real credential values. A future .env is
 host-only and Git-ignored. Inspect only credential presence, permissions, and ignore
 status when needed. Containers must never receive provider keys or the host .env.
-Do not start paid calls or provision resources before model integration and a
-user-approved spending cap with validated enforcement. Analysis spending is separate.
-A collaborator approves their own budgets and uses their own provider key (docs/plan.md,
-"Collaborator budgets and keys"); never use another person's key.
+Do not start paid calls or provision resources without a per-run budget specified
+before the run. Spending has exactly one control, repo-wide (docs/plan.md, "One per-run
+budget, no manual approvals (October 20, 2026)"): every paid invocation (a pilot run on
+any track, the live compatibility check, the behavior judge) has its own budget, the
+config's `run_budget_usd` (default $100; the launch prints it) or the judge's run limit
+(`--run-limit`, else `behavior_judge_max_usd`, else $50), and the ledger admits a request
+only while that run's committed spend plus the reservation fits. Never add cumulative
+caps, top-ups, extra spending checkers, approval notes or flags, typed confirmations,
+interactive-terminal requirements, or any step that makes the owner approve commands by
+hand or paste them into terminals; refresh stale records and handle leftover holds
+automatically. This applies to every collaborator's track too. A collaborator sets their
+own run budgets and uses their own provider key (docs/plan.md, "Collaborator budgets and
+keys"); never use another person's key.
 
 Preserve the weak operational judge and a separate observational research evaluator.
 Operational acceptance is not mathematical validity or intent. Keep unknown and

@@ -1,7 +1,9 @@
-"""Offline tests for the live provider-side key-limit check (SPEND-6, interface X2).
+"""Offline tests for the informational provider-side key-limit record (interface X2).
 
-Every HTTP call goes to a fake ``http_get`` (or a patched ``urlopen``); the key is a
-fake string and the host credential loader is patched. No network, no .env.
+Owner decision (docs/plan.md "One per-run budget, no manual approvals (October 20, 2026)"):
+the record never refuses a key; the run's budget is the spending control. Every HTTP call goes
+to a fake ``http_get`` (or a patched ``urlopen``); the key is a fake string and the host
+credential loader is patched. No network, no .env.
 """
 import datetime
 import importlib.util
@@ -15,8 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from research_swarm import provider_limit
-from research_swarm.budget import DEFAULT_CAPS
-from research_swarm.provider_limit import KEY_URL, ProviderLimitError, verify_key_limit
+from research_swarm.provider_limit import KEY_URL, ProviderLimitError, fetch_key_data, key_limit_record
 
 ROOT = Path(__file__).resolve().parents[1]
 NOW = datetime.datetime(2026, 10, 14, 12, 0, tzinfo=datetime.timezone.utc)
@@ -49,112 +50,65 @@ def load_script(name):
 
 
 @mock.patch("urllib.request.urlopen", no_network)
-class VerifyKeyLimitTests(unittest.TestCase):
-    def verify(self, data, cap="20", *, allow_unlimited=False, **kwargs):
+class KeyLimitRecordTests(unittest.TestCase):
+    def record(self, data, budget="20", **kwargs):
         get = FakeGet(data, **kwargs)
-        return verify_key_limit(FAKE_KEY, Decimal(cap), http_get=get, now=NOW,
-                                allow_unlimited=allow_unlimited), get
+        return key_limit_record(FAKE_KEY, None if budget is None else Decimal(budget), http_get=get, now=NOW), get
 
-    def test_passing_key_returns_a_key_free_report(self):
-        report, get = self.verify(GOOD)
+    def test_record_is_key_free(self):
+        report, get = self.record(GOOD)
         self.assertEqual(get.calls, [(KEY_URL, {"Authorization": "Bearer " + FAKE_KEY})])
         self.assertTrue(report["all_required_passed"])
-        self.assertEqual((report["limit"], report["limit_remaining"], report["limit_reset"], report["max_remaining_usd"]),
+        self.assertTrue(report["informational"])
+        self.assertEqual((report["limit"], report["limit_remaining"], report["limit_reset"], report["run_budget_usd"]),
                          (20, 20, None, "20"))
-        self.assertEqual(report["paid_calls"], 0)
-        text = json.dumps(report)
-        self.assertNotIn(FAKE_KEY, text)
-        self.assertNotIn("label", report)
-        self.assertNotIn("sk-", text)
-        self.assertNotIn("Authorization", text)
-        self.assertFalse(report["unlimited_key_authorized"])
-        self.assertTrue(report["provider_limit_enforced"])
-
-    def test_unlimited_key_requires_explicit_authorization(self):
-        data = dict(GOOD, limit=None, limit_remaining=None)
-        with self.assertRaises(ProviderLimitError):
-            self.verify(data)
-        report, _ = self.verify(data, allow_unlimited=True)
-        self.assertTrue(report["all_required_passed"])
-        self.assertTrue(report["unlimited_key_authorized"])
-        self.assertFalse(report["provider_limit_enforced"])
-        self.assertIn("no provider cap; shared ledger remains mandatory", report["warnings"])
-        for name in ("limit_set", "remaining_within_allowance"):
-            self.assertTrue(report["checks"][name]["waived"])
-        self.assertNotIn("waived", report["checks"]["key_not_expired"])
+        self.assertEqual((report["paid_calls"], report["warnings"]), (0, []))
         text = json.dumps(report)
         for forbidden in (FAKE_KEY, "label", "Authorization", "sk-"):
             self.assertNotIn(forbidden, text)
 
-    def test_unlimited_authorization_does_not_excuse_missing_or_invalid_metadata(self):
-        unlimited = dict(GOOD, limit=None, limit_remaining=None)
-        cases = [dict(unlimited, expires_at="2026-10-01T00:00:00Z"),
-                 dict(unlimited, expires_at="invalid date"),
-                 dict(unlimited, limit_reset="monthly"),
-                 dict(GOOD, limit=25, limit_remaining=21),
-                 dict(GOOD, limit_remaining=None), dict(GOOD, limit=None)]
-        for field in ("limit", "limit_remaining", "limit_reset"):
-            cases.append({name: value for name, value in unlimited.items() if name != field})
-        for data in cases:
-            with self.subTest(data=data), self.assertRaises(ProviderLimitError):
-                self.verify(data, allow_unlimited=True)
-        report, _ = self.verify(GOOD, allow_unlimited=True)
-        self.assertTrue(report["provider_limit_enforced"])
-        self.assertFalse(any(check.get("waived") for check in report["checks"].values()))
-
-    def test_unlimited_response_still_scrubs_credentials(self):
-        with self.assertRaises(ProviderLimitError) as caught:
-            self.verify(dict(GOOD, limit=None, limit_remaining=None, usage=FAKE_KEY), allow_unlimited=True)
-        self.assertIsNone(caught.exception.report)
-        self.assertNotIn(FAKE_KEY, str(caught.exception))
-
-    def test_refusals(self):
+    def test_nothing_is_ever_refused_only_warned(self):
         cases = {
             "limit_set": dict(GOOD, limit=None, limit_remaining=None),
             "limit_does_not_reset": dict(GOOD, limit_reset="monthly"),
-            "remaining_within_allowance": dict(GOOD, limit=25, limit_remaining=20.5),
+            "remaining_within_run_budget": dict(GOOD, limit=250, limit_remaining=200),
             "key_not_expired": dict(GOOD, expires_at="2026-10-01T00:00:00Z"),
         }
         for check, data in cases.items():
-            with self.subTest(check), self.assertRaises(ProviderLimitError) as caught:
-                self.verify(data)
-            self.assertIn(check, str(caught.exception))
-            self.assertFalse(caught.exception.report["checks"][check]["passed"])
-            self.assertNotIn(FAKE_KEY, str(caught.exception) + json.dumps(caught.exception.report))
-        with self.assertRaises(ProviderLimitError):  # limit set but no remaining figure: fail closed
-            self.verify(dict(GOOD, limit_remaining=None))
+            with self.subTest(check):
+                report, _ = self.record(data)
+                self.assertTrue(report["all_required_passed"])
+                self.assertFalse(report["checks"][check]["passed"])
+                self.assertTrue(report["warnings"])
+        report, _ = self.record(dict(GOOD, limit=250, limit_remaining=200), budget="100")
+        self.assertIn("above this run's budget", " ".join(report["warnings"]))
+        report, _ = self.record(dict(GOOD, limit_remaining=5, usage=15), budget="100")
+        self.assertIn("provider would stop the run first", " ".join(report["warnings"]))
+        report, _ = self.record(GOOD, budget=None)
+        self.assertNotIn("remaining_within_run_budget", report["checks"])
 
-    def test_remaining_compared_with_the_scope_allowance_and_tolerance(self):
-        self.assertTrue(self.verify(dict(GOOD, limit=2, limit_remaining=2), cap="2")[0]["all_required_passed"])
-        self.assertTrue(self.verify(dict(GOOD, limit_remaining="2.000000001"), cap="2")[0]["all_required_passed"])
-        with self.assertRaises(ProviderLimitError):
-            self.verify(dict(GOOD, limit_remaining="2.000000002"), cap="2")
-        with self.assertRaises(ProviderLimitError):  # a $20 pilot key is refused for the $2 compatibility check
-            self.verify(GOOD, cap="2")
-        report, _ = self.verify(dict(GOOD, limit=22, limit_remaining=19.5, usage=2.5), cap="19.75")
-        self.assertEqual(len(report["warnings"]), 2)  # prior usage and a limit above the allowance
-
-    def test_query_failures_fail_closed_without_the_key(self):
+    def test_query_failures_are_recorded_not_raised(self):
         error = OSError(f"connection reset while sending Bearer {FAKE_KEY}")
-        with self.assertRaises(ProviderLimitError) as caught:
-            self.verify(None, error=error)
-        self.assertIn("could not query", str(caught.exception))
-        self.assertNotIn(FAKE_KEY, str(caught.exception))
-        self.assertIsNone(caught.exception.__cause__)
+        report, _ = self.record(None, error=error)
+        self.assertIn("could not query", report["error"])
+        self.assertTrue(report["warnings"])
+        self.assertNotIn(FAKE_KEY, json.dumps(report))
         for body in (b"not json", json.dumps({"error": "x"}).encode(), json.dumps([1]).encode()):
-            with self.subTest(body=body), self.assertRaises(ProviderLimitError):
-                self.verify(None, body=body)
+            with self.subTest(body=body):
+                self.assertIn("error", self.record(None, body=body)[0])
         get = FakeGet(GOOD)
         for key in ("", "   ", None):
+            self.assertIn("error", key_limit_record(key, Decimal("20"), http_get=get, now=NOW))
             with self.assertRaises(ProviderLimitError):
-                verify_key_limit(key, Decimal("20"), http_get=get, now=NOW)
+                fetch_key_data(key, http_get=get)
         self.assertEqual(get.calls, [])
 
     def test_credential_like_response_is_not_recorded(self):
-        with self.assertRaises(ProviderLimitError) as caught:
-            self.verify(dict(GOOD, expires_at="sk-or-v1-0123456789abcdef"))
-        self.assertIn("credential-like", str(caught.exception))
-        self.assertIsNone(caught.exception.report)
+        report, _ = self.record(dict(GOOD, expires_at="sk-or-v1-0123456789abcdef"))
+        self.assertIn("credential-like", report["error"])
+        self.assertNotIn("sk-or", json.dumps(report))
+        report, _ = self.record(dict(GOOD, usage=FAKE_KEY))
+        self.assertNotIn(FAKE_KEY, json.dumps(report))
 
     def test_default_get_uses_urllib_with_the_header(self):
         seen = []
@@ -170,9 +124,16 @@ class VerifyKeyLimitTests(unittest.TestCase):
             seen.append((request.full_url, request.get_header("Authorization"), timeout))
             return Response(json.dumps({"data": GOOD}).encode())
         with mock.patch("urllib.request.urlopen", fake_urlopen):
-            report = verify_key_limit(FAKE_KEY, Decimal("20"), now=NOW)
-        self.assertTrue(report["all_required_passed"])
+            report = key_limit_record(FAKE_KEY, Decimal("20"), now=NOW)
+        self.assertEqual(report["limit"], 20)
         self.assertEqual(seen, [(KEY_URL, "Bearer " + FAKE_KEY, provider_limit.TIMEOUT_SECONDS)])
+
+    def test_write_record_never_raises(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = provider_limit.write_record(folder, self.record(GOOD)[0], source="test")
+            record = json.loads(Path(path).read_text())
+        self.assertEqual((record["source"], record["credential_recorded"]), ("test", False))
+        self.assertIsNone(provider_limit.write_record("/dev/null/not-a-dir", {}, source="test"))
 
 
 @mock.patch("urllib.request.urlopen", no_network)
@@ -182,7 +143,7 @@ class CheckProviderLimitScriptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, \
                 mock.patch("research_swarm.secrets.load_openrouter_key", return_value=FAKE_KEY), \
                 redirect_stdout(io.StringIO()) as out:
-            code = module.main(["--i-have-user-approval", "--output-dir", folder, *argv], http_get=FakeGet(data))
+            code = module.main(["--output-dir", folder, *argv], http_get=FakeGet(data))
             files = list(Path(folder).glob("provider-limit-*.json"))
             self.assertEqual(len(files), 1)
             text = files[0].read_text()
@@ -190,51 +151,40 @@ class CheckProviderLimitScriptTests(unittest.TestCase):
         self.assertNotIn("sk-", text)
         return code, json.loads(text)
 
-    def test_writes_key_free_evidence_through_the_shared_assessment(self):
+    def test_writes_key_free_record_without_any_flag(self):
         code, record = self.run_script(GOOD)
         self.assertEqual(code, 0)
         self.assertTrue(record["all_required_passed"])
         self.assertEqual((record["credential_used"], record["credential_recorded"], record["paid_calls"]),
                          (True, False, 0))
-        self.assertEqual(record["endpoint"], KEY_URL)
+        self.assertEqual((record["endpoint"], record["run_budget_usd"]), (KEY_URL, "100"))  # pilot.json budget
         self.assertNotIn("label", record)
-        code, record = self.run_script(GOOD, "--max-limit-usd", "2")  # a compatibility key must be at most $2
-        self.assertEqual(code, 1)
-        self.assertFalse(record["checks"]["remaining_within_allowance"]["passed"])
-        code, record = self.run_script(dict(GOOD, limit_reset="daily"))
-        self.assertEqual(code, 1)
-        self.assertFalse(record["all_required_passed"])
+        for data in (dict(GOOD, limit=None, limit_remaining=None), dict(GOOD, limit_reset="daily")):
+            code, record = self.run_script(data)
+            self.assertEqual(code, 0)
+            self.assertTrue(record["warnings"])
 
-    def test_unlimited_cli_flag_records_explicit_waiver(self):
-        unlimited = dict(GOOD, limit=None, limit_remaining=None)
-        self.assertEqual(self.run_script(unlimited)[0], 1)
-        code, record = self.run_script(unlimited, "--allow-unlimited")
-        self.assertEqual(code, 0)
-        self.assertTrue(record["unlimited_key_authorized"])
-        self.assertFalse(record["provider_limit_enforced"])
-        self.assertIn("no provider cap; shared ledger remains mandatory", record["warnings"])
-        above_allowance = float(Decimal(str(DEFAULT_CAPS["pilot"])) + 1)
-        self.assertEqual(self.run_script(dict(GOOD, limit_remaining=above_allowance), "--allow-unlimited")[0], 1)
+    def test_compares_with_the_configs_run_budget(self):
+        with tempfile.TemporaryDirectory() as folder:
+            config = Path(folder) / "small.json"
+            config.write_text(json.dumps({"run_budget_usd": "5"}))
+            code, record = self.run_script(GOOD, "--config", str(config))
+        self.assertEqual((code, record["run_budget_usd"]), (0, "5"))
+        self.assertFalse(record["checks"]["remaining_within_run_budget"]["passed"])
 
-    def test_unlimited_cli_flag_does_not_bypass_credential_approval(self):
-        module = load_script("check_provider_limit")
-        with mock.patch("research_swarm.secrets.load_openrouter_key") as load, \
-                mock.patch("sys.stderr", new=io.StringIO()), self.assertRaises(SystemExit) as caught:
-            module.main(["--allow-unlimited"], http_get=FakeGet(GOOD))
-        self.assertEqual(caught.exception.code, 2)
-        load.assert_not_called()
-
-    def test_launch_gate_accepts_the_written_evidence_shape(self):
+    def test_launch_gate_reports_the_written_record(self):
         from research_swarm import launch_gates
         module = load_script("check_provider_limit")
         with tempfile.TemporaryDirectory() as folder, \
                 mock.patch("research_swarm.secrets.load_openrouter_key", return_value=FAKE_KEY), \
                 redirect_stdout(io.StringIO()):
-            module.main(["--i-have-user-approval", "--output-dir", folder], http_get=FakeGet(GOOD))
+            module.main(["--output-dir", folder], http_get=FakeGet(dict(GOOD, limit=None, limit_remaining=None)))
             gates = launch_gates._Gates(ROOT, {}, folder, datetime.datetime.now(datetime.timezone.utc),
                                         lambda tag: None)
-            gates.provider_limit("20")
-        self.assertTrue(gates.results["provider_limit"]["passed"], gates.results["provider_limit"])
+            gates.provider_limit()
+        result = gates.results["provider_limit"]
+        self.assertTrue(result["passed"], result)
+        self.assertTrue(result["warnings"])
 
 
 if __name__ == "__main__":

@@ -23,8 +23,11 @@ with basis ``manual_reconciliation`` and an audit note per hold; an audit file g
 ``<ledger dir>/reconciliations/key-usage-<UTC>.json``. The credential is loaded only to make
 the GET and is never printed or recorded.
 
-    .venv/bin/python scripts/settle_by_key_usage.py --run-dir runs/RUN            # dry run (reads the key)
-    .venv/bin/python scripts/settle_by_key_usage.py --run-dir runs/RUN --i-have-user-approval \\
+It settles without any approval flag (docs/plan.md, "One per-run budget, no manual approvals
+(October 20, 2026)"); ``--dry-run`` only prints the plan.
+
+    .venv/bin/python scripts/settle_by_key_usage.py --run-dir runs/RUN --dry-run  # plan only (reads the key)
+    .venv/bin/python scripts/settle_by_key_usage.py --run-dir runs/RUN \\
         --loop-minutes 30 --until-exists runs/phase-b/RUN/pilot.exit
 """
 from __future__ import annotations
@@ -40,7 +43,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from research_swarm.budget import MANUAL_BASIS, BudgetLedger, track_caps, track_ledger_relative  # noqa: E402
+from research_swarm.budget import MANUAL_BASIS, BudgetLedger, track_ledger_relative  # noqa: E402
 
 NANO = Decimal("0.000000001")
 
@@ -108,8 +111,8 @@ def one_pass(args, approved, min_age_minutes, usage_reader=key_usage, now=None):
         summary["outcome"] = "dry run"
         print(json.dumps(summary))
         return summary
-    ledger = BudgetLedger(args.ledger, caps=track_caps(args.track))
-    note = ("key-usage allocation (scripts/settle_by_key_usage.py; owner approved 'Settle by key usage' in chat, "
+    ledger = BudgetLedger(args.ledger)
+    note = ("key-usage allocation (scripts/settle_by_key_usage.py; owner decision 'Settle by key usage', chat, "
             f"October 20, 2026): key usage {u1} - launch {u0} - settled {settled} + margin {args.margin_usd} = "
             f"{excess} over {len(holds)} uncertain holds by reservation")
     entries = []
@@ -141,12 +144,12 @@ def main(argv=None):
     parser.add_argument("--loop-minutes", type=float, default=0, help="repeat every N minutes (0: one pass)")
     parser.add_argument("--until-exists", type=Path, default=None,
                         help="with --loop-minutes: stop once this file exists (after one final pass)")
-    parser.add_argument("--i-have-user-approval", action="store_true")
+    parser.add_argument("--dry-run", action="store_true", help="print the plan only; settle nothing")
     args = parser.parse_args(argv)
     args.ledger = args.ledger or ROOT / track_ledger_relative(args.track)
     while True:
         try:
-            one_pass(args, args.i_have_user_approval, args.min_age_minutes)
+            one_pass(args, not args.dry_run, args.min_age_minutes)
         except Exception as ex:  # keep looping through transient key-endpoint or lock failures
             print(json.dumps({"utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                               "error": f"{type(ex).__name__}: {ex}"[:500]}))
@@ -155,7 +158,7 @@ def main(argv=None):
         if args.until_exists is not None and args.until_exists.exists():
             # Final pass once the counter has caught up: every remaining hold is eligible.
             time.sleep(args.min_age_minutes * 60)
-            one_pass(args, args.i_have_user_approval, 0)
+            one_pass(args, not args.dry_run, 0)
             return 0
         time.sleep(args.loop_minutes * 60)
 

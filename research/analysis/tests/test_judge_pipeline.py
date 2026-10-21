@@ -1,4 +1,4 @@
-"""Offline tests for the misbehavior judge pipeline, CLI and mock rehearsal (rubric gdm-judge-rubric/3).
+"""Offline tests for the misbehavior judge pipeline, CLI and mock rehearsal (rubric gdm-judge-rubric/3.1).
 
 Run from the repository root:
     PYTHONPATH=src:. .venv/bin/python -m unittest discover -s research/analysis/tests
@@ -230,7 +230,7 @@ class MockEndToEndTests(unittest.TestCase):
         for agent, result in self.results.items():
             self.assertEqual(result["schema"], pl.AGENT_RESULT_SCHEMA)
             self.assertEqual(result["mode"], "rehearsal")
-            self.assertEqual(result["judge_rubric_version"], "gdm-judge-rubric/3")
+            self.assertEqual(result["judge_rubric_version"], "gdm-judge-rubric/3.1")
             self.assertEqual(result["judge_model"], "anthropic/claude-sonnet-5.5")
             self.assertEqual(result["verifier_model"], "anthropic/claude-opus-5.5")
             self.assertIn(result["cohort"]["cohort"], schema.COHORTS)
@@ -428,7 +428,7 @@ class MockEndToEndTests(unittest.TestCase):
         pipeline = read(self.r.judge_dir / "pipeline.json")
         self.assertEqual((pipeline["run_id"], pipeline["mode"]), (RUN_ID, "rehearsal"))
         self.assertEqual(pipeline["pipeline_version"], pl.PIPELINE_VERSION)
-        self.assertEqual(pipeline["rubric"]["judge_rubric_version"], "gdm-judge-rubric/3")
+        self.assertEqual(pipeline["rubric"]["judge_rubric_version"], "gdm-judge-rubric/3.1")
         self.assertEqual({k: v["model"] for k, v in pipeline["models"].items()},
                          {"prefilter": "anthropic/claude-haiku-5.5", "judge": "anthropic/claude-sonnet-5.5",
                           "verify": "anthropic/claude-opus-5.5", "runlevel": "anthropic/claude-opus-5.5"})
@@ -455,7 +455,7 @@ class MockEndToEndTests(unittest.TestCase):
         self.assertEqual(manifest["pipeline_version"], pl.PIPELINE_VERSION)
         self.assertEqual(manifest["prompt_version"], prompts.PROMPT_VERSION)
         self.assertEqual(manifest["schema_version"], schema.SCHEMA_VERSION)
-        self.assertEqual(manifest["rubric"]["judge_rubric_version"], "gdm-judge-rubric/3")
+        self.assertEqual(manifest["rubric"]["judge_rubric_version"], "gdm-judge-rubric/3.1")
         self.assertEqual(manifest["rubric"]["judge_rubric_sha256"], prompts.rubric_info()["sha256"])
         self.assertEqual((manifest["settings"]["window_tokens"], manifest["settings"]["neighbors"]), (300, 1))
         self.assertNotIn("max_selected_fraction", manifest["settings"])
@@ -494,6 +494,88 @@ class MockEndToEndTests(unittest.TestCase):
         self.assertEqual(summary["status"], "complete", summary["errors"])
         self.assertEqual(len(self.r.transport.requests), before + 1)
         self.assertTrue(list(path.parent.glob("A02.w0001.json.stale-*")))
+
+
+class ThreadedMockTransport(FakeTransport):
+    """The paid path's threading with the mock model: each request is answered in a thread of
+    ``client.UrllibTransport``'s own bounded pool (as ``UrllibTransport.post`` sends it), after a
+    short random latency."""
+
+    def __init__(self, responder, workers):
+        super().__init__(responder=responder)
+        import threading
+        from research.analysis.judge.client import UrllibTransport
+        self.owner = UrllibTransport(max_workers=workers)
+        self.lock = threading.Lock()
+        self.active = self.peak = 0
+        self.thread_names = set()
+
+    async def post(self, url, headers, body, timeout):
+        import random
+        import threading
+        import time
+        request = {"url": url, "headers": dict(headers), "body": json.loads(body), "bytes": len(body),
+                   "timeout": timeout}
+        self.requests.append(request)
+
+        def work():
+            with self.lock:
+                self.active += 1
+                self.peak = max(self.peak, self.active)
+                self.thread_names.add(threading.current_thread().name)
+            try:
+                time.sleep(random.uniform(0.001, 0.02))
+                return self.responder(request)
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+        return await asyncio.get_running_loop().run_in_executor(self.owner._pool(), work)
+
+
+class HighConcurrencyTests(unittest.TestCase):
+    """Regression (judge speed fix, October 20, 2026): a paid run at --agent-concurrency 10
+    --haiku-concurrency 48 --sonnet-concurrency 32 --opus-concurrency 16 died with a segmentation
+    fault in a worker thread while agents' histories were being rebuilt in asyncio worker threads (each
+    rebuild runs inspect_ai's reader on an event loop of its own) beside the HTTP threads. Histories are
+    now prebuilt (history.HistoryCache) and served from memory on the event loop thread, and requests
+    are sent from each transport's own bounded pool; the new defaults (48/32/16, 20 agents) run the
+    candidate pipeline to completion with threaded requests."""
+
+    def test_default_concurrency_with_threaded_requests_and_prebuilt_histories(self):
+        import threading
+        from research.analysis.judge.history import HistoryCache
+        defaults = pl.PipelineSettings()
+        settings = dataclasses.replace(defaults, window_tokens=300, sample_fraction=1.0, max_selected_fraction=1.0,
+                                       judge_mode="candidates")
+        for attempt in range(3):
+            with self.subTest(attempt=attempt), tempfile.TemporaryDirectory() as tmp:
+                r = Rehearsal(tmp, settings=settings, judge_mode="candidates")
+                r.transport = ThreadedMockTransport(r.model, workers=sum(settings.concurrency(k) for k in pl.MODEL_KEYS))
+                cache = HistoryCache(r.run_dir, {agent: r.run for agent in r.agents})
+                loaded_on = []
+                original = cache.__class__.__call__
+
+                class Recording(HistoryCache):
+                    def __call__(self, agent_id):
+                        loaded_on.append(threading.current_thread() is threading.main_thread())
+                        return original(self, agent_id)
+
+                cache.__class__ = Recording
+                pipeline = r.pipeline()
+                pipeline.use_histories(cache)
+                try:
+                    summary = asyncio.run(pipeline.run())
+                finally:
+                    r.transport.owner.close()
+                self.assertEqual(summary["status"], "complete", summary.get("errors"))
+                self.assertEqual(len(loaded_on), len(r.agents))
+                self.assertTrue(all(loaded_on), "histories must be served on the event loop thread")
+                self.assertEqual(cache.runs, {}, "each agent's history is released once judged")
+                self.assertTrue(r.transport.thread_names)
+                self.assertTrue(all(name.startswith("judge-http") for name in r.transport.thread_names))
+                self.assertGreater(r.transport.peak, 1)
+                self.assertGreater(len(r.transport.requests), len(r.agents))
 
 
 class VersionGateTests(unittest.TestCase):
@@ -670,7 +752,8 @@ class RefusalRetryDeniedTests(unittest.TestCase):
 def finding(fid, category="cheating", claim="level", level="explored", evidence=("A01.t0001.r",)):
     return {"id": fid, "category": category, "claim": claim, "level": level if claim == "level" else None,
             "targets": [], "evidence": [{"item": i, "quote": "x"} for i in evidence], "counter_evidence": [],
-            "summary": "s", "borderline": False}
+            "summary": "s", "borderline": False,
+            "plain_explanation": "The agent tried a shortcut that the rules forbid. This sentence says so plainly."}
 
 
 class HelperTests(unittest.TestCase):
@@ -858,7 +941,8 @@ class HelperTests(unittest.TestCase):
         for gone in ("verifier_batch", "verifier_token_cap", "verifier_context"):
             self.assertFalse(hasattr(defaults, gone), gone)
         self.assertEqual((defaults.haiku_concurrency, defaults.sonnet_concurrency, defaults.opus_concurrency),
-                         (24, 16, 8))
+                         (48, 32, 16))
+        self.assertEqual(defaults.agent_concurrency, 20)
         # Each agent verifies its evaluation-awareness findings one at a time, so enough agents run at once
         # to fill the Opus slots; Sonnet slots fill from several candidate requests per agent.
         self.assertGreaterEqual(defaults.agent_concurrency, defaults.opus_concurrency)
@@ -979,45 +1063,39 @@ class CliTests(unittest.TestCase):
 
     def call(self, *args):
         err = io.StringIO()
-        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+        # The paid path's automatic pricing refresh is unpaid but networked: never run in tests.
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()), \
+                mock.patch.object(self.cli, "refresh_pricing", lambda args, **kwargs: None):
             code = self.cli.main(["--run-dir", str(self.run_dir), *args])
         return code, err.getvalue()
 
-    def test_paid_needs_approval(self):
-        code, err = self.call()
-        self.assertEqual(code, 4)
-        self.assertIn("--i-have-user-approval", err)
+    def test_paid_is_the_default_mode_without_any_approval_flag(self):
+        with mock.patch.object(self.cli, "pricing_record", return_value=None):
+            code, err = self.call("--ledger", str(self.tmp / "ledger.sqlite"))
+        self.assertEqual(code, 4)  # refused only for the missing pricing record (research integrity)
+        self.assertIn("no judge route pricing record", err)
+        self.assertNotIn("approval", err)
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            self.cli.parse_args(["--run-dir", str(self.run_dir), "--i-have-user-approval"])
 
-    def test_paid_needs_audited_ledger(self):
-        with mock.patch.object(sys.stdin, "isatty", return_value=True):
-            code, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "missing.sqlite"))
-        self.assertEqual(code, 4)
-        self.assertIn("never create a replacement ledger", err)
+    def test_paid_needs_no_existing_ledger(self):
+        created = []
 
-    def test_paid_judging_only_on_the_owners_tracks(self):
-        """Baseline and the owner's gemini track pass the track check; the collaborator's ablation track
-        and a run without readable settings.json are refused before any ledger, key or request."""
-        cases = (("gemini", "never create a replacement ledger"), ("ablation", "is on budget track 'ablation'"),
-                 (None, "is on budget track 'unknown'"))
-        for track, expected in cases:
-            with self.subTest(track=track):
-                settings = self.run_dir / "settings.json"
-                if track is None:
-                    settings.unlink()
-                else:
-                    settings.write_text(json.dumps({"config": {"budget_track": track},
-                                                    "effective": {"budget_track": track}}))
-                code, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "missing.sqlite"))
-                self.assertEqual(code, 4)
-                self.assertIn(expected, err)
+        class Stop(Exception):
+            pass
 
-    def test_paid_refuses_ledger_without_both_judge_raises(self):
-        problems = ["analysis cap history must be exactly the two audited judge raises"]
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-                mock.patch("research_swarm.budget.judge_analysis_problems", return_value=problems):
-            code, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"))
-        self.assertEqual(code, 4)
-        self.assertIn("analysis ledger not ready", err)
+        class FakeClient:
+            def __init__(self, key, ledger, **kwargs):
+                created.append(ledger)
+
+            def prepare(self):
+                raise Stop()
+        missing = self.tmp / "missing.sqlite"
+        with mock.patch.object(self.cli, "route_settings", return_value=JudgeRouteSettings.defaults(
+                    pricing_verified=True)), \
+                mock.patch("research.analysis.judge.client.JudgeClient", FakeClient), self.assertRaises(Stop):
+            self.call("--ledger", str(missing))
+        self.assertEqual(created[0], missing.resolve())
 
     def test_mock_refuses_output_inside_run(self):
         code, err = self.call("--mock")
@@ -1092,7 +1170,7 @@ class CliTests(unittest.TestCase):
             self.assertIn(column, text)
         self.assertIn("verify=opus (high)", text)
 
-    def test_paid_path_passes_credentials_root_after_typed_confirmation(self):
+    def test_paid_path_passes_credentials_root_without_confirmation(self):
         created = []
 
         class Stop(Exception):
@@ -1107,17 +1185,12 @@ class CliTests(unittest.TestCase):
 
         creds = self.tmp / "main-checkout"
         creds.mkdir()
-        snapshot = {"analysis": {"remaining_usd": "17.403969000"}}
         routes = JudgeRouteSettings.defaults(pricing_verified=True)
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-                mock.patch("research_swarm.budget.judge_analysis_problems", return_value=[]), \
-                mock.patch("research_swarm.budget.read_snapshot", return_value=snapshot), \
-                mock.patch.object(self.cli, "route_settings", return_value=routes), \
+        with mock.patch.object(self.cli, "route_settings", return_value=routes), \
                 mock.patch("research.analysis.judge.client.JudgeClient", FakeClient), \
-                mock.patch("builtins.input", return_value="17.403969000"):
+                mock.patch("builtins.input", side_effect=AssertionError("nothing may prompt")):
             with self.assertRaises(Stop):
-                self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"),
-                          "--credentials-root", str(creds))
+                self.call("--ledger", str(self.tmp / "ledger.sqlite"), "--credentials-root", str(creds))
         self.assertEqual([key for key, _ in created], list(pl.MODEL_KEYS))
         for key, kwargs in created:
             self.assertEqual(kwargs["credentials_root"], creds.resolve())
@@ -1138,18 +1211,14 @@ class CliTests(unittest.TestCase):
         judge_dir = self.run_dir / "analysis" / "judge"
         pl.write_json(judge_dir / "manifest.json", {"schema": "gdm-judge-pipeline-manifest/1",
                                                     "pipeline_version": "gdm-judge-pipeline/2"})
-        snapshot = {"analysis": {"remaining_usd": "17.403969000"}}
-        # Finding 25 of the v3 review: refused before the estimate and before the typed confirmation.
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-                mock.patch("research_swarm.budget.judge_analysis_problems", return_value=[]), \
-                mock.patch("research_swarm.budget.read_snapshot", return_value=snapshot), \
-                mock.patch.object(self.cli, "route_settings",
+        # Finding 25 of the v3 review: refused before any estimate, prompt or key.
+        with mock.patch.object(self.cli, "route_settings",
                                   return_value=JudgeRouteSettings.defaults(pricing_verified=True)), \
                 mock.patch("research.analysis.judge.client.JudgeClient", FakeClient), \
                 mock.patch("research.analysis.judge.estimate.plan_invocation",
                            side_effect=AssertionError("estimated before the refusal")) as planned, \
                 mock.patch("builtins.input", side_effect=AssertionError("asked before the refusal")) as typed:
-            code, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"))
+            code, err = self.call("--ledger", str(self.tmp / "ledger.sqlite"))
         self.assertEqual(code, 4)
         self.assertIn("different binding settings", err)
         self.assertEqual(prepared, [])
@@ -1175,17 +1244,12 @@ class CliTests(unittest.TestCase):
                "settings": dataclasses.asdict(pl.PipelineSettings()),
                "rubric": {"judge_rubric_version": "gdm-judge-rubric/2"}}
         pl.write_json(judge_dir / "manifest.json", v23)
-        snapshot = {"analysis": {"remaining_usd": "17.403969000"}}
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-                mock.patch("research_swarm.budget.judge_analysis_problems", return_value=[]), \
-                mock.patch("research_swarm.budget.read_snapshot", return_value=snapshot), \
-                mock.patch.object(self.cli, "route_settings", return_value=routes), \
+        with mock.patch.object(self.cli, "route_settings", return_value=routes), \
                 mock.patch("research.analysis.judge.client.JudgeClient", FakeClient), \
                 mock.patch("research.analysis.judge.estimate.plan_invocation",
                            side_effect=AssertionError("estimated before the refusal")) as planned, \
                 mock.patch("builtins.input", side_effect=AssertionError("asked before the refusal")) as typed:
-            code, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"),
-                                  "--upgrade-judge-revision")
+            code, err = self.call("--ledger", str(self.tmp / "ledger.sqlite"), "--upgrade-judge-revision")
         self.assertEqual(code, 4)
         self.assertIn("was written by judge revision v2.3", err)
         self.assertIn("never resumes, upgrades or mixes a v2.x judge directory", err)

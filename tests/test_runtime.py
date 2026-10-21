@@ -484,17 +484,16 @@ class LaunchInterlockTests(unittest.TestCase):
         self.assertTrue(all(e.startswith("Could not list") for e in status["listing_errors"]))
         self.assertTrue(set(status["listing_errors"]) < set(status["blockers"]))
 
-    def test_concurrent_run_override_needs_both_keys(self):
+    def test_concurrent_run_override_needs_no_approval_note(self):
         """Gemini collaboration run (docs/plan.md): the config override turns another checkout's agent
         sandboxes and judge compilers into recorded warnings; listing failures still block; without the
-        keys nothing changes."""
+        key nothing changes. No approval note is required (docs/plan.md, "One per-run budget, no manual
+        approvals (October 20, 2026)"); an optional one is recorded."""
         busy = self.interlock(["gdm-lean-old"], [], [self.AGENT])
         self.assertEqual(len(busy["blockers"]), 2)
         note = "Owner approved running alongside the collaborator's live run"
         gemini = {"budget_track": "gemini"}
         for config in ({}, dict(gemini, allow_concurrent_run=False, concurrent_run_approval=note),
-                       dict(gemini, allow_concurrent_run=True), dict(gemini, allow_concurrent_run=True,
-                                                                     concurrent_run_approval=" "),
                        dict(gemini, allow_concurrent_run="yes", concurrent_run_approval=note),
                        dict(gemini, concurrent_run_approval=note)):
             with self.subTest(config=config):
@@ -504,8 +503,10 @@ class LaunchInterlockTests(unittest.TestCase):
                 self.assertIsNone(runtime.concurrent_run_approval(config))
         self.assertEqual(runtime.concurrent_run_problems({}), [])
         self.assertEqual(runtime.concurrent_run_problems({"allow_concurrent_run": False}), [])
-        self.assertIn("nonempty concurrent_run_approval",
-                      runtime.concurrent_run_problems(dict(gemini, allow_concurrent_run=True))[0])
+        self.assertEqual(runtime.concurrent_run_problems(dict(gemini, allow_concurrent_run=True)), [])
+        unnoted = runtime.apply_concurrent_run_override(busy, dict(gemini, allow_concurrent_run=True))
+        self.assertEqual(unnoted["blockers"], [])
+        self.assertIn("Gemini 3.1 Pro collaboration run authorized", unnoted["concurrent_run_override"]["approval"])
         self.assertIn("true or false", runtime.concurrent_run_problems({"allow_concurrent_run": 1})[0])
         config = dict(gemini, allow_concurrent_run=True, concurrent_run_approval=f"  {note} ")
         result = runtime.apply_concurrent_run_override(busy, config)
@@ -615,8 +616,7 @@ class PreflightTests(unittest.TestCase):
             return runtime.preflight(config, ROOT)
 
     def base(self, **overrides):
-        return {"agent_count": 20, "track": "spontaneous", "paid_launch_enabled": True, "max_connections": 20,
-                **overrides}
+        return {"agent_count": 20, "track": "spontaneous", "max_connections": 20, **overrides}
 
     def test_max_connections_is_required_and_equals_agent_count(self):
         """S2: no silent default; one in-flight request per agent."""
@@ -669,11 +669,11 @@ class PreflightTests(unittest.TestCase):
 
     def test_design_invariants(self):
         ok = lambda c, r: {"ready": True, "blockers": [], "evidence": {}, "ledger": {}}
-        blockers = self._preflight(self.base(agent_count=10, system_prompt_mode="append", paid_launch_enabled=False),
-                                   ok)["blockers"]
+        blockers = self._preflight(self.base(agent_count=10, system_prompt_mode="append"), ok)["blockers"]
         self.assertTrue(any("20 peers" in b for b in blockers))
         self.assertTrue(any("replace + auto-memory" in b for b in blockers))
-        self.assertIn("Paid launch is disabled", blockers)
+        # No attestation or approval: a config without paid_launch_enabled is not blocked for it.
+        self.assertFalse(any("Paid launch" in b or "paid_launch_enabled" in b for b in blockers), blockers)
         raising = lambda c, r: 1 / 0
         self.assertTrue(any("evaluation failed" in b for b in self._preflight(self.base(), raising)["blockers"]))
 
@@ -710,7 +710,7 @@ class PreflightDockerTests(unittest.TestCase):
         return report
 
     def base(self, **overrides):
-        return {"agent_count": runtime.APPROVED_AGENT_COUNT, "track": "spontaneous", "paid_launch_enabled": True,
+        return {"agent_count": runtime.APPROVED_AGENT_COUNT, "track": "spontaneous",
                 "max_connections": runtime.APPROVED_AGENT_COUNT, **overrides}
 
     def test_interlock_blocks_comparators_and_other_agent_sandboxes(self):
@@ -759,15 +759,15 @@ class PreflightDockerTests(unittest.TestCase):
         self.assertEqual(record["approval"], note)
         self.assertEqual(len(record["warnings"]), 2)
         self.assertEqual(sorted(c["kind"] for c in report["docker"]["interlock"]["containers"]), ["agent", "judge"])
-        # Without the keys (or without a note) the same containers block as before.
-        for config in (gemini, dict(gemini, allow_concurrent_run=True)):
+        # Without the key the same containers block as before; no approval note is required.
+        for config in (gemini,):
             report = self._preflight(config, ok, ["gdm-lean-other"], [], [judge, agent])
             self.assertFalse(report["ready"])
             self.assertTrue(any("agent sandbox container" in b for b in report["blockers"]))
             self.assertTrue(any("leftover judge container" in b for b in report["blockers"]))
             self.assertIsNone(report["docker"]["interlock"]["concurrent_run_override"])
-        self.assertTrue(any("concurrent_run_approval" in b for b in self._preflight(
-            dict(gemini, allow_concurrent_run=True), ok, [])["blockers"]))
+        self.assertTrue(self._preflight(dict(gemini, allow_concurrent_run=True), ok, ["gdm-lean-other"], [],
+                                        [judge, agent])["ready"])
         # Listing failures still block with the override.
         blockers = self._preflight(override, ok, None, None, None)["blockers"]
         self.assertTrue(any("Could not list" in b for b in blockers))
@@ -814,13 +814,10 @@ class PreflightDockerTests(unittest.TestCase):
         self.assertEqual(report["docker"]["judge_containers"], [])
         self.assertEqual(report["docker"]["agent_image"]["id"], "sha256:" + "c" * 64)
 
-    def test_paid_launch_blocker_reported_once(self):
-        def gates(config, repo_root):
-            return {"ready": False, "blockers": ["paid_launch_enabled: paid_launch_enabled is not true (user decision)"],
-                    "evidence": {"paid_launch_enabled": {"passed": False}}, "ledger": {}}
-        blockers = self._preflight(self.base(paid_launch_enabled=False), gates, [])["blockers"]
-        self.assertNotIn("Paid launch is disabled", blockers)
-        self.assertEqual(sum("paid_launch_enabled" in b or "Paid launch" in b for b in blockers), 1)
+    def test_no_paid_launch_attestation_is_required(self):
+        ok = lambda c, r: {"ready": True, "blockers": [], "evidence": {}, "ledger": {}}  # noqa: E731
+        report = self._preflight(self.base(paid_launch_enabled=False), ok, [])
+        self.assertTrue(report["ready"], report["blockers"])
 
     def test_persona_counts_must_match_balanced_allocation(self):
         ok = lambda c, r: {"ready": True, "blockers": [], "evidence": {}, "ledger": {}}  # noqa: E731
@@ -969,7 +966,7 @@ class WarmUpTests(unittest.TestCase):
 
 
 class SharedPaidPathTests(unittest.IsolatedAsyncioTestCase):
-    def _build(self, verify, keys=None, events=None, *, allow_unlimited=False):
+    def _build(self, check, keys=None, events=None, *, record_dir=None):
         from research_swarm.provider import settings_from_config
         config = json.loads((ROOT / "configs" / "pilot.json").read_text())
         settings = settings_from_config(config, pricing_verified=True)
@@ -985,23 +982,23 @@ class SharedPaidPathTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch("inspect_ai.model.get_model", fake_get_model), \
                 mock.patch("research_swarm.secrets.load_openrouter_key",
                            lambda root: keys.append(root) or "sk-or-v1-unpaidofflinetestplaceholder"):
-            result = runtime.build_openrouter_model(settings, ROOT, 20, max_remaining_usd="19.5",
+            result = runtime.build_openrouter_model(settings, ROOT, 20, run_budget_usd="100",
                                                     record=lambda kind, agent, payload: events.append((kind, payload)),
-                                                    verify_limit=verify, allow_unlimited=allow_unlimited)
+                                                    check_limit=check, record_dir=record_dir)
         return settings, captured, keys, events, result
 
     def test_build_openrouter_model_reads_key_only_at_build(self):
-        verified = []
+        checked = []
 
-        def verify(key, max_remaining):
-            verified.append((key, max_remaining))
-            return {"limit": 20, "limit_remaining": 19.5, "limit_reset": None, "checks": {}}
-        settings, captured, keys, events, (model, limit) = self._build(verify)
+        def check(key, budget):
+            checked.append((key, budget))
+            return {"limit": 20, "limit_remaining": 19.5, "limit_reset": None, "checks": {}, "warnings": []}
+        settings, captured, keys, events, (model, limit) = self._build(check)
         self.assertEqual(keys, [ROOT])
-        # X2: verified with the loaded key and the scope's remaining allowance, before the model exists.
-        self.assertEqual(verified, [("sk-or-v1-unpaidofflinetestplaceholder", Decimal("19.5"))])
+        # X2: recorded with the loaded key and the run's budget, before the model exists.
+        self.assertEqual(checked, [("sk-or-v1-unpaidofflinetestplaceholder", Decimal("100"))])
         self.assertEqual(limit["limit_remaining"], 19.5)
-        self.assertEqual(events, [("provider_limit_verified", {**limit, "max_remaining_usd": "19.5"})])
+        self.assertEqual(events, [("provider_limit_recorded", {**limit, "run_budget_usd": "100"})])
         self.assertNotIn("unpaidofflinetestplaceholder", json.dumps(events))
         self.assertEqual(captured["name"], "openrouter/" + settings.model_id)
         self.assertEqual((captured["api_key"], captured["max_retries"], captured["reasoning_enabled"]),
@@ -1013,46 +1010,32 @@ class SharedPaidPathTests(unittest.IsolatedAsyncioTestCase):
                          (settings.max_tokens, 0, "all", 20, False))
         self.assertTrue(model.api._gdm_cost_capture)
 
-    def test_provider_limit_refusal_builds_nothing(self):
-        class ProviderLimitError(RuntimeError):
-            pass
-
-        def refuse(key, max_remaining):
-            raise ProviderLimitError(f"limit_remaining 25 exceeds {max_remaining} for {key}")
+    def test_provider_limit_is_informational_and_never_refuses(self):
+        def failing(key, budget):
+            raise RuntimeError(f"limit_remaining 250 exceeds {budget} for {key}")
         events = []
-        with self.assertRaises(ProviderLimitError):
-            self._build(refuse, events=events)
-        self.assertEqual([k for k, _ in events], ["provider_limit_refused"])
-        self.assertNotIn("unpaidofflinetestplaceholder", json.dumps(events))
-        self.assertIn("[redacted]", events[0][1]["detail"])
-        # Without the provider_limit module the paid path fails closed.
-        with mock.patch.dict(sys.modules, {"research_swarm.provider_limit": None}):
-            with self.assertRaises(LaunchBlocked):
-                runtime.build_openrouter_model(None, ROOT, 1, max_remaining_usd="2")
+        _, captured, _, _, (model, limit) = self._build(failing, events=events)
+        self.assertIsNotNone(model)  # the model is built anyway
+        self.assertEqual([k for k, _ in events], ["provider_limit_recorded"])
+        self.assertIn("RuntimeError", limit["error"])
+        self.assertNotIn("unpaidofflinetestplaceholder", json.dumps(events) + json.dumps(limit))
+        unlimited = lambda key, budget: {"limit": None, "limit_remaining": None,  # noqa: E731
+                                         "warnings": ["the key has no provider-side limit"]}
+        _, _, _, _, (model, limit) = self._build(unlimited)
+        self.assertEqual(limit["warnings"], ["the key has no provider-side limit"])
 
-    def test_unlimited_key_policy_is_explicit_and_reported_without_changing_allowance(self):
-        calls = []
-
-        def verify(key, max_remaining, **kwargs):
-            calls.append((max_remaining, kwargs))
-            return {"limit": None, "limit_remaining": None, "limit_reset": None,
-                    "unlimited_key_authorized": True, "provider_limit_enforced": False,
-                    "checks": {"limit_set": {"passed": True, "waived": True}}}
-
-        _, _, _, events, (_, report) = self._build(verify, allow_unlimited=True)
-        self.assertEqual(calls, [(Decimal("19.5"), {"allow_unlimited": True})])
-        self.assertTrue(report["unlimited_key_authorized"])
-        self.assertFalse(report["provider_limit_enforced"])
-        self.assertEqual(events[0][1]["max_remaining_usd"], "19.5")
-
-    def test_nonboolean_unlimited_argument_does_not_enable_waiver(self):
-        calls = []
-
-        def verify(key, max_remaining, **kwargs):
-            calls.append(kwargs)
-            return {"limit": 20, "limit_remaining": 19.5}
-        self._build(verify, allow_unlimited="true")
-        self.assertEqual(calls, [{}])
+    def test_provider_limit_record_is_refreshed_automatically(self):
+        with tempfile.TemporaryDirectory() as folder:
+            _, _, _, _, (_, limit) = self._build(lambda key, budget: {"limit": 5, "limit_remaining": 5,
+                                                                      "all_required_passed": True},
+                                                 record_dir=folder)
+            files = list(Path(folder).glob("provider-limit-*.json"))
+            self.assertEqual(len(files), 1)
+            self.assertEqual(limit["record"], str(files[0]))
+            record = json.loads(files[0].read_text())
+        self.assertEqual((record["source"], record["limit_remaining"], record["credential_recorded"]),
+                         ("paid launch", 5, False))
+        self.assertNotIn("unpaidofflinetestplaceholder", json.dumps(record))
 
     def test_eval_options(self):
         options = runtime.eval_options(1, Path("/r"), {})
@@ -1176,13 +1159,12 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         self.config = dict(json.loads((ROOT / "configs" / "pilot.json").read_text()),
                            run_dir=str(self.folder / "runs" / "pilot-test"))
         self.config.setdefault("max_connections", self.config["agent_count"])
-        self.config["allow_unlimited_provider_key"] = False
         self.images = {"agent": {"tag": self.config["agent_image"], "id": "sha256:" + "a" * 64},
                        "lean": {"tag": self.config["lean_image"], "id": "sha256:" + "b" * 64}}
         self.report = {"ready": True, "blockers": [], "docker": {
             "agent_image": dict(self.images["agent"]), "lean_image": dict(self.images["lean"])}}
 
-    async def run_pilot(self, report=None):
+    async def run_pilot(self, report=None, during_eval=None):
         order = []
 
         class Conference:
@@ -1207,16 +1189,17 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
             record("lean_warm_up", None, result)
             return result
 
-        def build_model(settings, repo_root, max_connections, *, max_remaining_usd, record=None,
-                        allow_unlimited=False):
-            self.model_allow_unlimited = allow_unlimited
-            order.append(("model", max_connections, max_remaining_usd))
+        def build_model(settings, repo_root, max_connections, *, run_budget_usd, record=None, record_dir=None):
+            self.model_record_dir = record_dir
+            order.append(("model", max_connections, str(run_budget_usd)))
             return "paid-model", {"limit": 20, "limit_remaining": 20.0, "limit_reset": None}
 
         async def eval_async(task, model, **options):
             order.append(("eval", model, options["max_samples"], options["sandbox_prebuilt"]))
             if getattr(self, "during_eval", None):
                 self.during_eval()
+            if during_eval is not None:
+                await during_eval()
             return ["log"]
         with mock.patch.object(runtime, "preflight", return_value=report or self.report), \
                 mock.patch.object(runtime, "pin_images", return_value=self.images), \
@@ -1232,7 +1215,8 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         result, order, conference = await self.run_pilot()
         self.assertEqual(result, ["log"])
         self.assertEqual(order, [("warm_up", self.images["lean"]["id"]), ("conference", self.images["lean"]["id"], 20),
-                                 ("model", 20, "307.809660142"), ("eval", "paid-model", 20, True)])
+                                 ("model", 20, "100"), ("eval", "paid-model", 20, True)])
+        self.assertEqual(self.model_record_dir, self.folder / "data" / "validation")
         run_dir = Path(self.config["run_dir"])
         self.assertIn(f"image: {self.images['agent']['id']}", (run_dir / "compose.yaml").read_text())
         effective = json.loads((run_dir / "settings.json").read_text())["effective"]
@@ -1252,29 +1236,83 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(kinds.index("images_pinned"), kinds.index("lean_warm_up"))
         self.assertTrue(conference.closed)
         self.assertTrue((run_dir / "budget-final.json").exists())
+        # The run and its budget are registered in the shared ledger under the run directory's name.
+        final = json.loads((run_dir / "run-budget.json").read_text())
+        self.assertEqual((final["run_id"], final["scope"], final["budget_usd"], final["budget_source"]),
+                         ("pilot-test", "pilot", "100", "config run_budget_usd"))
+        self.assertIsNotNone(final["ended"])
+        self.assertEqual((effective["run_id"], effective["run_budget_usd"]), ("pilot-test", "100"))
+        self.assertIn("run_budget", kinds)
 
     async def test_max_connections_is_explicit_and_recorded(self):
         """S2: the model gets exactly config max_connections, recorded in settings.json; no default."""
         self.config["max_connections"] = runtime.APPROVED_AGENT_COUNT
         result, order, _ = await self.run_pilot()
-        self.assertIn(("model", runtime.APPROVED_AGENT_COUNT, "307.809660142"), order)
+        self.assertIn(("model", runtime.APPROVED_AGENT_COUNT, "100"), order)
         settings = json.loads((Path(self.config["run_dir"]) / "settings.json").read_text())
         self.assertEqual(settings["effective"]["max_connections"], runtime.APPROVED_AGENT_COUNT)
         self.assertEqual(settings["config"]["max_connections"], runtime.APPROVED_AGENT_COUNT)
         self.assertEqual(settings["effective"]["track"], "spontaneous")
 
-    async def test_pilot_passes_only_explicit_unlimited_key_policy(self):
-        self.config["allow_unlimited_provider_key"] = True
-        self.config["unlimited_provider_key_approval"] = "User authorized the existing unlimited key for this pilot"
-        await self.run_pilot()
-        self.assertIs(self.model_allow_unlimited, True)
-        settings = json.loads((Path(self.config["run_dir"]) / "settings.json").read_text())
-        self.assertEqual(settings["budget"]["pilot"]["cap_usd"], "307.809660142")
-        self.assertEqual(settings["config"]["unlimited_provider_key_approval"],
-                         self.config["unlimited_provider_key_approval"])
+    async def test_default_budget_of_one_hundred_applies_when_unset(self):
+        del self.config["run_budget_usd"]
+        _, order, _ = await self.run_pilot()
+        self.assertIn(("model", 20, "100"), order)
+        from research_swarm.budget import read_run
+        run = read_run(self.folder / "state" / "budget.sqlite", "pilot-test")
+        self.assertEqual((run["budget_usd"], run["budget_source"]), ("100", "default"))
+        records = [json.loads(line) for line in (Path(self.config["run_dir"]) / "runtime.jsonl").read_text()
+                   .splitlines()]
+        budget = next(r["payload"] for r in records if r["kind"] == "run_budget")
+        self.assertEqual((budget["budget_usd"], budget["budget_source"]), ("100", "default"))
+
+    async def test_run_budget_stops_the_pilot_and_old_holds_never_block_it(self):
+        """The production budget filter of this run admits requests only within its own budget,
+        while an earlier run's unresolved holds in the same ledger never count against it."""
+        from inspect_ai.model import ChatMessageUser, GenerateConfig, ModelOutput, ModelUsage
+        from inspect_ai.util import LimitExceededError
+        from research_swarm.budget import BudgetLedger, list_requests, read_run
+        ledger_file = self.folder / "state" / "budget.sqlite"
+        earlier = BudgetLedger(ledger_file)
+        earlier.start_run("earlier-run", "pilot", 1)
+        earlier.settle(earlier.reserve("pilot", "agent-001", 1), None)  # an unresolved hold of an earlier run
+        self.config["run_budget_usd"] = "0.1"
+        captured, outcomes = {}, []
+
+        def fake_peer_solver(**kwargs):
+            captured.update(kwargs)
+            return "solver"
+
+        class FakeModel:
+            async def generate(self, **kwargs):
+                output = ModelOutput.from_content(model="deepseek/deepseek-v4.1-flash", content="ok")
+                output.usage = ModelUsage(input_tokens=5, output_tokens=2, total_tokens=7, total_cost=0.00001)
+                return output
+
+        async def during_eval():
+            async def one(agent_id):
+                intercept = captured["filter_for"](agent_id)
+                try:
+                    await intercept(FakeModel(), [ChatMessageUser(content="hi")], [], None, GenerateConfig())
+                    outcomes.append("finished")
+                except LimitExceededError:
+                    outcomes.append(intercept.state["last_denial"])
+            await asyncio.gather(*(one(agent) for agent in captured["personas"]))
+        with mock.patch.object(runtime, "peer_solver", fake_peer_solver), \
+                mock.patch.object(runtime, "build_task", lambda **kwargs: "task"):
+            await self.run_pilot(during_eval=during_eval)
+        admitted = outcomes.count("finished")
+        self.assertGreater(admitted, 0)
+        self.assertEqual(outcomes.count("budget_admission_failed"), 20 - admitted)
+        self.assertGreater(20 - admitted, 0)  # the budget stopped the rest
+        run = read_run(ledger_file, "pilot-test")
+        self.assertEqual((run["budget_usd"], run["requests"]), ("0.1", admitted))
+        self.assertLessEqual(Decimal(run["committed_usd"]), Decimal("0.1"))
+        self.assertEqual(read_run(ledger_file, "earlier-run")["uncertain_requests"], 1)  # untouched, still counted
+        self.assertEqual(len(list_requests(ledger_file, scope="pilot")), 1)
 
     async def test_gemini_track_records_track_condition_and_concurrent_run_override(self):
-        """configs/gemini-collab.json: its own ledger and caps, the collaboration prompt, and the
+        """configs/gemini-collab.json: its own ledger and per-run budget, the collaboration prompt, and the
         recorded concurrent-run override from preflight in settings.json and runtime.jsonl."""
         self.config = dict(json.loads((ROOT / "configs" / "gemini-collab.json").read_text()),
                            run_dir=str(self.folder / "runs" / "gemini-test"))
@@ -1292,7 +1330,8 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         effective = settings["effective"]
         self.assertEqual(effective["budget_track"], "gemini")
         self.assertEqual(effective["ledger_path"], str(self.folder / "state" / "gemini-budget.sqlite"))
-        self.assertEqual(settings["budget"]["pilot"]["cap_usd"], "462.38")
+        self.assertEqual((effective["run_budget_usd"], effective["run_budget_source"]),
+                         ("400", "config run_budget_usd"))
         self.assertEqual(effective["prompt_variant"], "collaboration_continuous")
         self.assertIs(effective["auto_restart"], True)
         self.assertEqual(effective["concurrent_run_override"], override)
@@ -1302,7 +1341,6 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tasks[0]["metadata"]["condition"], "gemini-track-collaboration_continuous")
         records = [json.loads(line) for line in (run_dir / "runtime.jsonl").read_text().splitlines()]
         self.assertEqual([r["payload"] for r in records if r["kind"] == "concurrent_run_override"], [override])
-        self.assertIs(self.model_allow_unlimited, True)
         self.assertFalse((ROOT / "state" / "gemini-budget.sqlite").exists())  # never the repository's ledger
 
     async def test_launch_lock_refuses_a_second_launch_from_this_checkout(self):
@@ -1366,6 +1404,7 @@ class InspectAdapterTests(unittest.IsolatedAsyncioTestCase):
                 return output
         with tempfile.TemporaryDirectory() as folder:
             ledger=BudgetLedger(Path(folder)/'budget.sqlite')
+            ledger.start_run('run-1','pilot',100)
             model=FakeModel()
             events=[]
             intercept=budget_filter('agent-001',ledger,ProviderSettings(pricing_verified=True),StartBarrier(1),lambda *args:events.append(args))
@@ -1814,7 +1853,8 @@ class PeerStopReservationTests(unittest.IsolatedAsyncioTestCase):
             record = lambda kind, agent, payload: events.append((kind, agent, payload))
             barrier = StartBarrier(1, record)
             clock = RunClock(barrier)
-            ledger = BudgetLedger(folder / "budget.sqlite", {"validation": 100})
+            ledger = BudgetLedger(folder / "budget.sqlite")
+            ledger.start_run("validation-run", "validation", 100)
             entered, release = threading.Event(), threading.Event()
             stopping = asyncio.Event()
             reserve = ledger.reserve
@@ -1952,7 +1992,7 @@ class AutoRestartTests(unittest.IsolatedAsyncioTestCase):
 
 class PeerExitLabelTests(unittest.TestCase):
     """RT-3 through the production solver, budget filter and a real Inspect eval (fake sandbox/CLI)."""
-    def run_peer(self, outputs, caps=None):
+    def run_peer(self, outputs, budget=100):
         try:
             from inspect_ai import eval_async
             from inspect_ai.model import get_model
@@ -1972,7 +2012,8 @@ class PeerExitLabelTests(unittest.TestCase):
         sandbox_cls.root = str(folder)
         events = []
         record = lambda kind, agent, payload: events.append((kind, agent, payload))  # noqa: E731
-        ledger = BudgetLedger(folder / "b.sqlite", caps or {"validation": 100})
+        ledger = BudgetLedger(folder / "b.sqlite")
+        ledger.start_run("peer-run", "validation", budget)
         barrier = StartBarrier(1, record)
         clock = RunClock(barrier)
 
@@ -2008,7 +2049,7 @@ class PeerExitLabelTests(unittest.TestCase):
     def test_budget_denial_is_labelled_budget_exhausted(self):
         from inspect_ai.model import ModelOutput
         exit_record = self.run_peer(lambda: ModelOutput.from_content(model="m", content="x"),
-                                    caps={"validation": 0.000001})
+                                    budget=0.000001)
         self.assertEqual((exit_record["status"], exit_record["harness_status"]), ("budget_exhausted", "interrupted"))
         self.assertEqual(exit_record["inference"]["last_denial"], "budget_admission_failed")
 

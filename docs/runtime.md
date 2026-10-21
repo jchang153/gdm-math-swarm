@@ -85,15 +85,13 @@ operator's shell is inherited and shows up as `true`. Only
 again as a backstop). `runtime.jsonl` records `inspect_dotenv_disabled` and, after the
 run, `credential_environment` (presence only); the compatibility evidence records
 `credentials_in_environment`. `build_openrouter_model` loads the key and, before any
-paid request, verifies its provider-side limit with an unpaid `GET /api/v1/key`
-(`provider_limit.verify_key_limit`) against the CALLING scope's remaining allowance.
-The limit must be set and must not reset, and `limit_remaining` must not exceed that
-allowance. Otherwise `ProviderLimitError` is raised (`provider_limit_refused`) and
-nothing is built. On success the key-free report is recorded as
-`provider_limit_verified` and in settings.json. The compatibility check therefore
-needs a key whose `limit_remaining` is at most the remaining $2 compatibility
-allowance, and the pilot needs one at most the remaining $20 pilot allowance: use
-separate keys or adjust the limit between the two steps (configs/README.md).
+paid request, records its provider-side limit with an unpaid `GET /api/v1/key`
+(`provider_limit.key_limit_record`), compared with the run's budget for information only
+(owner decision, October 20, 2026: the run's budget is the one spending control). Nothing
+is refused: a key without a limit, a resetting limit, a remaining amount above the run's
+budget or a failed query only adds warnings. The key-free record is recorded as
+`provider_limit_recorded`, written to `data/validation/provider-limit-<UTC>.json` and
+kept in settings.json.
 
 ## Configuration read by `run_pilot`
 
@@ -105,8 +103,8 @@ constant that changes only together with a recorded decision in docs/plan.md),
 `compilation_timeout_seconds` (120), `startup_timeout_seconds` (600), `max_run_seconds`
 (5400), `post_depletion_seconds` (600), `stop_grace_seconds` (180), `run_dir`,
 `provider_route`, `provider_settings`, `system_prompt_mode`, `claude_auto_memory`,
-`fixed_task_manifest`, `paid_launch_enabled`, `verified_integration`, `track` and the
-**required** `max_connections` (no default); optional `max_subprocesses` (64),
+`fixed_task_manifest`, `run_budget_usd` (the run's budget; $100 when absent), `track` and
+the **required** `max_connections` (no default); optional `max_subprocesses` (64),
 `persona_counts` (when present, preflight requires it to equal the balanced
 allocation), `warm_up_memory` (`6g`), `warm_up_timeout_seconds` (900) and
 `in_flight_grace_seconds` (120). Optional `budget_track` (`ablation` or `gemini`,
@@ -152,16 +150,20 @@ allocation), `warm_up_memory` (`6g`), `warm_up_timeout_seconds` (900) and
   track with no `seeded` block at all, explicit `max_connections` equal to
   `agent_count`, prompt mode), pinned-package, module, Docker-engine and image checks,
   applies the launch interlock (below; only a config's recorded concurrent-run override
-  turns another checkout's agent sandboxes and judge compilers into warnings), and merges
-  `launch_gates.evaluate`
-  (evidence files, route pricing, manifest, ledger,
-  provider limit, the `compatibility` evidence, and the `verified_integration` /
-  `paid_launch_enabled` attestations). A missing or failing gate module is itself a
-  blocker. Preflight's own "Paid launch is disabled" is added only when the gates did
-  not evaluate `paid_launch_enabled`, so the blocker appears once. Preflight never
-  reads a credential or calls a model.
-* **Ledger** (I4): `budget.DEFAULT_LEDGER_PATH(repo)` (`state/budget.sqlite`, never
-  under `runs/`), scope `pilot`.
+  turns another checkout's agent sandboxes and judge compilers into warnings), and merges `launch_gates.evaluate`
+  (evidence files, route pricing, manifest, the run budget, the informational ledger and
+  provider-limit reports, and the `compatibility` evidence). There is no attestation or
+  approval gate (docs/plan.md, "One per-run budget, no manual approvals (October 20,
+  2026)"). A missing or failing gate module is itself a blocker. Preflight never reads a
+  credential or calls a model.
+* **Ledger and run budget** (I4): `budget.ledger_path_for(config, repo)` (`state/budget.sqlite`,
+  never under `runs/`, or a budget track's own ledger, e.g. `state/gemini-budget.sqlite`), scope `pilot`. `run_pilot` registers the run there before any request
+  (`BudgetLedger.start_run(<run_dir name>, "pilot", run_budget_usd or $100)`); every request of
+  the run is admitted only while the run's own committed spend plus the reservation fits that
+  budget, so the run stops cleanly (agent exits `budget_exhausted`) at its budget. Holds and
+  violations of earlier runs never count against it. The run's final state is
+  `RUN/run-budget.json`; the key's provider-side limit is recorded (never refused) as
+  `provider_limit_recorded` and in `data/validation/provider-limit-<UTC>.json`.
 
 ## Launch interlock
 
@@ -433,7 +435,7 @@ consecutive truncations. `agent_exit` then distinguishes:
 | `harness_completed_empty_reply` | It ended right after a finished response with no visible text and no tool calls (`final_output` `reasoning_only` or `empty`). Not voluntary. |
 | `harness_completed_after_truncation` | The session ended right after truncated responses (recovery exhausted). |
 | `harness_completed_after_provider_error` | It ended right after a request that raised (e.g. Claude Code gave up after its API retries). |
-| `budget_exhausted` | The shared ledger refused admission (allowance cannot cover the request, or the scope is blocked by an estimate violation). |
+| `budget_exhausted` | The ledger refused admission: the run's own budget cannot cover the request. |
 | `budget_ledger_unavailable` | Admission failed because the ledger stayed locked. |
 | `error_after_truncation` | The CLI exited with an error right after truncated responses. |
 | `error` | Harness or sample error; re-raised so Inspect records it. |
@@ -445,7 +447,7 @@ finished response), `harness_after_stop` (how the harness ended after a stop, if
 did) and the filter's request counters. The
 mock validation simulates both a single truncation (must continue) and exhaustion;
 a live truncated reasoning turn may take Claude Code's "thinking-only" branch, which
-must be observed in the approved $2 compatibility check (**pending**).
+must be observed in the live compatibility check (**pending**).
 
 ## Observation and logging
 
@@ -560,7 +562,7 @@ Rebuild the agent image on the VM first (see "Rebuild required" above).
 | 1 | `PYTHONPATH=src .venv/bin/python scripts/validate_runtime.py` | `data/validation/runtime-e2e-<UTC>.json` | ≈12–17 min; 3 agent containers + 1 judge container + warm-up |
 | 2 | `PYTHONPATH=src .venv/bin/python scripts/isolation_probes.py` | `data/validation/runtime-isolation-<UTC>.json` | ≈10–20 min; 2 agent containers + 1 judge probe container |
 | 3 | `PYTHONPATH=src .venv/bin/python scripts/capacity_probe.py --duration 600` | `data/validation/runtime-capacity-<UTC>.json` | ≈20–30 min; 20 agent containers + judge containers; whole Docker VM |
-| 4 | `PYTHONPATH=src .venv/bin/python scripts/compat_check.py --i-have-user-approval` | `data/validation/compatibility-<UTC>.json` | **PAID** (≤ $2 scope); ≤ 10 min; 1 agent container; only after the user confirms immediately before |
+| 4 | `PYTHONPATH=src .venv/bin/python scripts/compat_check.py` | `data/validation/compatibility-<UTC>.json` | **PAID** (its own run budget, `run_budget_usd`, default $100; in practice a few dollars at most); ≤ 10 min; 1 agent container; no confirmation |
 
 The end-to-end check runs three mock-scripted peers through the production solver,
 filter, barrier (one late agent), snapshotter, instruction archive, conference tools,
@@ -636,35 +638,34 @@ cannot produce passing capacity evidence. Local compiles killed by the 120 s wra
 (exit 137 with the timeout notice) count under `no_compile_timeouts`. A bare 137 still
 counts as an OOM kill.
 
-## Live compatibility check (paid, separate $2 allowance)
+## Live compatibility check (paid, its own run budget)
 
 docs/plan.md "Live compatibility check (October 13, 2026)": one agent, a few turns on
-the frozen route, explicit abort criteria, ledger scope `compatibility` (cap $2, outside
-the $20 pilot and $5 analysis allowances). `scripts/compat_check.py` is written and its
+the frozen route, explicit abort criteria, ledger scope `compatibility`; since October 20,
+2026 one run with its own budget (`run_budget_usd`, default $100) instead of a separate
+cumulative allowance. `scripts/compat_check.py` is written and its
 logic is **validated** offline (refusals, abort guard, evidence and a full rehearsal of
 `run_check` through real Inspect with fake sandbox/CLI/judge and a scripted model); the
-paid run itself is **pending** the execution hold and the user's confirmation
-immediately before it.
+paid run itself needs no confirmation (October 20, 2026): its budget is the run's
+`run_budget_usd`.
 
 Procedure:
 
-1. Phase B steps 1–2 pass (runtime-e2e and runtime-isolation evidence), the route
-   freeze is fresh (`scripts/freeze_route.py`), and the user approves this run.
-2. `PYTHONPATH=src .venv/bin/python scripts/compat_check.py --i-have-user-approval`.
-   Without the flag it refuses. It opens `state/budget.sqlite` with
-   `budget.DEFAULT_CAPS` and refuses unless scope `compatibility` exists with cap
-   exactly $2, has no unacknowledged estimate violation and at least `--min-remaining`
-   (default $0.50) left; unless the launch gates `fixed_task_manifest`,
-   `frozen_dataset`, `approved_settings`, `config_caps`, `route_pricing`,
-   `credential_presence`, `runtime-e2e` and `runtime-isolation` pass; unless the pinned
-   Inspect packages are installed, the launch interlock is clear (no leftover judge
-   container, no running comparator container, no other run's agent sandbox; no
-   command-line override for this paid check, only the config's concurrent-run override
-   on a track that allows it), no other pilot or compatibility check of this checkout holds
-   the launch lock (which the check then holds until it ends), and both images pin to IDs. Its single agent uses
-   `max_connections` 1 (recorded). It prints the compatibility ledger snapshot and asks the operator to type
-   the remaining allowance (`--yes` skips this only for a user-approved run). Nothing
-   is spent and no credential is read before that point.
+1. Phase B steps 1–2 pass (runtime-e2e and runtime-isolation evidence).
+2. `PYTHONPATH=src .venv/bin/python scripts/compat_check.py [--config configs/pilot.json]`.
+   It refreshes the route-pricing freeze automatically when needed (unpaid), then refuses
+   unless `run_budget_usd` is absent or a positive amount; unless the launch gates
+   `fixed_task_manifest`, `frozen_dataset`, `approved_settings`, `run_budget`,
+   `route_pricing`, `credential_presence`, `runtime-e2e` and `runtime-isolation` pass;
+   unless the pinned Inspect packages are installed, the launch interlock is clear (no
+   leftover judge container, no running comparator container, no other run's agent
+   sandbox; no command-line override for this paid check, only the config's concurrent-run override on a
+   track that allows it), no other pilot or compatibility check of this checkout holds the launch lock
+   (which the check then holds until it ends), and both images pin to IDs. Its single agent
+   uses `max_connections` 1 (recorded). It prints the run's budget and registers the run
+   `compat-<UTC>` in the config's ledger (`state/budget.sqlite`, or a budget track's own) (scope `compatibility`); there is no prompt,
+   approval flag or terminal requirement. Nothing is spent and no credential is read
+   before that point.
 3. The run uses the production pieces through the helpers shared with `run_pilot`:
    pinned images, warm-up, `make_conference` (real conference service and operational
    judge in the researcher-only `runs/compat-<UTC>/`), the real pilot prompt for one
@@ -673,8 +674,8 @@ Procedure:
    `build_openrouter_model` (the same `settings_from_config`,
    `capture_openrouter_cost`, `max_retries=0`; the key is read there, via
    `secrets.load_openrouter_key`, and never written; the key's provider-side limit is
-   then verified against the remaining compatibility allowance before any paid
-   request), `eval_options` and `supervise`.
+   then recorded, informational, before any paid request), `eval_options` and
+   `supervise`.
    Before the agent runs, one researcher-side reasoning-cap probe request (agent id
    `cap-probe`, never shown to any agent, same ledger scope and budget filter, about
    $0.002) runs with `max_tokens` lowered to `--cap-probe-max-tokens` (default 1024).
@@ -693,18 +694,20 @@ Procedure:
    what ran. Failures: any other admission refusal (`admission_refused`); the first
    permanent provider HTTP 4xx (excluding temporary
    408/429), a converted pre-generation rejection, tool-call parse failure or provider
-   output error; any estimate violation in the scope. Temporary 408/429, server and
+   output error; any estimate violation among the check's own requests; the run budget
+   refusing a request. Temporary 408/429, server and
    transport errors retain Claude Code's existing bounded retries. The preflight records
    each transient error and permits it in evidence only when an exact matching failure
    is followed by a successful, provider-priced response from the same agent. Terminal
-   or unknown errors still fail; unresolved billing still requires reconciliation. This
-   policy applies to the small compatibility check, not to pilot stopping.
+   or unknown errors still fail. This policy applies to the small compatibility check,
+   not to pilot stopping.
 5. Evidence `data/validation/compatibility-<UTC>.json` (schema `gdm-compatibility/1`):
    `created_at`, `all_required_passed`, `image_ids {agent, lean}`, `model_id`,
    `provider_route`, `settings` (`provider.frozen_fields`), `request_ids` (every ledger
    request the check admitted, agent and probe), `requests` (`len(request_ids)`),
    `spent_usd` (the committed total of exactly those rows at run end, uncertain holds
-   at their full reservation), and `checks {name: {passed, required, detail}}`.
+   at their full reservation), `run_id` and `run_budget_usd`, and
+   `checks {name: {passed, required, detail}}`.
    Required: `tool_call_parsed`, `conference_tool_call`, `reasoning_replay_accepted`,
    `provider_cost_reported`, `completion_within_max_tokens`, `reasoning_cap_enforced`,
    `no_estimate_violation`, `route_pinned`, `no_sample_error`, and for models with signed
@@ -727,18 +730,18 @@ Procedure:
    tool-call list and warm-up. Credential-like strings are redacted before writing.
 6. The launch gate `compatibility` (in `launch_gates`, integrator-owned) reads the
    newest file: all required checks passed, model/route/settings equal
-   `settings_from_config(config)`, `spent_usd` within the cap, agent image equal to the
-   current one, and (interface X4) the ledger's CURRENT state of exactly the
-   `request_ids`: all known and in scope `compatibility`, none unresolved, none in
-   `estimate_violation` or `violation_acknowledged`, and their settled sum within $2.
-   Reconciling an uncertain hold after the run (`scripts/reconcile_ledger.py`) is
-   therefore supported. The scope-wide checks (no unresolved compatibility hold, no
-   unacknowledged violation) still apply. `verified_integration: true` remains a
-   separate explicit user confirmation that is also required; the evidence alone does
-   not set it.
+   `settings_from_config(config)`, `spent_usd` a nonnegative amount and the agent image
+   equal to the current one. It reports (interface X4, warnings only) the ledger's
+   CURRENT state of exactly the `request_ids`: unknown ids, ids outside scope
+   `compatibility`, unresolved holds and requests billed above their reservation. None
+   of these blocks launch, and nothing is compared with an allowance.
 
 
-## Explicitly authorized unlimited pilot key
+## Explicitly authorized unlimited pilot key (historical)
+
+Superseded on October 20, 2026 (docs/plan.md, "One per-run budget, no manual approvals"): the
+provider-side key limit is recorded, never enforced, for every key; the configuration keys below
+are no longer read.
 
 On October 14 the user authorized the main OpenRouter key despite its lack of a
 provider-side cap. The pilot configuration records `allow_unlimited_provider_key:

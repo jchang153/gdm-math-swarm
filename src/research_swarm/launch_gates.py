@@ -1,14 +1,23 @@
 """Evidence-based launch gates for the paid pilot (interface I3).
 
-``evaluate(config, repo_root)`` replaces self-attested readiness booleans with
-checks against frozen data, the shared budget ledger and the newest validation
-evidence in ``data/validation/`` (interface I6: ``<prefix>-<UTC YYYYMMDDTHHMMSSZ>.json``
-with ``schema``, ``created_at``, ``all_required_passed`` and ``image_ids``).
-Every check reports its evidence path and a reason. ``verified_integration`` and
-``paid_launch_enabled`` remain explicit user confirmations, but neither is
-sufficient alone: ``verified_integration`` is required in addition to passing
-compatibility evidence (``compatibility-<UTC>.json`` from the separate $2 live
-compatibility check, plan row "Live compatibility check").
+``evaluate(config, repo_root)`` checks frozen data, the budget ledger and the newest
+validation evidence in ``data/validation/`` (interface I6: ``<prefix>-<UTC YYYYMMDDTHHMMSSZ>.json``
+with ``schema``, ``created_at``, ``all_required_passed`` and ``image_ids``). Every check
+reports its evidence path and a reason.
+
+Spending (owner decisions, docs/plan.md "One per-run budget, no manual approvals (October 20,
+2026)"): the one spending control is the run's own budget, enforced by the ledger on every
+request (``budget.BudgetLedger.reserve``). The ``run_budget`` gate only validates the config's
+``run_budget_usd`` (absent means the $100 default; an invalid value is refused). The ``ledger``
+gate is informational: cumulative history, holds and estimate violations of earlier runs never
+block a new run. There is no cumulative cap, no separate compatibility allowance, no
+provider-key limit refusal (``provider_limit`` is informational: the paid launch checks the key
+it loads and records the result), no typed or attested approval and no cap equality with the
+plan. A stale, invalid or missing route-pricing freeze is refreshed automatically (unpaid) by the
+launch scripts first; a freeze whose catalog no longer validates against the config's reservation
+prices still refuses (the reservations must be upper bounds), and so does a freeze that is still
+older than ``route_pricing_max_age_hours`` after that refresh (reservations from old prices are no
+upper bound when a price went up).
 
 Runtime evidence must name its required checks (``REQUIRED_EVIDENCE_CHECKS``,
 ``ISOLATION_AGENT_CHECKS``), so a record from an older validation script that
@@ -20,8 +29,9 @@ true and ``limits`` equal to the config's judge limits, ``JUDGE_LIMIT_EVIDENCE``
 which includes the ``conference-race`` evidence from scripts/validate_conference.py).
 The evaluator gate also requires ``evaluator.validation_status()`` to accept the
 record (fixture manifest, pins, seccomp, image) and a passing self-comparison for
-every pilot template. The compatibility gate checks the ledger's current state of
-exactly the requests the check admitted (``request_ids``).
+every pilot template. The compatibility gate checks the live compatibility evidence
+(model, route, settings, agent image, required checks); the ledger state of the requests the
+check admitted (``request_ids``) is reported, never refused.
 
 The config itself must match the approved plan values (``approved_settings()``;
 its ``agent_count`` is ``runtime.APPROVED_AGENT_COUNT``, the single source of
@@ -33,9 +43,7 @@ a pilot config).
 Never loads a credential (credential checks are presence/permissions only), never
 contacts the network, never writes: the ledger is read read-only. The only external
 calls are ``docker image inspect`` against the local daemon to compare image IDs
-(here and inside ``evaluator.validation_status``). The provider-limit gate reads
-evidence only; the paid paths re-verify the key they load
-(``provider_limit.verify_key_limit``).
+(here and inside ``evaluator.validation_status``).
 """
 from __future__ import annotations
 
@@ -47,17 +55,11 @@ import subprocess
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from .budget import (DEFAULT_CAPS, DEFAULT_LEDGER_PATH, INITIAL_PILOT_SETTLED_USD, REPEAT_PILOT_ALLOWANCE_USD,
-                     EIGHT_GIB_CAP_USD, EIGHT_GIB_PRIOR_SETTLED_USD, EIGHT_GIB_PRIOR_HELD_USD,
-                     EIGHT_GIB_PRIOR_COMMITTED_USD, eight_gib_prior_problems,
-                     CACHE_REPEAT_CAP_USD, CACHE_REPEAT_PRIOR_SETTLED_USD, CACHE_REPEAT_PRIOR_HELD_USD,
-                     CACHE_REPEAT_PRIOR_COMMITTED_USD, CACHE_REPEAT_PRIOR_CALLS_SHA256, cache_repeat_prior_problems,
-                     LEGACY_LEDGER_RELATIVE, UNRESOLVED_STATES, list_requests,
-                     read_snapshot, budget_track_problems, caps_for, ledger_path_for, track_ledger_relative,
-                     track_of, BUDGET_TRACKS)
+from .budget import (BUDGET_TRACKS, DEFAULT_LEDGER_PATH, DEFAULT_RUN_BUDGET_USD, LEDGER_STATES, LEGACY_LEDGER_RELATIVE,
+                     RUN_BUDGET_KEY, UNRESOLVED_STATES, VIOLATION_STATES, budget_track_problems, ledger_path_for,
+                     list_requests, read_snapshot, run_budget, track_ledger_relative, track_of)
 from .provider import (CONFIG_OVERRIDABLE, MODEL_ID, SIGNED_REASONING_MODEL_IDS, TRACK_MODEL_IDS, frozen_fields,
                        settings_from_config, validate_catalog)
-from .provider_limit import TOLERANCE_USD as LIMIT_TOLERANCE_USD, assess as assess_provider_limit
 
 PILOT_SUBSET = "data/pilot_subset.json"
 PARENT_MANIFEST = "data/manifest.json"
@@ -149,7 +151,18 @@ from .prompts import (PERSONA_REVIEWING_DEFAULT, PERSONA_REVIEWING_KEY, PROMPT_V
                       persona_reviewing_problems, prompt_variant_problems)
 
 
-CONFIG_CAP_KEYS = {"pilot": "max_pilot_usd", "analysis": "max_analysis_usd", "compatibility": "max_compatibility_usd"}
+# Config keys of the superseded spending controls (cumulative caps, attestations, approval notes,
+# freshness limits, repeat bindings). They are not read; a config that still names one gets a
+# warning in the ``run_budget`` gate, never a refusal. ``run_budget_usd`` is the run's budget.
+OBSOLETE_SPENDING_KEYS = (
+    "max_pilot_usd", "max_analysis_usd", "max_compatibility_usd", "verified_integration", "paid_launch_enabled",
+    "allow_unlimited_provider_key", "unlimited_provider_key_approval", "provider_limit_max_age_hours",
+    "pilot_prior_settled_usd", "pilot_additional_allowance_usd", "pilot_prior_held_usd", "pilot_prior_committed_usd",
+    "pilot_prior_uncertain_requests", "pilot_prior_calls_sha256", "behavior_judge_approval",
+    "behavior_judge_live_max_usd")
+# Recorded request transformation (docs/prompt-caching.md): a config that names the version must
+# name the one the runtime applies (research integrity, not spending).
+PROMPT_CACHE_NORMALIZATION_KEY = "prompt_cache_normalization"
 
 # (evidence prefix, image roles that must match, image roles checked only if recorded)
 EVIDENCE_GATES = (
@@ -188,8 +201,8 @@ def capacity_config(config):
 # image ID), so a later change to the generated compose file invalidates it.
 COMPOSE_BOUND_EVIDENCE = ("runtime-e2e", "runtime-isolation", "runtime-capacity")
 # Evidence gates the owner may waive for one run on the gemini track (docs/plan.md, "Gemini 3.1 Pro
-# collaboration run authorized", Evidence row): config ``waived_evidence_gates`` (a subset of these)
-# plus a nonempty ``evidence_waiver_approval`` note. Never on the baseline or ablation track.
+# collaboration run authorized", Evidence row): config ``waived_evidence_gates`` (a subset of these;
+# an ``evidence_waiver_approval`` note is optional and recorded). Never on the baseline or ablation track.
 WAIVABLE_EVIDENCE = ("evaluator", "runtime-e2e", "runtime-isolation", "runtime-capacity")
 
 
@@ -203,11 +216,11 @@ def evidence_waiver(config, prefix):
         problems.append(f"waived_evidence_gates must be a list drawn from {list(WAIVABLE_EVIDENCE)}")
     if track_of(config) != "gemini":
         problems.append("an evidence waiver is allowed only on the gemini budget track")
+    # The waiver is the config's own listing (no approval note is required, docs/plan.md "One per-run
+    # budget, no manual approvals (October 20, 2026)"); an optional evidence_waiver_approval is recorded.
     note = (config or {}).get("evidence_waiver_approval")
-    if not isinstance(note, str) or not note.strip():
-        problems.append("waived_evidence_gates requires a nonempty evidence_waiver_approval note")
-        note = ""
-    return {"note": note.strip(), "problems": problems}
+    note = note.strip() if isinstance(note, str) and note.strip() else "listed in waived_evidence_gates"
+    return {"note": note, "problems": problems}
 # Lean evidence that must come from a complete run (all pilot tasks, strict variant
 # where applicable, no subset/skip flags: ``complete`` true) at the operational
 # judge limits (``limits`` {timeout_seconds, memory, cpus} equal to the config's).
@@ -267,9 +280,6 @@ def compatibility_required_checks(model_id):
     return COMPATIBILITY_REQUIRED_CHECKS + signed
 
 
-# Every ledger state (budget.py); a request id in none of them is unknown to the ledger.
-LEDGER_STATES = (*UNRESOLVED_STATES, "settled", "estimate_violation", "violation_acknowledged")
-VIOLATION_STATES = ("estimate_violation", "violation_acknowledged")
 
 
 # ---------------------------------------------------------------- evidence files
@@ -294,6 +304,27 @@ def newest_evidence(validation_dir, prefix):
     if not files:
         return None, None
     return files[-1], json.loads(files[-1].read_text())
+
+
+def route_pricing_refresh_reason(config, validation_dir, now=None):
+    """Why the launch scripts should refresh the route-pricing freeze (scripts/freeze_route.py,
+    unpaid) before launching, or None: no freeze yet, a newest freeze that is not valid (for example
+    a catalog that briefly reported the pinned route unavailable), one older than
+    ``route_pricing_max_age_hours`` (default 72), or one frozen for other settings."""
+    path, record = newest_evidence(validation_dir, "route-pricing")
+    if path is None:
+        return "no route-pricing freeze yet"
+    if record.get("valid") is not True:
+        return f"the newest freeze is not valid ({record.get('reason')})"
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    age = (now - _created(record, path)).total_seconds() / 3600
+    limit = float((config or {}).get("route_pricing_max_age_hours", DEFAULT_MAX_AGE_HOURS))
+    if age > limit or age < -0.1:
+        return f"the newest freeze is {age:.1f} h old (refresh after {limit:g} h)"
+    frozen = {k: v for k, v in (record.get("settings") or {}).items() if k in CONFIG_OVERRIDABLE}
+    if frozen != frozen_fields(settings_from_config(config or {})):
+        return "the newest freeze was made for other provider settings"
+    return None
 
 
 def write_evidence(validation_dir, prefix, record, when=None):
@@ -535,13 +566,13 @@ class _Gates:
             drift[MAX_CONNECTIONS_KEY] = {"config": self.config.get(MAX_CONNECTIONS_KEY),
                                           "approved": "equal to agent_count"}
         problems += connections
-        unlimited = self.config.get("allow_unlimited_provider_key", False)
-        if type(unlimited) is not bool:
-            problems.append("allow_unlimited_provider_key must be a boolean")
-        elif unlimited:
-            approval = self.config.get("unlimited_provider_key_approval")
-            if not isinstance(approval, str) or not approval.strip():
-                problems.append("allow_unlimited_provider_key requires a nonempty unlimited_provider_key_approval note")
+        if PROMPT_CACHE_NORMALIZATION_KEY in self.config:
+            from .prompt_cache import TOKEN_COUNTER_NORMALIZATION_VERSION
+            named = self.config.get(PROMPT_CACHE_NORMALIZATION_KEY)
+            if named != TOKEN_COUNTER_NORMALIZATION_VERSION:
+                drift[PROMPT_CACHE_NORMALIZATION_KEY] = {"config": named, "approved": TOKEN_COUNTER_NORMALIZATION_VERSION}
+                problems.append(f"{PROMPT_CACHE_NORMALIZATION_KEY} {named!r} differs from the runtime's recorded "
+                                f"normalization {TOKEN_COUNTER_NORMALIZATION_VERSION!r} (docs/prompt-caching.md)")
         from . import runtime  # lazy, as in approved_settings(): the concurrent-run override's config check
         problems += runtime.concurrent_run_problems(self.config)
         self.add("approved_settings", not problems, "; ".join(problems) or
@@ -554,12 +585,34 @@ class _Gates:
                  "spontaneous track; no seeded-contagion configuration present")
 
     def behavior_judge(self):
-        from .auto_judge import enabled, standing_approval_problems
-        problems = standing_approval_problems(self.config)
-        self.add("behavior_judge", not problems, "; ".join(problems) or (
-            "automatic post-run behavior judge enabled under the owner's standing approval (per-run cap "
-            f"${self.config.get('behavior_judge_max_usd')})" if enabled(self.config) else
-            "no automatic post-run behavior judge"))
+        from .auto_judge import enabled, judge_budget, judge_config_problems, live_settings
+        problems = judge_config_problems(self.config)
+        if problems or not enabled(self.config):
+            return self.add("behavior_judge", not problems, "; ".join(problems) or "no automatic post-run behavior judge")
+        amount, source = judge_budget(self.config)
+        live = live_settings(self.config)
+        during = {"paid": f"; live judging during the run every {live['interval_seconds']} s, from the same budget",
+                  "mock": "; free mock shadow of live judging during the run"}
+        self.add("behavior_judge", True, f"automatic post-run behavior judge enabled; its budget for the run is "
+                 f"${amount} ({source})" + during.get(live["mode"], ""), budget_usd=str(amount), budget_source=source,
+                 live_mode=live["mode"])
+
+    def run_budget(self):
+        """The run's budget, the one spending control: ``run_budget_usd`` when present (it must be a
+        positive amount), else the $100 default. Superseded spending keys are reported, never refused."""
+        warnings = []
+        named = [key for key in OBSOLETE_SPENDING_KEYS if key in self.config]
+        if named:
+            warnings.append("config names superseded spending keys that are not read: " + ", ".join(named)
+                            + f" (the run's budget is {RUN_BUDGET_KEY})")
+        try:
+            amount, source = run_budget(self.config)
+        except ValueError as ex:
+            return self.add("run_budget", False, f"{ex}; set {RUN_BUDGET_KEY} to a positive amount in USD or remove it "
+                            f"for the ${DEFAULT_RUN_BUDGET_USD} default", warnings=warnings)
+        self.add("run_budget", True, f"run budget ${amount} ({source}); a request is admitted only while this run's "
+                 "committed spend plus its reservation fits it", budget_usd=str(amount), budget_source=source,
+                 warnings=warnings)
 
     def budget_track(self):
         problems = budget_track_problems(self.config)
@@ -578,33 +631,28 @@ class _Gates:
         self.add("persona_reviewing", not problems, "; ".join(problems) or f"persona reviewing lines {reviewing!r}",
                  persona_reviewing=reviewing)
 
-    def config_caps(self):
-        drift = {}
-        caps = caps_for(self.config)
-        for scope, key in CONFIG_CAP_KEYS.items():
-            value = self.config.get(key)
-            if value is None or Decimal(str(value)) != Decimal(str(caps[scope])):
-                drift[key] = {"config": value, "ledger_default": caps[scope]}
-        self.add("config_caps", not drift, "config caps differ from the approved ledger caps: " + ", ".join(sorted(drift))
-                 if drift else "config caps equal the approved ledger caps (" + ", ".join(f"{k} ${v}" for k, v in caps.items()) + ")", drift=drift)
-
     def route_pricing(self):
         path, record = newest_evidence(self.validation, "route-pricing")
         if path is None:
-            return self.add("route_pricing", False, "no route-pricing evidence; run scripts/freeze_route.py")
-        problems = []
+            return self.add("route_pricing", False, "no route-pricing evidence; scripts/run_pilot.py and "
+                            "scripts/compat_check.py run scripts/freeze_route.py (unpaid) automatically")
+        problems, warnings = [], []
         settings = settings_from_config(self.config)
         if record.get("valid") is not True:
-            problems.append(f"freeze invalid: {record.get('reason')}")
+            problems.append(f"freeze invalid: {record.get('reason')} (the config's reservation prices must cover the "
+                            "route's current prices)")
         if record.get("credential_used") is not False:
             problems.append("freeze must record credential_used=false")
         age = (self.now - _created(record, path)).total_seconds() / 3600
         limit = float(self.config.get("route_pricing_max_age_hours", DEFAULT_MAX_AGE_HOURS))
         if age > limit or age < -0.1:
-            problems.append(f"freeze is {age:.1f} h old (limit {limit:g} h); re-run scripts/freeze_route.py")
+            problems.append(f"freeze is {age:.1f} h old (at most {limit:g} h; scripts/run_pilot.py and "
+                            "scripts/compat_check.py refresh it automatically before a paid launch, unpaid, and "
+                            "refuse only when that refresh fails)")
         frozen = {k: v for k, v in (record.get("settings") or {}).items() if k in CONFIG_OVERRIDABLE}
         if frozen != frozen_fields(settings):
-            problems.append("frozen settings differ from the ProviderSettings run_pilot will build")
+            problems.append("frozen settings differ from the ProviderSettings run_pilot will build (the launch "
+                            "scripts refresh the freeze for this config automatically)")
         snapshot = self.validation / "catalog-snapshots" / f"{record.get('catalog_sha256')}.json"
         if not snapshot.is_file() or _sha256(snapshot) != record.get("catalog_sha256"):
             problems.append("archived catalog snapshot missing or hash mismatch")
@@ -613,10 +661,11 @@ class _Gates:
                 validate_catalog(json.loads(snapshot.read_bytes()), settings)
             except ValueError as ex:
                 problems.append(f"offline catalog validation failed: {ex}")
-        self.add("route_pricing", not problems, "; ".join(problems) or "fresh, valid, equal to launch settings",
+        self.add("route_pricing", not problems, "; ".join(problems) or "valid and equal to the launch settings",
                  path, age_hours=round(age, 2), provider_route=settings.provider_route,
                  provider_name=(record.get("endpoint") or {}).get("provider_name"),
-                 prompt_usd_per_token=settings.prompt_usd_per_token, output_usd_per_token=settings.output_usd_per_token)
+                 prompt_usd_per_token=settings.prompt_usd_per_token, output_usd_per_token=settings.output_usd_per_token,
+                 warnings=warnings)
 
     def evidence(self, prefix, required, optional):
         waiver = evidence_waiver(self.config, prefix)
@@ -715,13 +764,15 @@ class _Gates:
         details["pilot_self_compare_gaps"] = gaps
         return problems
 
-    def compatibility(self, snapshot, ledger_path=None):
-        """Evidence from the separate $2 live compatibility check (scripts/compat_check.py)."""
+    def compatibility(self, ledger_path=None):
+        """Evidence from the live compatibility check (scripts/compat_check.py): the frozen model,
+        route and settings work with Claude Code on the current agent image (research integrity).
+        The ledger state of the requests it admitted is reported (warnings), never refused: the
+        check had its own run budget and spending has no other control."""
         path, record = newest_evidence(self.validation, "compatibility")
         if path is None:
-            return self.add("compatibility", False, "no compatibility-<UTC>.json evidence; the separate $2 live "
-                            "compatibility check (scripts/compat_check.py, ledger scope 'compatibility') has not run; "
-                            "it needs the user's confirmation immediately before the paid call")
+            return self.add("compatibility", False, "no compatibility-<UTC>.json evidence; run the live compatibility "
+                            "check (scripts/compat_check.py; its own run budget, ledger scope 'compatibility')")
         problems = []
         if record.get("schema") != COMPATIBILITY_SCHEMA:
             problems.append(f"schema is not {COMPATIBILITY_SCHEMA}")
@@ -737,59 +788,39 @@ class _Gates:
         checked = record.get("settings") if isinstance(record.get("settings"), dict) else {}
         if {k: v for k, v in checked.items() if k in CONFIG_OVERRIDABLE} != frozen_fields(settings):
             problems.append("checked settings differ from the ProviderSettings run_pilot will build")
-        cap = Decimal(str(caps_for(self.config)["compatibility"]))
         try:
             spent = Decimal(str(record.get("spent_usd")))
             if not spent.is_finite() or spent < 0:
                 raise InvalidOperation
         except (InvalidOperation, ValueError):
-            spent = None
             problems.append(f"spent_usd {record.get('spent_usd')!r} is not a nonnegative decimal")
-        if spent is not None and spent > cap:
-            problems.append(f"spent_usd {spent} exceeds the ${cap} compatibility allowance")
         requests = record.get("requests")
         if not isinstance(requests, int) or isinstance(requests, bool) or requests < 1:
             problems.append("requests must be a positive integer")
         image_problems, matched = self.match_images(record.get("image_ids"), ("agent",), ())
         problems += image_problems
-        ledger = (snapshot or {}).get("compatibility")
-        ledger_requests = {}
-        if ledger is None:
-            problems.append("the shared ledger records no compatibility scope; the check must reserve and settle in "
-                            "scope 'compatibility' of state/budget.sqlite")
-        else:
-            # Scope-wide: holds and violations from any compatibility run must be handled before launch.
-            if ledger["unresolved_requests"]:
-                problems.append(f"{ledger['unresolved_requests']} unresolved compatibility hold(s); reconcile first "
-                                "(scripts/reconcile_ledger.py)")
-            if ledger["violation"]:
-                problems.append("compatibility scope has an unacknowledged estimate_violation")
-            request_problems, ledger_requests = self.compatibility_requests(record, requests, ledger_path, cap)
-            problems += request_problems
+        warnings, ledger_requests = self.compatibility_requests(record, requests, ledger_path)
         informational = {name: checks[name].get("passed") if isinstance(checks.get(name), dict) else None
                          for name in COMPATIBILITY_INFORMATIONAL_CHECKS}
-        warnings = [f"informational check {name} not observed"
-                    for name, value in informational.items() if value is not True]
+        warnings += [f"informational check {name} not observed"
+                     for name, value in informational.items() if value is not True]
         self.add("compatibility", not problems, "; ".join(problems) or
-                 "live compatibility evidence passed for the frozen model, route, settings and agent image; its "
-                 "ledger requests are settled", path, created_at=record.get("created_at"), images=matched,
-                 spent_usd=record.get("spent_usd"), requests=requests, compatibility_cap_usd=str(cap),
-                 ledger_requests=ledger_requests, warnings=warnings, informational=informational)
+                 "live compatibility evidence passed for the frozen model, route, settings and agent image", path,
+                 created_at=record.get("created_at"), images=matched, spent_usd=record.get("spent_usd"),
+                 run_budget_usd=record.get("run_budget_usd"), requests=requests, ledger_requests=ledger_requests,
+                 warnings=warnings, informational=informational)
 
-    def compatibility_requests(self, record, requests, ledger_path, cap):
-        """X4: the ledger's CURRENT state of exactly the requests the check admitted.
-
-        Not the committed delta frozen at run end: reconciling an uncertain hold
-        lowers committed below that delta, which must not block launch (SPEND-1).
-        """
+    def compatibility_requests(self, record, requests, ledger_path):
+        """X4, informational: the ledger's CURRENT state of exactly the requests the check admitted,
+        as (warnings, details). Holds, violations and unknown ids are reported, never refused."""
         ids = record.get("request_ids")
         if not isinstance(ids, list) or not ids or not all(isinstance(i, str) and i for i in ids):
             return ["evidence lacks request_ids (the ledger request ids the check admitted; older script version?)"], {}
-        problems = []
+        warnings = []
         if len(set(ids)) != len(ids):
-            problems.append("request_ids contains duplicates")
+            warnings.append("request_ids contains duplicates")
         if isinstance(requests, int) and not isinstance(requests, bool) and requests != len(set(ids)):
-            problems.append(f"requests {requests} differs from the {len(set(ids))} recorded request_ids")
+            warnings.append(f"requests {requests} differs from the {len(set(ids))} recorded request_ids")
         rows = {r["request_id"]: r for r in list_requests(ledger_path, states=LEDGER_STATES)} if ledger_path else {}
         found = {i: rows[i] for i in ids if i in rows}
         unknown = [i for i in ids if i not in rows]
@@ -797,183 +828,73 @@ class _Gates:
         unresolved = [i for i, r in found.items() if r["state"] in UNRESOLVED_STATES]
         violated = [i for i, r in found.items() if r["state"] in VIOLATION_STATES]
         if unknown:
-            problems.append(f"{len(unknown)} of the evidence's request_ids are not in the shared ledger")
+            warnings.append(f"{len(unknown)} of the evidence's request_ids are not in this ledger")
         if other_scope:
-            problems.append(f"{len(other_scope)} of the evidence's requests are not in ledger scope 'compatibility'")
+            warnings.append(f"{len(other_scope)} of the evidence's requests are not in ledger scope 'compatibility'")
         if unresolved:
-            problems.append(f"{len(unresolved)} of the evidence's requests are unresolved in the ledger; reconcile "
-                            "first (scripts/reconcile_ledger.py)")
+            warnings.append(f"{len(unresolved)} of the evidence's requests are unresolved in the ledger (counted against "
+                            "the check's own run; scripts/reconcile_ledger.py settles them from provider records)")
         if violated:
-            problems.append(f"{len(violated)} of the evidence's requests exceeded their reservation "
-                            "(estimate_violation); the reservation estimate was not conservative")
+            warnings.append(f"{len(violated)} of the evidence's requests were billed above their reservation "
+                            "(estimate_violation, found after the check ended)")
         settled = sum((Decimal(r["actual_usd"]) for r in found.values() if r["actual_usd"] is not None), Decimal(0))
-        if settled > cap:
-            problems.append(f"the evidence's requests settled {settled}, above the ${cap} compatibility allowance")
         states = {}
         for row in found.values():
             states[row["state"]] = states.get(row["state"], 0) + 1
-        return problems, {"count": len(ids), "states": states, "settled_usd": str(settled)}
+        return warnings, {"count": len(ids), "states": states, "settled_usd": str(settled)}
 
-    def provider_limit(self, pilot_remaining):
+    def provider_limit(self):
+        """Informational only (never refuses): the newest provider-limit record, if any. Every paid
+        launch checks the key it actually loads (unpaid GET /api/v1/key) and records the result;
+        the run's budget is the spending control."""
         path, record = newest_evidence(self.validation, "provider-limit")
         if path is None:
-            return self.add("provider_limit", False, "no provider-limit evidence; the user must set an OpenRouter key "
-                            "credit limit and approve scripts/check_provider_limit.py")
-        problems = []
-        approval = self.config.get("unlimited_provider_key_approval")
-        allow_unlimited = (self.config.get("allow_unlimited_provider_key") is True
-                           and isinstance(approval, str) and bool(approval.strip()))
-        if record.get("all_required_passed") is not True:
-            problems.append("provider-side limit requirements not met: " + ", ".join(
-                k for k, v in (record.get("checks") or {}).items() if not v.get("passed", True)))
-        assessment = assess_provider_limit(
-            record, pilot_remaining if pilot_remaining is not None else caps_for(self.config)["pilot"], self.now,
-            **({"allow_unlimited": True} if allow_unlimited else {}))
-        failed = [name for name, check in assessment["checks"].items() if check.get("passed") is not True]
-        if not assessment["all_required_passed"]:
-            problems.append("provider-side metadata requirements not met: " + ", ".join(failed))
-        if not allow_unlimited and (record.get("unlimited_key_authorized") is True
-                                    or record.get("provider_limit_enforced") is False):
-            problems.append("unlimited-key waiver evidence requires the current approved configuration")
-        age = (self.now - _created(record, path)).total_seconds() / 3600
-        limit = float(self.config.get("provider_limit_max_age_hours", DEFAULT_MAX_AGE_HOURS))
-        if age > limit or age < -0.1:
-            problems.append(f"limit check is {age:.1f} h old (limit {limit:g} h)")
+            return self.add("provider_limit", True, "no provider-limit record yet; every paid launch checks the key it "
+                            "loads (unpaid) and records it (informational)")
+        warnings = []
         if re.search(r"\bsk-[A-Za-z0-9]", json.dumps(record)):
-            problems.append("evidence appears to contain a credential; delete it and re-run the check")
-        warnings = list(dict.fromkeys([*(record.get("warnings") or []), *assessment.get("warnings", [])]))
-        remaining = record.get("limit_remaining")
-        if remaining is not None and pilot_remaining is not None:
-            if Decimal(str(remaining)) > Decimal(pilot_remaining) + LIMIT_TOLERANCE_USD:
-                # The paid launch re-checks the loaded key live and would refuse it.
-                problems.append(f"provider limit_remaining {remaining} exceeds the remaining pilot allowance "
-                                f"{pilot_remaining}; lower the key's limit (the paid launch refuses it)")
-            elif Decimal(str(remaining)) < Decimal(pilot_remaining):
-                warnings.append("provider limit remaining is below the ledger's pilot allowance; the provider would "
-                                "stop the pilot first")
-        waived = assessment.get("provider_limit_enforced") is False
-        description = ("user-authorized unlimited key; provider-side cap is waived, not enforced; shared ledger "
-                       "still enforces the pilot allowance" if waived else
-                       "provider-side limit set, no reset, within the pilot allowance")
-        self.add("provider_limit", not problems, "; ".join(problems) or
-                 description + " (evidence is not bound to a key; the paid launch re-verifies the key it loads "
-                 "with provider_limit.verify_key_limit)",
-                 path, age_hours=round(age, 2), limit=record.get("limit"), limit_remaining=remaining,
-                 limit_reset=record.get("limit_reset"), warnings=warnings,
-                 unlimited_key_authorized=assessment.get("unlimited_key_authorized", False),
-                 provider_limit_enforced=assessment.get("provider_limit_enforced", not waived),
-                 checks=assessment["checks"])
+            warnings.append("record appears to contain a credential; delete it (the next launch writes a new one)")
+            record = {}
+        age = (self.now - _created(record, path)).total_seconds() / 3600 if record else None
+        warnings = list(dict.fromkeys([*warnings, *(record.get("warnings") or [])]))
+        self.add("provider_limit", True, "informational: every paid launch re-checks the key it loads and records the "
+                 "result; never a refusal (the run's budget is the spending control)", path,
+                 age_hours=None if age is None else round(age, 2), limit=record.get("limit"),
+                 limit_remaining=record.get("limit_remaining"), limit_reset=record.get("limit_reset"),
+                 warnings=warnings)
 
     def ledger(self, ledger_path, legacy):
-        if track_of(self.config) is not None:
-            return self.track_ledger(ledger_path)
-        snapshot = read_snapshot(ledger_path)
-        problems = []
-        if legacy.exists():
-            problems.append(f"legacy ledger {self.rel(legacy)} exists; its prior spending must be carried into "
-                            f"{self.rel(ledger_path)} before launch (move it there if that ledger does not exist "
-                            "yet; never delete either)")
-        for scope, data in (snapshot or {}).items():
-            if scope not in DEFAULT_CAPS:
-                continue
-            approved = Decimal(str(DEFAULT_CAPS[scope]))
-            if Decimal(data["cap_usd"]) < approved:
-                problems.append(f"ledger {scope} cap {data['cap_usd']} is below the approved ${approved}; after the "
-                                f"user approves, run scripts/preflight.py --raise-ledger-cap {scope} --approval-note "
-                                "TEXT --i-have-user-approval (audited; spending is kept)")
-            elif Decimal(data["cap_usd"]) != approved:
-                problems.append(f"ledger {scope} cap {data['cap_usd']} differs from the plan (never lowered)")
-        pilot = (snapshot or {}).get("pilot")
-        if pilot:
-            if pilot["unresolved_requests"] and Decimal(str(DEFAULT_CAPS["pilot"])) not in (Decimal(EIGHT_GIB_CAP_USD), Decimal(CACHE_REPEAT_CAP_USD)):
-                problems.append(f"{pilot['unresolved_requests']} unresolved pilot hold(s); reconcile first "
-                                "(scripts/reconcile_ledger.py)")
-            if pilot["violation"]:
-                problems.append("pilot scope has an unacknowledged estimate_violation")
-            if Decimal(pilot["remaining_usd"]) <= 0:
-                problems.append("no remaining pilot allowance")
-        if Decimal(str(DEFAULT_CAPS["pilot"])) == Decimal(CACHE_REPEAT_CAP_USD):
-            approved_metadata = {
-                "pilot_prior_settled_usd": CACHE_REPEAT_PRIOR_SETTLED_USD,
-                "pilot_prior_held_usd": CACHE_REPEAT_PRIOR_HELD_USD,
-                "pilot_prior_committed_usd": CACHE_REPEAT_PRIOR_COMMITTED_USD,
-                "pilot_additional_allowance_usd": REPEAT_PILOT_ALLOWANCE_USD,
-                "pilot_prior_uncertain_requests": "8",
-                "pilot_prior_calls_sha256": CACHE_REPEAT_PRIOR_CALLS_SHA256,
-                "prompt_cache_normalization": "counter-user-v1",
-            }
-            if any(str(self.config.get(key)) != value for key, value in approved_metadata.items()):
-                problems.append("cached repeat budget metadata differs from the exact approved prior snapshot, "
-                                "additional $100 and counter-user-v1 normalization")
-            problems.extend(cache_repeat_prior_problems(ledger_path))
-        elif Decimal(str(DEFAULT_CAPS["pilot"])) == Decimal(EIGHT_GIB_CAP_USD):
-            approved_metadata = {
-                "pilot_prior_settled_usd": EIGHT_GIB_PRIOR_SETTLED_USD,
-                "pilot_prior_held_usd": EIGHT_GIB_PRIOR_HELD_USD,
-                "pilot_prior_committed_usd": EIGHT_GIB_PRIOR_COMMITTED_USD,
-                "pilot_additional_allowance_usd": REPEAT_PILOT_ALLOWANCE_USD,
-                "pilot_prior_uncertain_requests": "7",
-            }
-            if any(str(self.config.get(key)) != value for key, value in approved_metadata.items()):
-                problems.append("8 GiB repeat budget metadata differs from the exact approved prior settled, held, "
-                                "committed and additional $100 amounts")
-            problems.extend(eight_gib_prior_problems(ledger_path))
-        else:
-            prior = self.config.get("pilot_prior_settled_usd")
-            if Decimal(str(DEFAULT_CAPS["pilot"])) == Decimal("119.636804044") and prior is None:
-                problems.append("repeat approval requires pilot_prior_settled_usd and pilot_additional_allowance_usd")
-            if prior is not None:
-                if (not pilot or Decimal(pilot["settled_usd"]) != Decimal(str(prior))
-                        or not pilot["cap_raises"]):
-                    problems.append("repeat requires the existing cumulative pilot ledger, prior spending, "
-                                    "and audited cap raise; never create a replacement ledger")
-                additional = self.config.get("pilot_additional_allowance_usd")
-                if (str(prior) != INITIAL_PILOT_SETTLED_USD or str(additional) != REPEAT_PILOT_ALLOWANCE_USD):
-                    problems.append("repeat budget metadata differs from the approved prior spending and additional $100")
-                if (additional is None or Decimal(str(prior)) + Decimal(str(additional))
-                        != Decimal(str(DEFAULT_CAPS["pilot"]))):
-                    problems.append("repeat prior spending plus additional allowance differs from approved cumulative cap")
-        remaining = pilot["remaining_usd"] if pilot else str(DEFAULT_CAPS["pilot"])
-        self.add("ledger", not problems, "; ".join(problems) or (
-            "no prior ledger; it will be created with DEFAULT_CAPS" if snapshot is None else
-            "approved prior holds preserved; no new in-flight calls or violations"), ledger_path if snapshot is not None else None,
-            path=self.rel(ledger_path), exists=snapshot is not None, pilot_remaining_usd=remaining)
-        return snapshot, remaining
-
-    def track_ledger(self, ledger_path):
-        """A budget track's own ledger (budget.BUDGET_TRACKS): approved caps, no holds or
-        violations, money left. It is never the baseline ledger nor another track's ledger, and
-        carries no binding to baseline runs."""
+        """Informational: the shared ledger's cumulative history per scope. Nothing here refuses a
+        launch: earlier runs' holds and violations count against their own runs, and a missing
+        ledger is created at the first paid request. A budget track (budget.BUDGET_TRACKS) keeps its
+        own ledger file: a track run reserving against the baseline ledger or another track's ledger
+        is refused (the records stay separate per person)."""
         track = track_of(self.config)
+        if track is not None:
+            separation = []
+            if Path(ledger_path).resolve() == DEFAULT_LEDGER_PATH(self.repo).resolve():
+                separation.append(f"the {track} track must not use the baseline ledger")
+            for other in BUDGET_TRACKS:
+                if other != track and Path(ledger_path).resolve() == (self.repo / track_ledger_relative(other)).resolve():
+                    separation.append(f"the {track} track must not use the {other} track's ledger")
+            if separation:
+                self.add("ledger", False, "; ".join(separation), path=self.rel(ledger_path), budget_track=track)
+                return read_snapshot(ledger_path)
         snapshot = read_snapshot(ledger_path)
-        caps = caps_for(self.config)
-        problems = []
-        if Path(ledger_path).resolve() == DEFAULT_LEDGER_PATH(self.repo).resolve():
-            problems.append(f"the {track} track must not use the baseline ledger")
-        for other in BUDGET_TRACKS:
-            if other != track and Path(ledger_path).resolve() == (self.repo / track_ledger_relative(other)).resolve():
-                problems.append(f"the {track} track must not use the {other} track's ledger")
-        for scope, data in (snapshot or {}).items():
-            if scope in caps and Decimal(data["cap_usd"]) != Decimal(str(caps[scope])):
-                problems.append(f"{track} ledger {scope} cap {data['cap_usd']} differs from the approved "
-                                f"${caps[scope]} (a raise is audited: budget.raise_cap)")
-        pilot = (snapshot or {}).get("pilot")
-        if pilot:
-            if pilot["unresolved_requests"]:
-                problems.append(f"{pilot['unresolved_requests']} unresolved pilot hold(s) in the {track} ledger; "
-                                "reconcile first (scripts/reconcile_ledger.py --ledger ...)")
-            if pilot["violation"]:
-                problems.append(f"{track} pilot scope has an unacknowledged estimate_violation")
-            if Decimal(pilot["remaining_usd"]) <= 0:
-                problems.append(f"no remaining pilot allowance in the {track} ledger")
-        remaining = pilot["remaining_usd"] if pilot else str(caps["pilot"])
-        self.add("ledger", not problems, "; ".join(problems) or (
-            f"no {track} ledger yet; it will be created with caps {caps}" if snapshot is None else
-            f"{track} ledger: approved caps, no holds, in-flight calls or violations"),
-            ledger_path if snapshot is not None else None,
-            path=self.rel(ledger_path), exists=snapshot is not None, pilot_remaining_usd=remaining,
-            budget_track=track)
-        return snapshot, remaining
+        warnings = []
+        if legacy.exists():
+            warnings.append(f"legacy ledger {self.rel(legacy)} exists; its history is not in {self.rel(ledger_path)} "
+                            "(it never affects admission)")
+        for scope, data in sorted((snapshot or {}).items()):
+            if data["unresolved_requests"]:
+                warnings.append(f"{scope}: {data['unresolved_requests']} unresolved hold(s) (${data['held_usd']}) of "
+                                "earlier runs, counted against their own runs until reconciled; never blocking")
+        reason = ("no ledger yet; it is created at the first paid request" if snapshot is None else
+                  "history only; admission is per run (" + ", ".join(
+                      f"{scope} committed ${data['committed_usd']}" for scope, data in sorted(snapshot.items())) + ")")
+        self.add("ledger", True, reason, ledger_path if snapshot is not None else None, path=self.rel(ledger_path),
+                 exists=snapshot is not None, warnings=warnings, budget_track=track or "baseline")
+        return snapshot
 
     def credentials(self):
         from .secrets import credential_status
@@ -985,17 +906,6 @@ class _Gates:
             problems.append("host .env must be a regular file with mode 600")
         self.add("credential_presence", not problems, "; ".join(problems) or "credential source present (not read)",
                  **status)
-
-    def attestations(self):
-        # Required in addition to the compatibility evidence gate, never instead of it.
-        self.add("verified_integration", self.config.get("verified_integration") is True,
-                 "user confirmed the live compatibility evidence (the compatibility gate checks the evidence itself)"
-                 if self.config.get("verified_integration") is True else
-                 "verified_integration is not true (set only after the separate $2 live compatibility check passes "
-                 "and the user confirms its evidence)")
-        self.add("paid_launch_enabled", self.config.get("paid_launch_enabled") is True,
-                 "user enabled paid launch" if self.config.get("paid_launch_enabled") is True
-                 else "paid_launch_enabled is not true (user decision)")
 
 
 def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy_ledger_path=None, now=None,
@@ -1019,27 +929,24 @@ def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy
     gates.run("frozen_dataset", gates.frozen_dataset)
     gates.run("approved_settings", gates.approved_settings)
     gates.run("seeded_track", gates.seeded_track)
+    gates.run("run_budget", gates.run_budget)
     gates.run("behavior_judge", gates.behavior_judge)
     gates.run("budget_track", gates.budget_track)
     gates.run("prompt_variant", gates.prompt_variant)
     gates.run("persona_reviewing", gates.persona_reviewing)
-    gates.run("config_caps", gates.config_caps)
     gates.run("route_pricing", gates.route_pricing)
     for prefix, required, optional in EVIDENCE_GATES:
         gates.run(prefix, lambda p=prefix, r=required, o=optional: gates.evidence(p, r, o))
-    state = {"snapshot": None, "remaining": None}
+    state = {"snapshot": None}
 
     def ledger_gate():
-        state["snapshot"], state["remaining"] = gates.ledger(ledger_path, legacy)
+        state["snapshot"] = gates.ledger(ledger_path, legacy)
     gates.run("ledger", ledger_gate)
-    gates.run("compatibility", lambda: gates.compatibility(state["snapshot"], ledger_path))
-    gates.run("provider_limit", lambda: gates.provider_limit(state["remaining"]))
+    gates.run("compatibility", lambda: gates.compatibility(ledger_path))
+    gates.run("provider_limit", gates.provider_limit)
     gates.run("credential_presence", gates.credentials)
-    gates.run("attestations", gates.attestations)
     blockers = [f"{name}: {result['reason']}" for name, result in gates.results.items() if not result["passed"]]
     return {"ready": not blockers, "blockers": blockers, "evidence": gates.results,
             "ledger": {"path": gates.rel(ledger_path), "exists": state["snapshot"] is not None,
-                       "snapshot": state["snapshot"],
-                       "default_caps": {} if budget_track_problems(config) else
-                       {k: str(v) for k, v in caps_for(config).items()}},
+                       "snapshot": state["snapshot"]},
             "images": gates.images, "checked_at": now.isoformat(), "credentials_read": False, "network_calls": 0}

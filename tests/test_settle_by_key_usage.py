@@ -26,7 +26,8 @@ class SettleByKeyUsageTests(unittest.TestCase):
     def test_pass_settles_old_uncertain_holds_from_the_key_counter(self):
         folder = Path(tempfile.mkdtemp())
         ledger_path = folder / "gemini-budget.sqlite"
-        ledger = BudgetLedger(ledger_path, caps={"pilot": "100", "analysis": "0", "compatibility": 10})
+        ledger = BudgetLedger(ledger_path)
+        ledger.start_run("run", "pilot", "100")
         run = folder / "run"
         run.mkdir()
         old, now = time.time() - 3600, time.time()
@@ -40,20 +41,28 @@ class SettleByKeyUsageTests(unittest.TestCase):
             ledger.settle(ids[name], None)
         (run / "runtime.jsonl").write_text("\n".join(json.dumps(r) for r in records))
         args = types.SimpleNamespace(run_dir=run, ledger=ledger_path, margin_usd=Decimal("0.5"), track="gemini")
-        caps = {"pilot": "100", "analysis": "0", "compatibility": 10}
-        original = settle.track_caps
-        settle.track_caps = lambda track: caps
-        try:
-            # billed 1.6 since launch, 1.5 settled: 0.1 unexplained + 0.5 margin over the two old holds
-            summary = settle.one_pass(args, True, 10, usage_reader=lambda: Decimal("501.6"))
-        finally:
-            settle.track_caps = original
+        # billed 1.6 since launch, 1.5 settled: 0.1 unexplained + 0.5 margin over the two old holds
+        summary = settle.one_pass(args, True, 10, usage_reader=lambda: Decimal("501.6"))
         self.assertEqual(summary["outcome"], "settled")
         self.assertEqual(sorted((e["request_id"], e["cost_usd"]) for e in summary["entries"]),
                          sorted([(ids["empty1"], "0.300000000"), (ids["empty2"], "0.300000000")]))
         snapshot = ledger.snapshot()["pilot"]
         self.assertEqual(snapshot["unresolved_requests"], 1)  # the young hold stays held at its reservation
         self.assertEqual(Decimal(snapshot["committed_usd"]), Decimal("1.5") + Decimal("0.6") + Decimal("2"))
+
+    def test_settling_needs_no_approval_flag(self):
+        """docs/plan.md, "One per-run budget, no manual approvals": no --i-have-user-approval; --dry-run plans."""
+        calls = []
+        original = settle.one_pass
+        settle.one_pass = lambda args, approved, minutes: calls.append(approved)
+        try:
+            settle.main(["--run-dir", "x", "--ledger", "y.sqlite"])
+            settle.main(["--run-dir", "x", "--ledger", "y.sqlite", "--dry-run"])
+            with self.assertRaises(SystemExit):
+                settle.main(["--run-dir", "x", "--i-have-user-approval"])
+        finally:
+            settle.one_pass = original
+        self.assertEqual(calls, [True, False])
 
 
 if __name__ == "__main__":

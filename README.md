@@ -39,15 +39,16 @@ the authoritative record of user decisions.
   Real runtime, strict isolation and the ten-minute 20-agent capacity test passed at
   the approved `2g` per-agent memory cap, with zero memory kills. The initial `1g`
   failure and all corrections remain in the [setup record](docs/vm-setup-2026-10-14.md).
-  The VM is stopped and confirmed `TERMINATED`. Paid compatibility and pilot launches
-  retain their approval checkpoints.
+  The VM is stopped and confirmed `TERMINATED`. Paid compatibility checks and pilot
+  launches now need no approval step: each run's own budget (`run_budget_usd`, $100 by
+  default, printed at launch) is the one spending control.
 * **Initial pilot complete:** Fireworks US compatibility passed all nine required
   checks; cumulative compatibility cost is $0.250809222. The approved 20-agent pilot
   ran for 12 minutes 48 seconds and settled at $19.636804044 of its shared $20 cap,
   with no holds or violations. Four accepted submissions independently verified as
   genuine, covering three distinct tasks. Nineteen peers stopped at budget admission;
   one suffered a container-memory-related harness failure. The VM is confirmed
-  `TERMINATED`; the consumed launch flag is disabled. Paid analysis remains $0.
+  `TERMINATED`. Paid analysis remains $0.
   See [the outcome record](docs/plan.md#initial-pilot-outcome-october-15-2026).
 
 ## Saved experiments
@@ -125,9 +126,9 @@ PYTHONPATH=src .venv/bin/python research/analysis/timeline.py --run-dir RUN
 ```
 
 * Preflight never reads a credential or calls a provider; it exits 0 only when every gate
-  passes. It is also the place to see prior costs and remaining allowances.
-* Phase B validation, the approval-gated paid steps and the launch follow the ordered
-  runbook in [docs/validation.md](docs/validation.md). `scripts/run_pilot.py` without
+  passes. It is also the place to see the run budget the config sets and the ledger's history.
+* Phase B validation, the paid steps and the launch follow the ordered runbook in
+  [docs/validation.md](docs/validation.md). `scripts/run_pilot.py` without
   `--launch-paid-pilot` only runs preflight.
 * `evaluate_run.py` is the post-run independent evaluation (serial, resumable, refuses to
   run beside live containers). `timeline.py` merges the run's logs into one ordered,
@@ -141,10 +142,11 @@ PYTHONPATH=src .venv/bin/python research/analysis/timeline.py --run-dir RUN
 
 * Read [docs/plan.md](docs/plan.md) before implementing or running anything; keep
   proposals distinct from approvals.
-* No paid call without the user's explicit approval, a fresh route freeze and passing
-  gates. The pilot's $20, analysis's $5 and the compatibility check's $2 are separate
-  ledger scopes in `state/budget.sqlite`; spending is never reset and the ledger is never
-  deleted.
+* Every paid run has one spending control, its own budget specified before it starts
+  (`run_budget_usd`, default $100; the behavior judge's run limit, default $50), enforced on
+  every request (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)").
+  There are no cumulative caps, approval flags or typed confirmations. `state/budget.sqlite`
+  records every request of every run; it is never reset or deleted.
 * Do not read, print, copy, mount or commit credential values. Inspect only presence and
   permissions.
 * Never put exploit fixtures, reference solutions, researcher reports, rubrics, evaluator

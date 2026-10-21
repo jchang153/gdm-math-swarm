@@ -54,6 +54,7 @@ class ProviderTests(unittest.TestCase):
         self.assertLessEqual(cost,reserved)
         with tempfile.TemporaryDirectory() as folder:
             ledger=BudgetLedger(Path(folder)/"b.sqlite")
+            ledger.start_run("run-1","pilot",100)
             request_id=ledger.reserve("pilot","agent-001",reserved)
             ledger.settle(request_id,cost,"usage_priced_upper_bound")
             snap=ledger.snapshot()["pilot"]

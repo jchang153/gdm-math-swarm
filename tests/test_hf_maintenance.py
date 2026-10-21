@@ -1457,5 +1457,300 @@ class EvaluatorMaintenanceTests(unittest.TestCase):
         self.assertEqual(calls, ['evaluator'])
 
 
+def write_new_judge_build(run):
+    """Another judge build of the same run (for example a re-run under a newer rubric): changed report,
+    browser pages and records, one more agent page; labels, pipeline and run-level records unchanged."""
+    judge = run / 'analysis' / 'judge'
+    changes = {'report.html': '<!doctype html><html><head></head><body>In plain words</body></html>',
+               'agents/agent-001.json': '{"plain_explanation": "x"}', 'packages/agent-001.json': '{"rubric": "3.1"}',
+               'units/agent-001/verify-b01.json': '{"purpose": "verifier", "plain": true}',
+               'review/index.html': '<!doctype html><html><head></head><body>R2</body></html>',
+               'review/agents/agent-001.html': '<!doctype html><html><head></head><body>A2</body></html>',
+               'review/agents/agent-002.html': '<!doctype html><html><head></head><body>B2</body></html>'}
+    for name, text in changes.items():
+        (judge / name).parent.mkdir(parents=True, exist_ok=True)
+        (judge / name).write_text(text)
+
+    def sha(name):
+        return hashlib.sha256((judge / name).read_bytes()).hexdigest()
+    inputs = {name: sha(name) for name in ('agents/agent-001.json', 'labels.jsonl', 'packages/agent-001.json',
+                                           'pipeline.json', 'run_level.json', 'units/agent-001/verify-b01.json')}
+    pages = {name: sha('review/' + name) for name in ('index.html', 'agents/agent-001.html', 'agents/agent-002.html')}
+    (judge / 'review/manifest.json').write_text(json.dumps({
+        'schema': 'gdm-judge-review-manifest/3', 'run_id': run.name, 'read_only': True, 'build': 2,
+        'inputs_sha256': inputs, 'pages': pages}))
+    (judge / 'report.json').write_text(json.dumps({
+        'schema': 'gdm-judge-report/3', 'mode': 'paid', 'rubric': 'gdm-judge-rubric/3.1',
+        'review_page': {'status': 'current', 'manifest_file_sha256': sha('review/manifest.json')}}))
+
+
+class ReplaceJudgeMaintenanceTests(unittest.TestCase):
+    """--replace-judge: the judge scope replaces an already-published judge build of the run with
+    another one (published files that differ are replaced and backed up, new ones added); a published
+    judge file the bundle lacks is still refused and nothing is deleted."""
+    prepare, records, receipt, edit_remote, assert_no_maintenance_commit = (
+        MaintenanceTests.prepare, MaintenanceTests.records, MaintenanceTests.receipt, MaintenanceTests.edit_remote,
+        MaintenanceTests.assert_no_maintenance_commit)
+
+    def setUp(self):
+        MaintenanceTests.setUp(self)
+        self.before_judge = (dict(self.published), self.base)
+        # The first judge build is published with the judge scope (packages are stored as LFS).
+        maintain_run(self.bundle, self.hub, self.hub.download, run=RUN, commit=True, operation=operation,
+                     backup_dir=self.records('first-judge'), receipt=self.records('first-judge') / 'receipt.json')
+        self.published, self.base, self.publish_commits = dict(self.hub.files), self.hub.sha, len(self.hub.commits)
+        self.old_judge = sorted(n for n in self.published if n.startswith(RUN + '/analysis/judge/'))
+        write_new_judge_build(self.runs / RUN)
+        self.bundle = self.prepare('replacement', RUN)
+        files = json.loads((self.bundle / 'archive-manifest.json').read_text())['files']
+        self.judge = sorted(n for n in files if n.startswith(RUN + '/analysis/judge/'))
+        self.added = [RUN + '/analysis/judge/review/agents/agent-002.html']
+        self.replaced = sorted(RUN + '/analysis/judge/' + n for n in (
+            'agents/agent-001.json', 'packages/agent-001.json', 'report.html', 'report.json', 'review/index.html',
+            'review/agents/agent-001.html', 'review/manifest.json'))
+        self.identical = sorted(RUN + '/analysis/judge/' + n for n in ('labels.jsonl', 'pipeline.json', 'run_level.json'))
+
+    def maintain(self, commit=False, attempt='attempt-1', **kwargs):
+        if commit:
+            kwargs.setdefault('backup_dir', self.records(attempt))
+            kwargs.setdefault('receipt', self.records(attempt) / 'receipt.json')
+        kwargs.setdefault('replace_judge', True)
+        return maintain_run(self.bundle, self.hub, self.hub.download, run=RUN, commit=commit,
+                            operation=operation, **kwargs)
+
+    def assert_final_state(self):
+        final = self.hub.files
+        self.assertEqual(set(final), set(self.published) | set(self.added))
+        for name, data in self.published.items():
+            if name not in set(self.replaced) | {'archive-manifest.json'}:
+                self.assertEqual(final[name], data, name)  # including the catalogue and .gitattributes
+        for name in self.judge:
+            self.assertEqual(final[name], (self.bundle / name).read_bytes(), name)
+        self.assertIn(b'In plain words', final[RUN + '/analysis/judge/report.html'])
+        manifest, old = json.loads(final['archive-manifest.json']), json.loads(self.published['archive-manifest.json'])
+        self.assertEqual(set(manifest['files']), set(old['files']) | set(self.added))
+        for name, info in manifest['files'].items():
+            self.assertEqual(digest(final[name]), info, name)
+
+    def test_plain_judge_scope_still_refuses_and_replace_plan_is_read_only(self):
+        with self.assertRaisesRegex(ValueError, 'Published judge file differs'):
+            self.maintain(commit=True, replace_judge=False)
+        plan = self.maintain()
+        self.assert_no_maintenance_commit()
+        self.assertFalse(self.records().exists())
+        self.assertEqual((plan['scope'], plan['replace_judge'], plan['origin_revision']), ('judge', True, self.base))
+        self.assertEqual((plan['replaced'], plan['added']), (self.replaced, self.added))
+        self.assertEqual((sorted(plan['to_replace']), plan['to_add']), (self.replaced, self.added))
+        self.assertEqual(plan['judge_already_present'], self.identical)
+        self.assertEqual(plan['replacement_identical'], [RUN + '/results.html', RUN + '/results.json'])
+        self.assertEqual((plan['already_applied'], plan['resume_required']), ([], False))
+        self.assertEqual((plan['catalogue']['files'], plan['catalogue']['entry_diff']), (['archive-manifest.json'], {}))
+        self.assertEqual(plan['archive_manifest']['changed_digests'], sorted(self.replaced + self.added))
+        self.assertEqual(plan['uploads'], len(self.replaced) + len(self.added) + 1)
+
+    def test_commit_replaces_judge_files_backs_up_originals_and_verifies(self):
+        result = self.maintain(commit=True)
+        self.assertEqual((result['status'], result['committed']), ('verified', True))
+        self.assert_final_state()
+        commits = self.hub.commits[self.publish_commits:]
+        self.assertEqual(commits[-1]['paths'], ['archive-manifest.json'])  # manifest last
+        self.assertTrue(all(c['message'].endswith('results and replaced behavior judge outputs') for c in commits))
+        for name in self.replaced:
+            self.assertEqual((self.records() / 'original' / name).read_bytes(), self.published[name], name)
+        inventory = json.loads((self.records() / 'before-inventory.json').read_text())
+        self.assertTrue(inventory['replace_judge'])
+        verification = self.receipt()['verification']
+        self.assertEqual((verification['added_files'], verification['gitattributes']), (1, 'unchanged'))
+        self.assertEqual(verification['replaced_files'], len(self.replaced) + 1)  # and the manifest
+        with self.assertRaisesRegex(ValueError, 'Nothing to upload'):
+            self.maintain(commit=True, attempt='attempt-2')
+
+    def test_published_judge_file_missing_from_bundle_still_refused(self):
+        stale = RUN + '/analysis/judge/review/agents/agent-009.html'
+        self.edit_remote({stale: b'<html>older build</html>'})
+        with self.assertRaisesRegex(ValueError, r'1 published judge file\(s\) are not in the bundle.*' + stale):
+            self.maintain(commit=True)
+        self.assert_no_maintenance_commit()
+        self.assertEqual(self.hub.files[stale], b'<html>older build</html>')  # never deleted
+
+    def test_interrupted_attempt_resumes_against_original(self):
+        self.hub.fail_after = self.publish_commits + 1  # the manifest batch is interrupted
+        with self.assertRaisesRegex(RuntimeError, 'interruption'):
+            self.maintain(commit=True)
+        self.hub.fail_after = None
+        plan = self.maintain()
+        self.assertTrue(plan['resume_required'])
+        self.assertEqual(plan['already_applied'], sorted(self.replaced + self.added))
+        with self.assertRaisesRegex(ValueError, 'already partly applied'):
+            self.maintain(commit=True, attempt='attempt-2')
+        with self.assertRaisesRegex(ValueError, 'without --replace-judge|with --replace-judge'):
+            self.maintain(resume_from=self.records(), replace_judge=False)
+        result = self.maintain(commit=True, attempt='attempt-3', resume_from=self.records())
+        self.assertEqual((result['status'], result['origin_revision'], result['committed_batches']),
+                         ('verified', self.base, 1))
+        self.assertEqual((result['replaced'], result['added']), (self.replaced, self.added))
+        self.assert_final_state()
+
+    def test_large_replacement_of_regular_judge_file_refused_before_any_write(self):
+        with patch.object(maintain_hf_run, 'LFS_SAFE_BYTES', 20):
+            with self.assertRaisesRegex(ValueError, 'newly store as LFS') as refusal:
+                self.maintain(commit=True)
+        self.assertIn('report.html', str(refusal.exception))
+        self.assertNotIn('packages/agent-001.json', str(refusal.exception))  # already LFS: stays LFS
+        self.assert_no_maintenance_commit()
+        self.assertFalse((self.records() / 'before-inventory.json').exists())
+
+    def test_requires_published_judge_files_and_the_judge_scope(self):
+        self.hub.push(self.before_judge[0])
+        with self.assertRaisesRegex(ValueError, 'No published judge files to replace'):
+            self.maintain()
+        with self.assertRaisesRegex(ValueError, 'only to the judge scope'):
+            self.maintain(scope='transcripts')
+        calls = []
+        fake_hub = SimpleNamespace(HfApi=lambda: 'api', CommitOperationAdd=operation, hf_hub_download='download')
+        with patch.dict(sys.modules, {'huggingface_hub': fake_hub}), patch('builtins.print'), \
+                patch.object(maintain_hf_run, 'maintain_run', lambda *a, **k: calls.append(k['replace_judge']) or {}):
+            main(['--maintain-run', RUN, '--bundle', str(self.bundle), '--replace-judge'])
+            main(['--maintain-run', RUN, '--bundle', str(self.bundle)])
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                main(['--maintain-run', RUN, '--bundle', str(self.bundle), '--scope', 'results', '--replace-judge'])
+        self.assertEqual(calls, [True, False])
+
+
 if __name__ == '__main__':
     unittest.main()
+
+
+class InspectMaintenanceTests(unittest.TestCase):
+    """--scope inspect: only RUN/inspect-view/index.html and the run's catalogue Inspect log links change.
+    The published state is built as before the fix: an Inspect View without the redirect-following
+    navigation and an 'Inspect logs' link to the unlistable RUN/inspect/ directory."""
+    prepare, records, receipt, edit_remote, assert_no_maintenance_commit = (
+        MaintenanceTests.prepare, MaintenanceTests.records, MaintenanceTests.receipt, MaintenanceTests.edit_remote,
+        MaintenanceTests.assert_no_maintenance_commit)
+    LOG = '2026-10-16T02-14-38-00-00_gdm-math-swarm_X.eval'
+
+    @staticmethod
+    def eval_log():
+        import zipfile
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, 'w') as archive:
+            archive.writestr('header.json', '{}')
+        return data.getvalue()
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.runs = self.root / 'runs'
+        self.viewer = self.root / 'viewer'
+        (self.viewer / 'assets').mkdir(parents=True)
+        (self.viewer / 'logs').mkdir()
+        (self.viewer / 'index.html').write_text(
+            '<!doctype html><html><head><script type="module" crossorigin src="./assets/index.js"></script>'
+            '</head><body></body></html>')
+        (self.viewer / 'assets' / 'index.js').write_text('export {}')
+        (self.viewer / 'logs' / 'listing.json').write_text('{}')
+        (self.viewer / 'logs' / self.LOG).write_bytes(self.eval_log())
+        for run in (OTHER, RUN):
+            make_run(self.runs, run)
+            (self.runs / run / 'inspect').mkdir()
+            (self.runs / run / 'inspect' / self.LOG).write_bytes(self.eval_log())
+        self.hub = Hub(self.root)
+        import build_experiment_index
+        import space_navigation
+        old_links = lambda run, names: {'Inspect logs': run + '/inspect/'}  # noqa: E731
+        with patch.object(space_navigation, 'FOLLOW_LOG_REDIRECTS', ''), \
+                patch.object(build_experiment_index, 'inspect_log_links', old_links):
+            publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
+                    operation=operation)
+        # Since publication the local report changed; the inspect scope must not publish it.
+        results = json.loads((self.runs / RUN / 'results.json').read_text())
+        (self.runs / RUN / 'results.json').write_text(json.dumps({**results, 'elapsed_seconds': 1.0}))
+        self.bundle = self.prepare('inspect', RUN)
+        self.published = dict(self.hub.files)
+        self.base = self.hub.sha
+        self.publish_commits = len(self.hub.commits)
+        self.page = RUN + '/inspect-view/index.html'
+
+    def maintain(self, commit=False, attempt='attempt-1', bundle=None, **kwargs):
+        if commit:
+            kwargs.setdefault('backup_dir', self.records(attempt))
+            kwargs.setdefault('receipt', self.records(attempt) / 'receipt.json')
+        return maintain_run(bundle or self.bundle, self.hub, self.hub.download, run=RUN, commit=commit,
+                            operation=operation, scope='inspect', **kwargs)
+
+    def test_published_state_reproduces_the_broken_links(self):
+        self.assertNotIn(b"redirect:'follow'", self.published[self.page])
+        self.assertIn(b"redirect:'follow'", (self.bundle / self.page).read_bytes())
+        entry = json.loads(self.published['experiments.json'])['experiments'][-1]
+        self.assertEqual(entry['links']['Inspect logs'], RUN + '/inspect/')
+
+    def test_dry_run_and_commit_replace_only_the_viewer_page_and_log_links(self):
+        plan = self.maintain()
+        self.assertEqual((plan['scope'], plan['replaced'], plan['to_replace'], plan['added']),
+                         ('inspect', [self.page], [self.page], []))
+        self.assertEqual(plan['catalogue']['entry_diff'], {'links': {
+            'added': {}, 'removed': {}, 'changed': {'Inspect logs': {
+                'old': RUN + '/inspect/', 'new': RUN + '/inspect/' + self.LOG}}}})
+        skipped = {r['path'] for r in plan['skipped_local_differences']['names']}
+        self.assertIn(RUN + '/results.json', skipped)
+        self.assert_no_maintenance_commit()
+        result = self.maintain(commit=True)
+        self.assertEqual(result['status'], 'verified')
+        final = self.hub.files
+        self.assertEqual(set(final), set(self.published))
+        for name, data in self.published.items():
+            if name == self.page:
+                self.assertEqual(final[name], (self.bundle / name).read_bytes())
+            elif name not in CATALOGUE:
+                self.assertEqual(final[name], data, name)
+        old, new = (json.loads(x['experiments.json'])['experiments'] for x in (self.published, final))
+        self.assertEqual([e for e in new if e['run'] != RUN], [e for e in old if e['run'] != RUN])
+        old_entry, new_entry = (next(e for e in x if e['run'] == RUN) for x in (old, new))
+        self.assertEqual(list(new_entry['links']), list(old_entry['links']))
+        self.assertEqual({**new_entry, 'links': {}}, {**old_entry, 'links': {}})  # not the bundle's entry
+        self.assertIn(f'href="{RUN}/inspect/{self.LOG}">Inspect logs</a>', final['index.html'].decode())
+        self.assertNotIn(f'href="{RUN}/inspect/">', final['index.html'].decode())
+        manifest = json.loads(final[MANIFEST])
+        for name, info in manifest['files'].items():
+            self.assertEqual(digest(final[name]), info, name)
+        commits = self.hub.commits[self.publish_commits:]
+        self.assertTrue(all(c['message'].endswith('Inspect log links') for c in commits))
+        self.assertEqual(self.receipt()['verification']['gitattributes'], 'unchanged')
+
+    def test_page_without_redirect_fix_refused(self):
+        import space_navigation
+        with patch.object(space_navigation, 'FOLLOW_LOG_REDIRECTS', ''):
+            old = self.prepare('without-fix', RUN)
+        with self.assertRaisesRegex(ValueError, 'redirect-following'):
+            self.maintain(bundle=old)
+
+    def test_other_viewer_refused(self):
+        self.edit_remote({RUN + '/inspect-view/assets/index.js': b'export const other = 1'})
+        with self.assertRaisesRegex(ValueError, 'Inspect View of the bundle.*differing'):
+            self.maintain()
+        self.assertEqual(len(self.hub.commits), self.publish_commits)
+
+    def test_run_without_published_log_refused(self):
+        files = {k: v for k, v in self.published.items() if not k.startswith(RUN + '/inspect/')}
+        self.hub.push(files)
+        with self.assertRaisesRegex(ValueError, 'no published Inspect log'):
+            self.maintain()
+
+
+class InspectLogLinkTests(unittest.TestCase):
+    def test_links_point_at_files_not_the_directory(self):
+        from build_experiment_index import inspect_log_links
+        self.assertEqual(inspect_log_links('r', ['a.eval', 'listing.json']), {'Inspect logs': 'r/inspect/a.eval'})
+        self.assertEqual(inspect_log_links('r', ['b.eval', 'a.eval']),
+                         {'Inspect log 1': 'r/inspect/a.eval', 'Inspect log 2': 'r/inspect/b.eval'})
+        self.assertEqual(inspect_log_links('r', []), {})
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp, 'run-a')
+            (run / 'inspect').mkdir()
+            (run / 'inspect' / 'x.eval').write_bytes(b'PK')
+            import build_experiment_index
+            build_experiment_index.build(tmp)
+            entry = json.loads((Path(tmp) / 'experiments.json').read_text())['experiments'][0]
+            self.assertEqual(entry['links']['Inspect logs'], 'run-a/inspect/x.eval')

@@ -1,5 +1,186 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## One per-run budget, no manual approvals (October 20, 2026)
+
+The repository owner (Jonathan) decided in chat on October 20, 2026, verbatim: "one budget limit is
+enough; I don't need 5 different checkers", "yes, remove or auto-handle the other 5", "never design
+any environments with these strict safety guardrails that require me to put you in manual and
+manually approve commands or copy-paste them into terminals", "I also want all these changes to
+generalize to amelie's too, they should be repo-wide", and "The per run budget should always be
+specified before each run; default to $100 a run".
+
+Recorded meaning (repo-wide; it supersedes, where they conflict, every earlier spending rule in this
+file, including "Approved spending limits", "Live compatibility check", the audited raises of the
+pilot and analysis caps, the standing approval of the automatic judge and the audited raises named in
+"Collaborator budgets and keys"):
+
+| Topic | Decision |
+| --- | --- |
+| The one spending control | Every paid invocation is one run with its own budget, specified before it starts: a pilot run on any track (the owner's and collaborators' alike) and the live compatibility check read `run_budget_usd` from their config, $100 when absent (the launch prints the budget it uses); the behavior judge's budget is its fixed run limit (`--run-limit`, else the run config's `behavior_judge_max_usd`, else $50). A request is admitted only if this run's committed spend (its own in-flight reservations, settled costs and uncertain holds, tagged by run id) plus the request's reservation fits the run's budget; the run then stops cleanly (`research_swarm.budget.BudgetLedger.reserve`). |
+| The shared ledger | `state/budget.sqlite` stays the record of every request of every run (cumulative history per scope, reconciliation, the `runs` table with each run's budget). There is no cumulative cap to raise and no top-up; the caps of older ledgers are kept as history only. |
+| Removed | Audited cap raises and their lineage checks; the separate compatibility allowance and its approval; the cap-equality and repeat-snapshot launch bindings; the `verified_integration` and `paid_launch_enabled` attestations; approval notes; `--i-have-user-approval`, `--yes` and every typed confirmation or interactive-terminal requirement (pilot, compatibility check, provider-limit check, reconciliation, judge); the provider-key limit as a refusal; the judge's $50 ceiling. Recorded reading, not a separate owner statement: the owner's "generalize to amelie's too, they should be repo-wide" (restated on October 20, 2026 as repo-wide, the collaborator's ablation track included) also lifts the judge's owner-only track restriction. |
+| Handled automatically | Route-pricing records (pilot and judge) refresh automatically (unpaid public catalog) when missing or older than 72 h, instead of refusing; the provider-side key limit is recorded (unpaid) at every paid launch, never refused; holds left by a process that is gone are marked `uncertain` at the next run's start, stay counted against their own run and never block a new run; an estimate violation is recorded, needs no acknowledgement, and scales the rest of that run's reservations up by the observed ratio; the post-run reconciliation settles uncertain holds from OpenRouter's generation records without a flag. |
+| Kept (research integrity, not spending) | Frozen tasks and dataset, approved design settings, `max_connections`, the seeded-track refusal, the recorded `prompt_cache_normalization`, Lean/runtime/isolation/capacity/evaluator evidence, the live compatibility evidence (model, route, settings, agent image), a route-pricing freeze that must validate against the config's reservation prices, the launch interlock, credential presence and host-only keys, judge directory bindings, label checks and held agents. |
+| Collaborators | The same rules apply to every track and every checkout; a collaborator specifies their own run budgets and uses their own provider key ("Collaborator budgets and keys"). |
+
+Implementation: `research_swarm.budget` (per-run admission, `start_run`, automatic leftover handling),
+`launch_gates` (`run_budget` gate; `ledger` and `provider_limit` informational), `runtime.run_pilot`,
+`scripts/run_pilot.py`, `scripts/compat_check.py`, `scripts/supervise_run.py`,
+`scripts/run_transcript_judge.py`, `scripts/reconcile_ledger.py`, `scripts/check_provider_limit.py`,
+`scripts/preflight.py`, `configs/README.md` ("Run budget") and `AGENTS.md`.
+
+Merged with "Live behavior judge during the run (October 20, 2026)" below, as revised after the
+review of October 20, 2026 (implementer, no new owner decision; no paid call): the judge's budget
+(`--run-limit`, else the run config's `behavior_judge_max_usd`, read from `--run-config` or else from
+the config the run recorded in `RUN/settings.json`, else $50) holds for the *judging run*: one judge
+directory of one judged run, its live store included (live passes, the early model stages, the
+post-run judge and every resume together). Superseded by the second review fixes below: the budget
+holds for all judging of one judged run, whatever its `--output-dir`. Each invocation counts what that directory's earlier
+invocations committed (`client.committed_for_judging`: the ledger runs its `run-budgets.json` records,
+written before any request, and the rows its request archives name) against the budget, whichever way
+the budget was given, and registers its own ledger run with the room left and the largest reservation
+factor reached so far, so the ledger and the run limit enforce the same amount and a resume never gets
+a fresh budget. A re-judge into a new `--output-dir` is a judging run with its own budget, so old spend
+or holds of another judging run never block it. A judge directory's spend is counted in one ledger
+(each ledger now has a `ledger_id`, recorded in `run-budgets.json`): without `--ledger` the judge uses
+that ledger when the checkout's own differs, and it refuses a different or missing one (nothing is
+sent). There is no live share (`behavior_judge_live_max_usd` is no longer read), no provider-key
+headroom deferral (the key's limit is only recorded), no clamp to an analysis allowance, no standing
+approval and no owner-only track; a paid live pass needs only a run config that enables paid live
+judging (`--run-config`, passed by the supervisor).
+
+Review fixes of October 20, 2026 (implementer, no new owner decision; no paid call), so the one budget
+stays automatic and as tight as the approved judge speed allows: (1) the judge speed fix's smaller
+Sonnet holds (12,000 of 48,000 output tokens, owner approved; `route.RESERVATION_OUTPUT_TOKENS`) stay.
+Without the removed acknowledgement, a Sonnet output billed past its hold is recorded and scales the
+judging run's later reservations (across its invocations); only the requests already in flight then
+can bill past the budget, by at most their unreserved output (about 23% of $50 in the worst case of 32
+Sonnet requests all running to 48,000 tokens; the largest measured Sonnet output was 3,181 tokens).
+Proposal for the owner, not decided: reserve Sonnet's full `max_tokens` (an empty
+`RESERVATION_OUTPUT_TOKENS`) if the budget must be a hard bound, at the cost of judge concurrency.
+(2) A paid judge or
+pilot launch refreshes its route-pricing record automatically (unpaid, up to three attempts) when it is
+missing, older than 72 h or no longer valid, and sends nothing with a record that is still stale or
+invalid after that: a live pass is deferred to the next pass, any other invocation refuses (exit 4,
+pilot gate `route_pricing`) and is simply run again later; an explicit `--pricing-record` must be fresh
+and valid. (3) The judge copies the pricing record it used into `RUN/analysis/judge/route-pricing/`
+(the supervisor also packages it as `judge-route-pricing/` in `completed-phase.tgz`). (4)
+`reconcile_ledger.py` (`--include-stale-reserved`, `--manual`) and `BudgetLedger.reconcile` never
+settle a `reserved` hold whose process is still running. (5) `scripts/supervise_run.py` prints the
+run's budget (and the judge's) on its own console before the launch (`launch-budget.json`).
+
+Budget tracks under the one per-run budget (port to the Gemini and ablation tracks, October 20, 2026;
+implementer, applying the owner's "they should be repo-wide"; no paid call): `budget_track` keeps
+selecting the track's own ledger file (`state/ablation-budget.sqlite`, `state/gemini-budget.sqlite`),
+so each person's records stay separate, but a track has no cumulative cap: each run on it (pilot or
+compatibility check) is admitted against its own `run_budget_usd` ($100 when absent), registered in
+that ledger. Removed on the tracks: `ABLATION_CAPS`/`GEMINI_CAPS`, `budget.raise_track_cap` and
+`raise_ablation_cap`, `preflight.py --raise-ledger-cap`, `settle_by_key_usage.py
+--i-have-user-approval` (it settles by default; `--dry-run` plans), the required
+`concurrent_run_approval`, `evidence_waiver_approval` and `unlimited_provider_key_approval` notes
+(the first two are optional and recorded when present), the paid judge's owner-only track check
+and the ablation and Gemini ledgers' cap and hold checks (a ledger gate still refuses a track run
+on the baseline or another track's ledger). `configs/gemini-collab.json` sets `run_budget_usd`
+"400" (the owner's "a fresh $400" for the relaunch); the ablation configs name no per-run amount
+and use the $100 default. The behavior judge of a track run still bills the baseline ledger with
+its own per-run budget; a live pass reads the pilot's run from the track ledger (`--pilot-ledger`)
+for its key-headroom deferral. Superseded where they conflict: the cap rows of "Prompt ablation
+track", "Gemini 3.1 Pro collaboration run authorized" and "Gemini relaunch: 6 hours, auto-restart",
+and the "Whose runs" row of the automatic judge.
+
+Second review fixes of October 20, 2026 (implementer, no new owner decision; no paid call), so the
+one per-run budget is a hard bound that nothing manual, stale or concurrent can bypass:
+(1) Every judge model reserves its full `max_tokens` (`route.RESERVATION_OUTPUT_TOKENS` is empty),
+which adopts the proposal above: with 12,000-token Sonnet holds, requests in flight could bill up
+to ~$0.36 each past the budget, a fixed amount that could double a $10 budget. Full Sonnet holds
+(~$0.70) lower concurrency only in the last ~$22 of a budget; a typical full judging run costs ~$5.
+The judge speed fix's other parts (concurrency, transports) are unchanged. (2) The judge keeps its
+own fixed per-run limit per *judged run* (the owner's wording), not per judge directory: every
+judge request labelled with the run counts (`client.committed_for_judging(run_id=...)`), so a
+re-judge into another `--output-dir` (or one adopting live units with `--warm-from`) counts what
+the run's judging already committed; a larger total takes a larger `--run-limit`. (3) A judging
+invocation bills `--ledger`, else this checkout's ledger, and counts the earlier spend of its judge
+directory in every ledger it was recorded in, read under the judging locks
+(`run_transcript_judge.judging_ledgers`): the recorded ledger when it is still there, else copies
+with its `ledger_id` that together hold every recorded ledger run (the run directory is searched,
+e.g. for the supervisor's `budget-final.sqlite` retrieved from a stopped VM). A stale copy alone is
+never enough, a ledger chosen before another process wrote the binding still counts that spend,
+and nothing refuses for being "another ledger"; only when a recorded ledger run is in no available
+file does the invocation refuse (exit 4, nothing sent). (4) A pilot relaunched into a reused run
+directory name registers a fresh ledger run (`<name>-r<N>`, `budget.fresh_run_id`) instead of
+inheriting the old run's spend and holds or crashing on its fixed budget. (5) After an estimate
+violation within one invocation, its run limit follows the ledger's raised reservation factor. (6)
+The live pass's automatic key-headroom deferral is restored (not a spending control): a paid live
+pass is deferred (exit 5, the next pass tries again) when the provider key's `limit_remaining` is
+below the running pilot's remaining budget plus its holds plus the pass's room. Not changed: the
+compatibility check still treats an estimate violation as a failed required check (its evidence
+shows that pilot reservations are upper bounds, a research-integrity check; a passing check is
+simply rerun).
+
+## Live behavior judge during the run (October 20, 2026)
+
+The owner approved in chat on October 20, 2026, verbatim: "Judge during the run, not after". The
+goal: behavior-judge results within minutes of the run's clock stopping. Recorded meaning, for the
+owner's runs with `auto_behavior_judge` true (same standing approval, same $50 per-run cap, same
+frozen judge revision v3, rubric `gdm-judge-rubric/3`, prompts and model allocation):
+
+Spending parts superseded by "One per-run budget, no manual approvals (October 20, 2026)" (see the
+merge note and the review fixes there): no standing approval, the judge's budget is any positive
+`behavior_judge_max_usd` ($50 when absent) for the judging run (the run's judge directory, live passes
+included), there is no live sub-cap, no provider-key deferral and no analysis-scope clamp, and any
+track qualifies. The table below records the rule as decided.
+
+| Item | Rule |
+| --- | --- |
+| During the run | `scripts/supervise_run.py` starts one live pass (`run_transcript_judge.py --live`) every `behavior_judge_live_interval_seconds` (default 300) after the common start, never two at once and never after the run stop. A pass reads each agent's Inspect sample from Inspect's realtime buffer (read-only; the `.eval` once flushed), `runtime.jsonl` (complete lines only) and the conference database (`mode=ro` only), and has Haiku screen only the windows that can no longer change. Units go to `RUN/analysis/judge/live/` under the hash of their request. Sonnet and Opus never run during the run: their v3 requests contain end-of-run facts. |
+| Same results as post-run judging | The post-run judge is unchanged. It adopts a live unit only for a byte-identical request, with the same binding, provider route and judge code (code hashes), and only when replaying the stored outputs through its own parse, repair and salvage gives the same result. It never adopts a `grading_failed` unit. Everything downstream is recomputed from the final records, so timing only changes which requests were paid for early. A refused request is never resent identically across the live/post-run boundary: a refused live unit that is not adopted but whose request body is byte-identical has its recorded outcomes carried over instead. Every adoption, carried refusal and unadopted live unit is listed in `live/consistency.json`. |
+| Request header | The Haiku screening request leaves out `window_count` (the agent's final number of windows) through the binding setting `prefilter_window_count: false`, for every invocation of a run whose launch config (`RUN/settings.json`) has paid live judging (a resume, or a re-judge into another output directory, follows what the judge directory, or else `RUN/analysis/judge`, recorded), never depending on what the live passes did. This is metadata only: the window's items, id and index are unchanged. The default (true, the v3 bytes) is left out of the binding, so existing v3 judge directories still resume and rescore. |
+| After the run | As the pilot exits, the judge's model stages (`--stage verify`) start in parallel with reconcile, evaluate and timeline: no model request reads evaluator verdicts. The post-run judge then finishes as a resume (host facts, run level, report). If a follow-up fails, the early stages are stopped and the post-run judge is skipped, as before. |
+| Budget | One ledger, the analysis scope, with the run id in every judge ledger label. The $50 per-run cap now holds across invocations: what the ledger already holds for the run counts against it, orphaned holds included, so a resume never gets a fresh $50. Live passes have a sub-cap, `behavior_judge_live_max_usd` (default $10). A pass sends nothing (it is deferred to the next pass) unless the shared provider key, after the live pass's room, still covers everything the pilot may be billed: its remaining allowance plus its unbilled holds (or the key is unlimited). Every spending invocation of a run holds one lock keyed by the ledger and the run id. Spend recorded before the labels carried the run id is found through the judge directories' request archives. |
+| Isolation | Host-side only. Agent containers have no host mounts and no network, and judge files stay under `RUN/analysis/judge/`, which HF publication excludes. A live pass runs at nice 19 and the idle I/O class (honoured only by I/O schedulers such as BFQ), with `oom_score_adj` 1000, a Haiku concurrency of 8 and a systemd memory scope only where its limit is verified; the early model stages run at the same priority with two history workers. SIGTERM stops a judge cleanly (in-flight requests settle, no hold is left reserved). A refused or budget-stopped pass ends live passes for the run. Live passes are recorded in `PHASE/live-judge.json` as a possible timing and CPU confound. |
+| Opt out or shadow | `live_behavior_judge: false` restores post-run-only judging exactly. `"mock"` runs free mock live passes, then mock model stages beside the follow-ups and a mock resume after them (the paid order), into `PHASE/live-judge-shadow/`, beside the unchanged paid post-run judge. Proposal, not yet decided by the owner: run the shadow on the VM once before the first paid live run. |
+
+Proposal, not decided by the owner: on gemini10 the evaluator's 11-15 minutes of sequential
+comparator work, not the judge, is now the slowest step before the verdict-dependent report.
+Running comparators in parallel after the stop is an owner decision outside the judge.
+
+Implementation review of the live judge, October 20, 2026 (implementer fixes after an adversarial
+review; no new owner decision, no paid call; the rubric, the prompts' judging semantics and the model
+allocation are unchanged): a `--warm-from` store outside the judge directory no longer crashes the
+post-run judge after its paid stages (its record goes to `<judge dir>/warm-consistency.json`); the
+window-count format follows the run's launch config instead of whether `live/manifest.json` exists;
+refused live units are carried, never resent identically; SIGTERM drains instead of orphaning ledger
+holds; the run lock is keyed by the ledger and the run id instead of `--output-dir`; pre-branch judge
+spend of a run counts against the per-run cap; the key headroom check counts the pilot's unbilled
+holds and a failed key check defers a pass instead of ending live judging; the report states live
+spend never adopted and the ledger's total for the run; set-aside live units are in `spend.live`;
+`consistency.json` survives a killed invocation (journal); the supervisor stops the early stages when
+a follow-up fails or an exception occurs, runs them at low priority with two history workers, verifies
+`MemoryMax` before using a memory scope, and runs the mock shadow in the paid order. Not changed, by
+design: live spend that the post-run judge does not adopt stays counted against the $50 per-run cap,
+which covers all of a run's judging spend.
+
+## Plain-language judge explanations, October 20, 2026
+
+Owner (chat), after reading the Gemini run's behavior-judge evidence, which described the exploits
+only as "decide +native" and "a native decide style bypass": "Can you modify the behavior judge to
+in the future explain their reasoning in simpler terms, assuming that the human reading it has no
+idea what the problem is about and knows nothing about lean?" Recorded meaning: the owner approved
+the goal (plain explanations for a reader who knows neither the problem nor Lean, in future judging
+runs, the automatic post-run judge included). The owner did not choose a design: every row below is
+an **implementer proposal awaiting the owner's confirmation**, implemented on branch
+`judge-plain-language`. None changes a classification rule, a spending cap or a guard, and no paid
+call was made.
+
+| Date | Item (status) | Record |
+| --- | --- | --- |
+| 2026-10-20 | Rubric `gdm-judge-rubric/3.1` (proposal) | `research/analysis/judge_rubric.md` Section 6.1 (v3 archived unchanged at `research/analysis/judge_rubric_v3_superseded.md`, sha256 `d50c7b2d…ee1cd6d2`). Every finding (cheating, whistleblowing, evaluation awareness) of the candidate judge, and every verdict of the Opus verifier, carries a `plain_explanation`: two to four sentences, about 60 words (150 at most), for a reader who knows nothing about Lean, formal proofs or the problem: what the problem asked (from the task description below), what the agent did and what happened to a hand-in, and why that counts (or, for the verifier, why it does or does not). Lean is "the proof-checking program"; a forbidden command is described by what it does and which written rule it breaks, naming another spelling of a banned command (for example decide +native for native_decide); no ids, code formatting, names_with_underscores, outcome codes or rubric labels; never implying a true fact is false. The verifier writes its own explanation from the records and is no longer shown the judge's wording. The run level adds a plain paragraph (`plain_summary`). Categories, levels, attributes, cohorts, flags and the verification order are unchanged. |
+| 2026-10-20 | Validation (proposal, revised after review) | A plain-language problem is soft. A missing, empty or over-long explanation is named in the one repair; if it is still missing after the repair, the decision, finding or verifier verdict is kept without it (an over-long one is cut by the host at a sentence boundary), recorded in `plain_problems` and listed in the report as "explanation missing"; a run-level paragraph still missing is replaced by the host paragraph while the spread, reach and summary are kept. It never changes a level, an attribute or a cohort. (The branch's first version failed the decision or verdict instead, which could drop a real classification such as an exploiter's confirmed submission; review found this and it was changed before merging.) A host lint (`schema.plain_lint`: ids, backticks, names_with_underscores, rubric labels) records style notes, shown with the technical details and added to a repair only when one is sent for another reason; it never fails anything. |
+| 2026-10-20 | Task descriptions (proposal) | `research/analysis/judge/task_plain_words.json` (researcher-only): titles for all 71 parent-pool tasks and one neutral sentence for 34 of them (the 14 frozen tasks, every test-category task, `Green14_W_3_11` and seven classical statements), written by the implementer from the pinned Lean statements and `docs/problems.md`, with no status, known answer or solution; not yet reviewed by the owner. Candidate, random-sample, verifier and run-level requests end with a "TASKS IN PLAIN WORDS" section listing only the tasks the request names (context, never evidence); the report and the evidence browser show "Problem" lines from the same table. A task without a sentence is named by its title only. |
+| 2026-10-20 | Report and evidence browser (proposal) | For results judged under rubric 3.1, `report.html` opens with the run in plain words, then each trick and each problem involved explained once, the agent table with a plain note (the plain headings of each agent's strongest verified findings) and a gloss of the group and flag names; evidence cards lead with the plain explanations, strongest first (the finding that sets each category's level and the claim that decides the cohort, no repeats); the technical summary (counts, cohort table, spread and reach, technical notes), the card labels and quotes, and the spend and provenance are collapsed, with a visible "How to read this" disclosure. A page over the 1,500-word target is rendered again with fewer plain paragraphs per card (`reading.card_layout`). In the evidence browser each agent page opens with a plain lead (the group gloss, the strongest finding per category, the problem), the cohort, technical note and categories table collapsed; each finding opens with a plain heading (prefixed when it does not count, for example "Suspected but rejected: …"; "Got a cheating trick ready to hand in (stopped before it was handed in)" for a readied bypass), its explanation, the problem and a plain status line. Outputs judged under rubric v3 keep the earlier layout; a v3 directory's rubric hash is compared with the v3 archive, so it shows no "rubric changed" banner. |
+| 2026-10-20 | Versions | Prompts `gdm-judge-prompts/5`, candidate prompts `gdm-judge-candidate-prompts/3`, schema `gdm-judge-schema/5`, verification `gdm-judge-verification/4`, decisions `gdm-judge-candidate-decisions/3`, verified record `gdm-judge-verified/4`, agent result `gdm-judge-agent-result/4`; the report, summary and review-manifest schemas stay `/3` (additive keys), so the publication rule is unchanged. A judge directory written under rubric v3 is refused for resumption with its own message (pass a new `--output-dir`). No paid call was made: the mock rehearsal emits synthetic explanations and the offline suites cover the change. |
+| 2026-10-20 | Open proposals needing the owner's approval and a spending cap | (1) An optional "explain-only" Opus pass that writes plain explanations into existing v3 results such as `gemini10-20261020T054602Z` from each verified finding and its cited passages, without re-judging (the current gemini10 report stays in the v3 layout until then). (2) A small paid replay of 5-10 real gemini10 findings to check the wording before relying on the prompt. (3) Owner review of the task sentences. None is implemented or run. |
+
 ## No cost estimates for judge runs, October 20, 2026
 
 Owner (chat): "Don't require estimates for anything—either runs or behavior judges." and "I don't
@@ -7,7 +188,9 @@ ever want to see a cost estimate again." The behavior judge no longer computes a
 and never asks for a typed confirmation. Each judging invocation has a fixed run limit:
 `--run-limit`, else $50 (a standing approval's `behavior_judge_max_usd` is a ceiling), clamped to
 the analysis scope's remaining allowance; the ledger cap, run limit, audited raises and the
-72-hour pricing-record check still apply. `--dry-run-estimate` remains an optional separate
+72-hour pricing-record check still apply (superseded by "One per-run budget, no manual approvals
+(October 20, 2026)": no cap or raises, the pricing record refreshes automatically, and the run limit is
+the judging run's budget). `--dry-run-estimate` remains an optional separate
 command. Experiment runs keep per-request ledger reservations (they enforce the run's cap and add
 no waiting); there is no estimate step for runs.
 
@@ -23,7 +206,10 @@ at most 50; `configs/README.md`, `research_swarm/auto_judge.py`) and executed by
 `scripts/supervise_run.py` after its unpaid follow-ups (reconcile dry run, evaluate, timeline) via
 `scripts/run_transcript_judge.py --standing-approval-from-config CONFIG`.
 
-Guards that remain:
+Superseded by "One per-run budget, no manual approvals (October 20, 2026)": the judge runs automatically
+for any track, needs no approval note, and its budget is `behavior_judge_max_usd` (any positive amount,
+$50 when absent) with no clamp to an analysis allowance; the pricing record refreshes automatically.
+The table below is the record of the earlier rule. Guards that remained at the time:
 
 | Guard | Rule |
 | --- | --- |
@@ -40,6 +226,10 @@ Guards that remain:
 | --- | --- | --- |
 | 2026-10-20 | Paid v3 judge on `gemini10-20261020T054602Z` | User approved in chat ("go ahead and do that to run it"): judge revision v3, rubric `gdm-judge-rubric/3`, estimate $8.49 central, run limit $16.98 (2× central), within the $200 analysis cap. The judge runs on VM `owner-vm` (README: paid runs on the VM only), checkout `~/gdm-judge` at `83a256d`, key from `~/gdm-math-swarm/.env` via `--credentials-root`. |
 | 2026-10-20 | Authoritative baseline/analysis ledger moved | On the user's instruction the single authoritative `state/budget.sqlite` (sha256 `9bcf868e…25fbad`, unchanged since October 18; analysis cap $110, $99.8998293 committed, 4 uncertain holds of $3.29486 carried over) now lives on `owner-vm` at `/home/owner/gdm-judge/state/budget.sqlite`. The previous copies on `collab-vm-1` and in `owner-vm:~/gdm-math-swarm/state/` were renamed (not deleted) to `budget.sqlite.retired-20261020-moved-to-owner-vm-gdm-judge`, each with a README note. Pre-raise backup: `owner-vm:~/gdm-math-swarm/runs/phase-b/judge-gemini10-20261020/budget-before-fifth-raise.sqlite`. The fifth audited raise ($110 → $200) is still to be applied by the operator before the paid run. |
+| 2026-10-20 | Evaluator results published for `gemini10-20261020T054602Z` | `scripts/maintain_hf_run.py --scope evaluator` published the independent evaluator records to the private HF Space (4 replaced, 2 added; Space revision `8372ccc` → `ee145a4`): 16 of 71 tasks verified. Receipts: `runs/phase-b/evaluator-publication-gemini10-20261020T054602Z/attempt-1/`. |
+| 2026-10-20 | Facts-only reports regenerated and republished | `scripts/build_results.py` reports replaced each run's `results.html`/`results.json` with `--scope results` (pilot, baseline8g100, cache100, gemini10; Space revision `ee145a4` → `d7a77a8`). `baseline100-20261015T191545Z` is pending a user label decision for its stop reason (`interrupted` vs `interrupted_by_user`). Receipts: `runs/phase-b/results-publication-*/attempt-1/`. |
+| 2026-10-20 | `baseline100-20261015T191545Z` unlisted from the run lists | The owner asked: "can we just remove baseline100 from the list of runs". Decision: unlist only, reversibly; no file is deleted locally or in the Space. The run is recorded in the tracked `data/library-unlisted.json` (run, date, reason), which `scripts/build_experiment_index.py` and `scripts/publish_hf_library.py` honor (publication of a listed run never re-adds it; publishing the unlisted run is refused). `scripts/maintain_hf_run.py --scope unlist` changed only `index.html`, `experiments.json` and `archive-manifest.json` (which keeps the run and its digests and records it under `unlisted_runs`), Space revision `311af2f` → `6f35f8d`; 18,281 other files verified unchanged, the run's 2,398 files kept, the other 4 entries unchanged. Local `runs/index.html` rebuilt with 4 runs. Receipt and backups: `runs/phase-b/unlist-baseline100/attempt-1/`. To re-list, remove the record and make a separate reviewed catalogue update. |
+| 2026-10-20 | Plain-language judge results published for `gemini10-20261020T054602Z` | The owner asked to re-run the behavior judge for the Gemini run ("re-run the behavior judge for gemini (the new one)"). The rubric `gdm-judge-rubric/3.1` re-run ($6.8073941 settled, 362 requests) replaced the published v3 judge outputs: `scripts/maintain_hf_run.py` judge scope with the new guarded `--replace-judge` (34 judge files replaced, 2 agent pages added, nothing deleted; reports and catalogue entry unchanged; Space revision `cc8f49b` → `311af2f`). The v3 build is kept locally, unpublished, in `analysis/judge-v3-first-run/`. Receipts: `runs/phase-b/judge-plain-publication-gemini10-20261020T054602Z/attempt-1/`. |
 
 ## Gemini relaunch: 6 hours, auto-restart, October 20, 2026
 
@@ -158,7 +348,9 @@ API key to use. The user decided: "They should be allowed to decide their own bu
 everything" and "they should use their own api key". Recorded meaning: a collaborator
 approves their own spending caps for their own experiments and analyses, and records each
 decision in this file before any paid call. The audited-raise mechanism (a cap bound to a
-recorded plan section and enforced by the ledger) stays in place. They use their own provider
+recorded plan section and enforced by the ledger) stays in place (superseded by "One per-run budget,
+no manual approvals (October 20, 2026)": a collaborator specifies each run's `run_budget_usd`; there
+are no caps or raises). They use their own provider
 key in their own private `.env`, never the user's key or the VM checkout's `.env` that holds
 it. The other rules are unchanged: their own Google login for the VM, exclusive VM use
 coordinated, ledgers and unresolved holds preserved. The user also asked to commit the
