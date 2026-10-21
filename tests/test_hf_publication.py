@@ -10,7 +10,7 @@ from unittest.mock import patch
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from publish_hf_library import publish, digest, load_bundle, merge_entries, validate_lfs_additions
+from publish_hf_library import SECRET, publish, digest, load_bundle, merge_entries, validate_lfs_additions
 from build_experiment_index import write_index
 
 
@@ -210,6 +210,15 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Inspect archive'):
                 self.run_publish(commit=True)
         self.assertEqual(self.hub.commits, [])
+
+    def test_credential_screen_needs_a_token_boundary(self):
+        # Fabricated values: a key-shaped run inside a longer base64url blob is not a key; one at a
+        # boundary (after a space, quote, '=' or line start) still is.
+        blob = b'Zm9v' + b'x' * 40 + b'sk-' + b'B' * 40 + b'_hf_' + b'C' * 40
+        self.assertIsNone(SECRET.search(b'"encrypted_content": "' + blob + b'"'))
+        for text in (b'key sk-' + b'A' * 30, b'"sk-' + b'A' * 30, b'KEY=hf_' + b'A' * 32, b'hf_' + b'A' * 32,
+                     b'-----BEGIN PRIVATE KEY-----'):
+            self.assertIsNotNone(SECRET.search(text), text[:12])
 
     def test_malicious_existing_catalogue_link_refused(self):
         bad = entry('evil', 1)
