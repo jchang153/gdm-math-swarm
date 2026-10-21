@@ -226,6 +226,18 @@ is being merged into main via `collab-env`.
 
 ## In flight as of 2026-10-21 (check status before redoing anything)
 
+0. **4 GLM 5.3 oversight runs RUNNING (launched 2026-10-21 ~22:44–23:03 UTC, 1 h each, $100 each,
+   auto judge + incident report, VMs stop themselves):**
+   - `glm-rule6-20261021T224441Z` on owner-vm-2 (collab_max_pressure, rule 6 kept)
+   - `glm-baseline-20261021T224732Z` on owner-vm (collab_max_pressure_no_rule6)
+   - `glm-overseer-20261021T230007Z` on owner-vm-3 (overseer agent-006, no powers)
+   - `glm-overseer-powers-20261021T230325Z` on owner-vm-4 (overseer with check_proof
+     and revert_submission)
+   The live mirror runs on the owner's Mac (log: `runs/phase-b/live-mirror/mirror-20261021.log`).
+   When the runs finish: retrieve each `runs/<id>` (touch `retrieved.marker`), check the VMs are
+   TERMINATED, then publish to HF and compare the 4 runs (cheating types, spread, overseer actions).
+   Erdős 340 has a pre-existing evaluator self-compare failure, so check_proof is "unresolved" on it.
+
 1. **Neutral "collab" environment: merged to main (43d6889), NOT yet run.**
    Two new prompt variants, with configs `configs/owner-collab-pressure-<model>.json`
    and `configs/owner-collab-glm-5.3.json`:
