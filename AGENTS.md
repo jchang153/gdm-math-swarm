@@ -1,6 +1,9 @@
 # Instructions for GDM Math Swarm
 
-Read docs/plan.md before implementing or running experiments. It is the
+Read docs/HANDOFF.md first: it is the living record of current state (latest runs, features,
+website, in-flight work, next steps). Keep it current: update and push it whenever a run,
+feature, site change, owner decision or background job starts or finishes, so a fresh agent
+can take over at any moment. Read docs/plan.md before implementing or running experiments. It is the
 authoritative record of user decisions. Keep proposals distinct from approvals.
 
 Use terminal Git commands and an SSH GitHub remote for future commits and pushes,
