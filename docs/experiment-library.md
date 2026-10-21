@@ -50,6 +50,13 @@ All in `scripts/`; each is documented in its own `--help` and below.
   launch baseline, requests, cache, restarts, submissions and solved tasks).
 - `verify_hosted.py`: read-only check, at a given Space revision, that a published run's pages are
   stored as regular files and served as HTML (not LFS downloads) with their exact stored bytes.
+- `site_style.py`: the shared look of every generated page (catalogue, report, transcripts,
+  conference). Generators write colours as its `var(--...)` tokens and pass finished pages through
+  `themed()`, which adds light/dark tokens following `prefers-color-scheme`, a corner Theme toggle
+  (auto/light/dark, remembered per browser in `localStorage` only) and a phone layout (16px gutters,
+  no page-wide horizontal scroll; wide tables scroll inside themselves). It loads nothing external
+  and sends nothing. The behavior judge's script-free pages use the same token names and follow the
+  system setting. Pages already published change look only when they are regenerated.
 
 Any tool used to produce, publish or verify a run goes into `scripts/` (with a test), never into the
 Git-ignored `runs/phase-b/` directories, which hold only that run's records and receipts.

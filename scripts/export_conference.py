@@ -11,20 +11,25 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+import sys
 from zoneinfo import ZoneInfo
+
+if str(Path(__file__).resolve().parent) not in sys.path:  # shared site theme lives beside this script
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from site_style import themed  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 STYLE = '''
-:root{font-family:system-ui,sans-serif;color:#182536;background:#f5f7fa;line-height:1.55}
-body{max-width:1280px;margin:32px auto;padding:0 24px}a{color:#175ba6}h1{margin-bottom:8px}
-.muted,small{color:#58677b}.banner{background:#eaf0fb;border-left:4px solid #6084bf;padding:12px 18px}
-nav,.filters{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}button,input,select{font:inherit;padding:9px 12px;border:1px solid #bac6d6;border-radius:7px;background:white;color:inherit}
-button{cursor:pointer}button[aria-selected=true]{background:#204e85;color:white;border-color:#204e85}
-input{flex:1;min-width:200px}article{background:white;border:1px solid #dce3ec;border-radius:10px;padding:20px;margin:14px 0}
-h2,h3{margin:0 0 8px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f3f5f8;padding:14px;border-radius:6px;font:13px/1.6 ui-monospace,monospace}
-.text{white-space:pre-wrap;overflow-wrap:anywhere}details{margin:12px 0}.badge{display:inline-block;background:#edf1f7;padding:2px 8px;border-radius:4px;font-size:12px}
-.row{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.empty{padding:32px;color:#58677b;border:1px dashed #bcc9d9;background:white;border-radius:10px}
-footer{margin:30px 0;color:#58677b}[hidden]{display:none!important}
+:root{font-family:system-ui,sans-serif;color:var(--fg);background:var(--bg);line-height:1.55}
+body{max-width:1280px;margin:32px auto;padding:0 24px}a{color:var(--accent)}h1{margin-bottom:8px}
+.muted,small{color:var(--muted)}.banner{background:var(--banner);border-left:4px solid var(--banner-line);padding:12px 18px}
+nav,.filters{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}button,input,select{font:inherit;padding:9px 12px;border:1px solid var(--input-line);border-radius:7px;background:var(--card);color:inherit}
+button{cursor:pointer}button[aria-selected=true]{background:var(--sel-bg);color:var(--sel-fg);border-color:var(--sel-bg)}
+input{flex:1;min-width:200px}article{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:20px;margin:14px 0}
+h2,h3{margin:0 0 8px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--pre);padding:14px;border-radius:6px;font:13px/1.6 ui-monospace,monospace}
+.text{white-space:pre-wrap;overflow-wrap:anywhere}details{margin:12px 0}.badge{display:inline-block;background:var(--chip);padding:2px 8px;border-radius:4px;font-size:12px}
+.row{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.empty{padding:32px;color:var(--muted);border:1px dashed var(--input-line);background:var(--card);border-radius:10px}
+footer{margin:30px 0;color:var(--muted)}[hidden]{display:none!important}
 '''
 
 
@@ -33,9 +38,9 @@ def json_lines(path):
 
 
 def page(title, body):
-    return ('<!doctype html><html lang="en"><meta charset="utf-8">'
-            '<meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>{html.escape(title)}</title><style>{STYLE}</style>{body}</html>')
+    return themed('<!doctype html><html lang="en"><meta charset="utf-8">'
+                  '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                  f'<title>{html.escape(title)}</title><style>{STYLE}</style>{body}</html>')
 
 
 def compact_browser_page(document):

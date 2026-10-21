@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
+from site_style import themed
 from space_navigation import private_space_navigation
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -132,9 +133,9 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
                     f'<td>{tasks}</td><td>{errors}</td><td>{links}</td></tr>')
     body = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             '<title>GDM Math Swarm experiments</title><style>'
-            'body{max-width:1450px;margin:40px auto;padding:0 24px;font:16px system-ui;line-height:1.5;color:#18212b;background:#fafbfc}'
-            'h1{margin-bottom:8px}p{max-width:950px;color:#475569}input{box-sizing:border-box;width:100%;padding:12px;border:1px solid #b8c2cf;border-radius:7px;margin:18px 0;background:white;font:inherit}'
-            '.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;background:white}td,th{padding:14px 12px;border-bottom:1px solid #dde3ea;text-align:left;vertical-align:top}th{font-size:13px;color:#475569}small{font-size:12px;color:#596579}a{color:#155eaa}td:last-child{min-width:210px}'
+            'body{max-width:1450px;margin:40px auto;padding:0 24px;font:16px system-ui;line-height:1.5;color:var(--fg);background:var(--bg)}'
+            'h1{margin-bottom:8px}p{max-width:950px;color:var(--muted)}input{box-sizing:border-box;width:100%;padding:12px;border:1px solid var(--input-line);border-radius:7px;margin:18px 0;background:var(--card);font:inherit}'
+            '.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;background:var(--card)}td,th{padding:14px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{font-size:13px;color:var(--muted)}small{font-size:12px;color:var(--muted)}a{color:var(--accent)}td:last-child{min-width:210px}'
             '</style><h1>GDM Math Swarm experiments</h1>'
             '<p>A private library of saved runs: results, full agent transcripts, independent evaluations and timelines.</p>'
             f'<p><strong>{len(entries)} saved experiment(s)</strong>. Verified tasks count distinct intended statements, so duplicate accepted proofs count once.</p>'
@@ -144,6 +145,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
             + ('<p>This private archive contains saved experiment records and derived views. Access requires permission to this Hugging Face Space. Preserve the original records when moving a run.</p>' if hosted else
                '<p>These files are stored on this computer. Raw runs and transcripts are excluded from Git; the code repository alone is not a backup or a shared results library. Keep the full experiment folder when backing up or moving a run.</p>') +
             '<script>document.getElementById("filter").addEventListener("input",function(){const q=this.value.toLowerCase();document.querySelectorAll("#runs tbody tr").forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q));});</script></html>')
+    body = themed(body)
     (runs / 'index.html').write_text(private_space_navigation(body) if hosted else body)
     (runs / 'experiments.json').write_text(json.dumps({'schema': 'gdm-experiment-index/1', 'experiments': entries, 'warnings': warnings}, indent=2))
     return {'index': str(runs / 'index.html'), 'experiments': len(entries), 'warnings': warnings}

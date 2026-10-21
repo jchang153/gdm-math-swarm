@@ -21,16 +21,20 @@ from pathlib import Path
 import sys
 from urllib.parse import quote
 
+if str(Path(__file__).resolve().parent) not in sys.path:  # shared site theme lives beside this script
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from site_style import head as theme_head  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 
-STYLE = ('<style>body{max-width:1100px;margin:36px auto;padding:0 20px;font:16px system-ui;line-height:1.5}'
-         'pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f4f4;padding:12px;margin:6px 0}'
-         'article{border-top:1px solid #ccc;margin:22px 0}details{margin:8px 0}a{color:#1263a3}'
-         'section{margin:10px 0}.meta{font-size:13px;color:#555;margin:2px 0}.id{font-family:monospace}'
-         '.segment{border-top:4px solid #555;padding-top:8px;margin-top:40px}.derived{border-left:4px solid #b26b00;'
-         'padding-left:10px}.harness{color:#555}.record{border-left:4px solid #1263a3;padding-left:10px}'
-         '.file{border-left:4px solid #5b8a3c;padding-left:10px}table{border-collapse:collapse}'
-         'td,th{border:1px solid #ccc;padding:3px 8px;text-align:left}</style>')
+STYLE = theme_head() + ('<style>body{max-width:1100px;margin:36px auto;padding:0 20px;font:16px system-ui;line-height:1.5}'
+         'pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--pre);padding:12px;margin:6px 0}'
+         'article{border-top:1px solid var(--line);margin:22px 0}details{margin:8px 0}a{color:var(--accent)}'
+         'section{margin:10px 0}.meta{font-size:13px;color:var(--muted);margin:2px 0}.id{font-family:monospace}'
+         '.segment{border-top:4px solid var(--segment);padding-top:8px;margin-top:40px}.derived{border-left:4px solid var(--derived);'
+         'padding-left:10px}.harness{color:var(--muted)}.record{border-left:4px solid var(--record);padding-left:10px}'
+         '.file{border-left:4px solid var(--file);padding-left:10px}table{border-collapse:collapse;max-width:100%}'
+         'td,th{border:1px solid var(--line);padding:3px 8px;text-align:left;overflow-wrap:anywhere}</style>')
 COLLAPSE_CHARS = 3000   # longer results and records start collapsed (full text is always present)
 LABELS = {"reasoning": "Reasoning (returned; untrusted self-report)", "text": "Visible text",
           "summary": "Compaction summary (derived self-report written by the agent's model)",

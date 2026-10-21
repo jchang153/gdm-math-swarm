@@ -49,13 +49,17 @@ from pathlib import Path
 import sqlite3
 import sys
 
+if str(Path(__file__).resolve().parent) not in sys.path:  # shared site theme lives beside this script
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from site_style import themed  # noqa: E402
+
 NANO = Decimal('1e-9')
 ACCEPTED = ('accepted', 'accepted_after_close')
 SCOPES = ('pilot', 'compatibility', 'analysis')
 JUDGE_REPORT = 'analysis/judge/report.html'
 STYLE = ('body{max-width:1100px;margin:40px auto;padding:0 22px;font:16px system-ui;line-height:1.55}'
-         'table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:9px;border-bottom:1px solid #ddd;'
-         'overflow-wrap:anywhere}a{color:#155eaa}small{color:#596579}')
+         'table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:9px;border-bottom:1px solid var(--line);'
+         'overflow-wrap:anywhere}a{color:var(--accent)}small{color:var(--muted)}')
 LINKS = (('Agent transcripts', 'transcripts/index.html'),
          ('Conference: board, DMs, library, private files and judging', 'conference-view/index.html'),
          ('Inspect View', 'inspect-view/index.html'), ('Inspect logs', 'inspect/'),
@@ -477,9 +481,9 @@ def render(results, title):
             '<li>' + (f'<strong>{esc(n["subject"])}</strong>: ' if n.get('subject') else '') + esc(n['text']) + '</li>'
             for n in results['researcher_notes']) + '</ul>')
     body.append('<h2>Records</h2><p>' + ' · '.join(f'<a href="{href}">{label}</a>' for label, href in LINKS) + '</p>')
-    return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" '
-            f'content="width=device-width,initial-scale=1"><title>{esc(title or results["run"] + " results")}</title>'
-            f'<style>{STYLE}</style>' + ''.join(body) + '</html>\n')
+    return themed('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" '
+                  f'content="width=device-width,initial-scale=1"><title>{esc(title or results["run"] + " results")}</title>'
+                  f'<style>{STYLE}</style>' + ''.join(body) + '</html>\n')
 
 
 def main(argv=None):
