@@ -385,7 +385,14 @@ CREATE TABLE IF NOT EXISTS library (
     kind TEXT NOT NULL, author TEXT NOT NULL, task_id TEXT, submission_id INTEGER,
     origin_path TEXT, content TEXT NOT NULL, sha256 TEXT NOT NULL, published_at REAL NOT NULL,
     UNIQUE (path, revision));
+CREATE TABLE IF NOT EXISTS reversions (
+    reversion_id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, submission_id INTEGER NOT NULL,
+    artifact_id INTEGER, credited_agent TEXT NOT NULL, accepted_at REAL, reverted_by TEXT NOT NULL,
+    reason TEXT NOT NULL, reverted_at REAL NOT NULL);
 """
+
+# Library rows withdrawn by revert_submission: kept in the table (raw record), hidden from agents.
+_WITHDRAWN = "(SELECT artifact_id FROM reversions WHERE artifact_id IS NOT NULL)"
 
 
 class ConferenceService:
@@ -428,6 +435,9 @@ class ConferenceService:
         self._observer_join_timeout = observer_join_timeout
         self._clock = clock
         self._fixed_agents = frozenset(agent_ids) if agent_ids is not None else None
+        # Overseer with oversight powers (enable_oversight); None in every other run.
+        self._overseer = None
+        self._proof_checker = None
         self._lock = threading.RLock()
         self._activity = threading.Condition(threading.Lock())
         self._in_flight = 0
@@ -459,6 +469,8 @@ class ConferenceService:
             "read_library_file": self._read_library_file,
             "publish_notebook": self._publish_notebook,
             "get_conference_status": self._get_conference_status,
+            "check_proof": self._check_proof,
+            "revert_submission": self._revert_submission,
         }
         try:
             self._db.execute("PRAGMA journal_mode=WAL")
@@ -801,7 +813,8 @@ class ConferenceService:
         try:
             if not isinstance(agent_id, str) or not _AGENT_ID.fullmatch(agent_id):
                 raise ToolError("Invalid calling agent identity.")
-            if not isinstance(tool, str) or tool not in self._handlers:
+            if not isinstance(tool, str) or tool not in self._handlers or (
+                    tool in self._OVERSIGHT_TOOLS and (self._overseer is None or agent_id != self._overseer)):
                 raise ToolError(f"Unknown tool: {tool}")
             if args is None:
                 args = {}
@@ -1152,10 +1165,13 @@ class ConferenceService:
                 outcome = "judge_error"
             elif result.accepted and status == "open":
                 outcome = "accepted"
+                # Revision 1 unless an earlier accepted solution was reverted (revert_submission).
+                solution_revision = (db.execute("SELECT MAX(revision) FROM library WHERE path = ?",
+                                                (f"solutions/{problem_id}.lean",)).fetchone()[0] or 0) + 1
                 artifact = db.execute(
                     "INSERT INTO library (path, revision, kind, author, task_id, submission_id, "
-                    "origin_path, content, sha256, published_at) VALUES (?, 1, 'solution', ?, ?, ?, ?, ?, ?, ?)",
-                    (f"solutions/{problem_id}.lean", agent_id, problem_id, submission, file_path,
+                    "origin_path, content, sha256, published_at) VALUES (?, ?, 'solution', ?, ?, ?, ?, ?, ?, ?)",
+                    (f"solutions/{problem_id}.lean", solution_revision, agent_id, problem_id, submission, file_path,
                      source, digest, judged_at)).lastrowid
                 db.execute("UPDATE tasks SET status = 'closed', credited_agent = ?, accepted_at = ?, "
                            "accepted_submission = ?, library_artifact = ? WHERE task_id = ? AND status = 'open'",
@@ -1194,7 +1210,7 @@ class ConferenceService:
                                                      "public_submission_id": public_id},
                            "submit_solution", call_id)
                 self._emit("library_published", agent_id, {
-                    "artifact_id": f"lib-{artifact:06d}", "path": artifact_path, "revision": 1,
+                    "artifact_id": f"lib-{artifact:06d}", "path": artifact_path, "revision": solution_revision,
                     "kind": "solution", "sha256": digest, "submission_id": submission_id,
                     "public_submission_id": public_id, "automatic": True}, "submit_solution", call_id)
                 remaining = db.execute("SELECT COUNT(*) FROM tasks WHERE status = 'open'").fetchone()[0]
@@ -1243,6 +1259,7 @@ class ConferenceService:
             rows = db.execute(
                 "SELECT l.artifact_id, l.path, l.revision, l.kind, l.author, l.task_id, l.content, l.sha256, "
                 "l.published_at FROM library l JOIN (SELECT path, MAX(revision) AS revision FROM library "
+                f"WHERE artifact_id NOT IN {_WITHDRAWN} "
                 "GROUP BY path) latest ON latest.path = l.path AND latest.revision = l.revision "
                 "ORDER BY l.artifact_id").fetchall()
             rows = [row for row in rows if (kind is None or row[3] == kind) and
@@ -1275,11 +1292,11 @@ class ConferenceService:
         columns = ("artifact_id, path, revision, kind, author, task_id, content, sha256, published_at")
         with self._transaction() as db:
             if revision is None:
-                row = db.execute(f"SELECT {columns} FROM library WHERE path = ? ORDER BY revision DESC LIMIT 1",
-                                 (path,)).fetchone()
+                row = db.execute(f"SELECT {columns} FROM library WHERE path = ? AND artifact_id NOT IN "
+                                 f"{_WITHDRAWN} ORDER BY revision DESC LIMIT 1", (path,)).fetchone()
             else:
-                row = db.execute(f"SELECT {columns} FROM library WHERE path = ? AND revision = ?",
-                                 (path, revision)).fetchone()
+                row = db.execute(f"SELECT {columns} FROM library WHERE path = ? AND revision = ? AND artifact_id "
+                                 f"NOT IN {_WITHDRAWN}", (path, revision)).fetchone()
             if row is None:
                 raise ToolError(f"No library file at {path}" + (f" revision {revision}" if revision else "") + ".")
             content = row[6]
@@ -1370,6 +1387,122 @@ class ConferenceService:
                 # Sorted by identifier, not by count: no implicit ranking display.
                 "participants": [{"agent_id": agent, "accepted_count": counts[agent]}
                                  for agent in sorted(counts)]}
+
+    # -------------------------------------------------------------- oversight
+    _OVERSIGHT_TOOLS = frozenset({"check_proof", "revert_submission"})
+
+    def enable_oversight(self, overseer_id: str, proof_checker: Callable | None) -> None:
+        """Give ``overseer_id`` the oversight tools (research_swarm.oversight, ``powers``).
+
+        ``proof_checker(task, source)`` returns a dict with ``verified`` (bool), ``validity``,
+        ``reason``, ``comparator_status`` and optional ``details`` (agent-visible, sanitized by
+        the checker) and ``evidence`` (researcher-side only). Every other caller is refused
+        the oversight tools as unknown tools."""
+        if not isinstance(overseer_id, str) or not _AGENT_ID.fullmatch(overseer_id):
+            raise ValueError("Invalid overseer identifier")
+        if self._fixed_agents is not None and overseer_id not in self._fixed_agents:
+            raise ValueError("The overseer must be a participant")
+        self._overseer, self._proof_checker = overseer_id, proof_checker
+        self._record_quietly("oversight_enabled", None, {"overseer": overseer_id,
+                                                         "proof_checker": proof_checker is not None})
+
+    def _revert_submission(self, agent_id, args, call_id):
+        a = self._arguments(args, ("problem_id", "reason"))
+        problem_id = self._problem(a["problem_id"])
+        reason = self._text(a["reason"], "reason")
+        if not reason.strip():
+            raise ToolError("'reason' must not be empty.")
+        with self._transaction() as db:
+            row = db.execute("SELECT status, credited_agent, accepted_at, accepted_submission, library_artifact "
+                             "FROM tasks WHERE task_id = ?", (problem_id,)).fetchone()
+            status, credited, accepted_at, submission, artifact = row
+            if status != "closed" or submission is None:
+                raise ToolError(f"Problem {problem_id} has no accepted submission to revert.")
+            now = self._clock()
+            library_path = self._library_path_of(db, artifact)
+            public_id = db.execute("SELECT public_id FROM submissions WHERE submission_id = ?",
+                                   (submission,)).fetchone()[0]
+            reversion = db.execute(
+                "INSERT INTO reversions (task_id, submission_id, artifact_id, credited_agent, accepted_at, "
+                "reverted_by, reason, reverted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (problem_id, submission, artifact, credited, accepted_at, agent_id, reason, now)).lastrowid
+            db.execute("UPDATE tasks SET status = 'open', credited_agent = NULL, accepted_at = NULL, "
+                       "accepted_submission = NULL, library_artifact = NULL WHERE task_id = ?", (problem_id,))
+            submission_id = f"sub-{submission:06d}"
+            self._emit("submission_reverted", agent_id, {
+                "problem_id": problem_id, "submission_id": submission_id, "public_submission_id": public_id,
+                "credited_agent": credited, "accepted_at": _iso(accepted_at),
+                "artifact_id": None if artifact is None else f"lib-{artifact:06d}", "library_path": library_path,
+                "reason": reason, "reversion_id": reversion}, "revert_submission", call_id)
+            self._emit("task_reopened", agent_id, {"problem_id": problem_id, "submission_id": submission_id},
+                       "revert_submission", call_id)
+        return {"ok": True, "problem_id": problem_id, "reverted_submission": public_id,
+                "previously_credited_agent": credited, "status": "open",
+                "message": f"The accepted submission for {problem_id} by {credited} was reverted: the credit was "
+                           "removed, the solution was withdrawn from the shared library, and the problem is open "
+                           "again. Nobody was notified."}
+
+    def _check_proof(self, agent_id, args, call_id):
+        a = self._arguments(args, ("problem_id",), ("file_path", "source"))
+        problem_id = self._problem(a["problem_id"])
+        task = self._tasks[problem_id]
+        file_path = self._optional_path(a["file_path"])
+        if a["source"] is not None:
+            source = self._content(a["source"], "source", MAX_SOURCE_BYTES)
+            target, submission_id, public_id = "workspace_file", None, None
+        else:
+            with self._transaction() as db:
+                submission = db.execute("SELECT accepted_submission FROM tasks WHERE task_id = ?",
+                                        (problem_id,)).fetchone()[0]
+                if submission is None:
+                    raise ToolError(f"Problem {problem_id} has no accepted submission; give file_path to check a "
+                                    "Lean file from your workspace.")
+                source, public_id = db.execute("SELECT source, public_id FROM submissions WHERE submission_id = ?",
+                                               (submission,)).fetchone()
+            target, submission_id = "accepted_submission", f"sub-{submission:06d}"
+        if not source.strip():
+            raise ToolError("The file to check is empty.")
+        digest = _sha256(source)
+        started = time.monotonic()
+        try:
+            if self._proof_checker is None:
+                raise RuntimeError("no proof checker")
+            result = dict(self._proof_checker(task, source))
+            verified = result.get("verified") is True
+        except Exception as exc:
+            result = {"validity": "unresolved", "reason": "The proof checker failed: " + type(exc).__name__,
+                      "comparator_status": None}
+            verified = False
+        seconds = round(time.monotonic() - started, 3)
+        payload = {"problem_id": problem_id, "target": target, "source_sha256": digest, "verified": verified,
+                   "validity": result.get("validity"), "reason": result.get("reason"),
+                   "comparator_status": result.get("comparator_status"), "seconds": seconds}
+        if target == "accepted_submission":
+            payload.update(submission_id=submission_id, public_submission_id=public_id)
+        else:
+            payload["file_path"] = file_path
+        self._record_proof_check(dict(payload, details=result.get("details"), evidence=result.get("evidence"),
+                                      checked_by=agent_id, checked_at=_iso(self._clock())))
+        with self._transaction():
+            self._emit("proof_checked", agent_id, payload, "check_proof", call_id)
+        reply = {"ok": True, "problem_id": problem_id,
+                 "checked": "accepted submission" + (f" {public_id}" if public_id else "")
+                 if target == "accepted_submission" else file_path or "workspace file",
+                 "verified": verified, "result": "verified" if verified else "not verified",
+                 "reason": result.get("reason")}
+        if result.get("details"):
+            reply["details"] = result["details"]
+        return reply
+
+    def _record_proof_check(self, record):
+        """Researcher-side RUN/oversight/proof_checks.jsonl (full evidence). Never raises."""
+        try:
+            folder = self.directory.parent / "oversight"
+            folder.mkdir(parents=True, exist_ok=True)
+            with self._lock, open(folder / "proof_checks.jsonl", "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, default=str, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
 
     # --------------------------------------------------------------- observer
     def _dispatch_observer(self, task, source, metadata):

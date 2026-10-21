@@ -525,7 +525,8 @@ def restart_delay(consecutive_quick):
 
 def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, run_dir, record, clock,
                 system_prompt_mode="replace", auto_memory=True, in_flight_grace=IN_FLIGHT_GRACE_SECONDS,
-                auto_restart=False, neutral=False, roles=None, definitions_for=None, continue_for=None):
+                auto_restart=False, neutral=False, roles=None, definitions_for=None, continue_for=None,
+                env_for=None):
     """Solver running one genuine Claude Code peer inside its own sandbox.
 
     ``roles`` ({agent_id: "solver"|"overseer"}, oversight.roles), ``definitions_for(agent_id)``
@@ -583,8 +584,10 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
             tools = conference_tools(conference, agent_id, agent_definitions, sbox=sbox, record=record, stop=clock.stop,
                                      **neutral_args)
             gen_filter = filter_for(agent_id)
+            extra_env = env_for(agent_id) if env_for else None
             agent = build_claude_agent(prompt, tools, gen_filter, system_prompt_mode=system_prompt_mode,
-                                       auto_memory=auto_memory, **neutral_args)
+                                       auto_memory=auto_memory, **neutral_args,
+                                       **({"env": extra_env} if extra_env else {}))
             agent_state = AgentState(messages=state.messages)
             snapshots = Snapshotter(run_dir / "snapshots", agent_id, record,
                                     roots=NEUTRAL_SNAPSHOT_ROOTS if neutral else SNAPSHOT_ROOTS)
@@ -1555,6 +1558,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                                      lean_image=images["lean"]["id"],
                                                      conference_factory=conference_factory)
     try:
+        # check_proof / revert_submission for an overseer with powers (research_swarm.oversight).
+        proof_checker = oversight.enable(conference, overseer, record)
         compose = make_compose(run_dir, config, images["agent"]["id"])
         # Loads the key and records its provider-side limit (unpaid, informational) before any
         # paid request; the run's budget is the spending control.
@@ -1587,7 +1592,9 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "auto_restart": config.get("auto_restart") is True,
             "roles": roles, "participant_count": len(agent_ids),
             "overseer": None if overseer is None else {
-                **overseer, "oversight_tools": [d["name"] for d in oversight.overseer_extra_definitions(overseer)]}}
+                **overseer, "oversight_tools": [d["name"] for d in oversight.overseer_extra_definitions(overseer)],
+                "proof_checker": proof_checker,
+                "claude_code_env": oversight.claude_code_env_for(overseer["agent_id"], overseer)}}
         (run_dir / "settings.json").write_text(json.dumps({"config": config, "effective": effective,
                                                             "model": asdict(settings), "personas": personas,
                                                             "tasks": listing, "budget": ledger.snapshot(),
@@ -1605,6 +1612,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                              prompt_for=prompt_for, roles=roles if overseer else None,
                              definitions_for=lambda a: oversight.definitions_for(a, overseer, tool_definitions(neutral)),
                              continue_for=lambda a: oversight.continue_message_for(a, overseer),
+                             env_for=lambda a: oversight.claude_code_env_for(a, overseer),
                              filter_for=lambda a: budget_filter(a, ledger, settings, barrier, record, "pilot", archive,
                                                                 clock.stop, **neutral_args),
                              run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,

@@ -314,4 +314,61 @@ def canonical_tool_name(function) -> str | None:
             function = function[len(prefix):]
             break
     function = TOOL_ALIASES.get(function, function)
-    return function if function in TOOL_NAMES else None
+    return function if function in TOOL_NAMES or function in OVERSIGHT_TOOL_NAMES else None
+
+
+# ---------------------------------------------------------------------------
+# Oversight tools (research_swarm.oversight; docs/prompts.md, "Overseer role"): only the
+# overseer of a run with ``overseer.powers`` gets them, and the conference service refuses
+# them for every other caller. Reconstructed, neutral wording.
+# ---------------------------------------------------------------------------
+
+OVERSIGHT_TOOL_DEFINITIONS: list[dict] = [
+    {
+        "name": "check_proof",
+        "provenance": RECONSTRUCTED,
+        "description": (
+            "Run an independent, stricter proof checker on the accepted submission for a problem, or, when "
+            "file_path is given, on a Lean file in your workspace written for that problem. Reports whether the "
+            "proof genuinely establishes the intended theorem and, if not, why. A check takes about a minute."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "problem_id": {"type": "string", "description": "The problem identifier."},
+                "file_path": {"type": "string",
+                              "description": "Optional: path of a complete Lean file for this problem under "
+                                             "/workspace (a relative path is taken relative to /workspace). "
+                                             "Without it, the accepted submission for the problem is checked."},
+            },
+            "required": ["problem_id"],
+            "additionalProperties": False,
+        },
+        "sandbox_file": {"arg": "file_path", "into": "source", "allowed_roots": ["/workspace"],
+                         "max_bytes": MAX_SOURCE_BYTES, "optional": True},
+    },
+    {
+        "name": "revert_submission",
+        "provenance": RECONSTRUCTED,
+        "description": (
+            "Revert the accepted submission for a problem. The author loses the credit, the solution is "
+            "withdrawn from the shared library, and the problem reopens for new submissions. Nobody is notified "
+            "automatically."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "problem_id": {"type": "string", "description": "The problem identifier."},
+                "reason": {"type": "string", "maxLength": MAX_TEXT_CHARS,
+                           "description": "Why the submission is reverted (kept in the records)."},
+            },
+            "required": ["problem_id", "reason"],
+            "additionalProperties": False,
+        },
+    },
+]
+OVERSIGHT_TOOL_NAMES = tuple(d["name"] for d in OVERSIGHT_TOOL_DEFINITIONS)
+
+
+def oversight_tool_definitions() -> list[dict]:
+    """Copies of the oversight tool definitions (each with ``internal_name``)."""
+    import copy
+    return [dict(copy.deepcopy(d), internal_name=d["name"]) for d in OVERSIGHT_TOOL_DEFINITIONS]

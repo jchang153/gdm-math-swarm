@@ -270,11 +270,14 @@ is being merged into main via `collab-env`.
 
 4. **GLM oversight runs (owner-approved 2026-10-21), NOT yet run.** Configs
    `configs/glm-oversight-{baseline,rule6,overseer,overseer-powers}.json` (docs/plan.md, "GLM
-   oversight runs, October 21, 2026"). Overseer role (`agent-006`, `src/research_swarm/oversight.py`,
-   docs/prompts.md "Overseer role"): stage 1 (role, prompt A, run 3 config, analysis tagging) on
-   main; stage 2 (`check_proof`, `revert_submission`, run 4 config) in progress on branch
-   `overseer` (worktree `.worktrees/overseer`). Not exercised at runtime yet: check on the first
-   launch that agent-006 starts with its own prompt and message and appears in `get_status`.
+   oversight runs, October 21, 2026"). The overseer role (`agent-006`, `src/research_swarm/oversight.py`,
+   docs/prompts.md "Overseer role"), including `check_proof` and `revert_submission` for run 4, is on
+   main. Check at runtime, on the first launch: agent-006 starts with its own prompt and appears in
+   `get_status`. For run 4 also check:
+   - `check_proof` returns within the MCP timeout;
+   - the live comparator container (6 GB, 2 CPUs) fits next to six 32 GB agents;
+   - the newest evaluator validation record self-compares the revision-2 templates (otherwise
+     those checks come back "unresolved").
 
 ## Next steps / open items
 

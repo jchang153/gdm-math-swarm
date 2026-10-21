@@ -402,7 +402,9 @@ def conference_tools(conference, agent_id, definitions, sbox=None, record=None, 
                 args = dict(args)
                 if stop is not None and stop.is_set():
                     return json.dumps(closed())
-                if spec:
+                if spec and spec.get("optional") and args.get(spec["arg"]) is None:
+                    args.pop(spec["arg"], None)  # an optional file argument (check_proof) left out
+                elif spec:
                     target = args.get(spec["arg"])
                     box = sbox
                     if box is None:

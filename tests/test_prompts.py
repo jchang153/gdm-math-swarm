@@ -195,7 +195,9 @@ class ToolDefinitionTests(unittest.TestCase):
             service = ConferenceService(Path(folder), [ConferenceTask('t', 'T', 't', False, 'x')],
                                         judge=lambda task, source: None, agent_ids=['agent-001'])
             try:
-                self.assertEqual(set(names), set(service._handlers))
+                # Plus the overseer's oversight tools (tools.OVERSIGHT_TOOL_NAMES), refused to everyone else.
+                from research_swarm.tools import OVERSIGHT_TOOL_NAMES
+                self.assertEqual(set(names) | set(OVERSIGHT_TOOL_NAMES), set(service._handlers))
             finally:
                 service.close()
 

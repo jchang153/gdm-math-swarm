@@ -300,7 +300,7 @@ def collect_submissions(run_dir, include_rejected=False, closed=None, request_me
     if closed is not None:
         notes['closed_requests'] = {'requested': sorted(closed), 'request_file': request_meta}
     reverted = read_reversions(run_dir)
-    if reverted is not None:  # overseer runs: reverted credits are evaluated, and flagged in the summary
+    if reverted:  # the table exists in every run since oversight; only actual reversions: reverted credits are evaluated, and flagged in the summary
         notes['reverted_submissions'] = sorted(reverted)
     selected.sort(key=lambda s: s['submission_id'])
     return selected, tasks, notes

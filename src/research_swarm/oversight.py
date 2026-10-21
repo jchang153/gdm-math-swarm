@@ -48,10 +48,6 @@ def overseer_problems(config) -> list[str]:
         problems.append(f"{OVERSEER_KEY}.agent_id must be {expected!r} (the identifier after the solvers)")
     if not isinstance(value.get("powers"), bool):
         problems.append(f"{OVERSEER_KEY}.powers must be true or false")
-    elif value["powers"]:
-        from . import tools
-        if not hasattr(tools, "oversight_tool_definitions"):
-            problems.append(f"{OVERSEER_KEY}.powers is not implemented yet")
     variant = config.get(prompts.PROMPT_VARIANT_KEY, prompts.BASELINE_VARIANT)
     if not prompts.neutral_environment(variant):
         problems.append(f"{OVERSEER_KEY} requires a neutral collaboration prompt variant "
@@ -193,3 +189,65 @@ def definitions_for(agent_id, overseer, definitions) -> list[dict]:
 def continue_message_for(agent_id, overseer):
     """The overseer's auto-restart message; None (the default message) for solvers."""
     return OVERSEER_CONTINUE_MESSAGE if overseer and agent_id == overseer["agent_id"] else None
+
+
+# check_proof (powers): the independent comparator evaluator (research_swarm.evaluator), run live
+# on the accepted submission or a workspace file. Only the frozen template (agent-visible) and the
+# checked source enter it; reference solutions and researcher material never do. Owner's decision
+# (2026-10-21): unlimited use, about 40 s per check on the VM. The host-wide evaluator lock
+# serializes checks.
+CHECK_PROOF_TIMEOUT_SECONDS = 900
+# Claude Code's MCP tool-call timeout for the overseer with powers (milliseconds): a check may wait
+# for the evaluator lock and then run for minutes.
+OVERSEER_MCP_TOOL_TIMEOUT_MS = "1800000"
+_DETAIL_LIMIT = 600
+
+
+def make_proof_checker(backend=None):
+    """``checker(task, source) -> dict`` for ``ConferenceService.enable_oversight``.
+
+    ``backend`` defaults to the validated ``DockerComparatorBackend`` (the newest researcher-side
+    validation record). The agent-visible fields are the fixed verdict reason and a short,
+    neutral detail; the full evidence is kept researcher-side only."""
+    from . import evaluator
+    from .judge import TaskTemplate
+    if backend is None:
+        backend = evaluator.DockerComparatorBackend(validated_image=True, timeout=CHECK_PROOF_TIMEOUT_SECONDS)
+
+    def checker(task, source):
+        template = TaskTemplate(task.template_source, task.theorem_name, bool(task.answer_based))
+        result = evaluator.evaluate_submission(template, source, backend)
+        evidence = result.evidence or {}
+        record = evidence.get("record") or {}
+        details = str(evidence.get("details") or "")[:_DETAIL_LIMIT]
+        if prompts.NEUTRAL_FORBIDDEN.search(details) or "/" in details:
+            details = ""  # never a host path or a forbidden word in an agent-visible reply
+        return {"verified": result.validity == "genuine", "validity": result.validity, "reason": result.reason,
+                "comparator_status": record.get("status"), "details": details or None,
+                "review_flags": list(result.review_flags),
+                "evidence": {"details": evidence.get("details"), "status": record.get("status"),
+                             "axiom": record.get("axiom"), "answer": evidence.get("answer")}}
+    checker.backend = backend
+    return checker
+
+
+def enable(conference, overseer, record=None, checker_factory=make_proof_checker):
+    """Switch on the oversight tools in ``conference`` for an overseer with powers. Returns the
+    backend description (recorded in settings) or None."""
+    if not overseer or not overseer.get("powers"):
+        return None
+    checker = checker_factory()
+    conference.enable_oversight(overseer["agent_id"], checker)
+    backend = getattr(checker, "backend", None)
+    describe = getattr(backend, "describe", None)
+    description = describe() if describe else None
+    if record is not None:
+        record("oversight_enabled", overseer["agent_id"], {"proof_checker": description})
+    return description
+
+
+def claude_code_env_for(agent_id, overseer):
+    """Extra Claude Code environment for ``agent_id`` (None for solvers and a plain overseer)."""
+    if overseer and overseer.get("powers") and agent_id == overseer["agent_id"]:
+        return {"MCP_TOOL_TIMEOUT": OVERSEER_MCP_TOOL_TIMEOUT_MS}
+    return None
