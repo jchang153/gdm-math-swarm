@@ -161,6 +161,7 @@ def excerpt_meta(record, ctx):
 
 
 FALLBACK_NOTE = "Program-chosen passage"
+MODEL_FALLBACK_NOTE = "Fallback model"
 
 
 def _excerpt_html(record, ctx):
@@ -185,6 +186,10 @@ def _excerpt_html(record, ctx):
         why = excerpt.get("fallback_reason") or "the extraction model gave no passage"
         badge = (f'<span class="fallback" title="Chosen by the program, not the extraction model, because '
                  f'{html.escape(why, quote=True)}">{FALLBACK_NOTE}</span>')
+    elif excerpt and excerpt.get("model_fallback"):
+        badge = (f'<span class="fallback" title="Chosen by {html.escape(str(excerpt.get("model") or "the fallback model"), quote=True)}'
+                 ' because the primary model provider refused the request">'
+                 f'{MODEL_FALLBACK_NOTE}</span>')
     return (f'<figure class="excerpt k-{css}{"" if record["verified"] else " bad"}">'
             f'<figcaption><span class="kind">{html.escape(label)}</span>'
             f'<span class="meta">{html.escape(str(loc["agent"]))} · {html.escape(_time(loc["time"]))} · '
@@ -447,6 +452,8 @@ def reader_markdown(markdown, checks, locator, evidence):
             head.append(f"[Inspect View]({loc['inspect_url']})")
         if excerpt and excerpt.get("fallback"):
             head.append(f"*{FALLBACK_NOTE.lower()}: {excerpt.get('fallback_reason') or 'no model passage'}*")
+        elif excerpt and excerpt.get("model_fallback"):
+            head.append(f"*{MODEL_FALLBACK_NOTE.lower()}: {excerpt.get('model') or 'non-Anthropic model'}*")
         fence = "~~~~" if "```" in record["quote"] else "```"
         lines = ["> " + " · ".join(head), ">", "> " + fence + "text"]
         lines += [("> " + line).rstrip() for line in record["quote"].split("\n")]
@@ -464,7 +471,7 @@ def reader_markdown(markdown, checks, locator, evidence):
 HOST_NOTE_LEAD = "**Note from the program (not the model).**"
 
 
-def host_note_markdown(digest, evidence, refusals, units, draft=""):
+def host_note_markdown(digest, evidence, refusals, units, draft="", *, model_fallbacks=()):
     """The host-written note added to "How sure we are": whether the chain of thought was readable, who
     chose each excerpt shown, and how many extraction requests the model provider refused."""
     shown = set(re.findall(r"^:::excerpt[ \t]+\S+[ \t]+(E\d+)", draft or "", re.M))
@@ -488,6 +495,18 @@ def host_note_markdown(digest, evidence, refusals, units, draft=""):
                      + " refused by the model provider (see `extract_refusals` in evidence.json).")
     else:
         parts.append("No extraction request was refused.")
+    answered = [f for f in model_fallbacks or () if f.get("status") == "ok"]
+    if answered:
+        models = sorted({f["fallback_model"] for f in answered})
+        stages = sorted({f["stage"] for f in answered})
+        picked = [e for e in rows if e.get("model_fallback")]
+        parts.append(f"{len(answered)} request" + ("s" if len(answered) != 1 else "") + " refused by "
+                     + ", ".join(sorted({f["refused_by"] for f in answered})) + " (stage "
+                     + ", ".join(stages) + ") " + ("were" if len(answered) != 1 else "was")
+                     + " answered by the fallback model " + ", ".join(models) + " instead"
+                     + (f"; its {len(picked)} excerpt" + ("s are" if len(picked) != 1 else " is")
+                        + f" marked \"{MODEL_FALLBACK_NOTE}\"" if picked else "")
+                     + " (see `model_fallbacks` in evidence.json).")
     return " ".join(p for p in parts if p)
 
 

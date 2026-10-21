@@ -17,7 +17,17 @@ sent and the invocation stops cleanly (exit 3; a rerun reuses every finished uni
 twice). No estimate, no confirmation, no approval flag. Requests go through the behavior judge's
 JudgeClient (OpenRouter, provider pinned to Anthropic, ledger "analysis" scope, raw archives under
 OUTPUT/raw/); the judge route pricing record is refreshed automatically when stale (unpaid public
-catalog). Transcripts are sent only to the configured models. The deterministic results report is
+catalog). Transcripts are sent only to the configured models.
+
+Refusals (owner request, October 21, 2026): Anthropic may refuse a unit outright (HTTP 200,
+finish_reason content_filter, no usage), e.g. its block on transcripts of another lab's model. Such
+a response is settled at its true cost from OpenRouter's generation record (judge client), and the
+unit is never resent to Anthropic: it goes once to the non-Anthropic fallback model
+(route.FALLBACK_MODEL_ID, frozen in the same pricing record, which is refreshed automatically when it
+lacks one) and is flagged in the report and evidence.json (``model_fallbacks``). Before admitting
+anything, an automatic startup pass settles this output directory's leftover uncertain holds whose
+archived responses reported no usage (generation lookup through the ledger's reconciliation path;
+a failed lookup keeps the hold; audit under the ledger's reconciliations/ folder). The deterministic results report is
 never modified. Nothing here may reach an experimental agent.
 """
 from __future__ import annotations
@@ -40,7 +50,7 @@ from research_swarm.inspect_adapter import disable_inspect_dotenv  # noqa: E402
 disable_inspect_dotenv()
 
 DEFAULT_RUN_LIMIT_USD = Decimal("20")
-CONCURRENCY = {"opus": 4, "sonnet": 8}
+CONCURRENCY = {"opus": 4, "sonnet": 8, "fallback": 4}
 
 
 def parse_args(argv=None):
@@ -57,6 +67,8 @@ def parse_args(argv=None):
     parser.add_argument("--pricing-record", type=Path, help="judge route pricing record (default: newest)")
     parser.add_argument("--history-workers", type=int, default=None)
     parser.add_argument("--no-repair", action="store_true", help="skip the writer's one revision pass")
+    parser.add_argument("--no-model-fallback", action="store_true",
+                        help="never send a refused unit to the non-Anthropic fallback model")
     parser.add_argument("--extract-model", choices=("opus", "sonnet"), default="opus",
                         help="model that picks excerpts of long records by segment number (default opus; "
                              "Sonnet refused Gemini transcripts on gemini10)")
@@ -78,6 +90,37 @@ def load_histories(run_dir, *, workers=None, log=None):
             if item.get("agent_id") == agent:
                 base.conference.items[record_id] = item
     return base, {agent: index[agent][2] for agent in agents}
+
+
+def settle_leftover_holds(ledger, out_dir, credentials_root, log):
+    """Startup pass: settle this output directory's leftover uncertain holds whose archived responses
+    reported no usage (``client.reconcile_archived_holds``: OpenRouter's generation record, the ledger's
+    reconciliation path); writes the audit file next to the other reconciliations. Never raises: a
+    failure keeps every hold (it then counts at its reservation, as before)."""
+    from research.analysis.judge.client import fetch_generation, reconcile_archived_holds
+    from reconcile_ledger import write_audit
+    from research_swarm.budget import BudgetLedger
+    try:
+        key = []
+
+        def lookup(generation_id):
+            if not key:
+                from research_swarm.secrets import load_openrouter_key
+                key.append(load_openrouter_key(credentials_root))
+            return fetch_generation(generation_id, key[0])
+
+        entries = reconcile_archived_holds(ledger, [out_dir / "raw"], lookup)
+        if not entries:
+            return []
+        audit = write_audit(ledger, BudgetLedger(ledger), entries, mode="incident_startup_generation_lookup",
+                            scope="analysis")
+        settled = [e for e in entries if e["outcome"] == "reconciled"]
+        log(f"settled {len(settled)} of {len(entries)} leftover no-usage hold(s) from OpenRouter generation records "
+            f"(total ${sum(float(e['cost_usd']) for e in settled):.4f}); audit {audit}")
+        return entries
+    except Exception as error:  # never blocks the run: the holds stay counted at their reservations
+        log(f"leftover-hold settlement skipped ({type(error).__name__}: {error})")
+        return []
 
 
 def label_run_id(run_dir):
@@ -110,6 +153,7 @@ def main(argv=None):
 
 def _run(args, run_dir, out_dir, log):
     from research.analysis.judge.client import FakeTransport, JudgeClient, RunLimit, committed_for_judging
+    from research.analysis.judge.route import FALLBACK_KEY
     from research.analysis.incident.mock import MockModel
     from research.analysis.incident.pipeline import IncidentPipeline, StageError, write_json
     import run_transcript_judge as rtj
@@ -133,13 +177,14 @@ def _run(args, run_dir, out_dir, log):
         if not credentials_root.is_dir():
             log(f"refused: --credentials-root {credentials_root} is not a directory")
             return 2
-        rtj.refresh_pricing(args, log=log)
+        rtj.refresh_pricing(args, log=log, require_fallback=not args.no_model_fallback)
         try:
             routes = rtj.route_settings(args, paid=True)
         except rtj.RouteRefused as error:
             log(f"refused: {error}")
             return 2
         sources = rtj.judging_ledgers(ledger, out_dir, search=(run_dir,), log=log)
+        settle_leftover_holds(ledger, out_dir, credentials_root, log)
     prior = committed_for_judging(sources, out_dir, scope=scope, run_id=label)
     room = budget - Decimal(prior["committed_usd"])
     if room <= 0:
@@ -155,6 +200,12 @@ def _run(args, run_dir, out_dir, log):
     run, epochs = load_histories(run_dir, workers=args.history_workers, log=log)
     roles = {"opus": "opus", "extract": args.extract_model}   # role -> judge route key
     models = {"plan_write": routes.route("opus").model_id, "extract": routes.route(args.extract_model).model_id}
+    if routes.has_fallback and not args.no_model_fallback:
+        roles["fallback"] = FALLBACK_KEY
+        models["fallback"] = routes.route(FALLBACK_KEY).model_id
+    elif not args.no_model_fallback:
+        log("note: the judge route pricing record has no valid fallback route; a refused unit gets host-chosen "
+            "excerpts only")
     if args.mock:
         transport = FakeTransport(responder=MockModel())
         made = {key: JudgeClient(key, ledger, scope=scope, archive_dir=out_dir / "raw", settings=routes,

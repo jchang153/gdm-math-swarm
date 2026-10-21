@@ -312,23 +312,27 @@ class RouteRefused(Exception):
     pass
 
 
-def pricing_problem(record):
+def pricing_problem(record, *, require_fallback=False):
     """Why ``record`` cannot price a paid judging run now (missing, unreadable, older than 72 h, or
-    no longer valid for the pinned route; ``JudgeRouteSettings.from_pricing_record``), or None."""
+    no longer valid for the pinned route; ``JudgeRouteSettings.from_pricing_record``), or None. With
+    ``require_fallback`` (the incident report), a record without a valid non-Anthropic fallback route
+    (route.FALLBACK_KEY) is a problem too."""
     from research.analysis.judge.route import JudgeRouteSettings
     if record is None:
         return "no judge route pricing record"
     try:
-        JudgeRouteSettings.from_pricing_record(record)
+        settings = JudgeRouteSettings.from_pricing_record(record)
     except (ValueError, OSError, KeyError, TypeError) as error:
         return f"judge route pricing record {Path(record).name}: {error}"
+    if require_fallback and not settings.has_fallback:
+        return f"judge route pricing record {Path(record).name} has no valid fallback route"
     return None
 
 
 REFRESH_DELAYS_SECONDS = (10, 30)   # waits before the second and third refresh attempts
 
 
-def refresh_pricing(args, *, freeze=None, log=None, sleep=None):
+def refresh_pricing(args, *, freeze=None, log=None, sleep=None, require_fallback=False):
     """Before a paid run: refresh the judge route pricing record (scripts/freeze_judge_route.py,
     unpaid public catalog, no credential) when the newest one cannot price a paid run now
     (``pricing_problem``: missing, older than the route's 72 h window or no longer valid), trying
@@ -340,7 +344,7 @@ def refresh_pricing(args, *, freeze=None, log=None, sleep=None):
     sleep = sleep or time.sleep
     if args.pricing_record:
         return None
-    reason = pricing_problem(pricing_record(args))
+    reason = pricing_problem(pricing_record(args), require_fallback=require_fallback)
     if reason is None:
         return None
     log(f"Refreshing the judge route pricing record ({reason}; unpaid public catalog, no credential).")
@@ -352,7 +356,7 @@ def refresh_pricing(args, *, freeze=None, log=None, sleep=None):
         if delay:
             sleep(delay)
         try:
-            if not freeze([]) and pricing_problem(pricing_record(args)) is None:
+            if not freeze([]) and pricing_problem(pricing_record(args), require_fallback=require_fallback) is None:
                 return reason
             log(f"Refresh attempt {attempt}: the new judge route pricing record did not validate (see the record).")
         except Exception as error:  # e.g. no network

@@ -1137,7 +1137,7 @@ class CredentialsRootTests(ClientCase):
 class FreezeRecordTests(unittest.TestCase):
     def test_newest_record_covers_three_models_with_effort_and_caching(self):
         record = json.loads(newest_record().read_text())
-        self.assertEqual(set(record["models"]), {"haiku", "sonnet", "opus"})
+        self.assertEqual(set(record["models"]) - {"fallback"}, {"haiku", "sonnet", "opus"})   # fallback optional
         self.assertEqual((record["credential_used"], record["paid_calls"], record["all_required_passed"]),
                          (False, 0, True))
         self.assertEqual(record["cache_system_defaults"], {"haiku": False, "sonnet": True, "opus": True})

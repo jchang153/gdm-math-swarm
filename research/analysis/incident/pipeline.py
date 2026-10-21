@@ -8,6 +8,10 @@
    shown as numbered segments and the model picks passages by segment number
    (``prompts.EXTRACT_SYSTEM``); the host cuts them out and completes their boundaries
    (``complete_span``); a refused or empty extraction gets a flagged host-chosen passage.
+   Model fallback (owner request, October 21, 2026): with a ``"fallback"`` client (a non-Anthropic
+   model, route.FALLBACK_MODEL_ID), a unit Anthropic refuses is not resent to Anthropic; it goes once to
+   the fallback model instead (unit ``<name>.fallback``), and everything that model chose is flagged
+   (``model_fallbacks`` in evidence.json, a "Fallback model" badge on its excerpts).
 4. Write (Opus): the Markdown report (``prompts.WRITE_SYSTEM``).
 5. Verify (host): every excerpt block and inline quote must be a verbatim substring of its cited
    record (whitespace normalized only), citations must exist and the required sections must be
@@ -248,7 +252,7 @@ def complete_span(text, lo, hi):
 
 def excerpt_sources(evidence):
     """Counts of the excerpts by who chose them, and the ids of the program-chosen (fallback) ones."""
-    counts, fallback = {"whole_record": 0, "model": 0, "host_fallback": 0}, []
+    counts, fallback, model_fallback = {"whole_record": 0, "model": 0, "host_fallback": 0}, [], []
     for story in evidence["storylines"]:
         for record in story["records"]:
             for excerpt in record["excerpts"]:
@@ -257,7 +261,10 @@ def excerpt_sources(evidence):
                 if excerpt["source"] == "host_fallback":
                     fallback.append({"eid": excerpt["eid"], "item": record["id"], "storyline": story["id"],
                                      "reason": excerpt.get("fallback_reason")})
-    return dict(counts, fallback=fallback)
+                if excerpt.get("model_fallback"):
+                    model_fallback.append({"eid": excerpt["eid"], "item": record["id"], "storyline": story["id"],
+                                           "model": excerpt.get("model")})
+    return dict(counts, fallback=fallback, model_fallback=model_fallback)
 
 
 class IncidentPipeline:
@@ -279,10 +286,42 @@ class IncidentPipeline:
         self.units = []
         self.dropped = []
         self.extract_refusals = []
+        self.model_fallbacks = []
         self.judge_quotes = {}
 
     # -- model units -----------------------------------------------------------
     async def call(self, key, stage, unit, system, user, *, refusal_retry=True):
+        return (await self.call_info(key, stage, unit, system, user, refusal_retry=refusal_retry))[0]
+
+    async def call_info(self, key, stage, unit, system, user, *, refusal_retry=True):
+        """(reply text, {"model", "fallback"}). With a fallback client, a refused request is never resent
+        to the refusing model: the unit goes once to the fallback model instead (``<unit>.fallback``)."""
+        fallback = self.clients.get("fallback")
+        if fallback is None or fallback is self.clients[key]:
+            text = await self._call(key, stage, unit, system, user, refusal_retry=refusal_retry)
+            return text, {"model": self.clients[key].route.model_id, "fallback": False}
+        try:
+            text = await self._call(key, stage, unit, system, user, refusal_retry=False)
+            return text, {"model": self.clients[key].route.model_id, "fallback": False}
+        except StageError as error:
+            if error.reason not in REFUSALS:
+                raise
+            refused = error
+        message = (refused.detail or {}).get("message") if isinstance(refused.detail, dict) else None
+        entry = {"unit": unit, "stage": stage, "refused_by": self.clients[key].route.model_id,
+                 "reason": refused.reason, "message": message, "fallback_model": fallback.route.model_id,
+                 "fallback_unit": f"{unit}.fallback"}
+        self.model_fallbacks.append(entry)
+        self.log(f"{stage}: {unit} refused by {entry['refused_by']}; using the fallback model {entry['fallback_model']}")
+        try:
+            text = await self._call("fallback", stage, f"{unit}.fallback", system, user, refusal_retry=False)
+        except StageError as error:
+            entry["status"] = error.reason
+            raise
+        entry["status"] = "ok"
+        return text, {"model": fallback.route.model_id, "fallback": True}
+
+    async def _call(self, key, stage, unit, system, user, *, refusal_retry=True):
         client = self.clients[key]
         max_tokens = MAX_TOKENS[stage]
         request_sha = hashlib.sha256(json.dumps([client.route.model_id, system, user, max_tokens],
@@ -291,7 +330,7 @@ class IncidentPipeline:
         cached = read_json(path)
         if cached and cached.get("request_sha256") == request_sha and cached.get("status") == "ok":
             self.units.append({"unit": unit, "model": cached.get("model"), "cached": True,
-                               "cost_usd": cached.get("cost_usd")})
+                               "cost_usd": cached.get("cost_usd"), **({"fallback": True} if key == "fallback" else {})})
             return cached["text"]
         refused = ("refused_once", "refused_twice")
         if cached and cached.get("request_sha256") == request_sha and (cached.get("error") or {}).get("reason") in refused:
@@ -310,7 +349,7 @@ class IncidentPipeline:
                   "raw_paths": result.get("raw_paths"), "at": _now(), "prompts": prompts.VERSION}
         write_json(path, record)
         self.units.append({"unit": unit, "model": record["model"], "cached": False, "cost_usd": record["cost_usd"],
-                           "status": record["status"]})
+                           "status": record["status"], **({"fallback": True} if key == "fallback" else {})})
         if result["status"] != "ok" or not result.get("text"):
             raise StageError(stage, (result.get("error") or {}).get("reason") or result["status"], result.get("error"))
         return result["text"]
@@ -409,10 +448,15 @@ class IncidentPipeline:
         (``fallback_excerpt``), flagged as such in the report."""
         key = "extract"
         try:
-            replies = [await self.call(key, "extract", f"extract-{story['id']}", prompts.EXTRACT_SYSTEM,
-                                       prompts.extract_user(story, long_records),
-                                       refusal_retry=len(long_records) == 1)]
+            replies = [await self.call_info(key, "extract", f"extract-{story['id']}", prompts.EXTRACT_SYSTEM,
+                                            prompts.extract_user(story, long_records),
+                                            refusal_retry=len(long_records) == 1)]
         except StageError as error:
+            if error.reason in REFUSALS and "fallback" in self.clients:
+                # Refused by Anthropic and by the fallback model: never resent piecemeal to the
+                # model that refused; every record gets a flagged host-chosen passage.
+                self.extract_refusals.append({"storyline": story["id"], "items": [r["id"] for r in long_records]})
+                return
             if error.reason not in REFUSALS or len(long_records) == 1:
                 if error.reason in REFUSALS:
                     self.extract_refusals.append({"storyline": story["id"], "items": [r["id"] for r in long_records]})
@@ -423,13 +467,13 @@ class IncidentPipeline:
             replies = []
             for record in long_records:
                 try:
-                    replies.append(await self.call(key, "extract", f"extract-{story['id']}-{record['id']}",
-                                                   prompts.EXTRACT_SYSTEM, prompts.extract_user(story, [record])))
+                    replies.append(await self.call_info(key, "extract", f"extract-{story['id']}-{record['id']}",
+                                                        prompts.EXTRACT_SYSTEM, prompts.extract_user(story, [record])))
                 except StageError as single:
                     if single.reason not in REFUSALS:
                         raise
                     self.extract_refusals.append({"storyline": story["id"], "items": [record["id"]]})
-        for reply in replies:
+        for reply, info in replies:
             try:
                 passages = parse_json_object(reply).get("passages") or []
             except ValueError:
@@ -441,8 +485,10 @@ class IncidentPipeline:
                 if len(target["excerpts"]) >= 3:
                     continue
                 text = self.locator.item(target["id"])["text"]
-                entry = {"note": passage.get("note"), "source": "model",
+                entry = {"note": passage.get("note"), "source": "model", "model": info["model"],
                          "segments": [passage.get("first"), passage.get("last")]}
+                if info["fallback"]:
+                    entry["model_fallback"] = True
                 span = segment_span(text, passage.get("first"), passage.get("last"))
                 if span is None:
                     target["rejected"].append(dict(entry, reason="segment numbers out of range"))
@@ -553,7 +599,8 @@ class IncidentPipeline:
         evidence["cited_ids"] = list(dict.fromkeys(m.group(0) for m in ITEM_ID_RE.finditer(draft)
                                                    if self.locator.item(m.group(0)) is not None))
         evidence["excerpt_sources"] = excerpt_sources(evidence)
-        note = render.host_note_markdown(digest, evidence, self.extract_refusals, self.units, draft)
+        note = render.host_note_markdown(digest, evidence, self.extract_refusals, self.units, draft,
+                                         model_fallbacks=self.model_fallbacks)
         body = render.insert_into_section(draft.rstrip(), "How sure we are", note) + "\n" \
             + render.appendix_markdown(evidence, self.locator, digest)
         checks = verify.verify_markdown(body, self.locator.item)
@@ -572,7 +619,8 @@ class IncidentPipeline:
                                    "structure_problems": verify.structure_problems(draft), "attempts": attempts},
                   "chain_of_thought": {k: v for k, v in digest["reasoning"].items()},
                   "plan": plan, "plan_dropped_items": self.dropped,
-                  "extract_refusals": self.extract_refusals, "evidence": evidence,
+                  "extract_refusals": self.extract_refusals, "model_fallbacks": self.model_fallbacks,
+                  "evidence": evidence,
                   "locators": {item_id: self.locator.locate(item_id) for item_id in evidence["cited_ids"]},
                   "inspect_view_present": self.locator.inspect_view_present, "units": self.units}
         write_json(self.out_dir / "evidence.json", record)
@@ -580,4 +628,5 @@ class IncidentPipeline:
                 "verification": checks["summary"],
                 "storylines": sum(s["section"] == "case_study" for s in plan["storylines"]),
                 "excerpt_sources": evidence["excerpt_sources"], "chain_of_thought": digest["reasoning"]["status"],
+                "model_fallbacks": self.model_fallbacks,
                 "units": self.units}
