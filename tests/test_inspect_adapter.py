@@ -26,6 +26,13 @@ from research_swarm.runtime import StartBarrier
 
 DUMMY_KEY = "unpaid-offline-test-placeholder"  # never a real credential
 
+def run_ledger(path, budget, scope="validation"):
+    """A throwaway ledger with one registered run of ``budget`` USD (the per-run budget)."""
+    ledger = BudgetLedger(path)
+    ledger.start_run("test-run", scope, budget)
+    return ledger
+
+
 
 def _completion(cost=None, byok=None, upstream=None, finish="stop", tool_call=False):
     from openai.types.chat import ChatCompletion
@@ -111,7 +118,7 @@ class BudgetFilterTests(unittest.IsolatedAsyncioTestCase):
                 self.config = kwargs["config"]
                 return output
         folder = tempfile.mkdtemp()
-        ledger = ledger or BudgetLedger(Path(folder) / "budget.sqlite", {"validation": 100})
+        ledger = ledger or run_ledger(Path(folder) / "budget.sqlite", 100)
         events = []
         model = FakeModel()
         intercept = budget_filter("agent-001", ledger, ProviderSettings(pricing_verified=True), StartBarrier(1),
@@ -151,7 +158,7 @@ class BudgetFilterTests(unittest.IsolatedAsyncioTestCase):
             async def generate(self, **kwargs):
                 return ModelOutput.from_content(model="m", content="ok")
         events = []
-        ledger = BudgetLedger(Path(tempfile.mkdtemp()) / "b.sqlite", {"validation": 100})
+        ledger = run_ledger(Path(tempfile.mkdtemp()) / "b.sqlite", 100)
         intercept = budget_filter("agent-001", ledger, ProviderSettings(pricing_verified=True), StartBarrier(1),
                                   lambda *a: events.append(a), scope="validation")
         await intercept(FakeModel(), messages, [], None, GenerateConfig())
@@ -174,7 +181,7 @@ class BudgetFilterTests(unittest.IsolatedAsyncioTestCase):
         from inspect_ai.model import ModelOutput
         from inspect_ai.util import LimitExceededError
         folder = tempfile.mkdtemp()
-        ledger = BudgetLedger(Path(folder) / "b.sqlite", {"validation": 0.001})
+        ledger = run_ledger(Path(folder) / "b.sqlite", 0.001)
         with self.assertRaises(LimitExceededError):
             await self._run(ModelOutput.from_content(model="m", content="x"), ledger=ledger)
         self.assertEqual(ledger.snapshot()["validation"]["committed_usd"], "0")
@@ -194,7 +201,7 @@ class BudgetFilterTests(unittest.IsolatedAsyncioTestCase):
         entered, release = threading.Event(), threading.Event()
         stop, events = asyncio.Event(), []
         with tempfile.TemporaryDirectory() as folder:
-            ledger = BudgetLedger(Path(folder) / "budget.sqlite", {"validation": 100})
+            ledger = run_ledger(Path(folder) / "budget.sqlite", 100)
             reserve = ledger.reserve
 
             def blocked_reserve(*args):
@@ -235,7 +242,7 @@ class BudgetFilterTests(unittest.IsolatedAsyncioTestCase):
         from research_swarm.inspect_adapter import budget_filter
         entered, release = threading.Event(), threading.Event()
         with tempfile.TemporaryDirectory() as folder:
-            ledger = BudgetLedger(Path(folder) / "budget.sqlite", {"validation": 100})
+            ledger = run_ledger(Path(folder) / "budget.sqlite", 100)
             reserve = ledger.reserve
 
             def blocked_reserve(*args):
@@ -291,14 +298,14 @@ class BudgetFilterTests(unittest.IsolatedAsyncioTestCase):
         class FakeModel:
             async def generate(self, **kwargs):
                 return output
-        ledger = BudgetLedger(Path(tempfile.mkdtemp()) / "b.sqlite", {"validation": 100})
+        ledger = run_ledger(Path(tempfile.mkdtemp()) / "b.sqlite", 100)
         intercept = budget_filter("agent-001", ledger, ProviderSettings(pricing_verified=True), StartBarrier(1),
                                   lambda *a: None, scope="validation")
         await intercept(FakeModel(), [ChatMessageUser(content="hi")], [], None, GenerateConfig())
         self.assertEqual((intercept.state["last_request_outcome"], intercept.state["last_output_kind"],
                           intercept.state["last_denial"], intercept.state["in_flight"]),
                          ("finished", "reasoning_only", None, 0))
-        poor = BudgetLedger(Path(tempfile.mkdtemp()) / "b.sqlite", {"validation": 0.000001})
+        poor = run_ledger(Path(tempfile.mkdtemp()) / "b.sqlite", 0.000001)
         denied = budget_filter("agent-001", poor, ProviderSettings(pricing_verified=True), StartBarrier(1),
                                lambda *a: None, scope="validation")
         with self.assertRaises(LimitExceededError):
@@ -320,7 +327,7 @@ class BudgetFilterTests(unittest.IsolatedAsyncioTestCase):
                 output.usage = ModelUsage(input_tokens=5, output_tokens=2, total_tokens=7)
                 output.metadata = {"openrouter_usage": {"cost": 0.00002}, "openrouter_generation_id": "gen-late"}
                 return output
-        ledger = BudgetLedger(Path(tempfile.mkdtemp()) / "b.sqlite", {"validation": 100})
+        ledger = run_ledger(Path(tempfile.mkdtemp()) / "b.sqlite", 100)
         events = []
         intercept = budget_filter("agent-001", ledger, ProviderSettings(pricing_verified=True), StartBarrier(1),
                                   lambda *a: events.append(a), scope="validation", stop=stop)
@@ -781,7 +788,7 @@ class InspectSdkErrorPathTests(unittest.IsolatedAsyncioTestCase):
         def refused(request):
             raise httpx2.ConnectError("offline: connection refused", request=request)
         model.api.client._client = httpx2.AsyncClient(transport=httpx2.MockTransport(refused))
-        ledger = BudgetLedger(Path(tempfile.mkdtemp()) / "b.sqlite", {"validation": 100})
+        ledger = run_ledger(Path(tempfile.mkdtemp()) / "b.sqlite", 100)
         events = []
         intercept = budget_filter("agent-001", ledger, ProviderSettings(pricing_verified=True), StartBarrier(1),
                                   lambda *a: events.append(a), scope="validation")
@@ -804,7 +811,7 @@ class BudgetFilterErrorTests(unittest.IsolatedAsyncioTestCase):
             async def generate(self, **kwargs):
                 return behavior()
         folder = tempfile.mkdtemp()
-        ledger = ledger or BudgetLedger(Path(folder) / "budget.sqlite", {"validation": 100})
+        ledger = ledger or run_ledger(Path(folder) / "budget.sqlite", 100)
         events = []
         intercept = budget_filter("agent-001", ledger, ProviderSettings(pricing_verified=True), StartBarrier(1),
                                   lambda *a: events.append(a), scope="validation")
@@ -870,7 +877,7 @@ class BudgetFilterErrorTests(unittest.IsolatedAsyncioTestCase):
             async def generate(self, **kwargs):
                 return outputs.pop(0)
         events = []
-        intercept = budget_filter("agent-001", BudgetLedger(Path(tempfile.mkdtemp()) / "b.sqlite", {"validation": 100}),
+        intercept = budget_filter("agent-001", run_ledger(Path(tempfile.mkdtemp()) / "b.sqlite", 100),
                                   ProviderSettings(pricing_verified=True), StartBarrier(1),
                                   lambda *a: events.append(a), scope="validation")
         seen = []
@@ -885,7 +892,7 @@ class BudgetFilterErrorTests(unittest.IsolatedAsyncioTestCase):
         import sqlite3
         from inspect_ai.model import ModelOutput
         import research_swarm.inspect_adapter as adapter
-        real = BudgetLedger(Path(tempfile.mkdtemp()) / "b.sqlite", {"validation": 100})
+        real = run_ledger(Path(tempfile.mkdtemp()) / "b.sqlite", 100)
         failures = [sqlite3.OperationalError("database is locked")]
 
         class FlakyLedger:

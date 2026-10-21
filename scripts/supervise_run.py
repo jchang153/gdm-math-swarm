@@ -1,42 +1,42 @@
 #!/usr/bin/env python3
-"""Unattended supervisor for one authorized paid run on the experiment VM.
+"""Unattended supervisor for one paid run on the experiment VM.
 
 Generalizes the per-run supervisors used for the October 15-16 runs (kept, unchanged, in the
 ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
 
-1. refuses to start twice for the same phase directory (``supervisor.started`` survives);
+1. refuses to start twice for the same phase directory (``supervisor.started`` survives, so a
+   second supervisor for the same phase never launches);
 2. backs up the budget ledger, then launches ``scripts/run_pilot.py --config CONFIG
-   --launch-paid-pilot --yes`` with a minimal environment (the provider key is never passed
-   on; the runtime loads it from the operator's private .env);
+   --launch-paid-pilot`` with a minimal environment (the provider key is never passed on; the
+   runtime loads it from the operator's private .env). The run's budget is CONFIG's
+   ``run_budget_usd`` (else $100), the one spending control (docs/plan.md, "One per-run budget,
+   no manual approvals (October 20, 2026)");
 3. writes ``live-checkpoint.json`` every 30 s while the run is going (event counts, prompt-cache
-   share, ledger snapshot, spending since launch, agent exits, run stop);
-4. afterwards sets ``paid_launch_enabled`` to false in CONFIG (never a second launch by
-   accident), backs up the ledger and, unless --no-postrun, runs the unpaid follow-ups in order:
-   reconcile_ledger.py (dry run), evaluate_run.py --dry-run, evaluate_run.py, timeline.py;
-   then, when CONFIG has ``auto_behavior_judge`` true (the repository owner's standing approval,
-   docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20, 2026)"),
-   the PAID behavior judge (scripts/run_transcript_judge.py --standing-approval-from-config
-   CONFIG, per-run cap behavior_judge_max_usd <= $50, this checkout's state/budget.sqlite and
-   .env), after refreshing a judge route pricing record older than 72 h with the unpaid
-   scripts/freeze_judge_route.py. Its outputs land in RUN/analysis/judge/ (packaged with the
-   run); its outcome is recorded in behavior-judge.json and never changes the worker exit or
-   stops the packaging;
+   share, the run's budget and committed spend, ledger history, agent exits, run stop);
+4. afterwards backs up the ledger and, unless --no-postrun, runs the follow-ups in order:
+   reconcile_ledger.py (settles uncertain holds from OpenRouter's unpaid generation records; a
+   failure is recorded and never stops the others), evaluate_run.py --dry-run, evaluate_run.py,
+   timeline.py; then, when CONFIG has ``auto_behavior_judge`` true, the PAID behavior judge
+   (scripts/run_transcript_judge.py --run-config CONFIG: its budget is CONFIG's
+   ``behavior_judge_max_usd``, else $50; this checkout's state/budget.sqlite and .env; it
+   refreshes its own route pricing record when needed). Its outputs land in RUN/analysis/judge/
+   (packaged with the run); its outcome is recorded in behavior-judge.json and never changes
+   the worker exit or stops the packaging;
 5. packages the run and phase records with SHA-256 checksums and waits up to --retrieval-wait
    seconds for a ``retrieved.marker`` in the phase directory;
 6. shuts the VM down only when it is idle (no Docker containers, no other tmux session, no
    unexpected process of this user, checked six times); otherwise it leaves the VM running and
    records why. --no-shutdown skips this step.
 
-Launching a paid run needs the operator's own recorded budget decision (docs/plan.md), the
-operator's own provider key in their private .env, and the gates in docs/validation.md; this
-script adds no authorization. Example (from the operator's checkout on the VM):
+The operator uses their own provider key in their private .env (docs/plan.md, "Collaborator
+budgets and keys"). Example (from the operator's checkout on the VM):
 
   tmux new -s gdm-RUN_ID
   .venv/bin/python scripts/supervise_run.py --config runs/phase-b/RUN_ID/launch-config.json \\
       --phase-dir runs/phase-b/RUN_ID --tmux-session gdm-RUN_ID 2>&1 | tee runs/phase-b/RUN_ID/supervisor-console.log
 
-CONFIG must name the run directory explicitly (``run_dir``) and have ``paid_launch_enabled``
-true. Researcher-only: never copy this into agent workspaces.
+CONFIG must name the run directory explicitly (``run_dir``). Researcher-only: never copy this
+into agent workspaces.
 """
 from __future__ import annotations
 
@@ -55,10 +55,9 @@ from decimal import Decimal
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FOLLOW_UPS = ("reconcile-dry", "evaluate-dry", "evaluate", "timeline")
-JUDGE_STEPS = ("judge-route-freeze", "behavior-judge")  # after FOLLOW_UPS, only with auto_behavior_judge true
-JUDGE_PRICING_GLOB = "judge-route-pricing-*.json"
-JUDGE_PRICING_MAX_AGE_HOURS = 72  # research/analysis/judge/route.py DEFAULT_MAX_AGE_HOURS
+FOLLOW_UPS = ("reconcile", "evaluate-dry", "evaluate", "timeline")
+NONBLOCKING_FOLLOW_UPS = ("reconcile",)  # bookkeeping: a failure is recorded, the others still run
+JUDGE_STEPS = ("behavior-judge",)  # after FOLLOW_UPS, only with auto_behavior_judge true
 JUDGE_OUTCOMES = {0: "complete", 2: "errors_or_held_agents", 3: "stopped", 4: "refused"}
 IDLE_PROCESSES = {"bash", "sh", "sshd", "sshd-session", "sshd-auth", "tmux: server", "tmux", "systemd", "(sd-pam)",
                   "dbus-daemon", "ps", "sleep"}
@@ -80,8 +79,6 @@ class Supervisor:
         config = json.loads(self.config_path.read_text())
         if not config.get("run_dir"):
             raise SystemExit("CONFIG must set run_dir explicitly (the supervisor packages that directory)")
-        if config.get("paid_launch_enabled") is not True:
-            raise SystemExit("CONFIG has paid_launch_enabled false; enable it only for the authorized launch")
         run_dir = Path(config["run_dir"])
         self.run = (run_dir if run_dir.is_absolute() else self.root / run_dir).resolve()
         self.env = {k: os.environ[k] for k in ENV_KEYS if k in os.environ}  # never the provider key
@@ -95,6 +92,9 @@ class Supervisor:
                                                                       indent=2))
 
     def backup(self, name):
+        """Copy the ledger into the phase directory (nothing to copy before its first request)."""
+        if not self.ledger.exists():
+            return False
         with sqlite3.connect("file:" + str(self.ledger) + "?mode=ro", uri=True) as src:
             with sqlite3.connect(str(self.phase / name)) as dst:
                 src.backup(dst)
@@ -102,7 +102,13 @@ class Supervisor:
     def snapshot(self):
         sys.path.insert(0, str(self.root / "src"))
         from research_swarm.budget import read_snapshot
-        return read_snapshot(self.ledger)
+        return read_snapshot(self.ledger) or {}
+
+    def run_budget(self):
+        """This run's budget and committed spend from the ledger (run id = the run directory's name)."""
+        sys.path.insert(0, str(self.root / "src"))
+        from research_swarm.budget import read_run
+        return read_run(self.ledger, self.run.name)
 
     def live_checkpoint(self):
         events = []
@@ -118,21 +124,15 @@ class Supervisor:
         prompt = sum(u.get("prompt_tokens", 0) or 0 for u in usage)
         cached = sum(((u.get("prompt_tokens_details") or {}).get("cached_tokens", 0) or 0) for u in usage)
         budget = self.snapshot()
-        settled = Decimal(budget["pilot"]["settled_usd"])
+        settled = Decimal((budget.get("pilot") or {}).get("settled_usd", "0"))
         data = {"utc": now(), "events": dict(Counter(e.get("kind") for e in events)),
                 "cache": {"prompt_tokens": prompt, "cached_tokens": cached,
                           "fraction": cached / prompt if prompt else None},
-                "budget": budget,
+                "run_budget": self.run_budget(), "budget": budget, "ledger": str(self.ledger),
                 "new_settled_usd": None if self.settled_at_launch is None else str(settled - self.settled_at_launch),
                 "agent_exits": [e for e in events if e.get("kind") == "agent_exit"],
                 "run_stop": [e for e in events if e.get("kind") == "run_stop"]}
         (self.phase / "live-checkpoint.json").write_text(json.dumps(data, indent=2))
-
-    def disable_launch(self):
-        if self.config_path.exists():
-            config = json.loads(self.config_path.read_text())
-            config["paid_launch_enabled"] = False
-            self.config_path.write_text(json.dumps(config, indent=2))
 
     # -- steps -----------------------------------------------------------------
     def step(self, name, arguments):
@@ -156,71 +156,45 @@ class Supervisor:
 
     def follow_ups(self):
         run = str(self.run)
-        commands = {"reconcile-dry": ["scripts/reconcile_ledger.py", "--run-dir", run],
+        commands = {"reconcile": ["scripts/reconcile_ledger.py", "--run-dir", run, "--ledger", str(self.ledger),
+                                  "--credentials-root", str(self.root)],
                     "evaluate-dry": ["scripts/evaluate_run.py", "--run-dir", run, "--dry-run"],
                     "evaluate": ["scripts/evaluate_run.py", "--run-dir", run],
                     "timeline": ["research/analysis/timeline.py", "--run-dir", run]}
         for name in FOLLOW_UPS:
             code = self.step(name, commands[name])
-            if code:
+            if code and name not in NONBLOCKING_FOLLOW_UPS:
                 return code
         return 0
 
-    # -- automatic behavior judge (owner's standing approval) --------------------
-    def judge_pricing(self):
-        """(path, age in hours) of the newest judge route pricing record, or (None, None)."""
-        found = sorted((self.root / "data" / "validation").glob(JUDGE_PRICING_GLOB))
-        if not found:
-            return None, None
-        try:
-            created = json.loads(found[-1].read_text())["created_at"]
-            created = datetime.datetime.fromisoformat(str(created).replace("Z", "+00:00"))
-            age = (datetime.datetime.now(datetime.timezone.utc) - created).total_seconds() / 3600
-        except (OSError, ValueError, KeyError, TypeError):
-            return found[-1], None
-        return found[-1], age
-
-    def judge_fresh(self):
-        path, age = self.judge_pricing()
-        return path is not None and age is not None and 0 <= age <= JUDGE_PRICING_MAX_AGE_HOURS
-
+    # -- automatic behavior judge ---------------------------------------------------
     def behavior_judge(self, worker_code):
-        """The paid behavior judge under the config's standing approval, or a recorded skip. Never
-        raises and never changes the worker exit; returns the record (also behavior-judge.json)."""
+        """The paid behavior judge with CONFIG's judge budget, or a recorded skip. Never raises and
+        never changes the worker exit; returns the record (also behavior-judge.json)."""
         record = {"utc": now(), "config": str(self.config_path), "run_dir": str(self.run)}
         try:
             config = json.loads(self.config_path.read_text())
             sys.path.insert(0, str(ROOT / "src"))
-            from research_swarm.auto_judge import enabled, standing_approval_problems
+            from research_swarm.auto_judge import enabled, judge_config_problems
             if not enabled(config):
                 return None  # not configured: no judge, no record
-            problems = standing_approval_problems(config)
+            problems = judge_config_problems(config)
             if problems:
-                record.update(outcome="skipped", reason="invalid standing approval: " + "; ".join(problems))
+                record.update(outcome="skipped", reason="invalid judge settings: " + "; ".join(problems))
             elif self.args.no_postrun:
                 record.update(outcome="skipped", reason="--no-postrun")
             elif worker_code != 0:
                 record.update(outcome="skipped", reason=f"the run or its follow-ups did not complete (exit {worker_code})")
             else:
-                if not self.judge_fresh():
-                    record["freeze_exit"] = self.step("judge-route-freeze", ["scripts/freeze_judge_route.py"])
-                path, age = self.judge_pricing()
-                record["pricing_record"] = None if path is None else str(path)
-                record["pricing_age_hours"] = None if age is None else round(age, 3)
-                if not self.judge_fresh():
-                    record.update(outcome="skipped", reason="no judge route pricing record at most "
-                                  f"{JUDGE_PRICING_MAX_AGE_HOURS} h old (freeze_judge_route.py exit "
-                                  f"{record.get('freeze_exit')})")
-                else:
-                    code = self.step("behavior-judge", [
-                        "scripts/run_transcript_judge.py", "--run-dir", str(self.run),
-                        "--standing-approval-from-config", str(self.config_path), "--ledger", str(self.ledger),
-                        "--credentials-root", str(self.root)])
-                    record.update(exit=code, outcome=JUDGE_OUTCOMES.get(code, "failed"))
-                    if code == 4:
-                        refused = [line for line in (self.phase / "behavior-judge.log").read_text().splitlines()
-                                   if line.startswith("REFUSED:")]
-                        record["reason"] = refused[-1] if refused else "refused (see behavior-judge.log)"
+                code = self.step("behavior-judge", [
+                    "scripts/run_transcript_judge.py", "--run-dir", str(self.run),
+                    "--run-config", str(self.config_path), "--ledger", str(self.ledger),
+                    "--credentials-root", str(self.root)])
+                record.update(exit=code, outcome=JUDGE_OUTCOMES.get(code, "failed"))
+                if code == 4:
+                    refused = [line for line in (self.phase / "behavior-judge.log").read_text().splitlines()
+                               if line.startswith("REFUSED:")]
+                    record["reason"] = refused[-1] if refused else "refused (see behavior-judge.log)"
         except Exception as error:  # a judge failure never fails the run's packaging
             record.update(outcome="supervisor_error", error_type=type(error).__name__, detail=str(error))
         record["finished_utc"] = now()
@@ -232,10 +206,9 @@ class Supervisor:
         code = 1
         try:
             self.backup("budget-before-launch.sqlite")
-            self.settled_at_launch = Decimal(self.snapshot()["pilot"]["settled_usd"])
+            self.settled_at_launch = Decimal((self.snapshot().get("pilot") or {}).get("settled_usd", "0"))
             code = self.step("pilot", ["scripts/run_pilot.py", "--config", str(self.config_path),
-                                       "--launch-paid-pilot", "--yes"])
-            self.disable_launch()
+                                       "--launch-paid-pilot"])
             self.backup("budget-after-pilot.sqlite")
             self.live_checkpoint()
             if code == 0 and (self.run / "settings.json").exists() and not self.args.no_postrun:
@@ -245,7 +218,6 @@ class Supervisor:
             self.status("worker_error", error_type=type(error).__name__, detail=str(error))
             code = 2
         finally:
-            self.disable_launch()
             try:
                 self.backup("budget-final.sqlite")
             except Exception as error:
@@ -271,9 +243,6 @@ class Supervisor:
                 path = self.config_path if name == self.config_path.name else self.phase / name
                 if path.exists():
                     tar.add(path, arcname=name)
-            pricing = (self.judge_record or {}).get("pricing_record")
-            if pricing and Path(pricing).exists():  # the route record the judge ran with
-                tar.add(pricing, arcname="judge-route-pricing/" + Path(pricing).name)
         hashes = {name: hashlib.sha256((self.phase / name).read_bytes()).hexdigest()
                   for name in ("completed-run.tgz", "completed-phase.tgz")}
         (self.phase / "completed-checksums.json").write_text(json.dumps(hashes, indent=2))
@@ -329,13 +298,13 @@ class Supervisor:
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--config", required=True, type=Path, help="launch config (run_dir set, paid_launch_enabled true)")
+    parser.add_argument("--config", required=True, type=Path, help="launch config (run_dir set; run_budget_usd, else $100)")
     parser.add_argument("--phase-dir", required=True, type=Path, help="ignored records folder, e.g. runs/phase-b/RUN_ID")
     parser.add_argument("--tmux-session", required=True, help="the tmux session running this supervisor")
     parser.add_argument("--root", type=Path, default=ROOT, help="repository checkout (default: this one)")
     parser.add_argument("--retrieval-wait", type=int, default=600,
                         help="seconds to wait for runs/phase-b/.../retrieved.marker before the idle check (default 600)")
-    parser.add_argument("--no-postrun", action="store_true", help="skip the unpaid reconcile/evaluate/timeline steps")
+    parser.add_argument("--no-postrun", action="store_true", help="skip the reconcile/evaluate/timeline steps and the judge")
     parser.add_argument("--no-shutdown", action="store_true", help="leave the VM running at the end")
     return parser.parse_args(argv)
 

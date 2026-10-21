@@ -16,11 +16,10 @@ import unittest
 from contextlib import redirect_stdout
 from decimal import Decimal
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 from research_swarm import launch_gates
-from research_swarm.budget import BudgetLedger, DEFAULT_CAPS, cap_changes, raise_cap, read_snapshot
+from research_swarm.budget import BudgetLedger, list_runs, read_snapshot
 from research_swarm.dataset import FrozenDataset
 from research_swarm.provider import MODEL_ID, ProviderSettings, frozen_fields, settings_from_config
 
@@ -41,16 +40,14 @@ def load_script(name):
 
 
 def pilot_config(**overrides):
-    config = json.loads((ROOT / "configs" / "pilot.json").read_text())
-    for key in ("pilot_prior_held_usd", "pilot_prior_committed_usd", "pilot_prior_uncertain_requests"):
-        config.pop(key, None)
-    config.pop("pilot_prior_settled_usd", None)
-    config.pop("pilot_additional_allowance_usd", None)
-    # Historical caps, matching GateFixture's patched DEFAULT_CAPS (pilot $20, analysis $5
-    # before the October 17 judge raises; the shipped config now states analysis $50).
-    config.update({"max_pilot_usd": 20, "max_analysis_usd": 5, "verified_integration": True,
-                   "paid_launch_enabled": True, "allow_unlimited_provider_key": False, **overrides})
-    return config
+    return {**json.loads((ROOT / "configs" / "pilot.json").read_text()), **overrides}
+
+
+def ledger_run(path, run_id, scope, budget):
+    """A ledger bound to a registered run (the per-run budget)."""
+    ledger = BudgetLedger(path)
+    ledger.start_run(run_id, scope, budget)
+    return ledger
 
 
 def other_route(route):
@@ -100,10 +97,6 @@ def pilot_self_compare(skip=()):
 
 class GateFixture(unittest.TestCase):
     def setUp(self):
-        # Existing evidence/provider tests describe the historical $20 pilot.
-        caps = mock.patch.dict(DEFAULT_CAPS, {"pilot":20,"analysis":5,"compatibility":2}, clear=True)
-        caps.start()
-        self.addCleanup(caps.stop)
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.tmp = Path(folder.name)
@@ -194,7 +187,7 @@ class GateFixture(unittest.TestCase):
         records; otherwise the evidence names ``request_ids`` (default: the last settled ones).
         """
         if settle:
-            ledger = BudgetLedger(self.ledger)
+            ledger = ledger_run(self.ledger, f"compat-{len(list_runs(self.ledger))}", "compatibility", 2)
             request = ledger.reserve("compatibility", "compat-agent", "0.5")
             ledger.settle(request, spent, "provider_reported_cost")
             self.compat_ids = [request]
@@ -253,16 +246,31 @@ class LaunchGateTests(GateFixture):
         self.assertTrue(result["evidence"]["route_pricing"]["passed"], result["evidence"]["route_pricing"])
 
     def test_route_pricing_freshness_settings_and_snapshot(self):
-        self.assertBlocked(self.evaluate(now=NOW + datetime.timedelta(hours=80)), "route_pricing", "old")
+        # A stale freeze is a warning: the launch scripts refresh it automatically (unpaid) first.
+        stale = self.evaluate(now=NOW + datetime.timedelta(hours=80))
+        self.assertTrue(stale["evidence"]["route_pricing"]["passed"], stale["evidence"]["route_pricing"])
+        self.assertTrue(any("refresh it automatically" in w for w in stale["evidence"]["route_pricing"]["warnings"]))
         lower = pilot_config(provider_settings={"prompt_usd_per_token": "0.00000015"})
         result = self.evaluate(lower)
         self.assertBlocked(result, "route_pricing", "differ from the ProviderSettings")
         self.assertIn("offline catalog validation failed", result["evidence"]["route_pricing"]["reason"])
         self.assertBlocked(self.evaluate(pilot_config(provider_route=other_route(pilot_config()["provider_route"]))),
                            "route_pricing")
+        self.write_route(valid=False, reason="completion price above the config", when=NOW - datetime.timedelta(minutes=5))
+        self.assertBlocked(self.evaluate(), "route_pricing", "must cover the route's current prices")
+        self.write_route(when=NOW - datetime.timedelta(minutes=4))
         snapshot = next((self.validation / "catalog-snapshots").iterdir())
         snapshot.write_text("{}")
         self.assertBlocked(self.evaluate(), "route_pricing", "snapshot")
+
+    def test_route_pricing_refresh_reason(self):
+        config = pilot_config()
+        self.assertIsNone(launch_gates.route_pricing_refresh_reason(config, self.validation, now=NOW))
+        self.assertIn("h old", launch_gates.route_pricing_refresh_reason(config, self.validation,
+                                                                          now=NOW + datetime.timedelta(hours=80)))
+        self.assertIn("other provider settings", launch_gates.route_pricing_refresh_reason(
+            pilot_config(provider_settings={"prompt_usd_per_token": "0.00000015"}), self.validation, now=NOW))
+        self.assertIn("no route-pricing", launch_gates.route_pricing_refresh_reason(config, self.tmp / "empty"))
 
     def test_newest_evidence_wins_and_legacy_names_ignored(self):
         (self.validation / "judge-2026-10-13.json").write_text(json.dumps({"all_required_passed": True}))
@@ -345,7 +353,6 @@ class LaunchGateTests(GateFixture):
         self.assertBlocked(self.evaluate(pilot_config(system_prompt_mode="replace")), "approved_settings",
                            "system_prompt_mode")
         self.assertBlocked(self.evaluate(pilot_config(seeded_contagion_enabled=True)), "approved_settings")
-        self.assertBlocked(self.evaluate(pilot_config(max_compatibility_usd=0)), "config_caps", "max_compatibility_usd")
         self.assertTrue(self.evaluate()["evidence"]["frozen_dataset"]["passed"])
 
     def test_max_connections_required_and_equal_to_agent_count(self):
@@ -402,39 +409,49 @@ class LaunchGateTests(GateFixture):
         del config["seeded_contagion_enabled"]  # must be stated, as false
         self.assertBlocked(self.evaluate(config), "seeded_track", "seeded_contagion_enabled None")
         example = json.loads((ROOT / "configs" / "seeded.example.json").read_text())
-        result = self.evaluate(dict(example, verified_integration=True, paid_launch_enabled=True))
+        result = self.evaluate(example)
         self.assertBlocked(result, "seeded_track", "track 'seeded'")
         self.assertIn("seeded-track configuration", result["evidence"]["seeded_track"]["reason"])
         self.assertBlocked(result, "approved_settings", "track")
 
-    def test_behavior_judge_standing_approval(self):
-        """docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20, 2026)"."""
+    def test_behavior_judge_config(self):
+        """docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)": any track, any positive
+        budget, no approval note."""
         from research_swarm import auto_judge
         shipped = json.loads((ROOT / "configs" / "pilot.json").read_text())
-        self.assertEqual(auto_judge.standing_approval_problems(shipped), [])
-        self.assertEqual(Decimal(auto_judge.standing_approval(shipped)["max_usd"]), Decimal(50))
-        approval = {"auto_behavior_judge": True, "behavior_judge_approval": "owner decision", "behavior_judge_max_usd": 50}
-        config = {k: v for k, v in pilot_config().items() if k not in approval}
+        self.assertEqual(auto_judge.judge_config_problems(shipped), [])
+        self.assertEqual(Decimal(auto_judge.judge_settings(shipped)["max_usd"]), Decimal(50))
+        judge = {"auto_behavior_judge": True, "behavior_judge_max_usd": 50}
+        config = {k: v for k, v in pilot_config().items() if k not in judge}
         self.assertTrue(self.evaluate(config)["evidence"]["behavior_judge"]["passed"])  # absent: no automatic judge
-        for good in (approval, dict(approval, budget_track="gemini"), dict(approval, behavior_judge_max_usd="12.5"),
-                     dict(approval, auto_behavior_judge=False)):
+        for good in (judge, dict(judge, budget_track="gemini"), dict(judge, budget_track="ablation"),
+                     dict(judge, behavior_judge_max_usd="12.5"), dict(judge, behavior_judge_max_usd=500),
+                     {"auto_behavior_judge": True}, dict(judge, auto_behavior_judge=False),
+                     dict(judge, behavior_judge_approval="")):
             result = self.evaluate(dict(config, **good))
-            self.assertTrue(result["evidence"]["behavior_judge"]["passed"], result["evidence"]["behavior_judge"])
-        for bad, text in ((dict(approval, budget_track="ablation"), "owner's runs"),
-                          (dict(approval, budget_track="someone-else"), "owner's runs"),
-                          (dict(approval, behavior_judge_approval=""), "nonempty behavior_judge_approval"),
-                          ({k: v for k, v in approval.items() if k != "behavior_judge_approval"}, "nonempty"),
-                          (dict(approval, behavior_judge_max_usd=50.01), "exceeds the owner's per-run cap $50"),
-                          (dict(approval, behavior_judge_max_usd=0), "positive amount"),
-                          (dict(approval, behavior_judge_max_usd=True), "positive amount"),
-                          ({k: v for k, v in approval.items() if k != "behavior_judge_max_usd"}, "positive amount"),
-                          (dict(approval, auto_behavior_judge="yes"), "must be a boolean")):
+            self.assertTrue(result["evidence"]["behavior_judge"]["passed"], (good, result["evidence"]["behavior_judge"]))
+        default = self.evaluate(dict(config, auto_behavior_judge=True))["evidence"]["behavior_judge"]
+        self.assertEqual((default["budget_usd"], default["budget_source"]), ("50", "default"))
+        for bad, text in ((dict(judge, behavior_judge_max_usd=0), "positive"),
+                          (dict(judge, behavior_judge_max_usd=True), "not an amount"),
+                          (dict(judge, behavior_judge_max_usd="abc"), "not an amount"),
+                          (dict(judge, auto_behavior_judge="yes"), "must be a boolean")):
             self.assertBlocked(self.evaluate(dict(config, **bad)), "behavior_judge", text)
-            if bad.get("auto_behavior_judge") is True:
-                with self.assertRaises(ValueError):
-                    auto_judge.standing_approval(bad)
-        with self.assertRaisesRegex(ValueError, "is not true"):
-            auto_judge.standing_approval(dict(approval, auto_behavior_judge=False))
+            with self.assertRaises(ValueError):
+                auto_judge.judge_settings(bad)
+
+    def test_run_budget_gate(self):
+        result = self.evaluate()
+        gate = result["evidence"]["run_budget"]
+        self.assertTrue(gate["passed"], gate)
+        self.assertEqual((gate["budget_usd"], gate["budget_source"], gate["warnings"]),
+                         ("100", "config run_budget_usd", []))
+        unset = {k: v for k, v in pilot_config().items() if k != "run_budget_usd"}
+        gate = self.evaluate(unset)["evidence"]["run_budget"]
+        self.assertEqual((gate["passed"], gate["budget_usd"], gate["budget_source"]), (True, "100", "default"))
+        for bad in ("abc", 0, "-1", True):
+            with self.subTest(bad=bad):
+                self.assertBlocked(self.evaluate(pilot_config(run_budget_usd=bad)), "run_budget", "run_budget_usd")
 
     def test_seeded_example_config(self):
         """S3: configs/seeded.example.json is the pilot config plus a disabled seeded block with null semantics."""
@@ -443,11 +460,13 @@ class LaunchGateTests(GateFixture):
         from research_swarm.seeded import SeededConfigError, SeededTrackConfig, resolve_track
         pilot = json.loads((ROOT / "configs" / "pilot.json").read_text())
         example = json.loads((ROOT / "configs" / "seeded.example.json").read_text())
-        track_keys = {"experiment", "track", "seeded", "verified_integration", "paid_launch_enabled"}
+        track_keys = {"experiment", "track", "seeded"}
         self.assertEqual({k: v for k, v in example.items() if k not in track_keys},
                          {k: v for k, v in pilot.items() if k not in track_keys})  # stays in sync with the pilot
-        self.assertEqual((example["track"], example["seeded_contagion_enabled"], example["verified_integration"],
-                          example["paid_launch_enabled"]), ("seeded", False, pilot["verified_integration"], False))
+        self.assertEqual((example["track"], example["seeded_contagion_enabled"]), ("seeded", False))
+        for key in launch_gates.OBSOLETE_SPENDING_KEYS:  # no superseded spending key ships
+            self.assertNotIn(key, pilot)
+            self.assertNotIn(key, example)
         block = example["seeded"]
         documentation = set(getattr(seeded_module, "DOCUMENTATION_KEYS", ("note",)))
         self.assertEqual(set(block) - documentation, {f.name for f in fields(SeededTrackConfig)})  # contract with seeded.py
@@ -479,7 +498,8 @@ class LaunchGateTests(GateFixture):
         for folder in (ROOT / "src" / "research_swarm", ROOT / "scripts"):
             for path in folder.glob("*.py"):
                 keys |= set(pattern.findall(path.read_text()))
-        keys |= set(launch_gates.approved_settings()) | set(launch_gates.CONFIG_CAP_KEYS.values())
+        keys |= set(launch_gates.approved_settings()) | set(launch_gates.OBSOLETE_SPENDING_KEYS)
+        keys |= {launch_gates.RUN_BUDGET_KEY, launch_gates.PROMPT_CACHE_NORMALIZATION_KEY}
         keys |= {key for key, _ in launch_gates.JUDGE_LIMIT_KEYS.values()} | set(launch_gates.CAPACITY_KEYS)
         keys |= {f"{role}_image" for role in launch_gates.DEFAULT_IMAGES}
         keys |= {launch_gates.MAX_CONNECTIONS_KEY, launch_gates.SEEDED_CONFIG_KEY}
@@ -488,126 +508,78 @@ class LaunchGateTests(GateFixture):
             self.assertIn(required, keys)
         self.assertEqual(sorted(k for k in keys if f"`{k}`" not in readme), [])
 
-    def test_attestations_remain_required(self):
-        result = self.evaluate(pilot_config(verified_integration=False, paid_launch_enabled=False))
-        self.assertBlocked(result, "verified_integration")
-        self.assertBlocked(result, "paid_launch_enabled")
+    def test_no_attestation_approval_or_cap_is_required(self):
+        """Owner decisions, October 20, 2026: no typed or attested approval and no cap; superseded keys only warn."""
+        old = {"verified_integration": False, "paid_launch_enabled": False, "allow_unlimited_provider_key": "x",
+               "unlimited_provider_key_approval": "", "max_pilot_usd": 1, "max_compatibility_usd": 0,
+               "max_analysis_usd": "0", "pilot_prior_calls_sha256": "0" * 64, "provider_limit_max_age_hours": 1}
+        result = self.evaluate(pilot_config(**old))
+        self.assertTrue(result["ready"], result["blockers"])
+        for gate in ("verified_integration", "paid_launch_enabled", "attestations", "config_caps"):
+            self.assertNotIn(gate, result["evidence"])
+        warning = result["evidence"]["run_budget"]["warnings"][0]
+        for key in old:
+            self.assertIn(key, warning)
 
-    def test_ledger_holds_violations_caps_and_legacy(self):
-        ledger = BudgetLedger(self.ledger)
+    def test_prompt_cache_normalization_must_match_the_runtime(self):
+        self.assertTrue(self.evaluate()["evidence"]["approved_settings"]["passed"])
+        self.assertBlocked(self.evaluate(pilot_config(prompt_cache_normalization="none")), "approved_settings",
+                           "prompt_cache_normalization")
+
+    def test_earlier_runs_holds_violations_and_legacy_never_block(self):
+        """A new run is never blocked by an old run's holds or violations; the ledger gate only reports."""
+        ledger = ledger_run(self.ledger, "earlier-pilot", "pilot", 20)
         call = ledger.reserve("pilot", "agent-001", 1)
-        self.assertBlocked(self.evaluate(), "ledger", "unresolved")
-        ledger.settle(call, 0.25, "provider_reported_cost")
+        ledger.settle(ledger.reserve("pilot", "agent-001", 0.1), 0.5)  # an estimate violation
         result = self.evaluate()
-        self.assertTrue(result["evidence"]["ledger"]["passed"])
-        self.assertEqual(result["evidence"]["ledger"]["pilot_remaining_usd"], "19.75")
-        self.assertEqual(result["ledger"]["snapshot"]["pilot"]["settled_usd"], "0.25")
-        ledger.settle(ledger.reserve("pilot", "agent-001", 0.1), 0.5)
-        self.assertBlocked(self.evaluate(), "ledger", "estimate_violation")
+        self.assertTrue(result["ready"], result["blockers"])
+        gate = result["evidence"]["ledger"]
+        self.assertTrue(gate["passed"])
+        self.assertIn("admission is per run", gate["reason"])
+        self.assertTrue(any("unresolved hold" in w for w in gate["warnings"]))
+        self.assertEqual(result["ledger"]["snapshot"]["pilot"]["committed_usd"], "1.5")
+        ledger.settle(call, 0.25, "provider_reported_cost")
         self.legacy.parent.mkdir(parents=True)
         self.legacy.write_bytes(b"")
-        self.assertBlocked(self.evaluate(), "ledger", "legacy ledger")
-
-    def test_repeat_ledger_requires_preserved_spending_and_audited_raise(self):
-        self.ledger.unlink()
-        config = pilot_config(max_pilot_usd="119.636804044", pilot_prior_settled_usd="19.636804044",
-                              pilot_additional_allowance_usd="100")
-        with mock.patch.dict(DEFAULT_CAPS, {"pilot":"119.636804044","analysis":5,"compatibility":2}, clear=True):
-            self.assertBlocked(self.evaluate(config), "ledger", "existing cumulative pilot ledger")
-            without_prior = dict(config)
-            del without_prior["pilot_prior_settled_usd"]
-            self.assertBlocked(self.evaluate(without_prior), "ledger", "repeat approval requires")
-            old = BudgetLedger(self.ledger, {"pilot":20,"analysis":5,"compatibility":2})
-            old.settle(old.reserve("pilot", "old-run", 20), "19.636804044")
-            self.assertBlocked(self.evaluate(config), "ledger", "audited cap raise")
-            raise_cap(self.ledger, "pilot", "119.636804044", "User approved fresh $100 baseline")
-            result = self.evaluate(config)
-            self.assertTrue(result["evidence"]["ledger"]["passed"], result["evidence"]["ledger"])
-            self.assertEqual(result["evidence"]["ledger"]["pilot_remaining_usd"], "100")
-            current = BudgetLedger(self.ledger)
-            call = current.reserve("pilot", "new-run", 1)
-            self.assertBlocked(self.evaluate(config), "ledger", "unresolved")
-            current.settle(call, ".5")
-            self.assertBlocked(self.evaluate(config), "ledger", "prior spending")
-
-    def test_eight_gib_repeat_requires_exact_preserved_snapshot_and_metadata(self):
-        from research_swarm.budget import _pilot_calls_sha256, _read_only
-        from contextlib import closing
-        import sqlite3
-        self.ledger.unlink()
-        old = BudgetLedger(self.ledger, {"pilot":20,"analysis":5,"compatibility":2})
-        old.settle(old.reserve("pilot", "first", 20), "19.636804044")
-        raise_cap(self.ledger, "pilot", "119.636804044", "First repeat approved")
-        old = BudgetLedger(self.ledger, {"pilot":"119.636804044","analysis":5,"compatibility":2})
-        old.settle(old.reserve("pilot", "second", 90), "86.091194430")
-        for amount in [".3"] * 6 + [".5276232"]:
-            old.settle(old.reserve("pilot", "uncertain", amount), None)
-        with closing(_read_only(self.ledger)) as db:
-            digest = _pilot_calls_sha256(db)
-        config = pilot_config(max_pilot_usd="208.055621674", pilot_prior_settled_usd="105.727998474",
-                              pilot_prior_held_usd="2.3276232", pilot_prior_committed_usd="108.055621674",
-                              pilot_additional_allowance_usd="100", pilot_prior_uncertain_requests=7)
-        with mock.patch.dict(DEFAULT_CAPS, {"pilot":"208.055621674","analysis":5,"compatibility":2}, clear=True), \
-                mock.patch("research_swarm.budget.EIGHT_GIB_PRIOR_CALLS_SHA256", digest):
-            self.assertBlocked(self.evaluate(config), "ledger")
-            raise_cap(self.ledger, "pilot", "208.055621674", "User authorized 8 GiB repeat")
-            result = self.evaluate(config)
-            self.assertTrue(result["evidence"]["ledger"]["passed"], result["evidence"]["ledger"])
-            self.assertEqual(result["evidence"]["ledger"]["pilot_remaining_usd"], "100")
-            for key in ("pilot_prior_settled_usd", "pilot_prior_held_usd", "pilot_prior_committed_usd",
-                        "pilot_additional_allowance_usd", "pilot_prior_uncertain_requests"):
-                for replacement in (None, "0"):
-                    with self.subTest(key=key, replacement=replacement):
-                        changed = dict(config)
-                        if replacement is None:
-                            del changed[key]
-                        else:
-                            changed[key] = replacement
-                        self.assertBlocked(self.evaluate(changed), "ledger", "metadata")
-            clean = self.ledger.read_bytes()
-            for sql in ("UPDATE calls SET agent='changed' WHERE agent='first'", "DELETE FROM cap_changes",
-                        "UPDATE calls SET state='reserved' WHERE agent='uncertain'"):
-                with self.subTest(sql=sql):
-                    self.ledger.write_bytes(clean)
-                    with sqlite3.connect(self.ledger) as db:
-                        db.execute(sql)
-                    self.assertBlocked(self.evaluate(config), "ledger")
-            self.ledger.write_bytes(clean)
-            current = BudgetLedger(self.ledger)
-            call = current.reserve("pilot", "new", 1)
-            self.assertBlocked(self.evaluate(config), "ledger")
-            current.settle(call, ".5")
-            self.assertBlocked(self.evaluate(config), "ledger")
-            self.ledger.unlink()
-            self.assertBlocked(self.evaluate(config), "ledger", "replacement ledger")
-            BudgetLedger(self.ledger)
-            self.assertBlocked(self.evaluate(config), "ledger")
-
-    def test_ledger_with_old_caps_blocks(self):
-        self.ledger.unlink()
-        BudgetLedger(self.ledger, {"pilot": 20, "analysis": 5, "compatibility": 0})
         result = self.evaluate()
-        self.assertBlocked(result, "ledger", "compatibility cap 0 is below the approved $2")
-        self.assertIn("--raise-ledger-cap compatibility", result["evidence"]["ledger"]["reason"])
+        self.assertTrue(result["evidence"]["ledger"]["passed"])
+        self.assertTrue(any("legacy ledger" in w for w in result["evidence"]["ledger"]["warnings"]))
+
+    def test_legacy_ledger_caps_never_block(self):
+        import sqlite3
+        from contextlib import closing
+        self.ledger.unlink()
+        self.ledger.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(self.ledger)) as db, db:  # a ledger from before per-run budgets
+            db.execute("CREATE TABLE scopes (name TEXT PRIMARY KEY, cap INTEGER NOT NULL)")
+            db.execute("CREATE TABLE calls (id TEXT PRIMARY KEY, scope TEXT NOT NULL, agent TEXT NOT NULL, "
+                       "reserved INTEGER NOT NULL, actual INTEGER, state TEXT NOT NULL, created TEXT)")
+            db.executemany("INSERT INTO scopes VALUES (?,?)", [("pilot", 20_000_000_000), ("compatibility", 0)])
+            db.execute("INSERT INTO calls VALUES ('old','pilot','a',20000000000,20000000000,'settled',NULL)")
+        result = self.evaluate()
+        self.assertTrue(result["evidence"]["ledger"]["passed"], result["evidence"]["ledger"])
+        self.assertEqual(result["ledger"]["snapshot"]["pilot"]["legacy_cap_usd"], "20")
 
     def test_gates_never_create_a_missing_ledger(self):
         self.ledger.unlink()
         result = self.evaluate()
         self.assertFalse(self.ledger.exists())
         self.assertTrue(result["evidence"]["ledger"]["passed"])
-        self.assertBlocked(result, "compatibility", "no compatibility scope")
+        self.assertIn("created at the first paid request", result["evidence"]["ledger"]["reason"])
+        gate = result["evidence"]["compatibility"]
+        self.assertTrue(gate["passed"], gate)
+        self.assertTrue(any("not in this ledger" in w for w in gate["warnings"]))
 
-    def test_compatibility_evidence_required_beyond_attestation(self):
+    def test_compatibility_evidence_required(self):
         for path in launch_gates.evidence_files(self.validation, "compatibility"):
             path.unlink()
-        result = self.evaluate(pilot_config(verified_integration=True))
+        result = self.evaluate()
         self.assertBlocked(result, "compatibility", "no compatibility-<UTC>.json")
-        self.assertIn("$2", result["evidence"]["compatibility"]["reason"])
-        self.assertTrue(result["evidence"]["verified_integration"]["passed"])
+        self.assertNotIn("$2", result["evidence"]["compatibility"]["reason"])
         self.write_compatibility(settle=False)
         result = self.evaluate(pilot_config(verified_integration=False))
         self.assertTrue(result["evidence"]["compatibility"]["passed"], result["evidence"]["compatibility"])
-        self.assertBlocked(result, "verified_integration")  # the explicit user confirmation is still required
+        self.assertTrue(result["ready"], result["blockers"])
 
     def test_compatibility_evidence_contents(self):
         later = iter(NOW - datetime.timedelta(minutes=50 - i) for i in range(50))
@@ -626,19 +598,26 @@ class LaunchGateTests(GateFixture):
         blocked("model_id", model_id="deepseek/deepseek-v4.1")
         blocked("provider_route", provider_route=other_route(pilot_config()["provider_route"]))
         blocked("settings differ", settings=dict(frozen_fields(settings_from_config(pilot_config())), max_tokens=8192))
-        blocked("exceeds the $2", spent_usd="2.01")
         blocked("nonnegative decimal", spent_usd="NaN")
         blocked("requests", requests=0)
         blocked("agent image", image_ids={"lean": IMAGES["gdm-math-swarm-lean:local"]})
         checks = passed_checks(launch_gates.COMPATIBILITY_REQUIRED_CHECKS)
         del checks["reasoning_cap_enforced"]  # required since the reasoning-cap check was added
         blocked("missing required checks (older or different script version?): reasoning_cap_enforced", checks=checks)
-        blocked("lacks request_ids", request_ids=[])
-        blocked("lacks request_ids", drop=("request_ids",))
-        blocked("lacks request_ids", request_ids="not-a-list")
-        blocked("not in the shared ledger", request_ids=["not-a-ledger-request"])
-        blocked("requests 3 differs from the 1 recorded request_ids", requests=3)
-        blocked("duplicates", request_ids=self.compat_ids * 2, requests=1)
+
+        def warned(text, **overrides):  # ledger bookkeeping is reported, never blocking
+            self.write_compatibility(settle=False, when=next(later), **overrides)
+            gate = self.evaluate()["evidence"]["compatibility"]
+            self.assertTrue(gate["passed"], gate)
+            self.assertTrue(any(text in w for w in gate["warnings"]), gate["warnings"])
+        warned("lacks request_ids", request_ids=[], requests=1)
+        warned("lacks request_ids", drop=("request_ids",), requests=1)
+        warned("lacks request_ids", request_ids="not-a-list")
+        warned("not in this ledger", request_ids=["not-a-ledger-request"])
+        warned("requests 3 differs from the 1 recorded request_ids", requests=3)
+        warned("duplicates", request_ids=self.compat_ids * 2, requests=1)
+        self.write_compatibility(spent="2.01", settle=False, when=next(later))  # no compatibility allowance
+        self.assertTrue(self.evaluate()["evidence"]["compatibility"]["passed"])
         self.write_compatibility(settle=False, when=next(later),
                                  settings={**frozen_fields(settings_from_config(pilot_config())),
                                            "pricing_verified": True, "live_compatibility_verified": True},
@@ -651,67 +630,49 @@ class LaunchGateTests(GateFixture):
         self.images["gdm-math-swarm-agent:local"] = "sha256:" + "f" * 64
         self.assertBlocked(self.evaluate(), "compatibility", "agent image changed")
 
-    def test_compatibility_ledger_holds_block(self):
-        ledger = BudgetLedger(self.ledger)
+    def test_compatibility_ledger_holds_are_reported_never_blocking(self):
+        ledger = ledger_run(self.ledger, "compat-later", "compatibility", 2)
         hold = ledger.reserve("compatibility", "compat-agent", "0.5")
-        ledger.settle(hold, None)
-        self.assertBlocked(self.evaluate(), "compatibility", "1 unresolved compatibility hold")
-        ledger.reconcile(hold, "0.6", note="generation total_cost")
-        self.assertBlocked(self.evaluate(), "compatibility", "estimate_violation")
-        self.assertTrue(self.evaluate()["evidence"]["ledger"]["passed"])  # the pilot scope is unaffected
+        ledger.settle(hold, None)  # another check's hold: never part of this evidence
+        result = self.evaluate()
+        self.assertTrue(result["ready"], result["blockers"])
+        self.assertTrue(any("compatibility: 1 unresolved hold" in w for w in result["evidence"]["ledger"]["warnings"]))
+        ledger.reconcile(hold, "0.6", note="generation total_cost")  # an estimate violation: recorded only
+        self.assertTrue(self.evaluate()["ready"])
 
-    def test_compatibility_gate_passes_after_reconciling_the_checks_hold(self):
-        """SPEND-1: spent_usd counted a hold's full reservation; reconciling it lower must not deadlock the gate."""
-        ledger = BudgetLedger(self.ledger)
+    def test_compatibility_requests_are_reported_with_their_current_ledger_state(self):
+        ledger = ledger_run(self.ledger, "compat-held", "compatibility", 2)
         first = ledger.reserve("compatibility", "agent-001", "0.05")
         ledger.settle(first, "0.009", "provider_reported_cost")
         hold = ledger.reserve("compatibility", "agent-001", "0.055")
         ledger.settle(hold, None)  # uncertain (e.g. cancelled by the max_minutes abort)
-        # compat_check records the committed delta at run end, which includes the whole hold.
         self.write_compatibility(spent="0.064", settle=False, request_ids=[first, hold],
                                  when=NOW - datetime.timedelta(minutes=30))
-        self.assertBlocked(self.evaluate(), "compatibility", "1 of the evidence's requests are unresolved")
+        gate = self.evaluate()["evidence"]["compatibility"]
+        self.assertTrue(gate["passed"], gate)
+        self.assertTrue(any("1 of the evidence's requests are unresolved" in w for w in gate["warnings"]))
         ledger.reconcile(hold, "0.004", note="generation total_cost")
-        self.assertLess(Decimal(read_snapshot(self.ledger)["compatibility"]["committed_usd"]) - Decimal("0.0421"),
-                        Decimal("0.064"))  # the old committed-delta comparison would have blocked here
-        result = self.evaluate()
-        self.assertTrue(result["evidence"]["compatibility"]["passed"], result["evidence"]["compatibility"])
-        self.assertEqual(result["evidence"]["compatibility"]["ledger_requests"],
-                         {"count": 2, "states": {"settled": 2}, "settled_usd": "0.013"})
-        # A manual (user-approved) reconciliation resolves a hold the same way.
-        manual = ledger.reserve("compatibility", "agent-001", "0.05")
-        ledger.settle(manual, None)
-        self.write_compatibility(spent="0.05", settle=False, request_ids=[manual],
-                                 when=NOW - datetime.timedelta(minutes=20))
-        self.assertBlocked(self.evaluate(), "compatibility", "unresolved")
-        ledger.reconcile(manual, "0.02", basis="manual_reconciliation", note="activity log; user approved")
-        self.assertTrue(self.evaluate()["evidence"]["compatibility"]["passed"])
+        gate = self.evaluate()["evidence"]["compatibility"]
+        self.assertTrue(gate["passed"], gate)
+        self.assertFalse(any("unresolved" in w for w in gate["warnings"]))
+        self.assertEqual(gate["ledger_requests"], {"count": 2, "states": {"settled": 2}, "settled_usd": "0.013"})
 
-    def test_compatibility_requests_must_not_exceed_reservation_or_leave_scope(self):
-        ledger = BudgetLedger(self.ledger)
+    def test_compatibility_requests_violations_and_other_scopes_are_warnings(self):
+        ledger = ledger_run(self.ledger, "compat-violation", "compatibility", 2)
         hold = ledger.reserve("compatibility", "agent-001", "0.05")
         ledger.settle(hold, None)
         self.write_compatibility(spent="0.05", settle=False, request_ids=[hold],
                                  when=NOW - datetime.timedelta(minutes=30))
         ledger.reconcile(hold, "0.06", note="generation total_cost")  # above its reservation
-        self.assertBlocked(self.evaluate(), "compatibility", "1 of the evidence's requests exceeded their reservation")
-        ledger.acknowledge_violation(hold, "estimator reviewed")
-        result = self.evaluate()  # an acknowledged violation unblocks the scope, not this evidence
-        self.assertBlocked(result, "compatibility", "exceeded their reservation")
-        self.assertNotIn("unacknowledged", result["evidence"]["compatibility"]["reason"])
-        pilot = ledger.reserve("pilot", "agent-001", "0.05")
-        ledger.settle(pilot, "0.01", "provider_reported_cost")
-        self.write_compatibility(settle=False, request_ids=[pilot], when=NOW - datetime.timedelta(minutes=20))
-        self.assertBlocked(self.evaluate(), "compatibility", "not in ledger scope 'compatibility'")
-
-    def test_compatibility_requests_settled_above_the_cap_block(self):
-        self.ledger.unlink()
-        ledger = BudgetLedger(self.ledger, {"pilot": 20, "analysis": 5, "compatibility": 5})
-        request = ledger.reserve("compatibility", "agent-001", "3")
-        ledger.settle(request, "2.5", "provider_reported_cost")
-        self.write_compatibility(spent="1.5", settle=False, request_ids=[request],
-                                 when=NOW - datetime.timedelta(minutes=30))
-        self.assertBlocked(self.evaluate(), "compatibility", "settled 2.5, above the $2 compatibility allowance")
+        gate = self.evaluate()["evidence"]["compatibility"]
+        self.assertTrue(gate["passed"], gate)
+        self.assertTrue(any("billed above their reservation" in w for w in gate["warnings"]))
+        pilot = ledger_run(self.ledger, "pilot-x", "pilot", 1)
+        request = pilot.reserve("pilot", "agent-001", "0.05")
+        pilot.settle(request, "0.01", "provider_reported_cost")
+        self.write_compatibility(settle=False, request_ids=[request], when=NOW - datetime.timedelta(minutes=20))
+        gate = self.evaluate()["evidence"]["compatibility"]
+        self.assertTrue(any("not in ledger scope 'compatibility'" in w for w in gate["warnings"]))
 
     def test_lean_evidence_must_be_complete_at_judge_limits(self):
         """J1/J2: partial runs (--only, --skip-timeout, --tasks, --template-only) or other limits never pass.
@@ -906,33 +867,29 @@ class LaunchGateTests(GateFixture):
                    NOW - datetime.timedelta(minutes=2))
         self.assertBlocked(self.evaluate(), "runtime-isolation", "judge_container_network_none")
 
-    def test_provider_limit_evidence(self):
-        self.write("provider-limit", {"all_required_passed": False, "checks": {"limit_does_not_reset": {"passed": False}}})
-        self.assertBlocked(self.evaluate(), "provider_limit", "limit_does_not_reset")
+    def test_provider_limit_record_is_informational(self):
+        """Owner decisions, October 20, 2026: the provider-side key limit never refuses a launch."""
+        cases = ({"all_required_passed": False, "checks": {"limit_does_not_reset": {"passed": False}}},
+                 {"limit": None, "limit_remaining": None, "limit_reset": None, "warnings": ["no provider-side limit"]},
+                 {"limit": 500, "limit_remaining": 500, "limit_reset": "monthly"})
+        for n, record in enumerate(cases):
+            self.write("provider-limit", dict({"all_required_passed": True}, **record),
+                       NOW - datetime.timedelta(minutes=10 - n))
+            gate = self.evaluate()["evidence"]["provider_limit"]
+            self.assertTrue(gate["passed"], gate)
+            self.assertEqual(gate["warnings"], record.get("warnings", []))
         self.write("provider-limit", {"all_required_passed": True, "note": "sk-or-v1-abcdef"},
                    NOW - datetime.timedelta(minutes=1))
-        self.assertBlocked(self.evaluate(), "provider_limit", "credential")
-        self.write("provider-limit", {"all_required_passed": True, "limit": 5, "limit_remaining": 5,
-                                      "limit_reset": None}, NOW - datetime.timedelta(seconds=30))
-        result = self.evaluate()
-        self.assertTrue(result["evidence"]["provider_limit"]["passed"])
-        self.assertTrue(any("below the ledger" in w for w in result["evidence"]["provider_limit"]["warnings"]))
-        self.assertBlocked(self.evaluate(now=NOW + datetime.timedelta(hours=73)), "provider_limit", "old")
-        self.assertIn("paid launch re-verifies the key it loads", result["evidence"]["provider_limit"]["reason"])
-        ledger = BudgetLedger(self.ledger)
-        ledger.settle(ledger.reserve("pilot", "agent-001", 1), "0.25", "provider_reported_cost")
-        self.write("provider-limit", {"all_required_passed": True, "limit": 20, "limit_remaining": 20,
-                                      "limit_reset": None},
-                   NOW - datetime.timedelta(seconds=20))
-        # The live check at paid launch would refuse 20 > 19.75; the gate reports it first.
-        self.assertBlocked(self.evaluate(), "provider_limit", "exceeds the remaining pilot allowance 19.75")
-        self.write("provider-limit", {"all_required_passed": True, "limit": 20, "limit_remaining": "19.75",
-                                      "limit_reset": None},
-                   NOW - datetime.timedelta(seconds=10))
-        self.assertTrue(self.evaluate()["evidence"]["provider_limit"]["passed"])
+        gate = self.evaluate()["evidence"]["provider_limit"]
+        self.assertTrue(gate["passed"])
+        self.assertTrue(any("credential" in w for w in gate["warnings"]))
+        old = self.evaluate(now=NOW + datetime.timedelta(hours=500))
+        self.assertTrue(old["evidence"]["provider_limit"]["passed"])  # no freshness refusal
         for path in launch_gates.evidence_files(self.validation, "provider-limit"):
             path.unlink()
-        self.assertBlocked(self.evaluate(), "provider_limit", "no provider-limit")
+        gate = self.evaluate()["evidence"]["provider_limit"]
+        self.assertTrue(gate["passed"])
+        self.assertIn("no provider-limit record yet", gate["reason"])
 
     def test_credential_presence_only(self):
         with mock.patch("research_swarm.secrets.credential_status",
@@ -943,199 +900,111 @@ class LaunchGateTests(GateFixture):
                                           env_file_private=False)):
             self.assertBlocked(self.evaluate(), "credential_presence", "mode 600")
 
-    def test_unlimited_key_requires_explicit_boolean_policy_and_approval_note(self):
-        for value in (None, "true", 1, [], {}):
-            with self.subTest(value=value):
-                self.assertBlocked(self.evaluate(pilot_config(allow_unlimited_provider_key=value)),
-                                   "approved_settings", "must be a boolean")
-        for note in (None, "", "   ", True, 42):
-            with self.subTest(note=note):
-                self.assertBlocked(self.evaluate(pilot_config(
-                    allow_unlimited_provider_key=True, unlimited_provider_key_approval=note)),
-                    "approved_settings", "nonempty unlimited_provider_key_approval")
-
-    def test_unlimited_provider_evidence_reassessed_and_waiver_explicit(self):
-        from research_swarm.provider_limit import assess
-        unlimited = {"limit": None, "limit_remaining": None, "limit_reset": None,
-                     "usage": 0, "expires_at": None}
-        report = assess(unlimited, Decimal("20"), NOW, allow_unlimited=True)
-        self.write("provider-limit", report, NOW - datetime.timedelta(minutes=1))
-        self.assertBlocked(self.evaluate(), "provider_limit", "waiver evidence")
-        config = pilot_config(allow_unlimited_provider_key=True,
-                              unlimited_provider_key_approval="Explicit user approval for this pilot")
-        result = self.evaluate(config)
-        self.assertTrue(result["ready"], result["blockers"])
-        gate = result["evidence"]["provider_limit"]
-        self.assertTrue(gate["unlimited_key_authorized"])
-        self.assertFalse(gate["provider_limit_enforced"])
-        self.assertIn("waived, not enforced", gate["reason"])
-        self.assertTrue(any(check.get("waived") for check in gate["checks"].values()))
-        # Even the authorized waiver cannot bless stale/tampered expiry metadata.
-        report["expires_at"] = "2026-10-01T00:00:00Z"
-        self.write("provider-limit", report, NOW - datetime.timedelta(seconds=30))
-        self.assertBlocked(self.evaluate(config), "provider_limit", "key_not_expired")
-
-    def test_passing_flag_cannot_hide_invalid_provider_metadata(self):
-        self.write("provider-limit", {"all_required_passed": True, "limit": None,
-                                      "limit_remaining": None, "limit_reset": None},
-                   NOW - datetime.timedelta(minutes=1))
-        self.assertBlocked(self.evaluate(), "provider_limit", "metadata requirements not met")
-
-    def test_unlimited_policy_preserves_ledger_caps_and_holds(self):
-        from research_swarm.provider_limit import assess
-        config = pilot_config(allow_unlimited_provider_key=True,
-                              unlimited_provider_key_approval="User approved unlimited provider key")
-        self.write("provider-limit", assess({"limit": None, "limit_remaining": None, "limit_reset": None},
-                                            Decimal("20"), NOW, allow_unlimited=True))
-        ledger = BudgetLedger(self.ledger)
-        ledger.reserve("pilot", "agent-001", "1")
-        self.assertBlocked(self.evaluate(config), "ledger", "unresolved")
-
 
 class ScriptTests(GateFixture):
-    def test_provider_limit_assessment(self):
-        assess = load_script("check_provider_limit").assess
-        cap = Decimal("20")
-        good = assess({"limit": 20, "limit_remaining": 20, "limit_reset": None, "usage": 0, "label": "sk-or-v1-x"}, cap, NOW)
-        self.assertTrue(good["all_required_passed"])
-        self.assertNotIn("label", good)
-        self.assertNotIn("sk-", json.dumps(good))
-        self.assertFalse(assess({"limit": None, "limit_remaining": None}, cap, NOW)["all_required_passed"])
-        self.assertFalse(assess({"limit": 20, "limit_remaining": 20, "limit_reset": "monthly"}, cap, NOW)["all_required_passed"])
-        self.assertFalse(assess({"limit": 25, "limit_remaining": 25}, cap, NOW)["all_required_passed"])
-        used = assess({"limit": 22, "limit_remaining": 19.5, "usage": 2.5}, cap, NOW)
-        self.assertTrue(used["all_required_passed"])
-        self.assertEqual(len(used["warnings"]), 2)  # prior usage and limit above cap
-        self.assertFalse(assess({"limit": 20, "limit_remaining": 20, "expires_at": "2026-10-01T00:00:00Z"}, cap, NOW)
-                         ["all_required_passed"])
-
-    def test_provider_limit_requires_approval_flag(self):
+    def test_provider_limit_script_needs_no_approval_flag(self):
         module = load_script("check_provider_limit")
-        with mock.patch("research_swarm.secrets.load_openrouter_key", side_effect=AssertionError("key read")), \
-                mock.patch.object(sys, "argv", ["check_provider_limit.py"]), redirect_stdout(io.StringIO()), \
-                mock.patch("sys.stderr", io.StringIO()):
-            with self.assertRaises(SystemExit) as caught:
-                module.main()
-        self.assertEqual(caught.exception.code, 2)
+        with mock.patch("research_swarm.secrets.load_openrouter_key", return_value="test-key-not-real-0123456789"), \
+                redirect_stdout(io.StringIO()):
+            code = module.main(["--output-dir", str(self.tmp / "limit")],
+                               http_get=lambda url, headers: {"data": {"limit": None, "limit_remaining": None}})
+        self.assertEqual(code, 0)
+        self.assertEqual(len(list((self.tmp / "limit").glob("provider-limit-*.json"))), 1)
+        with mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
+            module.main(["--i-have-user-approval"])
 
     def test_preflight_spending_checkpoint(self):
         preflight = load_script("preflight")
-        empty = preflight.spending_checkpoint(ROOT, self.ledger)
-        self.assertEqual(list(empty["scopes"]), ["pilot", "analysis", "compatibility"])
-        self.assertEqual(empty["scopes"]["pilot"]["remaining_usd"], "20")
-        ledger = BudgetLedger(self.ledger)
+        empty = preflight.spending_checkpoint(ROOT, self.tmp / "absent.sqlite", pilot_config())
+        self.assertEqual((empty["ledger_exists"], empty["scopes"], empty["recent_runs"]), (False, {}, []))
+        self.assertEqual((empty["run_budget"]["run_budget_usd"], empty["run_budget"]["source"]),
+                         ("100", "config run_budget_usd"))
+        default = preflight.spending_checkpoint(ROOT, self.ledger, {})["run_budget"]
+        self.assertEqual((default["run_budget_usd"], default["source"]), ("100", "default"))
+        self.assertIn("default", default["line"])
+        self.assertIn("error", preflight.spending_checkpoint(ROOT, self.ledger, {"run_budget_usd": "x"})["run_budget"])
+        ledger = ledger_run(self.ledger, "pilot-a", "pilot", 20)
         ledger.settle(ledger.reserve("pilot", "a", 1), 0.4, "provider_reported_cost")
         ledger.reserve("pilot", "b", 2)
-        pilot = preflight.spending_checkpoint(ROOT, self.ledger)["scopes"]["pilot"]
-        self.assertEqual((pilot["settled_usd"], pilot["held_usd"], pilot["remaining_usd"], pilot["unresolved_requests"]),
-                         ("0.4", "2", "17.6", 1))
-        text = "\n".join(preflight.render_spending(preflight.spending_checkpoint(ROOT, self.ledger)))
-        self.assertIn("prior known costs $0.4000", text)
-        self.assertIn("compatibility $2 (separate paid allowance for the live compatibility check", text)
-        self.assertIn('"Live compatibility check"', text)
-        self.assertNotIn("unpaid", text.lower())
-
-    def test_preflight_raise_ledger_cap_is_explicit_and_audited(self):
-        preflight = load_script("preflight")
-        old = self.tmp / "old" / "budget.sqlite"
-        ledger = BudgetLedger(old, {"pilot": 20, "analysis": 5, "compatibility": 0})
-        ledger.settle(ledger.reserve("pilot", "a", 1), "0.7", "provider_reported_cost")
-        ready = {"ready": True, "blockers": [], "launch_gates": {"evidence": {}}, "runtime_preflight": {},
-                 "spending": preflight.spending_checkpoint(ROOT, self.ledger)}
-        with mock.patch.object(preflight, "DEFAULT_LEDGER_PATH", lambda root: old), \
-                mock.patch.object(preflight, "collect", return_value=ready) as collect, \
-                redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(preflight.main(["--raise-ledger-cap", "compatibility"]), 2)
-            self.assertEqual(preflight.main(["--raise-ledger-cap", "compatibility", "--i-have-user-approval"]), 2)
-            self.assertEqual(preflight.main(["--raise-ledger-cap", "compatibility", "--approval-note", "user ok"]), 2)
-            self.assertEqual(read_snapshot(old)["compatibility"]["cap_usd"], "0")
-            collect.assert_not_called()
-            self.assertEqual(preflight.main(["--raise-ledger-cap", "compatibility", "--approval-note",
-                                             "user approved $2 in chat", "--i-have-user-approval"]), 0)
-            self.assertEqual(preflight.main(["--raise-ledger-cap", "compatibility", "--approval-note", "again",
-                                             "--i-have-user-approval"]), 2)  # already at the approved cap
-        self.assertIn("recorded spending is kept (committed: analysis $0.0000, compatibility $0.0000, pilot $0.7000)",
-                      out.getvalue())
-        snapshot = read_snapshot(old)
-        self.assertEqual((snapshot["compatibility"]["cap_usd"], snapshot["pilot"]["committed_usd"]), ("2", "0.7"))
-        self.assertEqual([c["note"] for c in cap_changes(old)], ["user approved $2 in chat"])
+        spending = preflight.spending_checkpoint(ROOT, self.ledger, pilot_config())
+        pilot = spending["scopes"]["pilot"]
+        self.assertEqual((pilot["settled_usd"], pilot["held_usd"], pilot["committed_usd"], pilot["unresolved_requests"]),
+                         ("0.4", "2", "2.4", 1))
+        self.assertEqual(spending["recent_runs"][-1]["run_id"], "pilot-a")
+        text = "\n".join(preflight.render_spending(spending))
+        self.assertIn("Run budget: $100 (config run_budget_usd)", text)
+        self.assertIn("known costs $0.4000", text)
+        self.assertIn("run pilot-a (pilot): committed $2.4000 of budget $20.0000", text)
+        self.assertNotIn("cap", text.lower())
         with mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
-            preflight.main(["--approval-note", "x"])
-        with mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
-            preflight.main(["--raise-ledger-cap", "pilotx"])
+            preflight.main(["--raise-ledger-cap", "compatibility"])  # no cap to raise
 
-    def test_preflight_drops_duplicate_paid_launch_blocker(self):
+    def ready_report(self, config=None):
         preflight = load_script("preflight")
-        gates = {"ready": False, "blockers": ["paid_launch_enabled: paid_launch_enabled is not true (user decision)"],
-                 "evidence": {}}
-        runtime_report = {"ready": False, "blockers": ["Paid launch is disabled", "Docker CLI unavailable",
-                                                       gates["blockers"][0]]}
-        with mock.patch.object(preflight.launch_gates, "evaluate", return_value=gates), \
-                mock.patch("research_swarm.runtime.preflight", return_value=runtime_report):
-            report = preflight.collect({}, ROOT, self.ledger)
-        self.assertEqual(report["blockers"], [gates["blockers"][0], "Docker CLI unavailable"])
-        with mock.patch.object(preflight.launch_gates, "evaluate", return_value=dict(gates, blockers=[])), \
-                mock.patch("research_swarm.runtime.preflight", return_value=runtime_report):
-            self.assertIn("Paid launch is disabled", preflight.collect({}, ROOT, self.ledger)["blockers"])
+        return {"ready": True, "blockers": [], "launch_gates": {"evidence": {}}, "runtime_preflight": {},
+                "spending": preflight.spending_checkpoint(ROOT, self.ledger, config or {})}
 
-    def test_run_pilot_requires_flag_config_gates_and_typed_confirmation(self):
+    def test_run_pilot_launches_without_prompt_flag_or_terminal(self):
         run_pilot = load_script("run_pilot")
-        ready = {"ready": True, "blockers": [], "launch_gates": {"evidence": {}}, "runtime_preflight": {},
-                 "spending": {"ledger": "x", "ledger_exists": False, "scopes": {"pilot": {
-                     "cap_usd": "20", "settled_usd": "0", "held_usd": "0", "committed_usd": "0", "remaining_usd": "20",
-                     "unresolved_requests": 0, "violation": False}}}}
-        args = SimpleNamespace(launch_paid_pilot=False)
-        self.assertFalse(run_pilot.launch_decision({"paid_launch_enabled": True}, ready, args)[0])
-        args.launch_paid_pilot = True
-        self.assertFalse(run_pilot.launch_decision({"paid_launch_enabled": False}, ready, args)[0])
-        self.assertFalse(run_pilot.launch_decision({"paid_launch_enabled": True}, dict(ready, ready=False), args)[0])
-        self.assertTrue(run_pilot.launch_decision({"paid_launch_enabled": True}, ready, args)[0])
-        prompts = []
-        self.assertTrue(run_pilot.confirm("20", lambda prompt: prompts.append(prompt) or "$20.00"))
-        self.assertIn("$2 compatibility and $5 analysis allowances are separate", prompts[0])
-        self.assertFalse(run_pilot.confirm("20", lambda prompt: "yes"))
-        self.assertFalse(run_pilot.confirm("19.5", lambda prompt: "20"))
         config_path = self.tmp / "pilot.json"
-        config_path.write_text(json.dumps({"paid_launch_enabled": True}))
-        calls = []
+        config_path.write_text(json.dumps({"run_budget_usd": "25"}))
+        calls, refreshed = [], []
 
         async def fake_run(config, repo):
             calls.append(config)
-        with mock.patch.object(run_pilot, "collect", return_value=ready), redirect_stdout(io.StringIO()):
-            self.assertEqual(run_pilot.main(["--config", str(config_path), "--launch-paid-pilot"],
-                                            ask=lambda p: "19", run=fake_run), 2)
-            self.assertEqual(calls, [])
-            self.assertEqual(run_pilot.main(["--config", str(config_path)], ask=lambda p: "20", run=fake_run), 0)
-            self.assertEqual(calls, [])  # preflight only by default
-            self.assertEqual(run_pilot.main(["--config", str(config_path), "--launch-paid-pilot"],
-                                            ask=lambda p: "20", run=fake_run), 0)
+        ready = self.ready_report({"run_budget_usd": "25"})
+        with mock.patch.object(run_pilot, "collect", return_value=ready), \
+                mock.patch("builtins.input", side_effect=AssertionError("nothing may prompt")), \
+                mock.patch.object(sys, "stdin", io.StringIO()), redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(run_pilot.main(["--config", str(config_path)], run=fake_run,
+                                            refresh=lambda *a: refreshed.append(a)), 0)
+            self.assertEqual((calls, refreshed), ([], []))  # preflight only by default: no refresh, no run
+            self.assertEqual(run_pilot.main(["--config", str(config_path), "--launch-paid-pilot"], run=fake_run,
+                                            refresh=lambda *a: refreshed.append(a)), 0)
+            with mock.patch.object(run_pilot, "collect", return_value=dict(ready, ready=False, blockers=["x"])):
+                self.assertEqual(run_pilot.main(["--config", str(config_path), "--launch-paid-pilot"], run=fake_run,
+                                                refresh=lambda *a: None), 2)
         self.assertEqual(len(calls), 1)
         self.assertIn(str(Path("runs") / "pilot-"), calls[0]["run_dir"])
+        self.assertEqual(refreshed[0][1], config_path)  # route pricing refreshed before the gates
+        self.assertIn("Run budget: $25 (config run_budget_usd)", out.getvalue())
+        for flag in ("--yes", "--i-have-user-approval"):
+            with self.subTest(flag=flag), mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
+                run_pilot.main(["--config", str(config_path), "--launch-paid-pilot", flag], run=fake_run)
 
-    def test_run_pilot_reports_a_refused_provider_limit(self):
-        """SPEND-6: runtime.run_pilot's live key check refuses before any paid request; the launcher exits 2."""
-        from research_swarm.provider_limit import ProviderLimitError
+    def test_run_pilot_prints_the_default_budget_when_unset(self):
         run_pilot = load_script("run_pilot")
-        ready = {"ready": True, "blockers": [], "launch_gates": {"evidence": {}}, "runtime_preflight": {},
-                 "spending": {"ledger": "x", "ledger_exists": False, "scopes": {"pilot": {
-                     "cap_usd": "20", "settled_usd": "0", "held_usd": "0", "committed_usd": "0", "remaining_usd": "20",
-                     "unresolved_requests": 0, "violation": False}}}}
         config_path = self.tmp / "pilot.json"
-        config_path.write_text(json.dumps({"paid_launch_enabled": True}))
+        config_path.write_text("{}")
 
-        async def refused(config, repo):
-            raise ProviderLimitError("provider-side key limit refused (limit_set): limit None")
-        with mock.patch.object(run_pilot, "collect", return_value=ready), \
-                mock.patch.object(run_pilot, "spending_checkpoint", return_value=ready["spending"]), \
+        async def fake_run(config, repo):
+            pass
+        with mock.patch.object(run_pilot, "collect", return_value=self.ready_report({})), \
                 redirect_stdout(io.StringIO()) as out:
-            code = run_pilot.main(["--config", str(config_path), "--launch-paid-pilot", "--yes"], run=refused)
-        self.assertEqual(code, 2)
-        self.assertIn("No paid call was made", out.getvalue())
-        self.assertIn("limit_set", out.getvalue())
+            self.assertEqual(run_pilot.main(["--config", str(config_path), "--launch-paid-pilot"], run=fake_run,
+                                            refresh=lambda *a: None), 0)
+        self.assertIn("Run budget: $100 (default; set run_budget_usd in the config to specify it)", out.getvalue())
+
+    def test_freeze_route_refresh_if_needed(self):
+        freeze_route = load_script("freeze_route")
+        config, calls, lines = pilot_config(), [], []
+        self.write_route(when=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=1))
+        fresh = freeze_route.refresh_if_needed(config, "cfg.json", self.validation, freeze=calls.append,
+                                               out=lines.append)
+        self.assertEqual((fresh, calls), (None, []))  # a fresh freeze for these settings: nothing to do
+        stale = freeze_route.refresh_if_needed(config, "cfg.json", self.tmp / "no-freeze",
+                                               freeze=lambda argv: calls.append(argv) or 0, out=lines.append)
+        self.assertIn("no route-pricing freeze", stale)
+        self.assertEqual(calls, [["--config", "cfg.json", "--output-dir", str(self.tmp / "no-freeze")]])
+
+        def offline(argv):
+            raise OSError("network unreachable")
+        freeze_route.refresh_if_needed(config, "cfg.json", self.tmp / "no-freeze", freeze=offline, out=lines.append)
+        self.assertIn("refresh failed (OSError", lines[-1])  # never raises
 
     def test_reconcile_script(self):
         module = load_script("reconcile_ledger")
-        ledger = BudgetLedger(self.ledger)
+        ledger = ledger_run(self.ledger, "pilot-r", "pilot", 20)
         uncertain, unknown, missing, stale = (ledger.reserve("pilot", "a", 1) for _ in range(4))
         for request in (uncertain, unknown, missing):
             ledger.settle(request, None)
@@ -1156,17 +1025,37 @@ class ScriptTests(GateFixture):
         self.assertEqual(ledger.audit_log()[0]["new_actual_usd"], "0.0123")
         with mock.patch("research_swarm.secrets.load_openrouter_key", side_effect=AssertionError("key read")), \
                 redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(module.main(["--ledger", str(self.ledger), "--run-dir", str(run_dir)]), 0)
+            self.assertEqual(module.main(["--ledger", str(self.ledger), "--run-dir", str(run_dir), "--dry-run"]), 0)
         self.assertIn("Dry run", out.getvalue())
+        # The default settles from the unpaid generation lookup, without any approval flag.
+        lookups = []
+        with mock.patch("research_swarm.secrets.load_openrouter_key", side_effect=AssertionError("key read")), \
+                redirect_stdout(io.StringIO()) as out:
+            code = module.main(["--ledger", str(self.ledger), "--run-dir", str(run_dir)],
+                               fetch=lambda gid: lookups.append(gid) or None)
+        self.assertEqual((code, lookups), (0, ["gen-404"]))
+        with mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
+            module.main(["--ledger", str(self.ledger), "--i-have-user-approval"])
+
+    def test_reconcile_default_loads_no_key_when_nothing_can_be_looked_up(self):
+        module = load_script("reconcile_ledger")
+        ledger = ledger_run(self.ledger, "pilot-n", "pilot", 20)
+        ledger.settle(ledger.reserve("pilot", "a", 1), None)  # no generation id recorded anywhere
+        with mock.patch("research_swarm.secrets.load_openrouter_key", side_effect=AssertionError("key read")), \
+                redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(module.main(["--ledger", str(self.ledger)]), 0)
+        self.assertIn("Nothing to look up", out.getvalue())
 
     def test_reconcile_judge_holds_with_expected_models_and_credentials_root(self):
         module = load_script("reconcile_ledger")
-        ledger = BudgetLedger(self.ledger)
-        opus, sonnet, pilot = (ledger.reserve(scope, agent, 1) for scope, agent in (
-            ("analysis", "judge-opus:verifier:agent-008.verify-b01"),
-            ("analysis", "judge-sonnet:judge_recheck:agent-020.judge.recheck.b01"), ("pilot", "agent-001")))
-        for request in (opus, sonnet, pilot):
+        ledger = ledger_run(self.ledger, "judge-run", "analysis", 50)
+        pilot_ledger = ledger_run(self.ledger, "pilot-run", "pilot", 20)
+        opus, sonnet = (ledger.reserve("analysis", agent, 1) for agent in (
+            "judge-opus:verifier:agent-008.verify-b01", "judge-sonnet:judge_recheck:agent-020.judge.recheck.b01"))
+        pilot = pilot_ledger.reserve("pilot", "agent-001", 1)
+        for request in (opus, sonnet):
             ledger.settle(request, None)
+        pilot_ledger.settle(pilot, None)
         from research_swarm.budget import list_requests
         fetched = {"gen-o": {"model": "anthropic/claude-opus-5.5", "total_cost": 0},
                    "gen-s": {"model": "anthropic/claude-sonnet-5.5", "total_cost": 0.0021}}
@@ -1193,8 +1082,7 @@ class ScriptTests(GateFixture):
                                   return_value={"model": "anthropic/claude-opus-5.5", "total_cost": 0.5}), \
                 redirect_stdout(io.StringIO()) as out:
             code = module.main(["--ledger", str(self.ledger), "--scope", "analysis", "--map", f"{other}=gen-x",
-                                "--expect-model", "anthropic/claude-opus-5.5", "--credentials-root", str(creds),
-                                "--i-have-user-approval"])
+                                "--expect-model", "anthropic/claude-opus-5.5", "--credentials-root", str(creds)])
         self.assertEqual(code, 0)
         self.assertEqual(seen, [creds])
         self.assertIn('"reconciled"', out.getvalue())
@@ -1205,7 +1093,7 @@ class ScriptTests(GateFixture):
 
     def test_reconcile_exception_path_hold_listing_and_manual_settlement(self):
         module = load_script("reconcile_ledger")
-        ledger = BudgetLedger(self.ledger)
+        ledger = ledger_run(self.ledger, "pilot-m", "pilot", 20)
         hold, other = ledger.reserve("pilot", "agent-007", 1), ledger.reserve("pilot", "agent-008", 1)
         ledger.settle(hold, None)
         ledger.settle(other, None)
@@ -1235,34 +1123,33 @@ class ScriptTests(GateFixture):
                 code = module.main(["--ledger", str(self.ledger), "--run-dir", str(run_dir), *argv])
             return code, out.getvalue()
 
-        code, text = run()
+        code, text = run("--dry-run")
         listing = json.loads(text.split("\nDry run")[0])["unresolved"]
         entry = next(e for e in listing if e["request_id"] == hold)
         self.assertEqual((entry["generation_id"], entry["provider_request_id"], entry["agent_id"]),
                          (None, "req_abc123", "agent-007"))
         self.assertIn("--manual REQUEST_ID COST", entry["next_step"])
         self.assertIn("generation lookup", next(e for e in listing if e["request_id"] == other)["next_step"])
-        with mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
-            run("--manual", hold, "0.31")  # a note is required
-        self.assertEqual(run("--manual", hold, "0.31", "--note", "activity log")[0], 0)  # dry run without approval
-        self.assertEqual(run("--manual", "nope", "0.31", "--note", "x", "--i-have-user-approval")[0], 2)
-        self.assertEqual(run("--manual", hold, "-1", "--note", "x", "--i-have-user-approval")[0], 2)
-        self.assertEqual(run("--manual", hold, "0.31", "--manual", "nope", "0.1", "--note", "x",
-                             "--i-have-user-approval")[0], 2)  # all-or-nothing
+        self.assertEqual(run("--manual", hold, "0.31", "--note", "activity log", "--dry-run")[0], 0)
+        self.assertEqual(run("--manual", "nope", "0.31", "--note", "x")[0], 2)
+        self.assertEqual(run("--manual", hold, "-1", "--note", "x")[0], 2)
+        self.assertEqual(run("--manual", hold, "0.31", "--manual", "nope", "0.1", "--note", "x")[0], 2)  # all-or-nothing
         self.assertEqual(read_snapshot(self.ledger)["pilot"]["uncertain_requests"], 2)
-        code, text = run("--manual", hold, "0.31", "--note", "OpenRouter activity 12:40Z; user approved",
-                         "--i-have-user-approval")
+        code, text = run("--manual", hold, "0.31", "--note", "OpenRouter activity 12:40Z")
         self.assertEqual(code, 0)
         snapshot = read_snapshot(self.ledger)["pilot"]
         self.assertEqual((snapshot["uncertain_requests"], snapshot["manual_reconciliations"]), (1, 1))
         audit = BudgetLedger(self.ledger).audit_log()[-1]
         self.assertEqual((audit["request_id"], audit["basis"], audit["new_actual_usd"]),
                          (hold, "manual_reconciliation", "0.31"))
-        self.assertIn("OpenRouter activity 12:40Z; user approved", audit["note"])
+        self.assertIn("OpenRouter activity 12:40Z", audit["note"])
         files = list((self.ledger.parent / "reconciliations").glob("reconcile-*.json"))
         self.assertEqual(len(files), 1)
         self.assertEqual(json.loads(files[0].read_text())["mode"], "manual")
-        self.assertEqual(run("--manual", hold, "0.31", "--note", "again", "--i-have-user-approval")[0], 2)
+        self.assertEqual(run("--manual", hold, "0.31", "--note", "again")[0], 2)
+        other_code, _ = run("--manual", other, "0.2")  # the note is optional
+        self.assertEqual(other_code, 0)
+        self.assertIn("amount entered with --manual", BudgetLedger(self.ledger).audit_log()[-1]["note"])
 
     def test_project_cost_from_reservations(self):
         module = load_script("project_cost")

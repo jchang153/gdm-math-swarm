@@ -1,5 +1,34 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## One per-run budget, no manual approvals (October 20, 2026)
+
+The repository owner (Jonathan) decided in chat on October 20, 2026, verbatim: "one budget limit is
+enough; I don't need 5 different checkers", "yes, remove or auto-handle the other 5", "never design
+any environments with these strict safety guardrails that require me to put you in manual and
+manually approve commands or copy-paste them into terminals", "I also want all these changes to
+generalize to amelie's too, they should be repo-wide", and "The per run budget should always be
+specified before each run; default to $100 a run".
+
+Recorded meaning (repo-wide; it supersedes, where they conflict, every earlier spending rule in this
+file, including "Approved spending limits", "Live compatibility check", the audited raises of the
+pilot and analysis caps, the standing approval of the automatic judge and the audited raises named in
+"Collaborator budgets and keys"):
+
+| Topic | Decision |
+| --- | --- |
+| The one spending control | Every paid invocation is one run with its own budget, specified before it starts: a pilot run on any track (the owner's and collaborators' alike) and the live compatibility check read `run_budget_usd` from their config, $100 when absent (the launch prints the budget it uses); the behavior judge's budget is its fixed run limit (`--run-limit`, else the run config's `behavior_judge_max_usd`, else $50). A request is admitted only if this run's committed spend (its own in-flight reservations, settled costs and uncertain holds, tagged by run id) plus the request's reservation fits the run's budget; the run then stops cleanly (`research_swarm.budget.BudgetLedger.reserve`). |
+| The shared ledger | `state/budget.sqlite` stays the record of every request of every run (cumulative history per scope, reconciliation, the `runs` table with each run's budget). There is no cumulative cap to raise and no top-up; the caps of older ledgers are kept as history only. |
+| Removed | Audited cap raises and their lineage checks; the separate compatibility allowance and its approval; the cap-equality and repeat-snapshot launch bindings; the `verified_integration` and `paid_launch_enabled` attestations; approval notes; `--i-have-user-approval`, `--yes` and every typed confirmation or interactive-terminal requirement (pilot, compatibility check, provider-limit check, reconciliation, judge); the provider-key limit as a refusal; the judge's owner-only track restriction and its $50 ceiling. |
+| Handled automatically | Route-pricing records (pilot and judge) refresh automatically (unpaid public catalog) when missing or older than 72 h, instead of refusing; the provider-side key limit is recorded (unpaid) at every paid launch, never refused; holds left by a process that is gone are marked `uncertain` at the next run's start, stay counted against their own run and never block a new run; an estimate violation is recorded, needs no acknowledgement, and scales the rest of that run's reservations up by the observed ratio; the post-run reconciliation settles uncertain holds from OpenRouter's generation records without a flag. |
+| Kept (research integrity, not spending) | Frozen tasks and dataset, approved design settings, `max_connections`, the seeded-track refusal, the recorded `prompt_cache_normalization`, Lean/runtime/isolation/capacity/evaluator evidence, the live compatibility evidence (model, route, settings, agent image), a route-pricing freeze that must validate against the config's reservation prices, the launch interlock, credential presence and host-only keys, judge directory bindings, label checks and held agents. |
+| Collaborators | The same rules apply to every track and every checkout; a collaborator specifies their own run budgets and uses their own provider key ("Collaborator budgets and keys"). |
+
+Implementation: `research_swarm.budget` (per-run admission, `start_run`, automatic leftover handling),
+`launch_gates` (`run_budget` gate; `ledger` and `provider_limit` informational), `runtime.run_pilot`,
+`scripts/run_pilot.py`, `scripts/compat_check.py`, `scripts/supervise_run.py`,
+`scripts/run_transcript_judge.py`, `scripts/reconcile_ledger.py`, `scripts/check_provider_limit.py`,
+`scripts/preflight.py`, `configs/README.md` ("Run budget") and `AGENTS.md`.
+
 ## No cost estimates for judge runs, October 20, 2026
 
 Owner (chat): "Don't require estimates for anything—either runs or behavior judges." and "I don't
@@ -7,7 +36,9 @@ ever want to see a cost estimate again." The behavior judge no longer computes a
 and never asks for a typed confirmation. Each judging invocation has a fixed run limit:
 `--run-limit`, else $50 (a standing approval's `behavior_judge_max_usd` is a ceiling), clamped to
 the analysis scope's remaining allowance; the ledger cap, run limit, audited raises and the
-72-hour pricing-record check still apply. `--dry-run-estimate` remains an optional separate
+72-hour pricing-record check still apply (superseded by "One per-run budget, no manual approvals
+(October 20, 2026)": no cap or raises, the pricing record refreshes automatically, and the run limit is
+the judging run's budget). `--dry-run-estimate` remains an optional separate
 command. Experiment runs keep per-request ledger reservations (they enforce the run's cap and add
 no waiting); there is no estimate step for runs.
 
@@ -23,7 +54,10 @@ at most 50; `configs/README.md`, `research_swarm/auto_judge.py`) and executed by
 `scripts/supervise_run.py` after its unpaid follow-ups (reconcile dry run, evaluate, timeline) via
 `scripts/run_transcript_judge.py --standing-approval-from-config CONFIG`.
 
-Guards that remain:
+Superseded by "One per-run budget, no manual approvals (October 20, 2026)": the judge runs automatically
+for any track, needs no approval note, and its budget is `behavior_judge_max_usd` (any positive amount,
+$50 when absent) with no clamp to an analysis allowance; the pricing record refreshes automatically.
+The table below is the record of the earlier rule. Guards that remained at the time:
 
 | Guard | Rule |
 | --- | --- |
@@ -74,7 +108,9 @@ API key to use. The user decided: "They should be allowed to decide their own bu
 everything" and "they should use their own api key". Recorded meaning: a collaborator
 approves their own spending caps for their own experiments and analyses, and records each
 decision in this file before any paid call. The audited-raise mechanism (a cap bound to a
-recorded plan section and enforced by the ledger) stays in place. They use their own provider
+recorded plan section and enforced by the ledger) stays in place (superseded by "One per-run budget,
+no manual approvals (October 20, 2026)": a collaborator specifies each run's `run_budget_usd`; there
+are no caps or raises). They use their own provider
 key in their own private `.env`, never the user's key or the VM checkout's `.env` that holds
 it. The other rules are unchanged: their own Google login for the VM, exclusive VM use
 coordinated, ledgers and unresolved holds preserved. The user also asked to commit the

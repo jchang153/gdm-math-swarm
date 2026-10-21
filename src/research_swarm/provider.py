@@ -45,7 +45,8 @@ class ProviderSettings:
         Assumes the route caps reasoning + visible completion tokens at max_tokens
         (OpenRouter's reasoning normalization). This is unverified until the live
         compatibility check; if the route bills more, settlement records an
-        estimate_violation and the ledger blocks the scope (fail closed).
+        estimate_violation and the ledger scales the run's later reservations up by the
+        observed ratio (``budget.BudgetLedger.settle``); the run's budget still bounds spend.
         """
         if not self.pricing_verified:
             raise RuntimeError("Freeze fresh conservative route pricing before paid admission")

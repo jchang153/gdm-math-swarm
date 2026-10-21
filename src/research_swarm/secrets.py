@@ -1,8 +1,9 @@
 """Explicit host-only secret loading.
 
-``load_openrouter_key`` is called only by the paid launch (runtime.run_pilot via
-scripts/run_pilot.py) and by unpaid account checks that the user approves
-explicitly (scripts/check_provider_limit.py, scripts/reconcile_ledger.py). Preflight
+``load_openrouter_key`` is called only by the paid paths (runtime.run_pilot via
+scripts/run_pilot.py, the compatibility check, the behavior judge) and by unpaid account
+checks (scripts/check_provider_limit.py, and scripts/reconcile_ledger.py when a hold has a
+generation id to look up). Preflight
 and launch gates never call it; they use ``credential_status`` (presence and file
 permissions only, never contents). The key never enters containers, prompts or logs.
 """

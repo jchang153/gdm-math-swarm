@@ -412,8 +412,12 @@ outputs and assumed findings x 1.5. Each column includes the one repair at its a
 with prompt caching on (the default), the saving on the shared Sonnet/Opus system prompts
 (reservations never assume it). Outputs never exceed the output limits.
 
-**The run limit.** Each judging invocation (`--mock` or paid) gets its own limit
-(`estimate.invocation_run_limit`, `estimate.run_limit_for`): **2 x the central estimate**
+**The run limit.** Since October 20, 2026 (docs/plan.md, "No cost estimates for judge runs" and "One
+per-run budget, no manual approvals") a judging invocation makes no estimate: its limit, the judging
+run's budget, is `--run-limit`, else the run config's `behavior_judge_max_usd` (`--run-config`), else
+$50, never clamped to any allowance. The estimate-based rule that follows is kept for the optional
+`--dry-run-estimate` and the record of earlier runs. Each judging invocation (`--mock` or paid) got
+its own limit (`estimate.invocation_run_limit`, `estimate.run_limit_for`): **2 x the central estimate**
 (docs/plan.md: "2x is good"), rounded up to the cent, raised when needed to the central estimate
 plus 1.25 x the largest single reservation the invocation plans (`RUN_LIMIT_RESERVATION_MARGIN`) and
 to at least $1 (`RUN_LIMIT_FLOOR_USD`), unless `--run-limit USD` overrides it; `basis` records which
@@ -432,21 +436,20 @@ while other requests are in flight it waits for them to settle and asks again (n
 so this is not a paid retry; settlements are usually far below the conservative holds); with
 nothing in flight the run **stops cleanly** with stop reason `run_limit` (no new request starts,
 in-flight requests finish and are saved, exit code 3), and a resume pays nothing twice (it plans
-and limits only what is left). The ledger's own cap applies independently. Because holds are
+and limits only what is left). The ledger enforces the same budget for the invocation's run. Because holds are
 conservative (a candidate request reserves its byte bound plus 48,000 output tokens, about $0.6-0.9),
 the invocation table warns, for an overridden limit, when a single reservation exceeds it or when it
 leaves less than one largest reservation above the central estimate.
 
-**One confirmation** (paid): the script refuses a judge directory the run would refuse (a v2.x one
-included) before anything else, then prints the run, models, route and settings, the estimate
-(`cost_estimate`), the run limit and the invocation table (per stage: requests to send, cached,
-central, high, stress; the prompt-cache saving; the totals; how many selections and verifications
-were cached or assumed; the largest single reservations; the analysis scope's remaining allowance
-and cap), and asks the operator to type the analysis scope's `remaining_usd` exactly as shown.
-Only then are the clients built and the host key loaded. The mock prints the same table.
+**No confirmation** (paid, October 20, 2026): the script refuses a judge directory the run would
+refuse (a v2.x one included) before anything else, then prints the run, models, route and settings
+and the run budget, builds the clients and loads the host key; nothing prompts. The optional
+`--dry-run-estimate` prints the invocation table (per stage: requests to send, cached, central, high,
+stress; the prompt-cache saving; the totals; how many selections and verifications were cached or
+assumed; the largest single reservations) against the run budget.
 
 **Records.** `state.json`: every judging invocation's `run_limit` (`client.RunLimit.record()`:
-schema `gdm-judge-run-limit/1`, `limit_usd`, `source` `estimate` or `override`, `basis`, `factor`,
+schema `gdm-judge-run-limit/1`, `limit_usd`, `source` (`override`, `run_config` or `default`; `estimate` in earlier runs), `ledger_run_id`, `basis`, `factor`,
 `floor_usd`, the compact `estimate` (`estimate.limit_record`: central, high and stress totals, per
 stage and column, the prompt-cache saving, the request counts and bases), `committed_usd`,
 `peak_committed_usd`, `settled_usd`, `uncertain_usd`, `requests`, `denied`, `first_denial` and
@@ -473,8 +476,8 @@ has a complete cached prefilter stage). Per scenario: candidates (and how many a
 passages), the candidates' full item tokens and the tokens actually sent, candidate requests,
 sample windows, expected verifier requests (`vreq`), the central dollars per stage (Haiku priced
 only for windows without a matching cached unit), the prompt-cache saving, and the central, high
-and stress totals with that saving, against the ledger's remaining analysis allowance when a ledger
-is readable (else the cap). The run's 60 assumed findings are scaled to the agents estimated
+and stress totals with that saving, against the judging run's budget (the `--run-limit`, else $50).
+The run's 60 assumed findings are scaled to the agents estimated
 (`--agents`: their share of the run's agents), as in the invocation table.
 
 ### Versions and the v2.x refusal
@@ -594,12 +597,13 @@ cleanly: no new request starts, in-flight requests finish and are saved, the sto
 `state.json` and the run exits with code 3. Every completed request is written to its unit file
 immediately, so a resumed run never pays for a completed call twice.
 
-The paid run accepts the authoritative ledger only with every audited analysis raise applied
-(`research_swarm.budget.judge_analysis_problems`: $5 -> $40 -> $50 -> $100 -> $110 -> $200, each
-bound to its docs/plan.md section; the fifth, to $200, to "Behavior judge iteration specified,
-October 19, 2026", carries the unreconciled holds over, still counted, and is applied on the VM
-ledger at the next paid run after a backup). The remaining allowance is what that ledger reports;
-the confirmation prints it.
+Spending (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)"): every judging
+invocation is one run with its own budget, its run limit (`--run-limit`, else the run config's
+`behavior_judge_max_usd` with `--run-config`, else $50). The three clients register the same ledger
+run (`RunLimit.run_id`, scope `analysis`) with that budget, so the ledger enforces it as well. There is
+no cumulative analysis cap and no raise; the ledger is created if missing, and holds or violations of
+earlier runs never block a new judging run. An estimate violation is recorded, needs no
+acknowledgement and scales the rest of the run's reservations up by the observed ratio.
 
 ## Running
 
@@ -616,9 +620,9 @@ PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py \
 PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py \
     --run-dir runs/<run-id> --mock --output-dir <scratch>/<run-id>/analysis/judge [--agents agent-003,agent-005]
 
-# 3. Paid run, on the VM only (below).
+# 3. Paid run (the default mode), on the VM only (below). No approval flag, prompt or terminal.
 PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py \
-    --run-dir runs/<run-id> --i-have-user-approval [--credentials-root <main checkout>] [--run-limit USD]
+    --run-dir runs/<run-id> [--credentials-root <main checkout>] [--run-limit USD | --run-config CONFIG]
 ```
 
 **The mock model** (`pipeline.MockModel`) reads the rendered prompts like a model would and
@@ -654,9 +658,8 @@ fixture that uses every v3 feature: a finding not checked by the early stop, exp
 speculative-only agents, a candidate decided on its keyword passages, a split refused batch and a
 forced window, and the run limit recorded and compared with the spend.
 
-**Useful options:** `--agents`; `--stage`; `--run-limit USD` (default 2 x the central estimate,
-raised to the central estimate plus 1.25 x the largest single reservation when that is more, at
-least $1); `--judge-mode {candidates|package}` (candidates), `--candidate-batch-items` (10),
+**Useful options:** `--agents`; `--stage`; `--run-limit USD` (the judging run's budget; default the
+`--run-config`'s `behavior_judge_max_usd`, else $50); `--run-config CONFIG`; `--judge-mode {candidates|package}` (candidates), `--candidate-batch-items` (10),
 `--candidate-batch-tokens` (35,000), `--candidate-context-chars` (800), `--passage-min-chars`
 (4,000), `--passage-chars` (500), `--act-passage-min-chars` (12,000); `--verifier-window-chars`
 (4,000), `--verifier-edge-chars` (1,000), `--verifier-full-chars` (10,000),
@@ -691,22 +694,19 @@ estimate remain preconditions.
    `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests`.
 3. **Use a new judge directory**: v3 refuses any v2.x directory (for example cache100's published
    `analysis/judge/`); pass `--output-dir` for another location if `RUN/analysis/judge` is taken.
-4. **Refresh the route pricing**: `PYTHONPATH=src .venv/bin/python scripts/freeze_judge_route.py`
-   (public catalog fetch only; the record must be at most 72 hours old).
-5. **Back up the ledger, then apply the pending audited analysis raise** once (the fifth, $110 ->
-   $200: `.venv/bin/python scripts/preflight.py --raise-ledger-cap analysis --approval-note "<plan
-   section and approval text>" --i-have-user-approval`). Until every raise is applied,
-   `budget.judge_analysis_problems` makes the paid run refuse before any request.
-6. **Screen first, then estimate exactly**: run with `--stage prefilter` (Haiku only; its own run
-   limit is 2 x the prefilter estimate, about $4 central for cache100's 824 windows), then
-   `--dry-run-estimate --output-dir <judge dir>`: the invocation table now plans the candidates
-   from Haiku's real selections. Continue only if it fits the remaining allowance; the selection
-   guard also holds any agent above 20% before its judge call.
-7. **Run** `scripts/run_transcript_judge.py --run-dir runs/<run-id> --i-have-user-approval [--output-dir ...]`
-   inside tmux. The script prints the estimate, the run limit and the analysis scope's remaining
-   allowance, requires the operator to type `remaining_usd` exactly as shown, and only then loads
-   the host key in memory and runs the unpaid provider-limit check. A `run_limit` stop (exit code 3)
-   is resumed by running the same command again (a new estimate and limit for what is left).
+4. **Route pricing** refreshes automatically: a paid run whose newest judge route pricing record is
+   missing or older than 72 hours runs the unpaid `scripts/freeze_judge_route.py` first (public
+   catalog fetch only); a record that no longer validates for the pinned route is refused.
+5. **Back up the ledger** (it records every request; nothing in it needs raising).
+6. **Optionally screen first**: run with `--stage prefilter` (Haiku only), then
+   `--dry-run-estimate --output-dir <judge dir>`: the invocation table plans the candidates from
+   Haiku's real selections. The estimate is never required; the selection guard holds any agent above
+   20% before its judge call.
+7. **Run** `scripts/run_transcript_judge.py --run-dir runs/<run-id> [--run-limit USD] [--output-dir ...]`
+   inside tmux. The script prints the run budget and the ledger run id, loads the host key in memory
+   and records the key's provider-side limit (informational); nothing prompts. A `run_limit` stop
+   (exit code 3) is resumed by running the same command again (a new run with its own budget for what
+   is left).
 8. **Evaluate closed submissions (unpaid)**:
    `PYTHONPATH=src .venv/bin/python scripts/evaluate_run.py --run-dir runs/<run-id> --include-closed-from --dry-run`,
    then without `--dry-run`; apply the verdicts with `--rescore-cached`; rerun
@@ -716,33 +716,23 @@ estimate remain preconditions.
 10. **Publication**: `scripts/build_experiment_index.py` and the HF library update
     (docs/experiment-library.md). The evidence browser is for optional inspection only.
 
-### Automatic judge after the owner's runs (standing approval, October 20, 2026)
+### Automatic judge after a run (October 20, 2026)
 
-docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20, 2026)": a run
-config with `auto_behavior_judge: true`, a nonempty `behavior_judge_approval` note and
-`behavior_judge_max_usd` (at most 50), on the baseline ledger or the owner's `gemini` budget track
-(never the collaborator's `ablation` track; `research_swarm.auto_judge`, launch gate
-`behavior_judge`), makes `scripts/supervise_run.py` judge the run after its unpaid follow-ups
-(reconcile dry run, evaluate, timeline):
-
-1. if the newest judge route pricing record is older than 72 h (or missing), it runs the unpaid
-   `scripts/freeze_judge_route.py` (`judge-route-freeze.log`); still stale: skipped, reason recorded;
-2. it runs `scripts/run_transcript_judge.py --run-dir RUN --standing-approval-from-config CONFIG
-   --ledger state/budget.sqlite --credentials-root <checkout>` (`behavior-judge.log`/`.exit`).
-
-`--standing-approval-from-config` replaces only `--i-have-user-approval`, the interactive terminal
-and the typed confirmation. The run limit is the smallest of the automatic limit (or
-`--run-limit`), the config's cap and the analysis scope's remaining allowance (record source
-`standing_approval`, with the note, config path, cap, basis and unclamped limit); a central
-estimate above it is refused before any request (exit 4). Every other refusal stays: stale or
-missing pricing record, missing audited raises, a judge directory with other binding settings,
-label checks, held agents. The approval is appended to `RUN/analysis/judge/standing-approvals.json`
-and recorded with the run limit in `state.json`. The supervisor writes `behavior-judge.json`
-(outcome `complete`, `errors_or_held_agents`, `stopped`, `refused` with the REFUSED line, `skipped`
-with its reason, or `supervisor_error`) and adds the judge logs and the pricing record to
-`completed-phase.tgz`; the judge directory is inside `completed-run.tgz`. A judge outcome never
-changes the worker exit or stops the packaging. The run report (`scripts/build_results.py`) still
-excludes judge content.
+docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20, 2026)" and "One
+per-run budget, no manual approvals (October 20, 2026)": a run config with `auto_behavior_judge: true`
+(any track; `behavior_judge_max_usd`, any positive amount, is the judging run's budget, $50 when
+absent; no approval note; `research_swarm.auto_judge`, launch gate `behavior_judge`) makes
+`scripts/supervise_run.py` judge the run after its follow-ups (reconcile, evaluate, timeline) with
+`scripts/run_transcript_judge.py --run-dir RUN --run-config CONFIG --ledger state/budget.sqlite
+--credentials-root <checkout>` (`behavior-judge.log`/`.exit`). The judge refreshes its own pricing
+record when needed. The run's budget and config path are recorded with the run limit in `state.json`
+(source `run_config`) and appended to `RUN/analysis/judge/run-budgets.json`. Research-integrity
+refusals stay: a pricing record that does not validate, a judge directory with other binding
+settings, label checks, held agents. The supervisor writes `behavior-judge.json` (outcome `complete`,
+`errors_or_held_agents`, `stopped`, `refused` with the REFUSED line, `skipped` with its reason, or
+`supervisor_error`) and adds the judge logs to `completed-phase.tgz`; the judge directory is inside
+`completed-run.tgz`. A judge outcome never changes the worker exit or stops the packaging. The run
+report (`scripts/build_results.py`) still excludes judge content.
 
 ## Costs
 

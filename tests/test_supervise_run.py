@@ -18,11 +18,16 @@ spec.loader.exec_module(supervise)
 
 STUB_PILOT = """import json, os, sys
 config = json.load(open(sys.argv[sys.argv.index('--config') + 1]))
-assert '--launch-paid-pilot' in sys.argv and '--yes' in sys.argv
+assert '--launch-paid-pilot' in sys.argv and '--yes' not in sys.argv  # no confirmation flag
 assert 'OPENROUTER_API_KEY' not in os.environ, 'provider key leaked to the child'
 run = config['run_dir']
 os.makedirs(run, exist_ok=True)
 open(os.path.join(run, 'settings.json'), 'w').write('{}')
+sys.path.insert(0, os.path.join(os.environ['GDM_TEST_REPO'], 'src'))
+from research_swarm.budget import BudgetLedger
+ledger = BudgetLedger(os.path.join('state', 'budget.sqlite'))
+ledger.start_run(os.path.basename(run), 'pilot', config.get('run_budget_usd', 100))
+ledger.settle(ledger.reserve('pilot', 'agent-001', '0.5'), '0.25')
 open(os.path.join(run, 'runtime.jsonl'), 'w').write(json.dumps({'kind': 'inference_finished', 'payload': {
     'provider_usage': {'prompt_tokens': 100, 'prompt_tokens_details': {'cached_tokens': 90}}}}) + '\\n')
 """
@@ -43,11 +48,15 @@ class SuperviseRunTests(unittest.TestCase):
         self.phase = self.tmp / "runs" / "phase-b" / "run-x"
         self.phase.mkdir(parents=True)
         self.config = self.phase / "launch-config.json"
-        self.config.write_text(json.dumps({"run_dir": "runs/run-x", "paid_launch_enabled": True}))
+        self.config.write_text(json.dumps({"run_dir": "runs/run-x", "run_budget_usd": "40"}))
         os.environ["OPENROUTER_API_KEY"] = "test-not-a-real-key"
+        os.environ["GDM_TEST_REPO"] = str(ROOT)
+        supervise.ENV_KEYS = (*supervise.ENV_KEYS, "GDM_TEST_REPO")
 
     def tearDown(self):
         os.environ.pop("OPENROUTER_API_KEY", None)
+        os.environ.pop("GDM_TEST_REPO", None)
+        supervise.ENV_KEYS = tuple(k for k in supervise.ENV_KEYS if k != "GDM_TEST_REPO")
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
@@ -63,33 +72,49 @@ class SuperviseRunTests(unittest.TestCase):
             self.assertTrue((self.phase / name).exists(), name)
         self.assertEqual([(self.phase / f"{n}.exit").read_text().strip() for n in ("pilot", *supervise.FOLLOW_UPS)],
                          ["0"] * 5)
-        self.assertFalse(json.loads(self.config.read_text())["paid_launch_enabled"])  # never relaunched
+        self.assertEqual(json.loads(self.config.read_text()), {"run_dir": "runs/run-x", "run_budget_usd": "40"})
         checkpoint = json.loads((self.phase / "live-checkpoint.json").read_text())
-        self.assertEqual((checkpoint["cache"]["fraction"], checkpoint["new_settled_usd"]), (0.9, "0"))
+        self.assertEqual((checkpoint["cache"]["fraction"], checkpoint["new_settled_usd"]), (0.9, "0.25"))
+        run = checkpoint["run_budget"]  # this run's own budget, read from the ledger
+        self.assertEqual((run["run_id"], run["budget_usd"], run["committed_usd"], run["remaining_usd"]),
+                         ("run-x", "40", "0.25", "39.75"))
+        reconcile = (self.tmp / "scripts" / "reconcile_ledger.py.ran").read_text()
+        self.assertNotIn("--dry-run", reconcile)  # settles uncertain holds automatically
+        self.assertIn("--ledger " + str(self.tmp.resolve() / "state" / "budget.sqlite"), reconcile)
         self.assertIn("--dry-run", (self.tmp / "scripts" / "evaluate_run.py.ran").read_text())
         self.assertEqual(json.loads((self.phase / "supervisor-status.json").read_text())["stage"],
                          "done_vm_left_running")
-        with self.assertRaises(SystemExit):  # the disabled config refuses a relaunch ...
-            supervise.Supervisor(self.args("--no-shutdown"))
-        self.config.write_text(json.dumps({"run_dir": "runs/run-x", "paid_launch_enabled": True}))
-        with self.assertRaises(FileExistsError):  # ... and so does the surviving marker, even if re-enabled
+        with self.assertRaises(FileExistsError):  # the surviving marker: a phase never launches twice
             supervise.Supervisor(self.args("--no-shutdown")).main()
 
-    def test_refuses_config_without_run_dir_or_disabled_launch(self):
-        self.config.write_text(json.dumps({"paid_launch_enabled": True}))
-        with self.assertRaises(SystemExit):
-            supervise.Supervisor(self.args())
-        self.config.write_text(json.dumps({"run_dir": "runs/run-x", "paid_launch_enabled": False}))
+    def test_refuses_config_without_run_dir(self):
+        self.config.write_text(json.dumps({"run_budget_usd": "40"}))
         with self.assertRaises(SystemExit):
             supervise.Supervisor(self.args())
         self.assertFalse((self.phase / "supervisor.started").exists())
+        # No attestation is needed: a config without paid_launch_enabled (or with it false) launches.
+        self.config.write_text(json.dumps({"run_dir": "runs/run-x", "paid_launch_enabled": False}))
+        supervise.Supervisor(self.args())
 
     def test_failed_run_skips_follow_ups(self):
         (self.tmp / "scripts" / "run_pilot.py").write_text("raise SystemExit(2)\n")
         self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 2)
         self.assertFalse((self.phase / "evaluate.exit").exists())
         self.assertTrue((self.phase / "budget-final.sqlite").exists())
-        self.assertFalse(json.loads(self.config.read_text())["paid_launch_enabled"])
+
+    def test_a_failed_reconciliation_never_stops_the_other_follow_ups(self):
+        (self.tmp / "scripts" / "reconcile_ledger.py").write_text("raise SystemExit(1)\n")
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        self.assertEqual((self.phase / "reconcile.exit").read_text().strip(), "1")
+        self.assertEqual((self.phase / "timeline.exit").read_text().strip(), "0")
+
+    def test_missing_ledger_is_not_an_error(self):
+        (self.tmp / "state" / "budget.sqlite").unlink()
+        (self.tmp / "scripts" / "run_pilot.py").write_text("raise SystemExit(2)\n")  # blocked before any request
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 2)
+        self.assertFalse((self.phase / "budget-final.sqlite").exists())
+        self.assertEqual(json.loads((self.phase / "supervisor-status.json").read_text())["stage"],
+                         "done_vm_left_running")
 
 
 
@@ -103,46 +128,29 @@ os.makedirs(os.path.join(run, 'analysis', 'judge'), exist_ok=True)
 open(os.path.join(run, 'analysis', 'judge', 'report.json'), 'w').write('{}')
 mode = open(os.path.join(root, 'judge-mode')).read().strip() if os.path.exists(os.path.join(root, 'judge-mode')) else 'ok'
 if mode == 'refuse':
-    print('REFUSED: standing approval: the run limit $1 cannot cover the central estimate $9; nothing was sent',
+    print('REFUSED: judge route pricing record x: no longer validates; nothing was sent',
           file=sys.stderr)
     raise SystemExit(4)
 if mode == 'crash':
     raise RuntimeError('judge crashed')
 """
-STUB_FREEZE = STUB_ORDER + """import datetime, json
-if not os.path.exists(os.path.join(root, 'freeze-fails')):
-    os.makedirs(os.path.join(root, 'data', 'validation'), exist_ok=True)
-    stamp = datetime.datetime.now(datetime.timezone.utc)
-    open(os.path.join(root, 'data', 'validation', 'judge-route-pricing-' + stamp.strftime('%Y%m%dT%H%M%SZ') + '.json'),
-         'w').write(json.dumps({'created_at': stamp.isoformat()}))
-else:
-    raise SystemExit(1)
-"""
-APPROVAL = {"auto_behavior_judge": True, "behavior_judge_approval": "owner standing approval (test)",
-            "behavior_judge_max_usd": 50}
+JUDGE_CONFIG = {"auto_behavior_judge": True, "behavior_judge_max_usd": 50}
 
 
 class AutoBehaviorJudgeTests(SuperviseRunTests):
     """The automatic post-run behavior judge (docs/plan.md, "Automatic post-run behavior judge for the
-    owner's runs (October 20, 2026)") with a fake judge and a fake route freeze: no paid call."""
+    owner's runs (October 20, 2026)" and "One per-run budget, no manual approvals (October 20, 2026)")
+    with a fake judge: no paid call."""
 
     def setUp(self):
         super().setUp()
         for name in ("scripts/reconcile_ledger.py", "scripts/evaluate_run.py", "research/analysis/timeline.py"):
             (self.tmp / name).write_text(STUB_ORDER)
         (self.tmp / "scripts" / "run_transcript_judge.py").write_text(STUB_JUDGE)
-        (self.tmp / "scripts" / "freeze_judge_route.py").write_text(STUB_FREEZE)
         self.write_config()
 
     def write_config(self, **changes):
-        self.config.write_text(json.dumps(dict(APPROVAL, run_dir="runs/run-x", paid_launch_enabled=True, **changes)))
-
-    def pricing(self, hours_old):
-        import datetime
-        folder = self.tmp / "data" / "validation"
-        folder.mkdir(parents=True, exist_ok=True)
-        created = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours_old)
-        (folder / "judge-route-pricing-20261001T000000Z.json").write_text(json.dumps({"created_at": created.isoformat()}))
+        self.config.write_text(json.dumps(dict(JUDGE_CONFIG, run_dir="runs/run-x", **changes)))
 
     def order(self):
         path = self.tmp / "order.log"
@@ -160,78 +168,70 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         return phase, run
 
     def test_judge_runs_after_the_follow_ups_and_is_packaged(self):
-        self.pricing(1)
         self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
         self.assertEqual(self.order(), ["reconcile_ledger.py", "evaluate_run.py", "evaluate_run.py", "timeline.py",
-                                        "run_transcript_judge.py"])  # fresh record: no freeze
+                                        "run_transcript_judge.py"])  # the judge refreshes its own pricing record
         judge_line = (self.tmp / "order.log").read_text().splitlines()[-1]
         root = self.tmp.resolve()
-        for text in ("--standing-approval-from-config " + str(self.config.resolve()),
+        for text in ("--run-config " + str(self.config.resolve()),
                      "--ledger " + str(root / "state" / "budget.sqlite"), "--credentials-root " + str(root),
                      "--run-dir " + str(root / "runs" / "run-x")):
             self.assertIn(text, judge_line)
         self.assertNotIn("--i-have-user-approval", judge_line)
+        self.assertNotIn("standing-approval", judge_line)
         record = self.judge_record()
         self.assertEqual((record["outcome"], record["exit"]), ("complete", 0))
         self.assertEqual((self.phase / "behavior-judge.exit").read_text().strip(), "0")
         phase, run = self.packaged()
         self.assertTrue({"behavior-judge.json", "behavior-judge.log", "behavior-judge.exit"} <= phase)
-        self.assertIn("judge-route-pricing/judge-route-pricing-20261001T000000Z.json", phase)
         self.assertIn("runs/run-x/analysis/judge/report.json", run)
         status = json.loads((self.phase / "supervisor-status.json").read_text())
         self.assertEqual(status["stage"], "done_vm_left_running")
         self.assertEqual(json.loads((self.phase / "worker.exit").read_text()), 0)
 
-    def test_stale_pricing_is_refreshed_first(self):
-        self.pricing(73)
-        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
-        self.assertEqual(self.order()[-2:], ["freeze_judge_route.py", "run_transcript_judge.py"])
-        record = self.judge_record()
-        self.assertEqual((record["freeze_exit"], record["outcome"]), (0, "complete"))
-        self.assertLess(record["pricing_age_hours"], 1)
-        self.assertIn("judge-route-freeze.log", self.packaged()[0])
-
-    def test_still_stale_pricing_skips_the_judge(self):
-        (self.tmp / "freeze-fails").write_text("")
-        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)  # no record at all
-        self.assertEqual(self.order()[-1], "freeze_judge_route.py")
-        record = self.judge_record()
-        self.assertEqual(record["outcome"], "skipped")
-        self.assertIn("no judge route pricing record at most 72 h old (freeze_judge_route.py exit 1)", record["reason"])
-        self.assertFalse((self.phase / "behavior-judge.exit").exists())
-        self.assertTrue((self.phase / "completed-checksums.json").exists())
+    def test_any_track_and_any_positive_budget_is_judged_without_an_approval_note(self):
+        for n, changes in enumerate(({"budget_track": "ablation"}, {"behavior_judge_max_usd": 120},
+                                     {"behavior_judge_max_usd": None})):
+            self.phase = self.tmp / "runs" / "phase-b" / f"run-{n}"
+            self.phase.mkdir(parents=True)
+            self.config = self.phase / "launch-config.json"
+            self.write_config(**changes)
+            self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+            self.assertEqual(self.judge_record()["outcome"], "complete", changes)
 
     def test_judge_refusal_or_failure_never_fails_the_run(self):
-        self.pricing(1)
         (self.tmp / "judge-mode").write_text("refuse")
         self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
         record = self.judge_record()
         self.assertEqual((record["outcome"], record["exit"]), ("refused", 4))
-        self.assertIn("cannot cover the central estimate", record["reason"])
+        self.assertIn("REFUSED:", record["reason"])
         self.assertTrue((self.phase / "completed-checksums.json").exists())
         self.assertTrue((self.phase / "budget-final.sqlite").exists())
         status = json.loads((self.phase / "supervisor-status.json").read_text())
         self.assertEqual(status["stage"], "done_vm_left_running")
 
     def test_judge_crash_never_fails_the_run(self):
-        self.pricing(1)
         (self.tmp / "judge-mode").write_text("crash")
         self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
         self.assertEqual((self.judge_record()["outcome"], self.judge_record()["exit"]), ("failed", 1))
         self.assertTrue((self.phase / "completed-run.tgz").exists())
 
     def test_supervisor_error_in_the_judge_step_is_recorded(self):
-        self.pricing(1)
-        with mock.patch.object(supervise.Supervisor, "judge_fresh", side_effect=OSError("disk")):
+        real_step = supervise.Supervisor.step
+
+        def step(supervisor, name, arguments):
+            if name == "behavior-judge":
+                raise OSError("disk")
+            return real_step(supervisor, name, arguments)
+        with mock.patch.object(supervise.Supervisor, "step", step):
             self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
         record = self.judge_record()
         self.assertEqual((record["outcome"], record["error_type"]), ("supervisor_error", "OSError"))
         self.assertTrue((self.phase / "completed-checksums.json").exists())
 
     def test_skips(self):
-        self.pricing(1)
-        cases = (({"budget_track": "ablation"}, (), "invalid standing approval"),
-                 ({"behavior_judge_max_usd": 60}, (), "invalid standing approval"),
+        cases = (({"behavior_judge_max_usd": "abc"}, (), "invalid judge settings"),
+                 ({"behavior_judge_max_usd": 0}, (), "invalid judge settings"),
                  ({}, ("--no-postrun",), "--no-postrun"))
         for n, (changes, extra, reason) in enumerate(cases):
             self.phase = self.tmp / "runs" / "phase-b" / f"run-{n}"
@@ -245,7 +245,6 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         self.assertNotIn("run_transcript_judge.py", self.order())
 
     def test_failed_follow_up_skips_the_judge(self):
-        self.pricing(1)
         (self.tmp / "research" / "analysis" / "timeline.py").write_text("raise SystemExit(7)\n")
         self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 7)
         record = self.judge_record()
@@ -254,15 +253,17 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         self.assertNotIn("run_transcript_judge.py", self.order())
 
     def test_no_judge_without_the_config_keys(self):
-        self.config.write_text(json.dumps({"run_dir": "runs/run-x", "paid_launch_enabled": True}))
+        self.config.write_text(json.dumps({"run_dir": "runs/run-x"}))
         self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
         self.assertFalse((self.phase / "behavior-judge.json").exists())
         self.assertNotIn("run_transcript_judge.py", self.order())
 
     # The inherited runs use the base config (no auto judge keys) and stub follow-ups.
     test_full_cycle_without_shutdown = None
-    test_refuses_config_without_run_dir_or_disabled_launch = None
+    test_refuses_config_without_run_dir = None
     test_failed_run_skips_follow_ups = None
+    test_a_failed_reconciliation_never_stops_the_other_follow_ups = None
+    test_missing_ledger_is_not_an_error = None
 
 
 if __name__ == "__main__":

@@ -34,7 +34,10 @@ Spending. With --ledger (a consistent copy of the budget ledger SQLite, opened i
 read-only) "budget.pilot" counts exactly the ledger calls whose request IDs this run admitted
 in runtime.jsonl and "cumulative_budget" summarizes the whole ledger. Without it
 "budget.pilot" comes from runtime.jsonl (requests settled only after the run stay counted as
-held, with a warning) and "cumulative_budget" is RUN/budget-final.json.
+held, with a warning) and "cumulative_budget" is RUN/budget-final.json. A run with its own
+budget (docs/plan.md "One per-run budget, no manual approvals (October 20, 2026)") reports that
+budget as the pilot row's cap (from the ledger's runs table, else RUN/run-budget.json); the
+cumulative rows show an older ledger's legacy caps only, "not recorded" otherwise.
 """
 import argparse
 import collections
@@ -153,6 +156,23 @@ def ledger_scope(db, scope, ids=None):
     return summary, sum(r[3] or 0 for r in settled) + sum(r[4] for r in held)
 
 
+def recorded_run_budget(run, db=None):
+    """This run's own budget in USD (Decimal) from the ledger's runs table, else RUN/run-budget.json,
+    else None (runs before per-run budgets)."""
+    if db is not None:
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'runs' in tables:
+            row = db.execute('SELECT budget FROM runs WHERE id=?', (run.name,)).fetchone()
+            if row is not None:
+                return Decimal(row[0]) * NANO
+    path = run / 'run-budget.json'
+    if path.is_file():
+        value = (json.loads(regular(path).read_text()) or {}).get('budget_usd')
+        if value is not None:
+            return Decimal(str(value))
+    return None
+
+
 def budgets(run, runtime, ledger):
     """Run-only pilot spending and the cumulative ledger, each labelled with its source."""
     final = json.loads(regular(run / 'budget-final.json').read_text())
@@ -160,14 +180,19 @@ def budgets(run, runtime, ledger):
         db = sqlite3.connect(f'file:{regular(ledger).resolve()}?mode=ro&immutable=1', uri=True)
         try:
             caps = dict(db.execute('SELECT name,cap FROM scopes'))
-            pilot, _ = ledger_scope(db, 'pilot', set(runtime['admitted']))
-            pilot['cap_usd'] = usd(caps.get('pilot', 0))
+            budget = recorded_run_budget(run, db)
+            pilot, committed = ledger_scope(db, 'pilot', set(runtime['admitted']))
+            if budget is not None:
+                pilot['cap_usd'] = dec(budget)
+                pilot['remaining_usd'] = dec(max(Decimal(0), budget - Decimal(committed) * NANO))
+            else:
+                pilot['cap_usd'] = usd(caps.get('pilot', 0))
             pilot['source'] = 'ledger calls with request IDs admitted in runtime.jsonl'
             cumulative = {}
             for scope in SCOPES:
                 summary, committed = ledger_scope(db, scope)
-                summary['cap_usd'] = usd(caps.get(scope, 0))
-                summary['remaining_usd'] = usd(caps.get(scope, 0) - committed)
+                summary['cap_usd'] = usd(caps[scope]) if scope in caps else None
+                summary['remaining_usd'] = usd(caps[scope] - committed) if scope in caps else None
                 summary['source'] = 'ledger'
                 cumulative[scope] = summary
         finally:
@@ -196,6 +221,10 @@ def budgets(run, runtime, ledger):
              'provider_reported_cost_usd': dec(provider), 'manual_reconciliation_usd': '0',
              'manual_reconciliation_requests': 0, 'cap_usd': (final.get('pilot') or {}).get('cap_usd'),
              'source': 'runtime.jsonl'}
+    budget = recorded_run_budget(run)
+    if budget is not None:
+        pilot['cap_usd'] = dec(budget)
+        pilot['remaining_usd'] = dec(max(Decimal(0), budget - settled - held))
     cumulative = {}
     for scope in SCOPES:
         s = final.get(scope) or {}
@@ -205,7 +234,7 @@ def budgets(run, runtime, ledger):
                              'unbilled_error_requests': s.get('unbilled_error_requests'),
                              'provider_reported_cost_usd': None, 'manual_reconciliation_usd': None,
                              'manual_reconciliation_requests': s.get('manual_reconciliations'),
-                             'cap_usd': s.get('cap_usd'), 'remaining_usd': s.get('remaining_usd'),
+                             'cap_usd': s.get('cap_usd', s.get('legacy_cap_usd')), 'remaining_usd': s.get('remaining_usd'),
                              'source': 'budget-final.json'}
     return pilot, cumulative
 

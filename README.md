@@ -125,9 +125,9 @@ PYTHONPATH=src .venv/bin/python research/analysis/timeline.py --run-dir RUN
 ```
 
 * Preflight never reads a credential or calls a provider; it exits 0 only when every gate
-  passes. It is also the place to see prior costs and remaining allowances.
-* Phase B validation, the approval-gated paid steps and the launch follow the ordered
-  runbook in [docs/validation.md](docs/validation.md). `scripts/run_pilot.py` without
+  passes. It is also the place to see the run budget the config sets and the ledger's history.
+* Phase B validation, the paid steps and the launch follow the ordered runbook in
+  [docs/validation.md](docs/validation.md). `scripts/run_pilot.py` without
   `--launch-paid-pilot` only runs preflight.
 * `evaluate_run.py` is the post-run independent evaluation (serial, resumable, refuses to
   run beside live containers). `timeline.py` merges the run's logs into one ordered,
@@ -141,10 +141,11 @@ PYTHONPATH=src .venv/bin/python research/analysis/timeline.py --run-dir RUN
 
 * Read [docs/plan.md](docs/plan.md) before implementing or running anything; keep
   proposals distinct from approvals.
-* No paid call without the user's explicit approval, a fresh route freeze and passing
-  gates. The pilot's $20, analysis's $5 and the compatibility check's $2 are separate
-  ledger scopes in `state/budget.sqlite`; spending is never reset and the ledger is never
-  deleted.
+* Every paid run has one spending control, its own budget specified before it starts
+  (`run_budget_usd`, default $100; the behavior judge's run limit, default $50), enforced on
+  every request (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)").
+  There are no cumulative caps, approval flags or typed confirmations. `state/budget.sqlite`
+  records every request of every run; it is never reset or deleted.
 * Do not read, print, copy, mount or commit credential values. Inspect only presence and
   permissions.
 * Never put exploit fixtures, reference solutions, researcher reports, rubrics, evaluator

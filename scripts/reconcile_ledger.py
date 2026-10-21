@@ -1,42 +1,42 @@
 #!/usr/bin/env python3
 """Reconcile uncertain ledger holds with OpenRouter's reported generation cost.
 
-Default (dry run): lists unresolved holds in the shared ledger with what the run
-directories' runtime.jsonl recorded for each (researcher-side logs): the generation
-id when one exists (payload ``provider_generation_id`` or ``generation_id``), and
-otherwise the details needed to find the charge by hand: agent, admission and end
-timestamps (UTC), the end event, HTTP status, reason and ``provider_request_id``
-(the HTTP request id of an exception-path hold, which is not a generation id).
-Explicit --map REQUEST_ID=GENERATION_ID entries add generation ids. Nothing is
-fetched, no credential is read and the ledger is not modified.
+Lists the unresolved holds in the shared ledger with what the run directories'
+runtime.jsonl recorded for each (researcher-side logs): the generation id when one exists
+(payload ``provider_generation_id`` or ``generation_id``), and otherwise the details needed
+to find the charge by hand: agent, admission and end timestamps (UTC), the end event, HTTP
+status, reason and ``provider_request_id`` (the HTTP request id of an exception-path hold,
+which is not a generation id). Explicit --map REQUEST_ID=GENERATION_ID entries add
+generation ids.
 
-With --i-have-user-approval (only after the user approves this check in chat): loads
-the host credential, fetches GET https://openrouter.ai/api/v1/generation?id=<id>
-(unpaid) for each uncertain hold that has a generation id, settles it through
-BudgetLedger.reconcile (audit row, basis provider_reported_cost) and writes an audit
-file <ledger dir>/reconciliations/reconcile-<UTC>.json. Holds without a generation
-id, or whose generation is not found, model-mismatched or lacks total_cost, stay
-unresolved. Nothing is ever released automatically.
+Then, by default, it settles them (owner decisions, docs/plan.md "One per-run budget, no
+manual approvals (October 20, 2026)": no approval flag): for each uncertain hold with a
+generation id it fetches GET https://openrouter.ai/api/v1/generation?id=<id> (unpaid; the
+host credential is loaded only when there is at least one such hold), settles it through
+BudgetLedger.reconcile (audit row, basis provider_reported_cost) and writes an audit file
+<ledger dir>/reconciliations/reconcile-<UTC>.json. Holds without a generation id, or whose
+generation is not found, model-mismatched or lacks total_cost, stay unresolved (explicit,
+still counted against their own run). Nothing is ever released without a billing record.
+``--dry-run`` only lists (nothing fetched, no credential read, ledger unchanged).
+scripts/supervise_run.py runs it after every run.
 
 Judge (analysis-scope) holds: the judge records each request's generation ids in its unit
 files, not in runtime.jsonl; pass them with --map, restrict the run with --scope analysis,
 name the judge models with --expect-model (repeatable; default the pilot model) and point
 --credentials-root at the checkout holding the host .env (default: this checkout).
 
-Manual settlement (an exception-path hold without a generation id, after the user
-has identified its charge, e.g. in the OpenRouter activity log by time and model,
-and approved the amount): ``--manual REQUEST_ID COST --note TEXT`` (repeatable
---manual, one note) with --i-have-user-approval settles each named hold at COST
-with basis ``manual_reconciliation`` and the note in its audit row. It never loads
-a credential or contacts the network; without the approval flag it only prints the
-planned settlements.
+Manual settlement (an exception-path hold without a generation id, once its charge is
+identified, e.g. in the OpenRouter activity log by time and model): ``--manual REQUEST_ID
+COST`` (repeatable; ``--note TEXT`` names the billing source and goes into each audit row)
+settles each named hold at COST with basis ``manual_reconciliation``. It never loads a
+credential or contacts the network.
 
-    .venv/bin/python scripts/reconcile_ledger.py --run-dir runs/pilot-...           # dry run
-    .venv/bin/python scripts/reconcile_ledger.py --run-dir runs/pilot-... --i-have-user-approval
+    .venv/bin/python scripts/reconcile_ledger.py --run-dir runs/pilot-...            # settle
+    .venv/bin/python scripts/reconcile_ledger.py --run-dir runs/pilot-... --dry-run  # list only
     .venv/bin/python scripts/reconcile_ledger.py --scope analysis --map REQUEST_ID=gen-... \\
-        --expect-model anthropic/claude-opus-5.5 --credentials-root ~/gdm-math-swarm --i-have-user-approval
+        --expect-model anthropic/claude-opus-5.5 --credentials-root ~/gdm-math-swarm
     .venv/bin/python scripts/reconcile_ledger.py --manual REQUEST_ID 0.0123 \\
-        --note "OpenRouter activity 2026-10-20 14:03Z, deepseek route; user approved in chat" --i-have-user-approval
+        --note "OpenRouter activity 2026-10-20 14:03Z, deepseek route"
 """
 from __future__ import annotations
 import argparse
@@ -114,10 +114,10 @@ def describe_holds(requests, details, generation_ids):
         entry = {**item, **{k: v for k, v in details.get(item["request_id"], {}).items() if k != "generation_id"},
                  "generation_id": generation_ids.get(item["request_id"])}
         if entry["generation_id"]:
-            entry["next_step"] = "unpaid generation lookup (--i-have-user-approval)"
+            entry["next_step"] = "unpaid generation lookup (default mode)"
         else:
             entry["next_step"] = ("no generation id: find the charge by time/model (and provider_request_id, if any), "
-                                  "then --manual REQUEST_ID COST --note TEXT --i-have-user-approval after user approval")
+                                  "then --manual REQUEST_ID COST --note TEXT")
         listing.append(entry)
     return listing
 
@@ -204,7 +204,7 @@ def settle_manual(ledger, planned, note, *, allow_reserved=False):
     for item in planned:
         try:
             result = ledger.reconcile(item["request_id"], item["manual_cost_usd"], MANUAL_BASIS,
-                                      note=f"manual reconciliation, user-approved (scripts/reconcile_ledger.py): {note}",
+                                      note=f"manual reconciliation (scripts/reconcile_ledger.py): {note}",
                                       allow_reserved=allow_reserved)
         except ValueError as ex:  # e.g. resolved concurrently since it was listed; left as it is
             entries.append({**item, "outcome": f"refused: {ex}", "new_state": None})
@@ -235,29 +235,27 @@ def parse_map(values):
     return mapping
 
 
-def main(argv=None):
+def main(argv=None, fetch=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER_PATH(ROOT))
     parser.add_argument("--scope", default=None, help="limit to one scope (default: all)")
     parser.add_argument("--run-dir", type=Path, action="append", default=[], help="run dir(s) with runtime.jsonl")
     parser.add_argument("--map", action="append", help="explicit REQUEST_ID=GENERATION_ID (repeatable)")
     parser.add_argument("--manual", nargs=2, action="append", metavar=("REQUEST_ID", "COST"),
-                        help="settle this hold at COST USD by hand (basis manual_reconciliation; repeatable); "
-                             "needs --note and --i-have-user-approval")
-    parser.add_argument("--note", help="audit note for --manual: where the amount came from and the user's approval")
+                        help="settle this hold at COST USD by hand (basis manual_reconciliation; repeatable)")
+    parser.add_argument("--note", help="audit note for --manual: where the amount came from")
     parser.add_argument("--expect-model", action="append",
                         help=f"accepted generation model (repeatable; default {MODEL_ID}), e.g. the judge's "
                              "anthropic/claude-opus-5.5 and anthropic/claude-sonnet-5.5")
     parser.add_argument("--credentials-root", type=Path, default=ROOT,
                         help="checkout whose private .env holds the host key (default: this checkout)")
     parser.add_argument("--include-stale-reserved", action="store_true",
-                        help="also reconcile 'reserved' holds; only after their run has fully stopped")
-    parser.add_argument("--i-have-user-approval", action="store_true",
-                        help="the user approved this reconciliation in chat (generation lookups load the host "
-                             "credential for unpaid requests; --manual settles the named holds)")
+                        help="also reconcile 'reserved' holds; only after their run has fully stopped (a new run "
+                             "marks the holds of a process that is gone as uncertain automatically)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="only list the holds and the planned settlements: nothing fetched, no credential read, "
+                             "ledger unchanged")
     args = parser.parse_args(argv)
-    if args.manual and not str(args.note or "").strip():
-        parser.error("--manual requires --note TEXT naming the billing source and the user's approval")
     if args.note and not args.manual:
         parser.error("--note is only used with --manual")
     requests = list_requests(args.ledger, scope=args.scope)
@@ -271,26 +269,34 @@ def main(argv=None):
         if problems:
             print("Not applied: fix the problems above. Ledger unchanged.")
             return 2
-        if not args.i_have_user_approval:
-            print("Dry run: manual settlements not applied (needs --i-have-user-approval). Ledger unchanged.")
+        if args.dry_run:
+            print("Dry run: manual settlements not applied. Ledger unchanged.")
             return 0
+        note = str(args.note or "").strip() or "amount entered with --manual"
         ledger = BudgetLedger(args.ledger)  # the ledger exists: every planned hold was listed from it
-        entries = settle_manual(ledger, planned, args.note.strip(), allow_reserved=args.include_stale_reserved)
-        path = write_audit(args.ledger, ledger, entries, mode="manual", note=args.note.strip())
+        entries = settle_manual(ledger, planned, note, allow_reserved=args.include_stale_reserved)
+        path = write_audit(args.ledger, ledger, entries, mode="manual", note=note)
         print(json.dumps({"audit": str(path), "outcomes": {e["request_id"]: e["outcome"] for e in entries}}, indent=2))
         return 0 if all(e["outcome"] == "reconciled_manually" for e in entries) else 2
-    if not args.i_have_user_approval:
+    if args.dry_run:
         print("Dry run: nothing fetched, no credential read, ledger unchanged.")
         return 0
     if not Path(args.ledger).exists():
         print("No ledger: nothing to reconcile.")
         return 0
-    from research_swarm.secrets import load_openrouter_key
-    key = load_openrouter_key(args.credentials_root)
+    fetchable = [r for r in requests if generation_ids.get(r["request_id"])
+                 and (r["state"] == "uncertain" or args.include_stale_reserved)]
+    if not fetchable:
+        print("Nothing to look up: no unresolved hold has a generation id. No credential read, ledger unchanged.")
+        return 0
+    if fetch is None:
+        from research_swarm.secrets import load_openrouter_key
+        key = load_openrouter_key(args.credentials_root)
+        fetch = lambda gid: fetch_generation(gid, key)  # noqa: E731
     ledger = BudgetLedger(args.ledger)
     models = tuple(args.expect_model or (MODEL_ID,))
-    entries = reconcile_requests(ledger, requests, generation_ids, lambda gid: fetch_generation(gid, key),
-                                 model_id=models, allow_reserved=args.include_stale_reserved)
+    entries = reconcile_requests(ledger, requests, generation_ids, fetch, model_id=models,
+                                 allow_reserved=args.include_stale_reserved)
     path = write_audit(args.ledger, ledger, entries, mode="generation_lookup", expected_models=list(models),
                        scope=args.scope)
     print(json.dumps({"audit": str(path), "outcomes": {e["request_id"]: e["outcome"] for e in entries}}, indent=2))

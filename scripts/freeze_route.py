@@ -6,7 +6,10 @@ ProviderSettings that the run config describes (provider.settings_from_config:
 max time-dependent prices, extra price components, context, tools/reasoning
 support), archives the raw catalog under catalog-snapshots/<sha256>.json and writes
 an I6 evidence record data/validation/route-pricing-<UTC>.json. Launch gates
-re-validate that snapshot offline and require the record to be fresh (default 72 h).
+re-validate that snapshot offline. scripts/run_pilot.py and scripts/compat_check.py run
+this automatically (``refresh_if_needed``) when the newest record is missing, older than
+``route_pricing_max_age_hours`` (default 72) or frozen for other settings; a record whose
+catalog no longer validates against the config's reservation prices still blocks launch.
 
     .venv/bin/python scripts/freeze_route.py [--config configs/pilot.json]
 """
@@ -21,11 +24,11 @@ from research_swarm.provider import (route_cache_read_bound, route_price_bounds,
 
 URL = "https://openrouter.ai/api/v1/models/{model}/endpoints"
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--config", type=Path, default=ROOT / "configs" / "pilot.json")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "data" / "validation")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     settings = settings_from_config(json.loads(args.config.read_text()))
     if not settings.provider_route:
         parser.error("config provider_route is not set")
@@ -52,6 +55,25 @@ def main():
     path = write_evidence(args.output_dir, "route-pricing", record, now)
     print(json.dumps({"path": str(path), "valid": record["valid"], "reason": record.get("reason")}))
     return 0 if record["valid"] else 1
+
+def refresh_if_needed(config, config_path, output_dir=None, *, freeze=None, out=print):
+    """Run the unpaid freeze when the newest route-pricing record is missing, stale or frozen for
+    other settings (``launch_gates.route_pricing_refresh_reason``). Never raises: a failed refresh
+    is reported and the launch gates then judge the newest record. Returns the reason or None."""
+    from research_swarm.launch_gates import route_pricing_refresh_reason
+    output_dir = Path(output_dir) if output_dir else ROOT / "data" / "validation"
+    reason = route_pricing_refresh_reason(config, output_dir)
+    if reason is None:
+        return None
+    out(f"Refreshing the route-pricing freeze ({reason}; unpaid public catalog, no credential).")
+    try:
+        code = (freeze or main)(["--config", str(config_path), "--output-dir", str(output_dir)])
+        if code:
+            out("The refreshed freeze did not validate against the config's reservation prices (see its record).")
+    except Exception as error:  # e.g. no network: the gates judge the newest record
+        out(f"Route-pricing refresh failed ({type(error).__name__}: {error}); continuing with the newest record.")
+    return reason
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

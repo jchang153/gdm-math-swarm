@@ -2,10 +2,11 @@
 
 docs/plan.md "Transcript behavior judge specified, October 17, 2026" (with the
 "downsized model allocation" decision): OpenRouter with the main host key, provider
-pinned to Anthropic with no fallbacks, real-time requests, the shared ledger's
-``analysis`` scope enforcing the analysis allowance (``budget.JUDGE_ANALYSIS_CAP_USD``, $200
-after the five audited raises $5 -> $40 -> $50 -> $100 -> $110 -> $200; the pilot's
-unlimited-key exception extends to this analysis), a refused request retried once and then
+pinned to Anthropic with no fallbacks, real-time requests, every request recorded in the shared
+ledger's ``analysis`` scope and admitted against the judging run's own budget (owner decisions,
+docs/plan.md "One per-run budget, no manual approvals (October 20, 2026)": the invocation's
+``RunLimit``, registered in the ledger as one run; no cumulative analysis cap), a refused
+request retried once and then
 ``ungraded`` (never a negative), and a judge model that never silently changes. One client
 serves one model:
 ``"haiku"`` (screening), ``"sonnet"`` (per-agent judging) or ``"opus"`` (verification, one
@@ -13,10 +14,10 @@ finding per request, and the run level); see route.MODEL_ALLOCATION. Judge revis
 (docs/plan.md, "Behavior judge iteration specified, October 19, 2026", items 6, 7 and 10): a
 multi-item request is never resent after a refusal (``refusal_retry=False``), the provider's
 refusal message is recorded, an HTTP 429 is resent with growing delays, and a ``RunLimit``
-holds one judging invocation to its own limit beside the ledger's cap.
-Paid judging stays gated: offline tests and the rehearsal inject ``FakeTransport``;
-the real HTTPS path exists only with ``paid_authorized=True``, which the orchestrator
-passes after the user confirms immediately before the first paid request.
+holds one judging invocation to its own limit (the same budget the ledger enforces for its run).
+Offline tests and the rehearsal inject ``FakeTransport``; the real HTTPS path exists only with
+``paid_authorized=True``, the programmatic switch scripts/run_transcript_judge.py passes for a
+paid judging run (no confirmation is asked).
 
 Prompt caching (``complete(cache_system=...)``, default on for Sonnet and Opus, off for
 Haiku; route.JudgeRouteSettings.prompt_cache can override): the system prompt, which is
@@ -79,8 +80,8 @@ Per request (``complete``), under an ``asyncio.Semaphore(max_concurrency)``:
 
 The host key is loaded only on the paid path, at first use, through
 ``research_swarm.secrets.load_openrouter_key(credentials_root)``, followed by the
-unpaid provider-limit check with the approved unlimited-key exception
-(``provider_limit.verify_key_limit``, ``allow_unlimited=True``). ``credentials_root``
+unpaid, informational provider-limit record (``provider_limit.key_limit_record``; it never
+refuses the key). ``credentials_root``
 is the directory whose private ``.env`` holds the key (default: this checkout's root),
 so a separate checkout on the VM can use the main checkout's ``.env`` without copying
 it; it is accepted only on the paid path and nothing is read from it before the first
@@ -108,7 +109,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
-from research_swarm.budget import BudgetExceeded, BudgetLedger, JUDGE_ANALYSIS_CAP_USD, judge_analysis_problems
+from research_swarm.budget import DEFAULT_JUDGE_RUN_BUDGET_USD, BudgetExceeded, BudgetLedger
 from research_swarm.inspect_adapter import openrouter_reported_cost
 
 from .route import (CACHE_CONTROL, CACHE_TTL, DEFAULT_CONCURRENCY, MODEL_KEYS, PROVIDER_NAME, STANDARD_SERVICE_TIERS,
@@ -398,15 +399,15 @@ class RunLimit:
     keeps it until ``reconcile()``). ``admit`` refuses a request whose reservation would push the
     committed spend past ``limit_usd``; the client then answers ``grading_failed`` with reason
     ``run_limit`` without touching the ledger or the network, and the pipeline treats it like a
-    ledger denial (waits while other requests are in flight, else stops cleanly). The ledger's
-    own cap still applies to every admitted request. ``estimate`` (the invocation estimate that
+    ledger denial (waits while other requests are in flight, else stops cleanly). The ledger
+    enforces the same budget for the invocation's run (``run_id``). ``estimate`` (the invocation estimate that
     set the limit), ``source`` (``estimate``: 2x the central estimate, or ``override``:
     ``--run-limit``) and ``basis`` (what set an estimated limit: ``factor``, ``largest_reservation``
     when the largest single reservation needed more room, or ``floor``) are recorded with the
     totals (``record()``)."""
 
     def __init__(self, limit_usd, *, source="estimate", estimate=None, factor=None, floor_usd=None, basis=None,
-                 standing_approval=None):
+                 run_config=None):
         limit = _decimal_or_none(limit_usd)
         if limit is None or limit <= 0:
             raise ValueError("run limit must be a positive amount in USD")
@@ -416,10 +417,12 @@ class RunLimit:
         self.factor = factor
         self.floor = _decimal_or_none(floor_usd)
         self.basis = basis
-        # Source ``standing_approval`` (docs/plan.md, "Automatic post-run behavior judge for the owner's
-        # runs (October 20, 2026)"): the config's approval note, path and per-run cap, recorded as given.
-        self.standing_approval = standing_approval
+        # Source ``run_config`` (docs/plan.md, "One per-run budget, no manual approvals (October 20,
+        # 2026)"): the judged run's config path, track and budget (``auto_judge.judge_settings``), as given.
+        self.run_config = run_config
         self.created_at = _now()
+        # The ledger run this invocation's clients register (budget = ``limit``).
+        self.run_id = f"judge-{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:8]}"
         self._lock = threading.Lock()
         self._held = {}                  # token -> (reserved USD, purpose, model key)
         self._uncertain = Decimal(0)
@@ -494,9 +497,10 @@ class RunLimit:
         with self._lock:
             held = sum((h for h, _, _ in self._held.values()), Decimal(0))
             return {"schema": RUN_LIMIT_SCHEMA, "limit_usd": str(self.limit), "source": self.source,
+                    "ledger_run_id": self.run_id,
                     "basis": self.basis, "factor": None if self.factor is None else str(self.factor),
                     "floor_usd": None if self.floor is None else str(self.floor), "created_at": self.created_at,
-                    "estimate": self.estimate, "standing_approval": self.standing_approval,
+                    "estimate": self.estimate, "run_config": self.run_config,
                     "committed_usd": str(self._committed()),
                     "peak_committed_usd": str(self.peak_committed), "settled_usd": str(self._settled),
                     "uncertain_usd": str(self._uncertain), "in_flight_usd": str(held), "requests": self.requests,
@@ -532,17 +536,18 @@ class JudgeClient:
     ``http``: a transport with ``async post(url, headers, body, timeout)`` (tests and
     the rehearsal pass ``FakeTransport``). ``http=None`` builds the real HTTPS
     transport and is refused unless ``paid_authorized=True``, ``scope="analysis"`` and
-    the settings come from a verified freeze record. The ``analysis`` scope requires
-    the existing ledger with every applied audited judge raise (``budget.judge_analysis_problems``:
-    all five, the last $110 -> $200 bound to docs/plan.md, "Behavior judge iteration specified,
-    October 19, 2026"), and opens it at ``budget.JUDGE_ANALYSIS_CAP_USD``; any other scope (offline rehearsal) needs
-    explicit ``ledger_caps`` and a fake transport. ``max_concurrency`` defaults to
+    the settings come from a verified freeze record. The client opens (or creates) the ledger and
+    registers its judging run there (``BudgetLedger.start_run``): run ``run_limit.run_id`` with the
+    run limit as its budget (shared by the invocation's clients), else its own run with budget
+    ``ledger_caps[scope]`` or $50 (``budget.DEFAULT_JUDGE_RUN_BUDGET_USD``). Any scope other than
+    ``analysis`` (offline rehearsal) needs a fake transport and, without a run limit, explicit
+    ``ledger_caps``. ``max_concurrency`` defaults to
     ``route.DEFAULT_CONCURRENCY`` (haiku 24, sonnet 16, opus 8; judge revision v3, item 10).
     The delay before resending a rate-limited (HTTP 429) request is awaited outside the
     concurrency semaphore through ``self.sleep`` (``asyncio.sleep``; tests replace it).
     ``run_limit`` (a ``RunLimit`` shared by the invocation's three clients; judge revision v3,
     item 7) refuses any request whose reservation would push the invocation's committed spend
-    past its limit (reason ``run_limit``); the ledger's cap applies independently.
+    past its limit (reason ``run_limit``); the ledger enforces the same budget for the run.
 
     ``credentials_root`` (paid path only; ``repo_root`` is an accepted alias): the
     directory whose private ``.env`` holds the host key, default this checkout's root.
@@ -584,25 +589,27 @@ class JudgeClient:
         self._paid = http is None
         if self._paid:
             if paid_authorized is not True:
-                raise RuntimeError("Paid judging is gated: pass paid_authorized=True only after the user confirms "
-                                   "immediately before the first paid request (docs/plan.md, October 17, 2026)")
+                raise RuntimeError("The real HTTPS transport needs paid_authorized=True (the paid judging run passes "
+                                   "it); offline paths inject a fake transport")
             if scope != ANALYSIS_SCOPE:
                 raise RuntimeError("Paid judge requests are admitted only through the ledger's analysis scope")
             if not self.settings.pricing_verified or not self.settings.pricing_record:
                 raise RuntimeError("Paid judging requires settings from a fresh freeze record "
                                    "(JudgeRouteSettings.from_pricing_record)")
-        if scope == ANALYSIS_SCOPE:
-            # Never create a replacement ledger, and require both applied audited raises.
-            problems = judge_analysis_problems(self.ledger_path)
-            if problems:
-                raise ValueError("Judge analysis ledger refused: " + "; ".join(problems))
-            caps = {ANALYSIS_SCOPE: JUDGE_ANALYSIS_CAP_USD}
-        else:
+        if scope != ANALYSIS_SCOPE:
             if self._paid:
                 raise RuntimeError("Non-analysis scopes are for offline rehearsals with a fake transport")
-            if not isinstance(ledger_caps, dict) or scope not in ledger_caps:
-                raise ValueError(f"Scope {scope!r} (offline rehearsal) needs explicit ledger_caps including it")
-            caps = {scope: ledger_caps[scope]}
+            if run_limit is None and (not isinstance(ledger_caps, dict) or scope not in ledger_caps):
+                raise ValueError(f"Scope {scope!r} (offline rehearsal) needs a run_limit or explicit ledger_caps")
+        # The judging run's budget (docs/plan.md "One per-run budget, no manual approvals (October 20,
+        # 2026)"): the invocation's run limit, else ledger_caps[scope], else $50.
+        if run_limit is not None:
+            run_id, run_budget, source = run_limit.run_id, run_limit.limit, f"judge run limit ({run_limit.source})"
+        elif isinstance(ledger_caps, dict) and ledger_caps.get(scope) is not None:
+            run_id, run_budget, source = f"judge-{model_key}-{uuid.uuid4().hex[:12]}", ledger_caps[scope], "ledger_caps"
+        else:
+            run_id, run_budget, source = (f"judge-{model_key}-{uuid.uuid4().hex[:12]}", DEFAULT_JUDGE_RUN_BUDGET_USD,
+                                          "default")
         self.credentials_root = None
         if self._paid and key_loader is None:
             # Only the directory is checked here; its .env is read at prepare().
@@ -615,7 +622,8 @@ class JudgeClient:
             def key_loader():
                 from research_swarm.secrets import load_openrouter_key
                 return load_openrouter_key(root)
-        self.ledger = BudgetLedger(self.ledger_path, caps)
+        self.ledger = BudgetLedger(self.ledger_path)
+        self.ledger.start_run(run_id, scope, run_budget, source=source, note=f"behavior judge ({scope})")
         self.run_limit = run_limit
         self._limit_tokens = {}             # ledger request id -> RunLimit token
         self.http = UrllibTransport(max_workers=max_concurrency) if self._paid else http
@@ -629,14 +637,30 @@ class JudgeClient:
         self.sleep = asyncio.sleep          # HTTP 429 back-off (outside the semaphore)
         self.jitter = random.random         # spreads the back-off of concurrent requests
 
+    @property
+    def run_limit(self):
+        return self._run_limit
+
+    @run_limit.setter
+    def run_limit(self, limit):
+        """A run limit given after construction (``pipeline.Pipeline`` attaches the invocation's) also
+        rebinds the ledger to that judging run, so the ledger enforces the same budget."""
+        if limit is not None and not isinstance(limit, RunLimit):
+            raise ValueError("run_limit must be a RunLimit (shared by the invocation's clients) or None")
+        self._run_limit = limit
+        ledger = getattr(self, "ledger", None)
+        if limit is not None and ledger is not None and ledger.run_id != limit.run_id:
+            ledger.start_run(limit.run_id, self.scope, limit.limit, source=f"judge run limit ({limit.source})",
+                             note=f"behavior judge ({self.scope})")
+
     # -- paid-path preparation ----------------------------------------------
     def prepare(self):
         """Load the key (paid path only) and run the unpaid provider-limit check once.
 
-        Without a key loader (fake transports) this does nothing. The limit check uses
-        the approved unlimited-key exception (plan, Route and key): the ledger, not a
-        provider cap, enforces the analysis allowance. The report (never the key) is
-        archived as ``provider-limit-<model>.json``.
+        Without a key loader (fake transports) this does nothing. The limit record is
+        informational (``provider_limit.key_limit_record`` never refuses the key): the judging
+        run's budget is the spending control. The report (never the key) is archived as
+        ``provider-limit-<model>.json``.
         """
         with self._prepare_lock:
             if self._prepared:
@@ -647,10 +671,10 @@ class JudgeClient:
                     raise RuntimeError("Key loader returned no key")
                 verify = self._verify_limit
                 if verify is None and self._paid:
-                    from research_swarm.provider_limit import verify_key_limit as verify
+                    from research_swarm.provider_limit import key_limit_record as verify
                 if verify is not None:
-                    remaining = Decimal(self.ledger.snapshot()[self.scope]["remaining_usd"])
-                    report = verify(key, remaining, allow_unlimited=True)
+                    budget = Decimal(self.ledger.run_snapshot()["budget_usd"])
+                    report = verify(key, budget)
                     self.limit_report = json.loads(self._scrub_text(json.dumps(report, default=str), key))
                     # One file per model: the three clients share one archive directory.
                     self._write_json(self.archive_dir / f"provider-limit-{self.model_key}.json",

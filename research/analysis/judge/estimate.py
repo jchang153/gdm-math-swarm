@@ -2,9 +2,12 @@
 
 Judge revision v3, docs/plan.md, "Behavior judge iteration specified, October 19, 2026", item 7:
 each paid judging run's own limit is set automatically at 2x its central estimate, the run
-refuses any request that would push its committed spend past that limit, one confirmation shows
-the estimate, the run limit and the remaining analysis allowance, the report shows estimate
-against actual cost, and an explicit ``--run-limit`` overrides the limit.
+refuses any request that would push its committed spend past that limit, the report shows estimate
+against actual cost, and an explicit ``--run-limit`` overrides the limit. Superseded on October 20,
+2026 (docs/plan.md, "No cost estimates for judge runs" and "One per-run budget, no manual
+approvals"): a paid run makes no estimate and asks no confirmation; its budget is ``--run-limit``,
+else the run config's ``behavior_judge_max_usd``, else $50. This module serves the optional
+``--dry-run-estimate`` only.
 
 ``plan_invocation`` (or ``InvocationPlanner`` fed one loaded agent at a time) estimates exactly
 what one judging invocation would send: its agents, its ``--stage``, its settings and its judge

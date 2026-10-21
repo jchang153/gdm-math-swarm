@@ -1310,13 +1310,13 @@ class EarlyStopEndToEndTests(unittest.TestCase):
     verified one at a time, strongest first; a refuted finding, or one whose output twice reached
     the output limit, moves on to the next; an output that reaches the limit once is repaired."""
 
-    def rehearse(self, tmp, *, expect="complete", **designations):
-        # The full max_tokens reserved for every model: a mock output that runs to its limit bills all of
-        # it, which a Sonnet output allowance (route.RESERVATION_OUTPUT_TOKENS) would record as an
-        # estimate_violation (test_truncated_sonnet_output_past_its_allowance_stops_cleanly).
+    def rehearse(self, tmp, *, expect="complete", allowance=False, **designations):
+        # The full max_tokens reserved for every model unless ``allowance``: a mock output that runs to its
+        # limit bills all of it, which a Sonnet output allowance (route.RESERVATION_OUTPUT_TOKENS) records as
+        # an estimate_violation (test_truncated_sonnet_output_past_its_allowance_is_recorded_and_continues).
         routes = JudgeRouteSettings.defaults(pricing_verified=True,
-                                             reservation_output_tokens=() if expect == "complete" else
-                                             JudgeRouteSettings.defaults().reservation_output_tokens)
+                                             reservation_output_tokens=JudgeRouteSettings.defaults()
+                                             .reservation_output_tokens if allowance else ())
         r = Rehearsal(tmp, judge_mode="candidates", agents=("agent-004",), model=pl.MockModel(routes, **designations))
         r.routes = routes
         explicit = next(i for i in r.run.agents["agent-004"].items if i["id"] == "A04.t0005.r")
@@ -1327,16 +1327,19 @@ class EarlyStopEndToEndTests(unittest.TestCase):
             return r, summary
         return r, read(r.judge_dir / "agents" / "agent-004.json")
 
-    def test_truncated_sonnet_output_past_its_allowance_stops_cleanly(self):
+    def test_truncated_sonnet_output_past_its_allowance_is_recorded_and_continues(self):
         """With the default Sonnet output allowance (12,000 of 48,000 tokens reserved), a candidate output
         that runs to its output limit is billed above its reservation: the ledger records an
-        estimate_violation and the run stops cleanly before its next request (resume after review)."""
+        estimate_violation, scales the judging run's later reservations up and the run continues
+        (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)"); its budget still
+        bounds the spend."""
         with tempfile.TemporaryDirectory() as tmp:
-            r, summary = self.rehearse(tmp, expect="stopped", truncate_once={("judge", "agent-004")})
-            self.assertEqual(summary["stop"]["reason"], "budget_admission_denied")
-            self.assertIn("reservation estimate was exceeded", summary["stop"]["detail"]["message"])
+            r, result = self.rehearse(tmp, allowance=True, truncate_once={("judge", "agent-004")})
             snap = budget.read_snapshot(r.root / "ledger.sqlite")["rehearsal"]
             self.assertTrue(snap["violation"])
+            runs = budget.list_runs(r.root / "ledger.sqlite", scope="rehearsal")
+            self.assertTrue(any(float(run["reservation_factor"]) > 1 for run in runs), runs)
+            self.assertTrue(result["verified"]["findings"])  # the agent was judged to the end
 
     @staticmethod
     def by_topic(result):

@@ -25,7 +25,7 @@ from collections import Counter
 from dataclasses import asdict
 from decimal import Decimal
 from pathlib import Path
-from .budget import BudgetLedger
+from .budget import BudgetLedger, run_budget
 from .provider import ProviderSettings, settings_from_config  # noqa: F401 (ProviderSettings re-exported)
 from .prompt_cache import TOKEN_COUNTER_NORMALIZATION_VERSION
 
@@ -428,9 +428,8 @@ def make_recorder(path):
 #   post_depletion_window, startup_timeout, monitor_error, or a compatibility-check
 #   abort reason), including a sample ended because its request was refused after
 #   the stop.
-# * ``budget_exhausted``: the shared ledger refused admission (the allowance cannot
-#   cover the request, or the scope is blocked by an estimate violation); the
-#   filter's LimitExceededError ended the sample.
+# * ``budget_exhausted``: the ledger refused admission (the run's own budget cannot
+#   cover the request); the filter's LimitExceededError ended the sample.
 # * ``budget_ledger_unavailable``: admission failed because the ledger stayed locked.
 # * ``error`` / ``error_after_truncation``: the harness raised.
 # * ``interrupted``: cancelled without any recorded outcome (e.g. the evaluation was
@@ -871,10 +870,6 @@ def preflight(config, repo_root):
     if missing:
         blockers.append("Conference/tool/prompt modules unavailable: " + ", ".join(missing))
     gates = _launch_gates(config, repo_root)
-    if not config.get("paid_launch_enabled") and "paid_launch_enabled" not in (gates.get("evidence") or {}):
-        # Defence in depth only when the launch gates did not evaluate the attestation
-        # themselves (otherwise their "paid_launch_enabled: ..." blocker is the one shown).
-        blockers.append("Paid launch is disabled")
     blockers.extend(gates["blockers"])
     docker = {"available": bool(shutil.which("docker"))}
     if docker["available"]:
@@ -1093,47 +1088,42 @@ def _redact(text, secret):
     return re.sub(r"\bsk-[A-Za-z0-9_-]{8,}", "[redacted]", text)
 
 
-def build_openrouter_model(settings, repo_root, max_connections, *, max_remaining_usd, record=None,
-                           verify_limit=None, allow_unlimited=False):
+def build_openrouter_model(settings, repo_root, max_connections, *, run_budget_usd, record=None, check_limit=None,
+                           record_dir=None):
     """The paid OpenRouter model, exactly as every paid path builds it: ``(model, provider_limit)``.
 
     The host credential is read here, at model construction, through
     ``secrets.load_openrouter_key`` and handed only to the host-side client; it is
     never returned, logged or written. Right after loading it, and before any paid
-    request, the key's provider-side limit is verified with an unpaid
-    ``GET /api/v1/key`` (``provider_limit.verify_key_limit``, interface X2): it must
-    have a non-resetting limit whose ``limit_remaining`` does not exceed
-    ``max_remaining_usd`` (the calling scope's remaining ledger allowance), else
-    ``ProviderLimitError`` propagates and nothing is built. The returned dict (no key)
-    is recorded as ``provider_limit_verified`` and returned for settings.json.
-    Only the pilot's explicitly approved ``allow_unlimited=True`` policy may waive
-    the additional provider cap for an unlimited key; the shared ledger remains
-    unchanged, and the report records that the provider cap is not enforced.
-    ``max_retries=0`` on both Inspect's retry loop and the OpenAI client itself: no
-    silent paid retries below the ledger. ``capture_openrouter_cost`` copies
-    OpenRouter's reported usage/cost and generation id into each output for settlement.
+    request, the key's provider-side limit is recorded with an unpaid
+    ``GET /api/v1/key`` (``provider_limit.key_limit_record``, interface X2). The record is
+    informational (owner decision, docs/plan.md "One per-run budget, no manual approvals
+    (October 20, 2026)"): it never refuses the key; the run's budget (``run_budget_usd``,
+    enforced by the ledger on every request) is the spending control. The key-free record
+    is recorded as ``provider_limit_recorded``, written to ``record_dir`` as
+    ``provider-limit-<UTC>.json`` when given (refreshing the launch gate's record), and
+    returned for settings.json. ``max_retries=0`` on both Inspect's retry loop and the
+    OpenAI client itself: no silent paid retries below the ledger. ``capture_openrouter_cost``
+    copies OpenRouter's reported usage/cost and generation id into each output for settlement.
     """
     from inspect_ai.model import GenerateConfig, get_model
     from .inspect_adapter import capture_openrouter_cost
     from .secrets import load_openrouter_key
     record = record or (lambda *args: None)
-    if verify_limit is None:
-        try:
-            from .provider_limit import verify_key_limit as verify_limit
-        except ImportError as ex:
-            raise LaunchBlocked("research_swarm.provider_limit is unavailable; the provider-side limit cannot be "
-                                "verified before paid requests") from ex
+    if check_limit is None:
+        from .provider_limit import key_limit_record as check_limit
     key = load_openrouter_key(repo_root)
     try:
-        limit = verify_limit(key, Decimal(str(max_remaining_usd)),
-                             **({"allow_unlimited": True} if allow_unlimited is True else {}))
-    except Exception as ex:
-        _safe_record(record, "provider_limit_refused", None,
-                     {"error": type(ex).__name__, "detail": _redact(ex, key)[:500],
-                      "max_remaining_usd": str(max_remaining_usd)})
-        raise
+        limit = check_limit(key, Decimal(str(run_budget_usd)))
+    except Exception as ex:  # informational: never stops the run
+        limit = {"error": f"{type(ex).__name__}: {_redact(ex, key)[:300]}", "informational": True,
+                 "warnings": ["provider-side limit not recorded"]}
     limit = json.loads(_redact(json.dumps(limit, default=str), key))
-    record("provider_limit_verified", None, {**limit, "max_remaining_usd": str(max_remaining_usd)})
+    _safe_record(record, "provider_limit_recorded", None, {**limit, "run_budget_usd": str(run_budget_usd)})
+    if record_dir is not None:
+        from .provider_limit import write_record
+        path = write_record(record_dir, limit, source="paid launch")
+        limit = dict(limit, record=None if path is None else str(path))
     model = capture_openrouter_cost(get_model(
         "openrouter/" + settings.model_id, api_key=key, max_retries=0,
         provider=settings.request_options()["provider"], reasoning_enabled=True,
@@ -1206,6 +1196,9 @@ async def run_pilot(config, repo_root, conference_factory=None):
     config without an explicit ``max_connections``, which is passed to the model and
     recorded in settings.json. Image tags are pinned to local image IDs once; a Lean
     warm-up runs before the start barrier. No substitute custom agent loop exists.
+    Every request is admitted against this run's own budget (``run_budget_usd``, else $100),
+    registered in the shared ledger as run ``<run_dir name>`` (``BudgetLedger.start_run``);
+    the run's final state is written to ``run-budget.json``.
     """
     report = preflight(config, repo_root)
     if not report["ready"]:
@@ -1231,8 +1224,15 @@ async def run_pilot(config, repo_root, conference_factory=None):
     record = make_recorder(run_dir / "runtime.jsonl")
     record("inspect_dotenv_disabled", None, dotenv)
     record("images_pinned", None, images)
+    # The run's budget, the one spending control (docs/plan.md "One per-run budget, no manual
+    # approvals (October 20, 2026)"): every request of this run is admitted against it.
+    budget, budget_source = run_budget(config)
     ledger_file = ledger_path(repo_root)
     ledger = BudgetLedger(ledger_file)
+    started = ledger.start_run(run_dir.name, "pilot", budget, source=budget_source,
+                               note=f"pilot run {run_dir}")
+    record("run_budget", None, {"run_id": run_dir.name, "budget_usd": str(budget), "budget_source": budget_source,
+                                "ledger": str(ledger_file), "orphaned_holds": started["orphaned_holds"]})
     # Pricing and compatibility evidence were checked by launch_gates above, against
     # the same settings_from_config object (route-pricing gate compares frozen_fields).
     settings = settings_from_config(config, pricing_verified=True, live_compatibility_verified=True)
@@ -1246,12 +1246,11 @@ async def run_pilot(config, repo_root, conference_factory=None):
                                                      conference_factory=conference_factory)
     try:
         compose = make_compose(run_dir, config, images["agent"]["id"])
-        # Loads the key and verifies the provider-side limit against the pilot scope's
-        # remaining allowance (unpaid) before any paid request.
+        # Loads the key and records its provider-side limit (unpaid, informational) before any
+        # paid request; the run's budget is the spending control.
         model, provider_limit = build_openrouter_model(
-            settings, repo_root, connections,
-            max_remaining_usd=ledger.snapshot()["pilot"]["remaining_usd"], record=record,
-            allow_unlimited=config.get("allow_unlimited_provider_key") is True)
+            settings, repo_root, connections, run_budget_usd=budget, record=record,
+            record_dir=Path(repo_root) / "data" / "validation")
         effective = {
             "agent_count": agent_count, "persona_seed": persona_seed, "persona_counts": persona_counts(personas),
             "agent_image": images["agent"]["tag"], "lean_image": images["lean"]["tag"], "images": images,
@@ -1264,6 +1263,7 @@ async def run_pilot(config, repo_root, conference_factory=None):
             "lean_warm_up": warm_up, "system_prompt_mode": mode, "claude_auto_memory": auto_memory,
             "prompt_cache_normalization": TOKEN_COUNTER_NORMALIZATION_VERSION,
             "claude_code_env": claude_code_env(auto_memory), "ledger_path": str(ledger_file), "budget_scope": "pilot",
+            "run_id": run_dir.name, "run_budget_usd": str(budget), "run_budget_source": budget_source,
             "evaluator_observer": None if observer is None else "queue",
             "fixed_task_manifest": config.get("fixed_task_manifest"), "inspect_dotenv": dotenv,
             "provider_limit": provider_limit, "in_flight_grace_seconds": in_flight_grace,
@@ -1271,6 +1271,7 @@ async def run_pilot(config, repo_root, conference_factory=None):
         (run_dir / "settings.json").write_text(json.dumps({"config": config, "effective": effective,
                                                             "model": asdict(settings), "personas": personas,
                                                             "tasks": listing, "budget": ledger.snapshot(),
+                                                            "run_budget": ledger.run_snapshot(),
                                                             "preflight": report}, indent=2, default=str))
         barrier = StartBarrier(len(agent_ids), record)
         clock = RunClock(barrier)
@@ -1289,6 +1290,7 @@ async def run_pilot(config, repo_root, conference_factory=None):
                                clock, conference, record, config)
     finally:
         await asyncio.to_thread(conference.close)
+        (run_dir / "run-budget.json").write_text(json.dumps(ledger.end_run(), indent=2))
         (run_dir / "budget-final.json").write_text(json.dumps(ledger.snapshot(), indent=2))
         # Measured after the run (presence only): Inspect never loaded the host .env.
         _safe_record(record, "credential_environment", None,

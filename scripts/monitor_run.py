@@ -3,15 +3,19 @@
 
     python scripts/monitor_run.py --run-dir runs/RUN_ID [--phase-dir runs/phase-b/RUN_ID] [--ledger LEDGER]
 
-Prints elapsed time against the run's ``max_run_seconds``, this run's settled and committed
-spending and its rate, the remaining allowance and the time it lasts at that rate, requests,
-prompt-cache fraction, agent restarts and exits, and conference submissions and solved tasks.
+Prints elapsed time against the run's ``max_run_seconds``, this run's budget, its settled and
+committed spending and their rate, the run's remaining budget and the time it lasts at that rate,
+requests, prompt-cache fraction, agent restarts and exits, and conference submissions and solved
+tasks.
 
 Nothing is written. The ledger and ``conference/state.sqlite`` are opened read-only. The ledger is
-``--ledger`` or the path recorded in the supervisor's ``live-checkpoint.json``; without one the
-checkpoint's last budget snapshot is used. This run's spending is the ledger now minus the ledger at
-launch, read from the phase directory's ``budget-before-launch.sqlite`` backup; when that backup is
-absent the baseline is reported as unknown and only the checkpoint's ``new_settled_usd`` is shown.
+``--ledger`` or the path recorded in the supervisor's ``live-checkpoint.json``. A run with its own
+budget (docs/plan.md "One per-run budget, no manual approvals (October 20, 2026)") is read from the
+ledger's ``runs`` table (run id = the run directory's name), else from the checkpoint's
+``run_budget`` or the run's ``run-budget.json``. For older runs (cumulative caps), this run's
+spending is the ledger now minus the ledger at launch, read from the phase directory's
+``budget-before-launch.sqlite`` backup; when that backup is absent the baseline is reported as
+unknown and only the checkpoint's ``new_settled_usd`` is shown.
 """
 import argparse
 import datetime
@@ -24,7 +28,7 @@ import time
 import urllib.parse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from research_swarm.budget import read_snapshot  # noqa: E402
+from research_swarm.budget import read_run, read_snapshot  # noqa: E402
 
 
 def _json(path):
@@ -94,23 +98,38 @@ def summarize(run_dir, phase_dir=None, ledger=None, scope="pilot", now=None):
     max_seconds = (settings.get("config") or {}).get("max_run_seconds", launch.get("max_run_seconds"))
 
     ledger_path = ledger or checkpoint.get("ledger")
-    live = read_snapshot(ledger_path) if ledger_path and Path(ledger_path).exists() else None
-    current = (live or checkpoint.get("budget") or {}).get(scope)
-    source = "ledger" if live else ("checkpoint" if current else None)
-    base_snapshot = read_snapshot(phase_dir / "budget-before-launch.sqlite")
-    base = (base_snapshot or {}).get(scope)
-
-    spend = {"scope": scope, "source": source, "ledger": str(ledger_path) if live else None,
-             "baseline": "budget-before-launch.sqlite" if base else None}
+    exists = bool(ledger_path) and Path(ledger_path).exists()
+    live_run = read_run(ledger_path, run_dir.name) if exists else None
+    final_run = _json(run_dir / "run-budget.json")
+    run = live_run or checkpoint.get("run_budget") or final_run
     rate_settled = None
-    if current:
-        cap, committed = _money(current["cap_usd"]), _money(current["committed_usd"])
-        spend.update(cap_usd=str(cap), committed_total_usd=str(committed), remaining_usd=str(cap - committed))
-        if base:
-            spend["baseline_committed_usd"] = base["committed_usd"]
-            spend["run_committed_usd"] = str(committed - _money(base["committed_usd"]))
-            spend["run_allowance_usd"] = str(cap - _money(base["committed_usd"]))
-            rate_settled = _money(current["settled_usd"]) - _money(base["settled_usd"])
+    if run:  # a run with its own budget
+        source = "ledger" if live_run else ("checkpoint" if checkpoint.get("run_budget") else "run-budget.json")
+        spend = {"scope": run.get("scope", scope), "source": source, "ledger": str(ledger_path) if live_run else None,
+                 "run_id": run.get("run_id"), "budget_usd": run.get("budget_usd"),
+                 "run_committed_usd": run.get("committed_usd"), "run_settled_usd": run.get("settled_usd"),
+                 "remaining_usd": run.get("remaining_usd"), "unresolved_requests": run.get("unresolved_requests"),
+                 "estimate_violations": run.get("estimate_violations")}
+        rate_settled = _money(run.get("settled_usd"))
+    else:  # older runs: cumulative ledger caps
+        live = read_snapshot(ledger_path) if exists else None
+        current = (live or checkpoint.get("budget") or {}).get(scope)
+        source = "ledger" if live else ("checkpoint" if current else None)
+        base_snapshot = read_snapshot(phase_dir / "budget-before-launch.sqlite")
+        base = (base_snapshot or {}).get(scope)
+        spend = {"scope": scope, "source": source, "ledger": str(ledger_path) if live else None,
+                 "baseline": "budget-before-launch.sqlite" if base else None}
+        if current:
+            cap, committed = _money(current.get("cap_usd", current.get("legacy_cap_usd"))), _money(current["committed_usd"])
+            spend.update(committed_total_usd=str(committed))
+            if cap is not None:
+                spend.update(cap_usd=str(cap), remaining_usd=str(cap - committed))
+            if base:
+                spend["baseline_committed_usd"] = base["committed_usd"]
+                spend["run_committed_usd"] = str(committed - _money(base["committed_usd"]))
+                if cap is not None:
+                    spend["run_allowance_usd"] = str(cap - _money(base["committed_usd"]))
+                rate_settled = _money(current["settled_usd"]) - _money(base["settled_usd"])
     if rate_settled is None and checkpoint.get("new_settled_usd") is not None:
         rate_settled = _money(checkpoint["new_settled_usd"])
     if rate_settled is not None:
@@ -118,7 +137,7 @@ def summarize(run_dir, phase_dir=None, ledger=None, scope="pilot", now=None):
     if rate_settled is not None and elapsed:
         per_hour = rate_settled / Decimal(str(elapsed)) * 3600
         spend["settled_usd_per_hour"] = f"{per_hour:.2f}"
-        if current and per_hour > 0:
+        if spend.get("remaining_usd") is not None and per_hour > 0:
             spend["eta_hours"] = round(float(_money(spend["remaining_usd"]) / per_hour), 2)
 
     restarts = {}
@@ -150,7 +169,19 @@ def render(summary):
     state = "stopped" if summary["stopped"] else ("running" if summary["started"] else "not started")
     lines = [f"{summary['run']} [{state}] {datetime.datetime.now(datetime.timezone.utc):%H:%M} UTC | elapsed "
              f"{minutes(summary['elapsed_seconds'])} of {minutes(summary['max_run_seconds'])}"]
-    if spend.get("source"):
+    if spend.get("run_id"):
+        parts = [f"spend[{spend['scope']}] run {spend['run_id']} from {spend['source']}: budget "
+                 f"${Decimal(spend['budget_usd']):.2f}"]
+        if "settled_usd_per_hour" in spend:
+            parts.append(f"run settled ${Decimal(spend['run_settled_usd']):.2f} (${spend['settled_usd_per_hour']}/h)")
+        elif spend.get("run_settled_usd") is not None:
+            parts.append(f"run settled ${Decimal(spend['run_settled_usd']):.2f}")
+        parts.append(f"run committed ${Decimal(spend['run_committed_usd']):.2f}")
+        parts.append(f"${Decimal(spend['remaining_usd']):.2f} left")
+        if "eta_hours" in spend:
+            parts.append(f"~{spend['eta_hours']:.1f}h at this rate")
+        lines.append(" | ".join(parts))
+    elif spend.get("source"):
         baseline = (f"baseline ${spend['baseline_committed_usd']} at launch" if spend.get("baseline")
                     else "baseline unknown (no budget-before-launch.sqlite)")
         parts = [f"spend[{spend['scope']}] from {spend['source']}: {baseline}"]
@@ -160,7 +191,8 @@ def render(summary):
         if "run_committed_usd" in spend:
             parts.append(f"run committed ${Decimal(spend['run_committed_usd']):.2f}")
         allowance = f" of ${Decimal(spend['run_allowance_usd']):.2f}" if "run_allowance_usd" in spend else ""
-        parts.append(f"${Decimal(spend['remaining_usd']):.2f}{allowance} left (cap ${spend['cap_usd']})")
+        if spend.get("remaining_usd") is not None:
+            parts.append(f"${Decimal(spend['remaining_usd']):.2f}{allowance} left (cap ${spend['cap_usd']})")
         if "eta_hours" in spend:
             parts.append(f"~{spend['eta_hours']:.1f}h at this rate")
         lines.append(" | ".join(parts))

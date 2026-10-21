@@ -1060,28 +1060,39 @@ class CliTests(unittest.TestCase):
 
     def call(self, *args):
         err = io.StringIO()
-        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+        # The paid path's automatic pricing refresh is unpaid but networked: never run in tests.
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()), \
+                mock.patch.object(self.cli, "refresh_pricing", lambda args, **kwargs: None):
             code = self.cli.main(["--run-dir", str(self.run_dir), *args])
         return code, err.getvalue()
 
-    def test_paid_needs_approval(self):
-        code, err = self.call()
-        self.assertEqual(code, 4)
-        self.assertIn("--i-have-user-approval", err)
+    def test_paid_is_the_default_mode_without_any_approval_flag(self):
+        with mock.patch.object(self.cli, "pricing_record", return_value=None):
+            code, err = self.call("--ledger", str(self.tmp / "ledger.sqlite"))
+        self.assertEqual(code, 4)  # refused only for the missing pricing record (research integrity)
+        self.assertIn("no judge route pricing record", err)
+        self.assertNotIn("approval", err)
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            self.cli.parse_args(["--run-dir", str(self.run_dir), "--i-have-user-approval"])
 
-    def test_paid_needs_audited_ledger(self):
-        with mock.patch.object(sys.stdin, "isatty", return_value=True):
-            code, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "missing.sqlite"))
-        self.assertEqual(code, 4)
-        self.assertIn("never create a replacement ledger", err)
+    def test_paid_needs_no_existing_ledger(self):
+        created = []
 
-    def test_paid_refuses_ledger_without_both_judge_raises(self):
-        problems = ["analysis cap history must be exactly the two audited judge raises"]
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-                mock.patch("research_swarm.budget.judge_analysis_problems", return_value=problems):
-            code, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"))
-        self.assertEqual(code, 4)
-        self.assertIn("analysis ledger not ready", err)
+        class Stop(Exception):
+            pass
+
+        class FakeClient:
+            def __init__(self, key, ledger, **kwargs):
+                created.append(ledger)
+
+            def prepare(self):
+                raise Stop()
+        missing = self.tmp / "missing.sqlite"
+        with mock.patch.object(self.cli, "route_settings", return_value=JudgeRouteSettings.defaults(
+                    pricing_verified=True)), \
+                mock.patch("research.analysis.judge.client.JudgeClient", FakeClient), self.assertRaises(Stop):
+            self.call("--ledger", str(missing))
+        self.assertEqual(created[0], missing.resolve())
 
     def test_mock_refuses_output_inside_run(self):
         code, err = self.call("--mock")
@@ -1156,7 +1167,7 @@ class CliTests(unittest.TestCase):
             self.assertIn(column, text)
         self.assertIn("verify=opus (high)", text)
 
-    def test_paid_path_passes_credentials_root_after_typed_confirmation(self):
+    def test_paid_path_passes_credentials_root_without_confirmation(self):
         created = []
 
         class Stop(Exception):
@@ -1171,17 +1182,12 @@ class CliTests(unittest.TestCase):
 
         creds = self.tmp / "main-checkout"
         creds.mkdir()
-        snapshot = {"analysis": {"remaining_usd": "17.403969000"}}
         routes = JudgeRouteSettings.defaults(pricing_verified=True)
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-                mock.patch("research_swarm.budget.judge_analysis_problems", return_value=[]), \
-                mock.patch("research_swarm.budget.read_snapshot", return_value=snapshot), \
-                mock.patch.object(self.cli, "route_settings", return_value=routes), \
+        with mock.patch.object(self.cli, "route_settings", return_value=routes), \
                 mock.patch("research.analysis.judge.client.JudgeClient", FakeClient), \
-                mock.patch("builtins.input", return_value="17.403969000"):
+                mock.patch("builtins.input", side_effect=AssertionError("nothing may prompt")):
             with self.assertRaises(Stop):
-                self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"),
-                          "--credentials-root", str(creds))
+                self.call("--ledger", str(self.tmp / "ledger.sqlite"), "--credentials-root", str(creds))
         self.assertEqual([key for key, _ in created], list(pl.MODEL_KEYS))
         for key, kwargs in created:
             self.assertEqual(kwargs["credentials_root"], creds.resolve())
@@ -1202,18 +1208,14 @@ class CliTests(unittest.TestCase):
         judge_dir = self.run_dir / "analysis" / "judge"
         pl.write_json(judge_dir / "manifest.json", {"schema": "gdm-judge-pipeline-manifest/1",
                                                     "pipeline_version": "gdm-judge-pipeline/2"})
-        snapshot = {"analysis": {"remaining_usd": "17.403969000"}}
-        # Finding 25 of the v3 review: refused before the estimate and before the typed confirmation.
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-                mock.patch("research_swarm.budget.judge_analysis_problems", return_value=[]), \
-                mock.patch("research_swarm.budget.read_snapshot", return_value=snapshot), \
-                mock.patch.object(self.cli, "route_settings",
+        # Finding 25 of the v3 review: refused before any estimate, prompt or key.
+        with mock.patch.object(self.cli, "route_settings",
                                   return_value=JudgeRouteSettings.defaults(pricing_verified=True)), \
                 mock.patch("research.analysis.judge.client.JudgeClient", FakeClient), \
                 mock.patch("research.analysis.judge.estimate.plan_invocation",
                            side_effect=AssertionError("estimated before the refusal")) as planned, \
                 mock.patch("builtins.input", side_effect=AssertionError("asked before the refusal")) as typed:
-            code, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"))
+            code, err = self.call("--ledger", str(self.tmp / "ledger.sqlite"))
         self.assertEqual(code, 4)
         self.assertIn("different binding settings", err)
         self.assertEqual(prepared, [])
@@ -1239,17 +1241,12 @@ class CliTests(unittest.TestCase):
                "settings": dataclasses.asdict(pl.PipelineSettings()),
                "rubric": {"judge_rubric_version": "gdm-judge-rubric/2"}}
         pl.write_json(judge_dir / "manifest.json", v23)
-        snapshot = {"analysis": {"remaining_usd": "17.403969000"}}
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-                mock.patch("research_swarm.budget.judge_analysis_problems", return_value=[]), \
-                mock.patch("research_swarm.budget.read_snapshot", return_value=snapshot), \
-                mock.patch.object(self.cli, "route_settings", return_value=routes), \
+        with mock.patch.object(self.cli, "route_settings", return_value=routes), \
                 mock.patch("research.analysis.judge.client.JudgeClient", FakeClient), \
                 mock.patch("research.analysis.judge.estimate.plan_invocation",
                            side_effect=AssertionError("estimated before the refusal")) as planned, \
                 mock.patch("builtins.input", side_effect=AssertionError("asked before the refusal")) as typed:
-            code, err = self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"),
-                                  "--upgrade-judge-revision")
+            code, err = self.call("--ledger", str(self.tmp / "ledger.sqlite"), "--upgrade-judge-revision")
         self.assertEqual(code, 4)
         self.assertIn("was written by judge revision v2.3", err)
         self.assertIn("never resumes, upgrades or mixes a v2.x judge directory", err)

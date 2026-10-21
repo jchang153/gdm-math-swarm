@@ -60,8 +60,9 @@ the price tiers that bound could reach (Haiku 5.5 bills prompts of at least 100,
 tokens at a higher prompt AND completion price), plus ``max_tokens`` at that
 completion price (adaptive thinking and the visible reply share ``max_tokens`` and
 thinking bills as output). The byte bound is unverified until the first paid request:
-a bill above the reservation settles as ``estimate_violation`` and the shared ledger
-blocks the scope (fail closed).
+a bill above the reservation settles as ``estimate_violation``, and the shared ledger
+scales the judging run's later reservations up by the observed ratio (its run budget still
+bounds spend).
 """
 from __future__ import annotations
 
@@ -113,8 +114,8 @@ STRUCTURED_OUTPUT_PARAMETERS = ("response_format", "structured_outputs")
 
 FRAMING_TOKEN_ALLOWANCE = 8192
 # Per-request output ceiling (thinking + reply). Well below the route's 128,000
-# maximum so one reservation stays small relative to the analysis allowance and to an
-# invocation's run limit (judge revision v3, item 7).
+# maximum so one reservation stays small relative to an invocation's run limit, its budget
+# (judge revision v3, item 7).
 MAX_TOKENS_CEILING = 64000
 # Output tokens (thinking + reply) a request's ledger reservation assumes, at most its max_tokens
 # (judge speed fix, October 20, 2026, owner approved: smaller in-flight holds). Sonnet only: its

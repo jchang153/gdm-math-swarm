@@ -656,8 +656,9 @@ def _cost_html(cost):
             idle += 1  # a resume with nothing left to send
             continue
         limit = (f"run limit {_usd(row.get('limit_usd'))} ("
-                 + {"estimate": "2 × central", "standing_approval": "standing approval, clamped"}.get(row.get("source"),
-                                                                                           "override") + ")")
+                 + {"estimate": "2 × central", "standing_approval": "standing approval, clamped",
+                    "run_config": "run config budget", "default": "default budget"}.get(row.get("source"), "override")
+                 + ")")
         outcome = row.get("status") if not row.get("stop_reason") else f"stopped ({row['stop_reason']})"
         lines.append(f"{n}. --stage {row.get('stage')}: estimated {_usd(row.get('estimate_central_usd'))} central, "
                      f"{limit}, settled {_usd(row.get('settled_usd'))}, {outcome}")

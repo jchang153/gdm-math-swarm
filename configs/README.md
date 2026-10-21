@@ -6,7 +6,7 @@
 
 This file lists every key that code reads (`config.get(...)` or `config[...]` in `src/research_swarm/` and `scripts/`), including the optional keys that `pilot.json` leaves out (see "Optional keys"). Keys marked *label* are recorded in the run's `settings.json` but no code reads them.
 
-Changing a key that the launch gates compare (`launch_gates.approved_settings()`, `max_connections`, the caps, or the capacity-validated keys) blocks launch until the matching user decision is recorded in `docs/plan.md`, or until the evidence is regenerated. Do not edit keys to make a gate pass.
+Changing a key that the launch gates compare (`launch_gates.approved_settings()`, `max_connections`, or the capacity-validated keys) blocks launch until the matching user decision is recorded in `docs/plan.md`, or until the evidence is regenerated. Do not edit keys to make a gate pass. Spending is not one of these: each run's own budget is `run_budget_usd` (see "Run budget"), and setting it is not a gate.
 
 ## Experiment identity and design
 
@@ -34,12 +34,10 @@ Changing a key that the launch gates compare (`launch_gates.approved_settings()`
 | `provider`, `candidate_model_id` | `openrouter`, `deepseek/deepseek-v4.1-flash` | The approved model and route family. Gate. |
 | `requested_model` | `DeepSeek v4.1` | The user's selection, recorded as given. *Label.* |
 | `provider_route` | `fireworks` | User-approved alternative after the `deepseek` endpoint was unavailable (October 14). Routing is `provider.only` with no fallbacks; live compatibility remains required. |
-| `allow_unlimited_provider_key` | `true` | Explicit October 14 user exception for the main unlimited OpenRouter key. Code defaults to strict provider-cap enforcement; this permits only an explicitly unlimited key while retaining the shared $20 pilot ledger. Compatibility checks keep their strict key-limit policy. |
-| `unlimited_provider_key_approval` | recorded user authorization | Required nonempty approval note whenever unlimited-key use is enabled. Live key evidence and run settings record the exception; it never increases the pilot, compatibility or analysis allowance. |
 | `provider_settings` | `{}` | Optional overrides of `ProviderSettings` fields, with prices written as strings. `provider.settings_from_config` builds the settings that the freeze, the gates and the launched run all share. The verification flags cannot be set here. |
 | `max_connections` | `20` | **Required.** Inspect's limit on concurrent inference requests for the run's model (`GenerateConfig.max_connections`). The approved rule is one in-flight request per agent, so it equals `agent_count` and no agent queues behind another inside Inspect (plan checklist item 4, "Scheduling"; "Remaining model-setting authority" requires freezing concurrency before launch). Gate `approved_settings`: it must be present, a positive integer, and equal to `agent_count`. A different value needs a documented plan decision and a change to `launch_gates.max_connections_problems`. The launched run records it in `settings.json`. The provider's real rate limit at 20 concurrent requests is observed only in the live compatibility check and the pilot; the unpaid probes use a mock model. |
-| `route_pricing_max_age_hours` | `72` | How old the newest `route-pricing-*.json` freeze may be. Re-run `scripts/freeze_route.py` before launch. |
-| `provider_limit_max_age_hours` | `72` | How old the newest `provider-limit-*.json` check may be. The paid paths also re-check the key they load (see "Provider-side key limit" below). |
+| `route_pricing_max_age_hours` | `72` | When the newest `route-pricing-*.json` freeze is older than this (or was made for other provider settings), `scripts/run_pilot.py --launch-paid-pilot` and `scripts/compat_check.py` refresh it automatically with the unpaid `scripts/freeze_route.py` before the gates. An older freeze is a warning in the `route_pricing` gate, never a refusal; a freeze whose catalog no longer validates against these reservation prices still blocks launch. |
+| `prompt_cache_normalization` | `counter-user-v1` | The recorded request transformation of historical token counters (docs/prompt-caching.md). Gate `approved_settings`: when present it must equal the version the runtime applies (`prompt_cache.TOKEN_COUNTER_NORMALIZATION_VERSION`). |
 
 ## Images and resources
 
@@ -75,58 +73,48 @@ Changing a key that the launch gates compare (`launch_gates.approved_settings()`
 
 ## Seeded track
 
-`seeded.example.json` is the explicit seeded-contagion configuration that the plan requires ("Experiment tracks"). It is a copy of `pilot.json` with these changes: `experiment` `seeded-contagion-example`, `track` `seeded`, the attestations `false`, and a `seeded` block. The block's keys are the fields of `research_swarm.seeded.SeededTrackConfig`, plus `note` (`seeded.DOCUMENTATION_KEYS`: read by people, never passed to the service). The block has `enabled: false`. Every semantic field is `null`: `trigger_kind`, `trigger_value`, `artifact_path`, `artifact_sha256`, `channel`, `author` and `credit_effect` (`seeded.SEMANTIC_FIELDS`), plus `task_id`, `library_path` and `intent_type`, one of which the chosen channel requires (`seeded.CHANNEL_FIELDS`). `tags` is `[]` and must stay a list. The `note` records that the seeded track's trigger, artifact, provenance and credit/task-state effects are still undecided by the user (plan "Track definitions" and checklist item 9). Do not fill these fields until the user decides them. A seeded run would also need `seeded.enabled: true` and `seeded_contagion_enabled: true`. `research_swarm.seeded.resolve_track` validates the values and the artifact when the conference starts.
+`seeded.example.json` is the explicit seeded-contagion configuration that the plan requires ("Experiment tracks"). It is a copy of `pilot.json` with these changes: `experiment` `seeded-contagion-example`, `track` `seeded`, and a `seeded` block. The block's keys are the fields of `research_swarm.seeded.SeededTrackConfig`, plus `note` (`seeded.DOCUMENTATION_KEYS`: read by people, never passed to the service). The block has `enabled: false`. Every semantic field is `null`: `trigger_kind`, `trigger_value`, `artifact_path`, `artifact_sha256`, `channel`, `author` and `credit_effect` (`seeded.SEMANTIC_FIELDS`), plus `task_id`, `library_path` and `intent_type`, one of which the chosen channel requires (`seeded.CHANNEL_FIELDS`). `tags` is `[]` and must stay a list. The `note` records that the seeded track's trigger, artifact, provenance and credit/task-state effects are still undecided by the user (plan "Track definitions" and checklist item 9). Do not fill these fields until the user decides them. A seeded run would also need `seeded.enabled: true` and `seeded_contagion_enabled: true`. `research_swarm.seeded.resolve_track` validates the values and the artifact when the conference starts.
 
 How the parts fit together:
 
 - The runtime passes `track` and `seeded` to the conference service (`seeded.conference_arguments`) only when `track` is `seeded`, `seeded.enabled` is `true`, `seeded_contagion_enabled` is not `false`, and every semantic field is set. It never passes them otherwise. A contradictory or incomplete seeded configuration is refused, never silently run as either track. The conference service also refuses a seeded configuration in the spontaneous track, and a seeded track that is not enabled. In a seeded run, the run clock polls the conference's seeded trigger on every tick, so a time-based trigger fires on time even when no agent acts. In the spontaneous track the poll does nothing.
 - The launch gates refuse any seeded configuration for the approved pilot. The `seeded_track` gate requires `track` `spontaneous`, `seeded_contagion_enabled` `false`, and no `seeded` key. `approved_settings` also blocks a `track` or `seeded_contagion_enabled` that differs from the plan, and `runtime.preflight` blocks any track other than `spontaneous`. Running the seeded track would therefore need a recorded user decision and changes to those gates.
 
-## Spending and launch
+## Run budget (October 20, 2026)
+
+Owner decisions (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)"): the one spending control is each run's own budget, specified before the run. There is no cumulative cap to raise, no top-up, no approval note, no typed confirmation and no interactive terminal.
 
 | Key | Value | Meaning |
 | --- | --- | --- |
-| `max_pilot_usd`, `max_analysis_usd`, `max_compatibility_usd` | `307.809660142`, `200`, `2` | Must equal `budget.DEFAULT_CAPS`. These are three separate allowances: the pilot's shared $20, post-run analysis's $200 (originally $5; the October 17, 2026 transcript-judge decision raised it to $40 for judging `cache100-20261016T020259Z` through the audited `budget.raise_judge_analysis_cap`, and the October 17 evening misbehavior-focused judge decision added $10, $40 to $50, through the second audited `budget.raise_judge_analysis_second_cap`, which requires exactly the first raise and is reachable as `scripts/preflight.py --raise-ledger-cap analysis`; a ledger still at $5 or $40 opens unchanged and keeps enforcing its own cap until the raise, and the user's late-evening completion authority added a third audited raise, $50 to $100, `budget.raise_judge_analysis_third_cap`; after that ceiling stopped the v2.3 pass, the user's October 18 decision "Just increase cap as much as needed to finish the analysis" added a fourth audited raise, $100 to $110, `budget.raise_judge_analysis_fourth_cap`, allowed with the unreconcilable uncertain holds still counted, and the judge-iteration decision of October 19 ("overall analysis cap can be $200") added a fifth, $110 to $200, `budget.raise_judge_analysis_fifth_cap`, likewise carrying the holds over; a ledger at an earlier judge cap opens unchanged, and the judge accepts only a ledger carrying all five raises), and a separate paid $2 for the live compatibility check (plan row "Live compatibility check", which supersedes the earlier unpaid-only, $0 compatibility cap). The ledger, not this file, enforces the caps. The shared ledger is `state/budget.sqlite`, and spending in it is never reset. |
-| `verified_integration` | `false` | The user's explicit confirmation of the live compatibility evidence. It is not sufficient alone: launch also needs the `compatibility` gate to pass on the evidence file (see below). Set it only after that evidence passes and the user has reviewed it. |
-| `paid_launch_enabled` | `false` | Set only by the user. A paid launch also requires `--launch-paid-pilot` and a typed confirmation of the remaining allowance. |
+| `run_budget_usd` | `"100"` | The run's budget in USD, for a pilot run (any track) and for the live compatibility check that reads this config. A request is admitted only if this run's committed spend (its own in-flight reservations, settled costs and uncertain holds, tagged by run id in `state/budget.sqlite`) plus the request's reservation fits it; the run then stops cleanly. When the key is absent (or null), the budget is $100 and the launch prints the budget it uses. Any positive amount is valid; an invalid value blocks launch (gate `run_budget`). |
+| superseded spending keys | absent | `max_pilot_usd`, `max_analysis_usd`, `max_compatibility_usd`, `verified_integration`, `paid_launch_enabled`, `allow_unlimited_provider_key`, `unlimited_provider_key_approval`, `provider_limit_max_age_hours`, `pilot_prior_settled_usd`, `pilot_additional_allowance_usd`, `pilot_prior_held_usd`, `pilot_prior_committed_usd`, `pilot_prior_uncertain_requests`, `pilot_prior_calls_sha256` and `behavior_judge_approval` belonged to the cumulative caps, attestations and approvals that the October 20, 2026 decision removed. No code reads them; a config that still names one gets a warning in the `run_budget` gate, never a refusal. |
+
+The shared ledger `state/budget.sqlite` stays the record of every request of every run (cumulative history per scope, reconciliation). Each run is registered there before its first request (`BudgetLedger.start_run`: run id, scope, budget, where the budget came from); a pilot run's id is its run directory's name, the compatibility check's `compat-<UTC>`, a judging run's `judge-<UTC>-<id>`. Holds and estimate violations of earlier runs count against their own runs and never block a new run. A hold whose process is gone is marked `uncertain` at the next run's start (still counted, reconcilable); an estimate violation is recorded and the run continues with its later reservations scaled up by the observed ratio, without any acknowledgement. The run's final state is written to `RUN/run-budget.json`.
 
 ## Automatic post-run behavior judge (October 20, 2026)
 
-The repository owner's standing approval (docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20, 2026)"): after the run's unpaid follow-ups, `scripts/supervise_run.py` runs the paid misbehavior judge (`scripts/run_transcript_judge.py --standing-approval-from-config CONFIG`) without the typed confirmation. Valid only for the owner's runs: the baseline ledger (no `budget_track`) or the owner's `gemini` budget track; the collaborator's `ablation` track (and any other value) is refused. Gate `behavior_judge` (`research_swarm.auto_judge.standing_approval_problems`) refuses an invalid combination at preflight; absent keys mean no automatic judge.
+After the run's follow-ups, `scripts/supervise_run.py` runs the paid misbehavior judge (`scripts/run_transcript_judge.py --run-config CONFIG`) when `auto_behavior_judge` is true, for any track (the owner's and the collaborator's runs alike). Gate `behavior_judge` (`research_swarm.auto_judge.judge_config_problems`) refuses only malformed values; absent keys mean no automatic judge.
 
 | Key | Value | Meaning |
 | --- | --- | --- |
-| `auto_behavior_judge` | `true` | Boolean. `true` runs the judge automatically after the run (supervisor only; a manual judge run still needs `--i-have-user-approval` and the typed confirmation, or this flag). |
-| `behavior_judge_approval` | recorded owner decision | Required nonempty note whenever `auto_behavior_judge` is true. Recorded with the judge's run limit (`state.json`) and in `RUN/analysis/judge/standing-approvals.json`. |
-| `behavior_judge_max_usd` | `50` | Per-run cap in USD: positive, at most $50 (`auto_judge.MAX_STANDING_JUDGE_USD`). The judge's run limit is the smallest of its automatic limit (2 x central estimate, or the largest-reservation rule), this cap and the analysis scope's remaining allowance; a run whose central estimate does not fit is refused before any request. The ledger's analysis cap (`max_analysis_usd`) still applies. |
+| `auto_behavior_judge` | `true` | Boolean. `true` runs the judge automatically after the run (supervisor only). A manual judge run needs no flag either: paid judging is `scripts/run_transcript_judge.py`'s default mode. |
+| `behavior_judge_max_usd` | `50` | The judging run's budget in USD: any positive amount, $50 when absent (`budget.DEFAULT_JUDGE_RUN_BUDGET_USD`). The judge stops cleanly when its next request would push its committed spend past it (`--run-limit` overrides it for a manual run). |
 
 ## Compatibility gate
 
-The paid pilot is blocked until `data/validation/compatibility-<UTC YYYYMMDDTHHMMSSZ>.json` exists and passes. `scripts/compat_check.py` writes it after the separate $2 live compatibility check: one agent running a few turns on the frozen route, reserving and settling in ledger scope `compatibility` of `state/budget.sqlite`. The check runs only after the plan's execution hold is lifted and the user confirms immediately before the paid call. The newest file must have:
+The paid pilot is blocked until `data/validation/compatibility-<UTC YYYYMMDDTHHMMSSZ>.json` exists and passes (research integrity: the frozen model and route work with Claude Code on the current agent image). `scripts/compat_check.py` writes it after the live compatibility check: one agent running a few turns on the frozen route, as one run with its own budget (`run_budget_usd` of the config it reads, else $100), reserving and settling in ledger scope `compatibility` of `state/budget.sqlite`. It needs no approval flag and asks no confirmation. The newest file must have:
 
 - `schema` `gdm-compatibility/1` and `all_required_passed: true`;
 - each required check present with `passed: true`: `tool_call_parsed`, `conference_tool_call`, `reasoning_replay_accepted`, `provider_cost_reported`, `completion_within_max_tokens`, `reasoning_cap_enforced`, `no_estimate_violation`, `route_pinned` and `no_sample_error`. `truncation_observed` and `compaction_observed` are informational; when they are missing or not passed, preflight shows a warning;
 - `model_id`, `provider_route` and `settings` equal to what `provider.settings_from_config` builds from this file;
-- `spent_usd` at most the $2 compatibility cap, and `requests` at least 1;
-- `request_ids`: the ledger request ids the check admitted, one per counted request;
+- `spent_usd` a nonnegative amount, and `requests` at least 1;
 - `image_ids.agent` equal to the current local `agent_image` ID. Rebuilding the agent image requires a new check.
 
-The shared ledger must also agree, in its current state rather than the totals frozen when the check ended. Every id in `request_ids` must be in scope `compatibility`, none may be unresolved (`reserved` or `uncertain`), none may have exceeded its reservation (`estimate_violation`, even if acknowledged later), and their settled costs must sum to at most $2. The scope as a whole must have no unresolved holds and no unacknowledged estimate violation. Reconciling an uncertain hold (`scripts/reconcile_ledger.py`) therefore unblocks the gate. Its lower reconciled cost does not conflict with the `spent_usd` recorded at run end, which counted the full reservation.
-
-A ledger created while the compatibility cap was $0 cannot be opened with the current caps, because the ledger never resets. After the user approves, raise it explicitly. The raise is recorded in the ledger's `cap_changes` table, and prior spending stays counted:
-
-```
-.venv/bin/python scripts/preflight.py --raise-ledger-cap compatibility \
-    --approval-note "User approved the $2 compatibility allowance in chat on <date>" --i-have-user-approval
-```
+The gate also reports the ledger's current state of the requests the check admitted (`request_ids`): ids missing from the ledger or outside scope `compatibility`, unresolved holds and requests billed above their reservation appear as warnings. None of them blocks launch, and no amount is compared with any allowance.
 
 ## Provider-side key limit
 
-The ledger enforces every allowance. A provider-side OpenRouter key limit is an additional safeguard (plan row "Approved spending limits"). `scripts/check_provider_limit.py` (unpaid, but it loads the credential, so it runs only with the user's approval) writes `provider-limit-<UTC>.json`. The `provider_limit` gate requires a fresh passing record: a limit is set, it does not reset, `limit_remaining` is within the cap, and it does not exceed the remaining pilot allowance.
-
-That evidence is not bound to a key. `secrets.load_openrouter_key` prefers an exported `OPENROUTER_API_KEY` over the host `.env`, so the key that was checked can differ from the key a later launch loads. The binding check therefore happens live. Right after the paid launch (`runtime.run_pilot`) or the paid compatibility check loads its key, and before any paid request, it calls `provider_limit.verify_key_limit` (an unpaid `GET /api/v1/key`). The call refuses the key if `limit` is null, if `limit_reset` is not null, or if `limit_remaining` exceeds that scope's remaining ledger allowance. The returned numbers, without the key, are recorded in the run's `runtime.jsonl` and `settings.json`.
-
-Because each check is against its own scope's allowance, the $2 compatibility check needs a key with at most the remaining compatibility allowance left, and the $20 pilot needs a key with at most the remaining pilot allowance left. Use separate keys for the two steps, or adjust the key's limit between them (for example, a $2 limit for the compatibility check, then a limit of the compatibility usage plus the remaining pilot allowance before the pilot). Re-run `scripts/check_provider_limit.py` for the pilot key afterwards (`--max-limit-usd 2` checks a compatibility key).
+Informational only (owner decision, October 20, 2026): the run's budget is the spending control. Right after a paid path loads its key (`runtime.run_pilot`, the compatibility check, the behavior judge) and before any paid request, it records the key's provider-side limit with an unpaid `GET /api/v1/key` (`provider_limit.key_limit_record`); the pilot and the compatibility check also refresh `data/validation/provider-limit-<UTC>.json`. A key without a limit, a resetting limit, a remaining amount above or below the run's budget, an expiry or a failed query only adds warnings; nothing is refused. `scripts/check_provider_limit.py` writes the same record on demand without any flag. The `provider_limit` gate reports the newest record and never fails. The numbers (never the key, a key hash or the key label) are recorded in the run's `runtime.jsonl` and `settings.json`.
 
 ## Compatibility retries (October 14, 2026)
 
@@ -136,7 +124,7 @@ context/input rejections that Inspect converts into usage-less `model_length` or
 Claude Code's existing bounded retries; no extra SDK or guard retry loop is introduced.
 An exact recorded transient error followed by a successful, provider-priced response
 from the same agent may pass the compatibility evidence checks. Terminal/unknown
-errors and unresolved billing still block readiness. A single proof rejection or
+errors still block readiness (unresolved billing is reported, never blocking). A single proof rejection or
 rate-limit response does not stop the full pilot; its retry behavior is unchanged.
 
 ## Capacity evidence settings (October 14, 2026)
@@ -156,14 +144,18 @@ and does not by itself fail a capacity run whose required workload checks pass.
 
 ## Other evidence gates
 
-Besides the evidence gates, `research_swarm.launch_gates` checks the config itself: `fixed_task_manifest`, `frozen_dataset`, `approved_settings` (the plan values above, plus `max_connections` equal to `agent_count`), `seeded_track` (no seeded configuration), `config_caps`, `ledger`, `credential_presence` (presence only, never read), `verified_integration` and `paid_launch_enabled`.
+Besides the evidence gates, `research_swarm.launch_gates` checks the config itself: `fixed_task_manifest`, `frozen_dataset`, `approved_settings` (the plan values above, plus `max_connections` equal to `agent_count` and the recorded `prompt_cache_normalization`), `seeded_track` (no seeded configuration), `run_budget` (a valid `run_budget_usd`, or the $100 default), `behavior_judge`, and `credential_presence` (presence only, never read). The `ledger` and `provider_limit` gates are informational and never fail.
 
-`research_swarm.launch_gates` also requires the newest `declarations`, `judge`, `timing`, `reuse`, `conference-race`, `evaluator`, `runtime-e2e`, `runtime-isolation`, `runtime-capacity`, `route-pricing` and `provider-limit` evidence files. The checks beyond `all_required_passed` and image IDs are:
+`research_swarm.launch_gates` also requires the newest `declarations`, `judge`, `timing`, `reuse`, `conference-race`, `evaluator`, `runtime-e2e`, `runtime-isolation`, `runtime-capacity`, `route-pricing` and `compatibility` evidence files. The checks beyond `all_required_passed` and image IDs are:
 
 - **`declarations`, `judge`, `timing` and `conference-race`:** `complete` must be `true`, which means a full run: every pilot task (for `conference-race`, every scenario), the strict variant where applicable, and no `--only`, `--skip-*`, task-subset or custom-workload flags. `limits` (`timeout_seconds`, `memory`, `cpus` actually used for judge-path compiles) must equal `compilation_timeout_seconds`, `judge_memory` and `judge_cpus` here. A partial run, or one at other limits, cannot satisfy the gate. `scripts/validate_conference.py` takes these limits from `--config` (default `configs/pilot.json`), as `validate_judge.py` and `validate_dataset.py` do.
 - **`runtime-e2e`, `runtime-isolation` and `runtime-capacity`:** `compose_sha256` must equal `runtime.compose_fingerprint(config, current agent image ID)`, the SHA-256 of the compose file a launch would write. Changing the generated compose file (for example its mounts, network or privileges), `agent_memory` or `agent_cpus`, or the agent image invalidates the evidence.
 - **`runtime-e2e` and `runtime-isolation`:** named check keys must be present and passed (`REQUIRED_EVIDENCE_CHECKS`; per-agent `ISOLATION_AGENT_CHECKS` for at least two agents). This means a record from an older script version cannot satisfy the gate. The e2e list includes `background_lean_killed_at_120s`, which an offline rehearsal or `--skip-background-lean-check` records as skipped, and both lists include `compose_matches_fingerprint`; the per-agent list includes `cgroup_limits_match_compose`.
 - **`evaluator`:** the record must also pass `evaluator.validation_status()`, which checks the fixture manifest, pins, seccomp profile and comparator image. It must also contain a passing self-comparison for every pilot template, plus the answer bridge for answer-based tasks (`scripts/validate_evaluator.py --pilot-self-compare`).
+
+## Historical cumulative caps (superseded October 20, 2026)
+
+The three sections below describe the cumulative ledger caps and their launch bindings that the per-run budget replaced (see "Run budget"). They are kept as the record of those runs; none of their keys is read any more.
 
 ### First fresh baseline repetition, October 15, 2026 (historical)
 
@@ -179,7 +171,7 @@ already included in the new total remaining $100, not added on top. Analysis and
 compatibility caps remain separate $5 and $2. `paid_launch_enabled` stays false
 until the integrator completes the approved run's checks.
 
-### Fresh 8 GiB baseline, October 15, 2026
+### Fresh 8 GiB baseline, October 15, 2026 (historical)
 
 The user authorized `agent_memory: "8g"` and another fresh $100 shared allowance.
 The cumulative ledger cap is $208.055621674: prior settled $105.727998474 plus
@@ -193,7 +185,7 @@ rather than added to the new run's $100. Fresh runtime, isolation and capacity
 evidence at 8 GiB are required. All other experiment and judge settings remain
 unchanged, and paid launch stays disabled until full preflight passes.
 
-## Cached-counter repetition, October 15, 2026
+### Cached-counter repetition, October 15, 2026 (historical)
 
 The user authorized one fresh 20-agent run with the `counter-user-v1` correction
 and a new shared $100 allowance. `max_pilot_usd` is $307.809660142 cumulatively:

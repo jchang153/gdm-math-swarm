@@ -229,6 +229,11 @@ class RunLimitPipelineTests(unittest.TestCase):
             self.assertEqual((summary["status"], summary["stop"]["reason"]), ("stopped", "run_limit"))
             self.assertLess(len(first.transport.requests), full)
             self.assertLessEqual(Decimal(limit.record()["committed_usd"]), Decimal("0.05"))
+            # The ledger registered the invocation as one run with the same budget and enforced it too.
+            from research_swarm.budget import read_run
+            run = read_run(first.root / "ledger.sqlite", limit.run_id)
+            self.assertEqual((run["scope"], run["budget_usd"]), ("rehearsal", "0.05"))
+            self.assertLessEqual(Decimal(run["committed_usd"]), Decimal("0.05"))
             state = read(first.judge_dir / "state.json")["invocations"][-1]
             self.assertEqual((state["run_limit"]["limit_usd"], state["run_limit"]["source"]), ("0.05", "override"))
             self.assertGreater(state["run_limit"]["denied"], 0)
@@ -384,7 +389,10 @@ class CommandLineTests(unittest.TestCase):
                    mock.patch("research.analysis.judge.history.build_run",
                               lambda run_dir, agents=None, **kwargs: self.run),
                    # Rebuild in this process (worker processes would not see the patched build_run).
-                   mock.patch("research.analysis.judge.history.default_history_workers", return_value=1)]
+                   mock.patch("research.analysis.judge.history.default_history_workers", return_value=1),
+                   # The paid path's automatic pricing refresh is unpaid but networked: recorded, never run.
+                   mock.patch.object(self.cli, "refresh_pricing",
+                                     lambda args, **kwargs: getattr(self, "refreshes", []).append(args))]
         with contextlib.ExitStack() as stack:
             for patch in patches:
                 stack.enter_context(patch)
@@ -442,24 +450,29 @@ class CommandLineTests(unittest.TestCase):
             def prepare(self):
                 raise Stop()
 
-        snapshot = {"analysis": {"remaining_usd": "150.000000000", "cap_usd": "200"}}
+        self.refreshes = []
         with mock.patch.object(sys.stdin, "isatty", return_value=False), \
-                mock.patch("research_swarm.budget.judge_analysis_problems", return_value=[]), \
-                mock.patch("research_swarm.budget.read_snapshot", return_value=snapshot), \
                 mock.patch.object(self.cli, "route_settings", return_value=JudgeRouteSettings.defaults(
                     pricing_verified=True)), \
                 mock.patch("research.analysis.judge.client.JudgeClient", FakeClient), \
                 mock.patch("builtins.input", side_effect=AssertionError("no typed confirmation")), \
                 mock.patch.object(est, "plan_invocation", side_effect=AssertionError("no estimate")):
-            with self.assertRaises(Stop):
-                self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"),
-                          "--output-dir", str(self.judge_dir))
+            with self.assertRaises(Stop):  # paid judging is the default mode: no approval flag
+                self.call("--ledger", str(self.tmp / "ledger.sqlite"), "--output-dir", str(self.judge_dir))
         limit = created[0]["run_limit"]
         self.assertEqual((limit.limit, limit.source), (Decimal("50"), "default"))
+        self.assertEqual(len(self.refreshes), 1)  # the route pricing record is refreshed automatically when needed
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            self.cli.parse_args(["--run-dir", str(self.run_dir), "--i-have-user-approval"])
 
-    def test_default_limit_is_clamped_to_the_remaining_allowance(self):
-        limit = self.cli.fixed_run_limit(None, None, {"analysis": {"remaining_usd": "12.5"}})
-        self.assertEqual((limit["limit_usd"], limit["basis"]), ("12.5", "analysis_remaining"))
+    def test_default_limit_is_fifty_and_never_clamped(self):
+        self.assertEqual(self.cli.fixed_run_limit(None), {"limit_usd": "50", "source": "default", "basis": "default"})
+        config = {"max_usd": "120", "budget_source": "config behavior_judge_max_usd"}
+        self.assertEqual(self.cli.fixed_run_limit(None, config),
+                         {"limit_usd": "120", "source": "run_config", "basis": "config behavior_judge_max_usd"})
+        self.assertEqual(self.cli.fixed_run_limit(Decimal("300"), config)["limit_usd"], "300")  # --run-limit wins
+        default = {"max_usd": "50", "budget_source": "default"}
+        self.assertEqual(self.cli.fixed_run_limit(None, default)["source"], "default")
 
     def test_paid_clients_share_the_run_limit(self):
         created = []
@@ -474,16 +487,11 @@ class CommandLineTests(unittest.TestCase):
             def prepare(self):
                 raise Stop()
 
-        snapshot = {"analysis": {"remaining_usd": "150.000000000"}}
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-                mock.patch("research_swarm.budget.judge_analysis_problems", return_value=[]), \
-                mock.patch("research_swarm.budget.read_snapshot", return_value=snapshot), \
-                mock.patch.object(self.cli, "route_settings", return_value=JudgeRouteSettings.defaults(
+        with mock.patch.object(self.cli, "route_settings", return_value=JudgeRouteSettings.defaults(
                     pricing_verified=True)), \
-                mock.patch("research.analysis.judge.client.JudgeClient", FakeClient), \
-                mock.patch("builtins.input", return_value="150.000000000"):
+                mock.patch("research.analysis.judge.client.JudgeClient", FakeClient):
             with self.assertRaises(Stop):
-                self.call("--i-have-user-approval", "--ledger", str(self.tmp / "ledger.sqlite"), "--output-dir",
+                self.call("--ledger", str(self.tmp / "ledger.sqlite"), "--output-dir",
                           str(self.judge_dir), "--run-limit", "9")
         limits = {id(kwargs["run_limit"]) for kwargs in created}
         self.assertEqual(len(created), 3)

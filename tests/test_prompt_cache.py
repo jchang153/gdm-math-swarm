@@ -118,6 +118,11 @@ class BudgetFilterIntegrationTests(unittest.IsolatedAsyncioTestCase):
         from pathlib import Path
         from inspect_ai.model import ChatMessageSystem, ChatMessageUser, GenerateConfig, ModelOutput, ModelUsage
         from research_swarm.budget import BudgetLedger
+
+        def run_ledger(path, budget):
+            ledger = BudgetLedger(path)
+            ledger.start_run("test-run", "validation", budget)
+            return ledger
         from research_swarm.inspect_adapter import budget_filter
         from research_swarm.provider import ProviderSettings
         from research_swarm.runtime import StartBarrier
@@ -141,7 +146,7 @@ class BudgetFilterIntegrationTests(unittest.IsolatedAsyncioTestCase):
         settings = ProviderSettings(pricing_verified=True)
         archive, model = Archive(), FakeModel()
         with tempfile.TemporaryDirectory() as folder:
-            ledger = BudgetLedger(Path(folder) / "budget.sqlite", {"validation": 1})
+            ledger = run_ledger(Path(folder) / "budget.sqlite", 1)
             intercept = budget_filter("agent-001", ledger, settings, StartBarrier(1),
                                       lambda *args: events.append(args), scope="validation", archive=archive)
             await intercept(model, messages, [], None, GenerateConfig())

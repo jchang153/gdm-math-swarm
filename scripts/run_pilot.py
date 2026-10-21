@@ -1,27 +1,22 @@
 #!/usr/bin/env python3
 """Pilot launcher. By default it runs the unpaid preflight only and spends nothing.
 
-A PAID launch (20 Claude Code peers on OpenRouter, shared cumulative pilot ledger) requires
-all of the following, in addition to every launch gate passing (including the
-compatibility evidence from the separate $2 live compatibility check; that check
-spends its own ledger scope, never the pilot's):
+``--launch-paid-pilot`` starts the PAID run (20 Claude Code peers on OpenRouter) when every
+launch gate passes. Spending has one control, the run's own budget (owner decisions,
+docs/plan.md "One per-run budget, no manual approvals (October 20, 2026)"): ``run_budget_usd``
+in the config, else the $100 default; the launch prints the budget it uses, and every request
+is admitted only while the run's committed spend plus the request's reservation fits it. There
+is no typed confirmation, approval flag or interactive terminal.
 
-1. ``paid_launch_enabled: true`` in the config, set by the user;
-2. ``--launch-paid-pilot`` on the command line;
-3. typing the displayed remaining pilot allowance at the confirmation prompt. ``--yes``
-   skips the prompt and may be used only when the user approved this exact launch.
-
-``runtime.run_pilot`` then re-runs its own fail-closed preflight, loads the host
-credential (host process only; never containers) and, before any paid request,
-re-verifies the provider-side limit of the key it actually loaded
-(``provider_limit.verify_key_limit``: an unpaid GET /api/v1/key; the limit must be
-set, must not reset, and its ``limit_remaining`` must not exceed the remaining pilot
-allowance). The ``provider-limit`` evidence alone is not bound to that key, because an
-exported ``OPENROUTER_API_KEY`` wins over the host .env. A refused key ends the
-launch with exit code 2 before any paid call. Then the run starts.
+Before the gates, a paid launch refreshes the route-pricing freeze automatically when it is
+missing, older than ``route_pricing_max_age_hours`` or frozen for other settings
+(scripts/freeze_route.py: unpaid public catalog, no credential). ``runtime.run_pilot`` then
+re-runs its own fail-closed preflight, registers the run and its budget in the shared ledger,
+loads the host credential (host process only; never containers) and records the loaded key's
+provider-side limit (unpaid ``GET /api/v1/key``, informational) before any paid request.
 
     .venv/bin/python scripts/run_pilot.py                      # preflight only
-    .venv/bin/python scripts/run_pilot.py --launch-paid-pilot  # paid, after approval
+    .venv/bin/python scripts/run_pilot.py --launch-paid-pilot  # paid
 """
 from __future__ import annotations
 import argparse
@@ -29,14 +24,13 @@ import asyncio
 import datetime
 import json
 import sys
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
-from preflight import collect, money, render, render_spending, spending_checkpoint  # noqa: E402
-from research_swarm.budget import DEFAULT_CAPS, DEFAULT_LEDGER_PATH  # noqa: E402
+from preflight import collect, render, render_spending, spending_checkpoint  # noqa: E402
+from research_swarm.budget import DEFAULT_LEDGER_PATH  # noqa: E402
 
 
 def log_locations(run_dir, repo_root):
@@ -52,57 +46,32 @@ def log_locations(run_dir, repo_root):
         "conference_events": str(run_dir / "conference" / "events.jsonl"),
         "settings_and_preflight": str(run_dir / "settings.json"),
         "effective_instructions": str(run_dir / "instructions"),
+        "run_budget": str(run_dir / "run-budget.json"),
         "budget_final": str(run_dir / "budget-final.json"),
         "shared_ledger": str(DEFAULT_LEDGER_PATH(repo_root)),
         "post_run_evaluation": f".venv/bin/python scripts/evaluate_run.py --run-dir {run_dir}",
     }
 
 
-def confirm(remaining, ask=input):
-    """True only if the operator types the remaining pilot allowance exactly."""
-    answer = ask(f"Remaining pilot allowance is {money(remaining)} (cap ${DEFAULT_CAPS['pilot']}, shared by all 20 "
-                 f"agents; the ${DEFAULT_CAPS['compatibility']} compatibility and ${DEFAULT_CAPS['analysis']} analysis "
-                 "allowances are separate). Type that amount in USD to start the PAID pilot, anything else aborts: ")
-    try:
-        return Decimal(answer.strip().lstrip("$").replace(",", "")) == Decimal(str(remaining))
-    except (InvalidOperation, AttributeError):
-        return False
-
-
-def launch_decision(config, report, args):
-    """(allowed, reason) for a paid launch; pure so it can be tested offline."""
-    if not args.launch_paid_pilot:
-        return False, "preflight only (pass --launch-paid-pilot for a paid launch)"
-    if config.get("paid_launch_enabled") is not True:
-        return False, "config paid_launch_enabled is not true"
-    if not report["ready"]:
-        return False, "launch gates are blocked"
-    return True, "all launch conditions met"
-
-
-def main(argv=None, ask=input, run=None):
+def main(argv=None, run=None, refresh=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--config", type=Path, default=ROOT / "configs" / "pilot.json")
     parser.add_argument("--launch-paid-pilot", action="store_true", help="start the paid pilot if every gate passes")
-    parser.add_argument("--yes", action="store_true", help="skip the typed confirmation (user-approved launch only)")
     args = parser.parse_args(argv)
     config = json.loads(args.config.read_text())
+    if args.launch_paid_pilot:
+        if refresh is None:
+            from freeze_route import refresh_if_needed as refresh
+        refresh(config, args.config)
     report = collect(config, ROOT)
     print(render(report))
-    allowed, reason = launch_decision(config, report, args)
-    if not allowed:
-        print(f"Not launching: {reason}. No paid call was made.")
-        if args.launch_paid_pilot:
-            return 2
+    if not args.launch_paid_pilot:
+        print("Preflight only (pass --launch-paid-pilot for a paid launch). No paid call was made.")
         return 0 if report["ready"] else 1
-    remaining = report["spending"]["scopes"]["pilot"]["remaining_usd"]
-    if not args.yes:
-        if not sys.stdin.isatty() and ask is input:
-            print("Not launching: confirmation needs an interactive terminal (or --yes after user approval).")
-            return 2
-        if not confirm(remaining, ask):
-            print("Not launching: confirmation did not match. No paid call was made.")
-            return 2
+    if not report["ready"]:
+        print("Not launching: launch gates are blocked. No paid call was made.")
+        return 2
+    print(report["spending"]["run_budget"]["line"])
     config = dict(config)
     if not config.get("run_dir"):  # explicit, so the log locations below are exact
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -112,16 +81,11 @@ def main(argv=None, ask=input, run=None):
     if run is None:
         from research_swarm.runtime import run_pilot
         run = run_pilot
-    from research_swarm.provider_limit import ProviderLimitError
     try:
         asyncio.run(run(config, ROOT))
-    except ProviderLimitError as ex:  # raised by the live key check, before any paid request
-        print(f"Not launching: the provider-side limit of the loaded key was refused ({ex}). No paid call was made; "
-              "set a non-resetting key limit no larger than the remaining pilot allowance (configs/README.md).")
-        return 2
     finally:
         print("Run ended. Logs:\n" + json.dumps(locations, indent=2))
-        print("\n".join(render_spending(spending_checkpoint(ROOT))))  # post-run spending checkpoint
+        print("\n".join(render_spending(spending_checkpoint(ROOT, config=config))))  # post-run spending checkpoint
     return 0
 
 

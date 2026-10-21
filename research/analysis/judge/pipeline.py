@@ -4079,8 +4079,8 @@ def project_costs(per_agent, settings, route_settings, assumptions, cap_usd=Deci
     (inputs x ``tokenizer_factor_high``), ``stress`` (high inputs, outputs and the flagged share x
     ``output_factor_stress``); each also gives the total with prompt caching of the Sonnet/Opus
     system prompts (``total_usd_with_prompt_cache``, also ``expected_usd``), which ``fits_cap``
-    compares with the analysis cap and ``fits_remaining`` with the ledger's remaining allowance
-    when known. Candidate mode is projected by ``project_costs_candidates``."""
+    compares with ``cap_usd`` (the judging run's budget) and ``fits_remaining`` with
+    ``remaining_usd`` when given. Candidate mode is projected by ``project_costs_candidates``."""
     if settings.judge_mode == "candidates":
         return project_costs_candidates(per_agent, settings, route_settings, assumptions, cap_usd=cap_usd,
                                         remaining_usd=remaining_usd, agents_in_run=agents_in_run)

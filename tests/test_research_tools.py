@@ -39,12 +39,16 @@ def make_run(root):
                      "INSERT INTO posts VALUES (1);")
     db.commit()
     db.close()
-    ledger = BudgetLedger(phase / "budget.sqlite", {"pilot": 100})
-    ledger.settle(ledger.reserve("pilot", "old", 10), 10)  # a prior run's spending
+    prior = BudgetLedger(phase / "budget.sqlite")
+    prior.start_run("prior-run", "pilot", 100)
+    prior.settle(prior.reserve("pilot", "old", 10), 10)  # a prior run's spending
     shutil.copy(phase / "budget.sqlite", phase / "budget-before-launch.sqlite")
+    ledger = BudgetLedger(phase / "budget.sqlite")
+    ledger.start_run(run.name, "pilot", 20)  # this run's own budget
     ledger.settle(ledger.reserve("pilot", "agent-001", 5), 4)
     ledger.reserve("pilot", "agent-001", 2)  # still held
     return run, phase
+
 
 
 class MonitorRunTest(unittest.TestCase):
@@ -55,11 +59,11 @@ class MonitorRunTest(unittest.TestCase):
             summary = monitor_run.summarize(run, ledger=phase / "budget.sqlite", now=START + 3600)
             self.assertEqual({p: p.read_bytes() for p in before}, before)
         spend = summary["spend"]
-        self.assertEqual((spend["source"], spend["baseline_committed_usd"]), ("ledger", "10"))
+        self.assertEqual((spend["source"], spend["run_id"], spend["budget_usd"]), ("ledger", run.name, "20"))
         self.assertEqual((spend["run_settled_usd"], spend["run_committed_usd"]), ("4", "6"))
-        self.assertEqual((spend["remaining_usd"], spend["run_allowance_usd"]), ("84", "90"))
+        self.assertEqual((spend["remaining_usd"], spend["unresolved_requests"]), ("14", 1))
         self.assertEqual(spend["settled_usd_per_hour"], "4.00")
-        self.assertEqual(spend["eta_hours"], 21.0)
+        self.assertEqual(spend["eta_hours"], 3.5)
         self.assertEqual((summary["elapsed_seconds"], summary["max_run_seconds"]), (3600, 7200))
         self.assertEqual(summary["requests"], {"admitted": 1, "finished": 1, "uncertain": 0})
         self.assertEqual((summary["restarts"], summary["exits"]), (1, 1))
@@ -69,10 +73,21 @@ class MonitorRunTest(unittest.TestCase):
         self.assertEqual(conf["submissions"], {"accepted": 1, "rejected": 2})
         text = monitor_run.render(summary)
         self.assertIn("elapsed 60m of 120m", text)
-        self.assertIn("baseline $10 at launch", text)
+        self.assertIn(f"run {run.name} from ledger: budget $20.00", text)
+        self.assertIn("$14.00 left", text)
         self.assertIn("solved 1/2", text)
 
+    def test_final_run_budget_record_without_a_ledger(self):
+        with tempfile.TemporaryDirectory() as folder:
+            run, phase = make_run(Path(folder))
+            (run / "run-budget.json").write_text(json.dumps({
+                "run_id": run.name, "scope": "pilot", "budget_usd": "20", "committed_usd": "7", "settled_usd": "7",
+                "remaining_usd": "13", "unresolved_requests": 0, "estimate_violations": 0}))
+            summary = monitor_run.summarize(run, phase_dir=phase, now=START + 3600)
+        self.assertEqual((summary["spend"]["source"], summary["spend"]["remaining_usd"]), ("run-budget.json", "13"))
+
     def test_checkpoint_fallback_without_baseline(self):
+        # Runs from before per-run budgets: cumulative caps and a launch baseline.
         with tempfile.TemporaryDirectory() as folder:
             run, phase = make_run(Path(folder))
             (phase / "budget-before-launch.sqlite").unlink()

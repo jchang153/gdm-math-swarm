@@ -24,28 +24,29 @@ enter agent containers.
   # Unpaid rehearsal with the deterministic mock model; output OUTSIDE the run directory.
   PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> --mock \
       --output-dir <scratch>/<run>/analysis/judge
-  # Paid judging (GCP VM, authoritative ledger; docs/gcp-vm.md, docs/validation.md).
-  PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> --i-have-user-approval \
-      [--credentials-root /path/to/main/checkout] [--run-limit USD]
+  # Paid judging (the default mode; GCP VM, authoritative ledger; docs/gcp-vm.md, docs/validation.md).
+  PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> \
+      [--credentials-root /path/to/main/checkout] [--run-limit USD | --run-config CONFIG]
   # Re-apply host facts (e.g. new evaluator verdicts) from cached units only: no model calls.
   PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> --rescore-cached
   # Switch an existing judge directory of this revision from package mode to candidate judging,
   # reusing its paid prefilter units: the old judge outputs move to analysis/judge/superseded/
   # (never a v2.x directory: v3 refuses those).
-  PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> --i-have-user-approval \
+  PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> \
       --judge-mode candidates --upgrade-judge-revision
 
-No estimate, no typed confirmation (owner decision, October 20, 2026: "Don't require estimates for
-anything"). Every judging invocation (--mock or paid) has a fixed run limit: --run-limit USD, else
-the standing approval's behavior_judge_max_usd (--standing-approval-from-config CONFIG), else $50,
-clamped to the analysis scope's remaining allowance. It never sends a request that would push its
-committed spend (in-flight holds, settled and uncertain costs) past that limit, and stops cleanly
-instead (stop reason run_limit; a resume pays nothing twice); the ledger's cap applies as well.
---mock, --dry-run-estimate (optional, never required) and --rescore-cached never load credentials,
-never call a real model and never write the authoritative ledger. A paid run needs
---i-have-user-approval (or the standing approval), the applied audited analysis raises
-(budget.judge_analysis_problems) and a fresh judge route pricing record
-(scripts/freeze_judge_route.py, at most 72 h old).
+No estimate, no confirmation and no approval flag (owner decisions, October 20, 2026: "Don't
+require estimates for anything"; docs/plan.md "One per-run budget, no manual approvals (October 20,
+2026)"). Every judging invocation (--mock or paid) is one run with its own budget, its fixed run
+limit: --run-limit USD, else the run config's behavior_judge_max_usd (--run-config CONFIG), else
+$50. It never sends a request that would push its committed spend (in-flight holds, settled and
+uncertain costs) past that budget, and stops cleanly instead (stop reason run_limit; a resume pays
+nothing twice); the ledger registers the invocation as one run with the same budget. There is no
+cumulative analysis cap. --mock, --dry-run-estimate (optional, never required) and
+--rescore-cached never load credentials, never call a real model and never write the
+authoritative ledger. A paid run refreshes the judge route pricing record automatically when it
+is missing or older than 72 h (scripts/freeze_judge_route.py, unpaid public catalog); a record that
+no longer validates for the pinned route is refused.
 """
 
 import argparse
@@ -103,14 +104,10 @@ def parse_args(argv=None):
     mode.add_argument("--rescore-cached", action="store_true",
                       help="recompute host stages from cached model units only (no model calls), e.g. after new "
                            "evaluator verdicts for closed submissions")
-    parser.add_argument("--i-have-user-approval", action="store_true",
-                        help="required for a paid (non-mock) run; an interactive confirmation follows")
-    parser.add_argument("--standing-approval-from-config", type=Path, metavar="CONFIG",
-                        help="paid run without the typed confirmation, under the owner's standing approval recorded in "
-                             "this run config (auto_behavior_judge true, behavior_judge_approval, "
-                             "behavior_judge_max_usd <= 50; baseline or gemini budget track only): the run limit is "
-                             "clamped to the config's cap and the analysis scope's remaining allowance; every other "
-                             "refusal stays")
+    parser.add_argument("--run-config", "--standing-approval-from-config", dest="run_config", type=Path,
+                        metavar="CONFIG",
+                        help="paid run: the judged run's config; its behavior_judge_max_usd (any positive amount, "
+                             "else $50) is this judging run's budget unless --run-limit is given (any track)")
     parser.add_argument("--stage", default="report", help="run every stage up to and including this one: "
                         "history, prefilter, judge, verify, host, closed, runlevel, report (default)")
     parser.add_argument("--agents", action="append", help="agent subset, comma separated (repeatable)")
@@ -181,11 +178,9 @@ def parse_args(argv=None):
                              "Never applies to a v2.x judge directory (rubric gdm-judge-rubric/2), which judge revision "
                              "v3 refuses")
     parser.add_argument("--run-limit", type=_usd, metavar="USD",
-                        help="this judging invocation's own spending limit (paid or mock): no request is sent that "
-                             "would push the invocation's committed spend (in-flight holds plus settled and uncertain "
-                             "costs) past it; default the standing approval's cap or $50, clamped to the analysis "
-                             "allowance. No estimate is made. The ledger's cap applies as well")
-    parser.add_argument("--mock-cap", default="50", help="rehearsal ledger cap in USD (mock only)")
+                        help="this judging invocation's budget (paid or mock): no request is sent that would push the "
+                             "invocation's committed spend (in-flight holds plus settled and uncertain costs) past it; "
+                             "default the --run-config's behavior_judge_max_usd, else $50. No estimate is made")
     parser.add_argument("--estimate-output", type=Path, help="write the full estimate JSON here")
     parser.add_argument("--estimate-fractions", default="0.02,0.05,0.10,0.20")
     return parser.parse_args(argv)
@@ -227,17 +222,60 @@ class RouteRefused(Exception):
     pass
 
 
+def record_age_hours(path):
+    """Age of a judge route pricing record from its ``created_at`` (None when unreadable)."""
+    import datetime
+    try:
+        created = datetime.datetime.fromisoformat(str(json.loads(Path(path).read_text())["created_at"])
+                                                  .replace("Z", "+00:00"))
+        created = created if created.tzinfo else created.replace(tzinfo=datetime.timezone.utc)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return (datetime.datetime.now(datetime.timezone.utc) - created).total_seconds() / 3600
+
+
+def refresh_pricing(args, *, freeze=None, log=None):
+    """Before a paid run: refresh the judge route pricing record (scripts/freeze_judge_route.py,
+    unpaid public catalog, no credential) when the newest one is missing or older than the route's
+    72 h window. An explicit --pricing-record is used as given. Never raises (a failed refresh is
+    reported and the newest record is used). Returns the reason it refreshed, or None."""
+    from research.analysis.judge.route import DEFAULT_MAX_AGE_HOURS
+    log = log or (lambda message: print(message, file=sys.stderr, flush=True))
+    if args.pricing_record:
+        return None
+    record = pricing_record(args)
+    age = None if record is None else record_age_hours(record)
+    if record is not None and age is not None and 0 <= age <= DEFAULT_MAX_AGE_HOURS:
+        return None
+    reason = "no judge route pricing record" if record is None else (
+        f"the newest judge route pricing record is {'of unknown age' if age is None else f'{age:.1f} h old'}")
+    log(f"Refreshing the judge route pricing record ({reason}; unpaid public catalog, no credential).")
+    try:
+        if freeze is None:
+            if str(ROOT / "scripts") not in sys.path:
+                sys.path.insert(0, str(ROOT / "scripts"))
+            from freeze_judge_route import main as freeze
+        if freeze([]):
+            log("The refreshed judge route pricing record did not validate (see the record).")
+    except Exception as error:  # e.g. no network: the newest record is used
+        log(f"Judge route pricing refresh failed ({type(error).__name__}: {error}); using the newest record.")
+    return reason
+
+
 def route_settings(args, *, paid):
-    """Frozen route settings: a fresh record for a paid run; offline modes accept a stale
-    record (prices only) and fall back to the observed defaults only when no record exists.
-    A record that does not validate (for example one predating the Sonnet route) is refused."""
+    """Frozen route settings. A paid run uses the newest record after ``refresh_pricing`` (a record
+    still stale after a failed refresh is used, with its age in the run's route description);
+    offline modes accept a stale record (prices only) and fall back to the observed defaults only
+    when no record exists. A record that does not validate (for example one predating the Sonnet
+    route) is refused."""
     from research.analysis.judge.route import JudgeRouteSettings
     record = pricing_record(args)
     try:
         if paid:
             if record is None:
-                raise RouteRefused("no judge route pricing record; run scripts/freeze_judge_route.py first")
-            return JudgeRouteSettings.from_pricing_record(record)
+                raise RouteRefused("no judge route pricing record (the automatic refresh with "
+                                   "scripts/freeze_judge_route.py did not write one)")
+            return JudgeRouteSettings.from_pricing_record(record, allow_stale=True)
         if record is not None:  # frozen prices for the projection/rehearsal; freshness not required offline
             return JudgeRouteSettings.from_pricing_record(record, allow_stale=True)
     except (ValueError, OSError) as error:
@@ -354,7 +392,7 @@ def print_candidate_estimate(result, out=None):
           f"= high inputs, outputs and findings x {assumptions['output_factor_stress']:g}. 'recall-only' = no prefilter "
           "selection (keyword recall and submissions only: a lower bound); 'actual' = the cached Haiku selections of "
           "the judge directory. The fit column compares central and high with "
-          + ("the ledger's remaining analysis allowance." if remaining is not None else "the analysis cap."), file=out)
+          + ("the remaining allowance." if remaining is not None else "this judging run's budget."), file=out)
     print("largest reservation per request: " + ", ".join(f"{k} ${v}" for k, v in
                                                          projection["largest_reservation_usd"].items())
           + "; at full concurrency: " + ", ".join(f"{k} ${v}" for k, v in
@@ -363,8 +401,8 @@ def print_candidate_estimate(result, out=None):
 
 def print_invocation_estimate(estimate, limit, out=None, *, analysis=None, note=None):
     """What one judging invocation would send now (``estimate.plan_invocation``; cached units
-    free) with its central, high and stress cost, the run limit it gets and, for a paid run, the
-    analysis scope's remaining allowance."""
+    free) with its central, high and stress cost, the run limit it gets and the analysis scope's
+    history in the ledger."""
     from research.analysis.judge.estimate import STAGES
     out = out or sys.stdout
     columns = estimate["columns"]
@@ -410,9 +448,7 @@ def print_invocation_estimate(estimate, limit, out=None, *, analysis=None, note=
     largest = estimate.get("largest_reservation_usd") or {}
     if largest:
         print("  largest single reservation: " + ", ".join(f"{k} ${v}" for k, v in largest.items()), file=out)
-    rule = ("standing approval: the smallest of the automatic limit, the config's cap and the analysis allowance"
-            if limit["source"] == "standing_approval" else
-            "--run-limit override" if limit["source"] != "estimate" else
+    rule = ("--run-limit override" if limit["source"] != "estimate" else
             f"central ${limit['central_usd']} + {limit['reservation_margin']} x the largest single reservation "
             f"${limit['largest_reservation_usd']}, above {limit['factor']} x central so that request can be admitted"
             if limit.get("basis") == "largest_reservation" else
@@ -430,9 +466,8 @@ def print_invocation_estimate(estimate, limit, out=None, *, analysis=None, note=
               "may stop (cleanly) before its last requests; resume it without --run-limit (the automatic limit "
               "covers the largest request), or pass a larger --run-limit", file=out)
     if analysis is not None:
-        print(f"  analysis scope: remaining ${analysis.get('remaining_usd')}"
-              + (f" of cap ${analysis['cap_usd']}" if analysis.get("cap_usd") is not None else "")
-              + " (the ledger's own cap applies as well)", file=out)
+        print(f"  analysis scope history: committed ${analysis.get('committed_usd')} over all judging runs (no "
+              "cumulative cap; each judging run has its own budget)", file=out)
 
 
 def _cents(value):
@@ -491,7 +526,7 @@ def print_estimate(result, out=None):
           f"{assumptions['tokenizer_factor_high']:g}; stress = high inputs, outputs and flagged share x "
           f"{assumptions['output_factor_stress']}. 'sel tok' = share of item tokens selected; 'comms' = "
           "communications shown. The fit column compares central and high (with the cache saving) with "
-          + ("the ledger's remaining analysis allowance." if remaining is not None else "the analysis cap."),
+          + ("the remaining allowance." if remaining is not None else "this judging run's budget."),
           file=out)
     print("largest reservation per request: " + ", ".join(f"{k} ${v}" for k, v in
                                                          projection["largest_reservation_usd"].items())
@@ -502,59 +537,27 @@ def print_estimate(result, out=None):
 DEFAULT_RUN_LIMIT_USD = Decimal("50")
 
 
-def fixed_run_limit(override, standing, snapshot):
-    """The invocation's run limit without any estimate: ``--run-limit``, else the standing
-    approval's cap, else DEFAULT_RUN_LIMIT_USD; clamped to the analysis scope's remaining
-    allowance when a ledger snapshot is given."""
+def fixed_run_limit(override, judge_config=None):
+    """The invocation's budget without any estimate: ``--run-limit``, else the run config's
+    ``behavior_judge_max_usd`` (``judge_config`` from ``auto_judge.judge_settings``), else
+    DEFAULT_RUN_LIMIT_USD ($50). No cumulative cap clamps it."""
     if override is not None:
-        limit, source = Decimal(str(override)), "override"
-    else:
-        limit, source = DEFAULT_RUN_LIMIT_USD, "default"
-    basis = source
-    if standing is not None:  # the standing approval's cap is a ceiling, never exceeded
-        cap = Decimal(str(standing["max_usd"]))
-        if override is None or cap < limit:
-            limit, basis = cap, "standing_approval_cap"
-        source = "standing_approval"
-    remaining = ((snapshot or {}).get("analysis") or {}).get("remaining_usd")
-    if remaining is not None and Decimal(str(remaining)) < limit:
-        limit, basis = Decimal(str(remaining)), "analysis_remaining"
-    if limit <= 0:
-        raise SystemExit("no analysis allowance remains; nothing was sent")
-    return {"limit_usd": str(limit), "source": source, "basis": basis}
+        return {"limit_usd": str(Decimal(str(override))), "source": "override", "basis": "override"}
+    if judge_config is not None and judge_config.get("budget_source") != "default":
+        return {"limit_usd": str(Decimal(str(judge_config["max_usd"]))), "source": "run_config",
+                "basis": judge_config["budget_source"]}
+    return {"limit_usd": str(DEFAULT_RUN_LIMIT_USD), "source": "default", "basis": "default"}
 
 
-def standing_run_limit(limit, invocation, standing, snapshot):
-    """The run limit under a standing approval (``research_swarm.auto_judge``): the smallest of the
-    invocation's own limit (automatic or --run-limit), the config's per-run cap (never above $50)
-    and the analysis scope's remaining allowance. Raises ValueError when the ledger reports no
-    remaining allowance or the clamped limit cannot cover the central estimate (nothing is sent).
-    Fills ``standing`` with the clamp and returns the limit record to use."""
-    from research_swarm.auto_judge import clamp_run_limit
-    remaining = ((snapshot or {}).get("analysis") or {}).get("remaining_usd")
-    if remaining is None:
-        raise ValueError("standing approval: the ledger reports no analysis allowance; nothing was sent")
-    clamped, basis = clamp_run_limit(limit["limit_usd"], standing["max_usd"], remaining)
-    central = Decimal(str(invocation["central_usd"]))
-    if clamped <= 0 or central > clamped:
-        raise ValueError(f"standing approval: the run limit ${clamped} (set by {basis}; cap ${standing['max_usd']}, "
-                         f"analysis remaining ${remaining}) cannot cover the central estimate ${invocation['central_usd']}"
-                         "; nothing was sent")
-    standing.update({"run_limit_usd": str(clamped), "run_limit_basis": basis, "unclamped_limit_usd": limit["limit_usd"],
-                     "unclamped_source": limit["source"], "analysis_remaining_usd": str(remaining),
-                     "estimate_central_usd": invocation["central_usd"]})
-    return dict(limit, limit_usd=str(clamped), source="standing_approval")
-
-
-def record_standing_approval(judge_dir, standing, *, run_dir, ledger):
-    """Append this invocation's standing approval to ``judge_dir/standing-approvals.json``."""
+def record_run_budget(judge_dir, entry, *, run_dir, ledger):
+    """Append this paid invocation's budget to ``judge_dir/run-budgets.json``."""
     import datetime
-    path = Path(judge_dir) / "standing-approvals.json"
+    path = Path(judge_dir) / "run-budgets.json"
     try:
         records = json.loads(path.read_text())
     except (OSError, ValueError):
         records = []
-    records.append(dict(standing, at=datetime.datetime.now(datetime.timezone.utc).isoformat(), run_dir=str(run_dir),
+    records.append(dict(entry, at=datetime.datetime.now(datetime.timezone.utc).isoformat(), run_dir=str(run_dir),
                         ledger=str(ledger)))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(records, indent=2) + "\n")
@@ -579,7 +582,7 @@ def _main(argv=None):
         return refuse(f"{run_dir} has no inspect/ directory (not a saved run)")
     disable_inspect_dotenv()  # before anything can import inspect_ai
     from research.analysis.judge import pipeline as pl
-    from research_swarm.budget import DEFAULT_CAPS, DEFAULT_LEDGER_PATH, judge_analysis_problems, read_snapshot
+    from research_swarm.budget import DEFAULT_LEDGER_PATH, read_snapshot
     if args.stage not in pl.STAGES:
         return refuse(f"--stage must be one of {', '.join(pl.STAGES)}")
     recorded = None
@@ -597,16 +600,16 @@ def _main(argv=None):
     agents = _agents(args.agents)
     log = lambda message: print(message, file=sys.stderr, flush=True)  # noqa: E731
 
-    standing = None
-    if args.standing_approval_from_config is not None:
+    judge_config = None
+    if args.run_config is not None:
         if args.mock or args.dry_run_estimate or args.rescore_cached:
-            return refuse("--standing-approval-from-config applies to a paid judging run only")
-        from research_swarm.auto_judge import standing_approval
-        config_path = args.standing_approval_from_config.resolve()
+            return refuse("--run-config applies to a paid judging run only")
+        from research_swarm.auto_judge import judge_settings
+        config_path = args.run_config.resolve()
         try:
-            standing = standing_approval(json.loads(config_path.read_text()), config_path)
+            judge_config = judge_settings(json.loads(config_path.read_text()), config_path)
         except (OSError, ValueError) as error:
-            return refuse(f"no valid standing approval in {config_path}: {error}")
+            return refuse(f"no valid judge settings in {config_path}: {error}")
     if args.run_limit is not None and (args.dry_run_estimate or args.rescore_cached):
         return refuse("--run-limit applies to a judging run (--mock or a paid run), not to --dry-run-estimate or "
                       "--rescore-cached")
@@ -642,8 +645,8 @@ def _main(argv=None):
                                         recompute_stale=args.recompute_stale, all_agents=all_agents)
         result = pl.estimate_run(run_dir, settings, routes, agents=agents, fractions=fractions, log=log,
                                  judge_dir=judge_dir if (judge_dir / "manifest.json").exists() else None,
-                                 cap_usd=Decimal(str(DEFAULT_CAPS["analysis"])),
-                                 remaining_usd=(analysis or {}).get("remaining_usd"), on_agent=planner.add,
+                                 cap_usd=Decimal(fixed_run_limit(args.run_limit)["limit_usd"]),
+                                 remaining_usd=None, on_agent=planner.add,
                                  agents_in_run=len(all_agents), loader=histories)
         invocation = planner.finish(agents=sorted(agents) if agents else all_agents)
         limit = est.invocation_run_limit(invocation)
@@ -678,17 +681,11 @@ def _main(argv=None):
         all_agents = sorted(sample_index(run_dir))
         scope, mode, models, clients = "rehearsal", "rehearsal", models_of(routes), {}
     else:
-        if standing is None:
-            if not args.i_have_user_approval:
-                return refuse("choose --dry-run-estimate, --mock, or a paid run with --i-have-user-approval (or "
-                              "--standing-approval-from-config CONFIG)")
         ledger = (args.ledger or DEFAULT_LEDGER_PATH(ROOT)).resolve()
-        problems = judge_analysis_problems(ledger)
-        if problems:
-            return refuse("analysis ledger not ready: " + "; ".join(problems))
         credentials_root = args.credentials_root.resolve()
         if not credentials_root.is_dir():
             return refuse(f"--credentials-root {credentials_root} is not a directory")
+        refresh_pricing(args, log=log)
         routes = route_settings(args, paid=True)
         all_agents = None
         scope, mode, models, clients = "analysis", "paid", models_of(routes), {}
@@ -705,16 +702,14 @@ def _main(argv=None):
             pipeline.check_manifest(write=False)
         except pl.PipelineError as error:
             return refuse(str(error))
-        # Owner decision, October 20, 2026 ("Don't require estimates for anything"): no pre-run cost
-        # estimate and no typed confirmation. A fixed run limit: --run-limit, else the standing
-        # approval's cap, else DEFAULT_RUN_LIMIT_USD, clamped to the analysis scope's remaining
-        # allowance. The ledger cap and the run limit still stop the run cleanly.
+        # Owner decisions, October 20, 2026 ("Don't require estimates for anything"; "One per-run
+        # budget, no manual approvals"): no pre-run cost estimate and no confirmation. The
+        # invocation's budget: --run-limit, else the run config's behavior_judge_max_usd, else
+        # DEFAULT_RUN_LIMIT_USD. It stops the run cleanly; the ledger enforces it for the run too.
         invocation = None
-        limit = fixed_run_limit(args.run_limit, standing, read_snapshot(ledger) if mode == "paid" else None)
-        if standing is not None:
-            standing.update({"run_limit_usd": limit["limit_usd"], "run_limit_basis": limit["basis"]})
+        limit = fixed_run_limit(args.run_limit, judge_config)
         run_limit = RunLimit(limit["limit_usd"], source=limit["source"], estimate=None, factor=None,
-                             floor_usd=None, basis=limit["basis"], standing_approval=standing)
+                             floor_usd=None, basis=limit["basis"], run_config=judge_config)
         pipeline.run_limit = run_limit
     # Every agent's history is rebuilt once, in parallel worker processes, before any request and before
     # the event loop starts (never in a thread beside the HTTP threads); the pipeline reads it from memory.
@@ -739,7 +734,7 @@ def _main(argv=None):
         transport = FakeTransport(responder=mock)
         clients.update({key: JudgeClient(key, ledger, scope=scope, archive_dir=judge_dir / "raw", settings=routes,
                                          http=transport, max_concurrency=settings.concurrency(key),
-                                         ledger_caps={scope: str(Decimal(args.mock_cap))}, run_limit=run_limit)
+                                         run_limit=run_limit)
                         for key in MODEL_KEYS})
     elif not rescore:
         snapshot = (read_snapshot(ledger) or {}).get("analysis") or {}
@@ -751,8 +746,8 @@ def _main(argv=None):
                           "upgrade_judge_revision": args.upgrade_judge_revision,
                           "run_limit": limit}, indent=2),
               file=sys.stderr)
-        print(f"paid judging: run limit ${limit['limit_usd']} ({limit['basis']}); analysis remaining "
-              f"${snapshot.get('remaining_usd')}", file=sys.stderr)
+        print(f"paid judging: run budget ${limit['limit_usd']} ({limit['basis']}); ledger run {run_limit.run_id}",
+              file=sys.stderr)
         clients.update({key: JudgeClient(key, ledger, scope=scope, archive_dir=judge_dir / "raw", settings=routes,
                                          http=None, max_concurrency=settings.concurrency(key), paid_authorized=True,
                                          credentials_root=credentials_root, run_limit=run_limit)
@@ -760,8 +755,8 @@ def _main(argv=None):
     try:
         if mode == "paid" and not rescore:
             pipeline.check_manifest()  # writes the manifest (or performs the requested upgrade)
-            if standing is not None:
-                record_standing_approval(judge_dir, standing, run_dir=run_dir, ledger=ledger)
+            record_run_budget(judge_dir, dict(limit, ledger_run_id=run_limit.run_id, run_config=judge_config),
+                              run_dir=run_dir, ledger=ledger)
             for client in clients.values():
                 client.prepare()  # loads the host key in memory and runs the unpaid provider-limit check
         summary = asyncio.run(pipeline.run())

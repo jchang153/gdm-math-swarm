@@ -7,6 +7,7 @@ of the shared interface read by the launch gate ``compatibility``.
 import asyncio
 import contextlib
 import copy
+import dataclasses
 import hashlib
 import io
 import json
@@ -23,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import compat_check as cc  # noqa: E402
 from research_swarm import runtime  # noqa: E402
+from research_swarm import budget as cc_budget  # noqa: E402
 from research_swarm.budget import BudgetLedger  # noqa: E402
 from research_swarm.provider import frozen_fields, settings_from_config  # noqa: E402
 
@@ -279,6 +281,7 @@ class EvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
             ledger = BudgetLedger(folder / "budget.sqlite")
+            ledger.start_run("compat-test", "compatibility", 2)
             request = ledger.reserve("compatibility", "agent-001", Decimal("0.05"))
             ledger.settle(request, Decimal("0.0123"))
             record = cc.build_evidence(checks=cc.build_checks(**passing_inputs()), images=IMAGES, settings=SETTINGS,
@@ -286,15 +289,19 @@ class EvidenceTests(unittest.TestCase):
             gate = self._gate(folder, record)
         self.assertTrue(gate["passed"], gate["reason"])
 
-    def test_reconcile_then_gate(self):
-        """SPEND-1: an uncertain hold reconciled after the run (lower actual cost) must not block the gate."""
+    def test_unresolved_holds_are_reported_never_blocking(self):
+        """An uncertain hold of the check is counted against its own run and reported by the gate (a
+        warning); reconciling it later clears the warning. It never blocks the launch."""
         if not _gate_supports_request_ids():
             self.skipTest("launch_gates does not read request_ids yet (X4 reader)")
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)
             path = folder / "budget.sqlite"
+            pilot = BudgetLedger(path)
+            pilot.start_run("pilot-run", "pilot", 1)
+            pilot.reserve("pilot", "agent-001", Decimal("0.5"))  # another run: never part of this evidence
             ledger = BudgetLedger(path)
-            ledger.reserve("pilot", "agent-001", Decimal("0.5"))  # another scope: never part of this evidence
+            ledger.start_run("compat-test", "compatibility", 2)
             settled = ledger.reserve("compatibility", "agent-001", Decimal("0.05"))
             ledger.settle(settled, Decimal("0.0123"))
             held = ledger.reserve("compatibility", "agent-001", Decimal("0.064"))
@@ -312,19 +319,23 @@ class EvidenceTests(unittest.TestCase):
                                        spent_usd=spent, request_ids=request_ids)
             self.assertTrue(record["all_required_passed"])  # runtime recovered; billing has not
             gate = self._gate(folder, record)
-            self.assertFalse(gate["passed"])
-            self.assertIn("unresolved", gate["reason"])
+            self.assertTrue(gate["passed"], gate["reason"])
+            self.assertTrue(any("unresolved" in w for w in gate["warnings"]), gate["warnings"])
             ledger.reconcile(held, Decimal("0.009"), note="OpenRouter activity log, offline test")
-            self.assertLess(Decimal(ledger.snapshot()["compatibility"]["committed_usd"]), spent)
+            self.assertLess(Decimal(ledger.run_snapshot()["committed_usd"]), spent)
             gate = self._gate(folder, record)
         self.assertTrue(gate["passed"], gate["reason"])
+        self.assertFalse(any("unresolved" in w for w in gate["warnings"]), gate["warnings"])
 
     def test_request_rows_cover_every_state_of_this_check_only(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "budget.sqlite"
+            earlier = BudgetLedger(path)
+            earlier.start_run("compat-earlier", "compatibility", 2)
+            other = earlier.reserve("compatibility", "agent-001", Decimal("0.05"))  # an earlier check's request
             ledger = BudgetLedger(path)
+            ledger.start_run("compat-test", "compatibility", 2)
             ours = [ledger.reserve("compatibility", "agent-001", Decimal("0.05")) for _ in range(3)]
-            other = ledger.reserve("compatibility", "agent-001", Decimal("0.05"))  # an earlier check's request
             ledger.settle(ours[0], Decimal("0.01"))
             ledger.settle(ours[1], Decimal("0.07"))  # above its reservation: estimate_violation
             rows = cc.request_rows(path, ours)
@@ -378,7 +389,7 @@ class AbortGuardTests(unittest.IsolatedAsyncioTestCase):
             inner.state["requests"] += 1
             return behaviors.pop(0)()
         inner.state = {"requests": 0}
-        ledger = types.SimpleNamespace(snapshot=lambda: {"compatibility": {"violation": violation}})
+        ledger = types.SimpleNamespace(run_snapshot=lambda: {"estimate_violations": int(violation)})
         guard = cc.AbortGuard(inner, clock, record, ledger, max_requests=max_requests)
         return guard, clock, events
 
@@ -501,6 +512,7 @@ class AbortGuardTests(unittest.IsolatedAsyncioTestCase):
                                                        "code": "context_length_exceeded"}})
         with tempfile.TemporaryDirectory() as folder:
             ledger = BudgetLedger(Path(folder) / "budget.sqlite")
+            ledger.start_run("compat-test", cc.SCOPE, 2)
             clock = runtime.RunClock(runtime.StartBarrier(1))
             record = lambda *args: events.append(args)  # noqa: E731
             model = capture_openrouter_cost(get_model("openrouter/" + SETTINGS.model_id,
@@ -549,80 +561,117 @@ class MainRefusalTests(unittest.TestCase):
         self.folder = Path(tempfile.mkdtemp())
         self.ledger_file = self.folder / "state" / "budget.sqlite"
         self.out = self.folder / "validation"
-        patcher = mock.patch("research_swarm.secrets.load_openrouter_key",
-                             side_effect=AssertionError("credential must not be read"))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for target, error in (("research_swarm.secrets.load_openrouter_key", "credential must not be read"),
+                              ("builtins.input", "nothing may prompt")):
+            patcher = mock.patch(target, side_effect=AssertionError(error))
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.runs = []
+        self.reservations = ["0.05"] * 3
+        self.settle_cost = "0.001"
 
     async def fake_run(self, config, args, stamp, *, images, ledger, ledger_path):
         self.runs.append(stamp)
-        before = ledger.snapshot()["compatibility"]
+        before = ledger.run_snapshot()
         ids = []
-        for _ in range(3):  # the cap probe, then two agent requests
-            request_id = ledger.reserve("compatibility", "agent-001", Decimal("0.05"))
-            ledger.settle(request_id, Decimal("0.001"))
+        for amount in self.reservations:  # the cap probe, then the agent requests
+            try:
+                request_id = ledger.reserve("compatibility", "agent-001", Decimal(amount))
+            except cc_budget.BudgetExceeded:
+                break
+            ledger.settle(request_id, Decimal(self.settle_cost))
             ids.append(request_id)
         inputs = passing_inputs()
-        mapping = {"p1": ids[0], "r1": ids[1], "r2": ids[2]}
+        mapping = {"p1": ids[0], "r1": ids[1 % len(ids)], "r2": ids[2 % len(ids)]}
         for event in inputs["events"]:
             if "request_id" in event["payload"]:
                 event["payload"]["request_id"] = mapping[event["payload"]["request_id"]]
         return {"run_dir": self.folder / "runs" / f"compat-{stamp}", "settings": SETTINGS, "persona": "combinatorics",
-                "warm_up": {"ok": True}, "ledger_before": before, "ledger_after": ledger.snapshot()["compatibility"],
+                "warm_up": {"ok": True}, "ledger_before": before, "ledger_after": ledger.run_snapshot(),
                 "abort_reason": "max_requests", "cancelled": False, "activity": inputs["activity"],
                 "runtime_events": inputs["events"], "conference_events": inputs["conference_events"],
                 "agent_exit": {"status": "stopped:max_requests"}, "inspect_log": "x.eval",
                 "credentials_in_environment": False, "provider_limit": {"limit": 2, "limit_remaining": 2},
                 "compose_sha256": runtime.compose_fingerprint(config, images["agent"]["id"])}
 
-    def main(self, *argv, gates=_gates_all_pass, environment=None, ask=None, isatty=lambda: True):
+    def main(self, *argv, gates=_gates_all_pass, environment=None, config=None):
         environment = environment or (lambda config: ([], IMAGES))
+        if config is not None:
+            path = self.folder / "config.json"
+            path.write_text(json.dumps(config))
+            argv = ("--config", str(path), *argv)
         self.output = io.StringIO()
         with contextlib.redirect_stdout(self.output):
             return cc.main(["--output-dir", str(self.out), "--runs-dir", str(self.folder / "runs"), *argv],
-                           ask=ask or (lambda prompt: self.fail("unexpected prompt")), gates=gates,
-                           environment=environment, run=self.fake_run, ledger_file=self.ledger_file, isatty=isatty)
+                           gates=gates, environment=environment, run=self.fake_run, ledger_file=self.ledger_file)
 
-    def test_requires_user_approval_flag(self):
-        never = lambda config: self.fail("nothing may be evaluated without approval")  # noqa: E731
-        self.assertEqual(self.main("--yes", gates=never, environment=never), 2)
-        self.assertFalse(self.ledger_file.exists())
-        self.assertEqual(self.runs, [])
+    def test_runs_without_any_approval_flag_prompt_or_terminal(self):
+        self.assertEqual(self.main(), 0)
+        self.assertEqual(len(self.runs), 1)
+        for flag in ("--i-have-user-approval", "--yes", "--min-remaining"):
+            with self.subTest(flag=flag), mock.patch("sys.stderr", new=io.StringIO()), \
+                    self.assertRaises(SystemExit):
+                cc.parse_args([flag])
 
-    def test_refuses_a_different_compatibility_cap(self):
-        BudgetLedger(self.ledger_file, {"pilot": 20, "analysis": 5, "compatibility": 0})
-        self.assertEqual(self.main("--i-have-user-approval", "--yes"), 2)
-        self.assertEqual(self.runs, [])
+    def test_default_budget_of_one_hundred_applies_when_unset(self):
+        config = {k: v for k, v in CONFIG.items() if k != "run_budget_usd"}
+        self.assertEqual(self.main(config=config), 0)
+        self.assertIn("Run budget: $100 (default", self.output.getvalue())
+        [run] = cc_budget.list_runs(self.ledger_file)
+        self.assertEqual((run["scope"], run["budget_usd"], run["budget_source"]), ("compatibility", "100", "default"))
+        record = json.loads(sorted(self.out.glob("compatibility-*.json"))[-1].read_text())
+        self.assertEqual((record["run_budget_usd"], record["run_budget_source"], record["run_id"]),
+                         ("100", "default", run["run_id"]))
 
-    def test_refuses_low_remaining_and_violations(self):
-        ledger = BudgetLedger(self.ledger_file)
-        request = ledger.reserve("compatibility", "agent-001", Decimal("1.6"))
-        ledger.settle(request, Decimal("1.6"))
-        self.assertEqual(self.main("--i-have-user-approval", "--yes"), 2)  # $0.40 < $0.50
-        self.assertIn("below the minimum", self.output.getvalue())
-        self.assertIn("remaining $0.4", self.output.getvalue())  # the snapshot is printed before refusing
-        self.assertEqual(self.main("--i-have-user-approval", "--yes", "--min-remaining", "0.30"), 0)
-        problems = cc.ledger_problems({"compatibility": {"cap_usd": "2", "remaining_usd": "1.9", "violation": True}},
-                                      Decimal("0.5"))
-        self.assertTrue(any("estimate_violation" in p for p in problems))
-        self.assertTrue(cc.ledger_problems({}, Decimal("0.5")))
-        self.assertTrue(cc.ledger_problems({"compatibility": {"cap_usd": "2", "remaining_usd": "2",
-                                                              "violation": False}}, Decimal("0.5"),
-                                           caps={"compatibility": 0}))
+    def test_invalid_run_budget_refuses_before_anything(self):
+        self.assertEqual(self.main(config=dict(CONFIG, run_budget_usd="abc")), 2)
+        self.assertIn("run_budget_usd", self.output.getvalue())
+        self.assertEqual((self.runs, self.ledger_file.exists()), ([], False))
+
+    def test_run_budget_stops_the_check(self):
+        self.reservations, self.settle_cost = ["0.04"] * 4, "0.04"
+        self.assertEqual(self.main(config=dict(CONFIG, run_budget_usd="0.1")), 0)
+        [run] = cc_budget.list_runs(self.ledger_file)
+        self.assertEqual((run["budget_usd"], run["requests"]), ("0.1", 2))  # the third reservation did not fit
+        self.assertIn("of run budget $0.1", self.output.getvalue())
+
+    def test_earlier_holds_and_violations_never_block_a_new_check(self):
+        earlier = cc_budget.BudgetLedger(self.ledger_file)
+        earlier.start_run("compat-earlier", "compatibility", 2)
+        earlier.settle(earlier.reserve("compatibility", "agent-001", Decimal("1.6")), None)  # uncertain
+        earlier.settle(earlier.reserve("compatibility", "agent-001", Decimal("0.2")), Decimal("0.39"))  # violation
+        self.assertEqual(self.main(config=dict(CONFIG, run_budget_usd="2")), 0)
+        runs = {r["run_id"]: r for r in cc_budget.list_runs(self.ledger_file)}
+        self.assertEqual(runs["compat-earlier"]["unresolved_requests"], 1)  # untouched, still counted
+        [new] = [r for name, r in runs.items() if name != "compat-earlier"]
+        self.assertEqual((new["requests"], new["committed_usd"]), (3, "0.003"))
 
     def test_refuses_failed_gates_and_environment(self):
         def gates(config):
             report = _gates_all_pass(config)
-            report["evidence"]["route_pricing"] = {"passed": False, "reason": "freeze is 80 h old"}
+            report["evidence"]["route_pricing"] = {"passed": False, "reason": "freeze invalid: price above config"}
             del report["evidence"]["runtime-isolation"]
             return report
-        self.assertEqual(self.main("--i-have-user-approval", "--yes", gates=gates), 2)
-        self.assertEqual(cc.gate_problems(gates(None)), ["route_pricing: freeze is 80 h old",
+        self.assertEqual(self.main(gates=gates), 2)
+        self.assertEqual(cc.gate_problems(gates(None)), ["route_pricing: freeze invalid: price above config",
                                                         "runtime-isolation: launch gate not evaluated"])
         broken = lambda config: (["agent image gdm-math-swarm-agent:local does not resolve"], None)  # noqa: E731
-        self.assertEqual(self.main("--i-have-user-approval", "--yes", environment=broken), 2)
+        self.assertEqual(self.main(environment=broken), 2)
         self.assertEqual(self.runs, [])
+        self.assertIn("run_budget", cc.REQUIRED_GATES)
+        self.assertNotIn("config_caps", cc.REQUIRED_GATES)
+
+    def test_route_pricing_is_refreshed_before_the_gates(self):
+        calls = []
+        with mock.patch.object(cc, "evaluate_gates", lambda config: calls.append("gates") or _gates_all_pass(config)):
+            self.output = io.StringIO()
+            with contextlib.redirect_stdout(self.output):
+                code = cc.main(["--output-dir", str(self.out), "--runs-dir", str(self.folder / "runs")],
+                               environment=lambda config: ([], IMAGES), run=self.fake_run,
+                               ledger_file=self.ledger_file,
+                               refresh=lambda config, path: calls.append(("refresh", str(path))))
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, [("refresh", str(cc.DEFAULT_CONFIG)), "gates"])
 
     def test_environment_check_applies_the_launch_interlock_without_override(self):
         """S1: a running comparator / leftover judge / other agent sandbox refuses the paid check."""
@@ -640,31 +689,23 @@ class MainRefusalTests(unittest.TestCase):
             with mock.patch.object(runtime, "launch_interlock",
                                    lambda image, docker="docker": dict(busy, blockers=[])):
                 self.assertEqual(cc.environment_check(CONFIG), ([], IMAGES))  # default: runtime.launch_interlock
-        self.assertFalse(hasattr(cc.parse_args(["--i-have-user-approval"]), "force_while_live"))  # no override
-        self.assertEqual(self.main("--i-have-user-approval", "--yes",
-                                   environment=lambda config: (busy["blockers"], IMAGES)), 2)
+        self.assertFalse(hasattr(cc.parse_args([]), "force_while_live"))  # no override
+        self.assertEqual(self.main(environment=lambda config: (busy["blockers"], IMAGES)), 2)
         self.assertIn("gdm-evaluator=1", self.output.getvalue())
         self.assertEqual(self.runs, [])
-
-    def test_confirmation(self):
-        self.assertEqual(self.main("--i-have-user-approval", ask=lambda prompt: "1.00"), 2)
-        self.assertEqual(self.main("--i-have-user-approval", isatty=lambda: False, ask=input), 2)
-        self.assertEqual(self.runs, [])
-        prompts = []
-        self.assertEqual(self.main("--i-have-user-approval", ask=lambda prompt: prompts.append(prompt) or "$2.00"), 0)
-        self.assertIn("PAID", prompts[0])
-        self.assertEqual(len(self.runs), 1)
 
     def test_run_failure_returns_error_without_evidence(self):
         async def broken(config, args, stamp, **kwargs):
             raise RuntimeError("Set OPENROUTER_API_KEY in the host environment or private .env")
         self.fake_run = broken
-        self.assertEqual(self.main("--i-have-user-approval", "--yes"), 1)
+        self.assertEqual(self.main(), 1)
         self.assertIn("aborted before evidence", self.output.getvalue())
         self.assertEqual(list(self.out.glob("compatibility-*.json")) if self.out.exists() else [], [])
+        [run] = cc_budget.list_runs(self.ledger_file)
+        self.assertIsNotNone(run["ended"])  # the run's end is recorded
 
     def test_successful_run_writes_evidence(self):
-        self.assertEqual(self.main("--i-have-user-approval", "--yes"), 0)
+        self.assertEqual(self.main(), 0)
         files = sorted(self.out.glob("compatibility-*.json"))
         self.assertEqual(len(files), 1)
         self.assertRegex(files[0].name, r"^compatibility-\d{8}T\d{6}Z\.json$")
@@ -685,10 +726,10 @@ class MainRefusalTests(unittest.TestCase):
         self.assertEqual(record["settings"], frozen_fields(settings_from_config(CONFIG)))
         self.assertEqual(record["abort_reason"], "max_requests")
         self.assertEqual(record["ledger"]["scope"], "compatibility")
+        self.assertEqual((record["run_budget_usd"], record["ledger"]["after"]["committed_usd"]), ("100", "0.003"))
 
     def test_cap_probe_must_be_below_the_frozen_max_tokens(self):
-        self.assertEqual(self.main("--i-have-user-approval", "--yes", "--cap-probe-max-tokens",
-                                   str(SETTINGS.max_tokens)), 2)
+        self.assertEqual(self.main("--cap-probe-max-tokens", str(SETTINGS.max_tokens)), 2)
         self.assertIn("--cap-probe-max-tokens", self.output.getvalue())
         self.assertEqual(self.runs, [])
 
@@ -730,7 +771,7 @@ class OfflineRehearsalTests(unittest.TestCase):
         init_display_type("none")
         self.addCleanup(init_display_type, previous_display)
 
-    def rehearse(self, outputs, *argv, config=CONFIG, cwd=None):
+    def rehearse(self, outputs, *argv, config=CONFIG, cwd=None, budget="2"):
         """run_check with offline stand-ins; ``outputs(input, tools, tool_choice, config, n)`` answers each call."""
         from test_runtime import _fake_claude_code, _fake_sandbox_class
         from inspect_ai.model import get_model
@@ -757,18 +798,19 @@ class OfflineRehearsalTests(unittest.TestCase):
             return task
         built = []
 
-        def fake_model(settings, repo_root, max_connections, *, max_remaining_usd, record=None, allow_unlimited=False):
-            # X2: the limit check runs inside the builder, against the remaining compatibility allowance.
-            built.append((settings.model_id, max_connections, str(max_remaining_usd)))
-            limit = {"limit": 2.0, "limit_remaining": float(max_remaining_usd), "limit_reset": None}
-            limit["unlimited_key_authorized"] = allow_unlimited
-            record("provider_limit_verified", None, limit)
+        def fake_model(settings, repo_root, max_connections, *, run_budget_usd, record=None, record_dir=None):
+            # X2: the informational limit record runs inside the builder, with the check's run budget.
+            built.append((settings.model_id, max_connections, str(run_budget_usd)))
+            limit = {"limit": 2.0, "limit_remaining": 2.0, "limit_reset": None, "record_dir": str(record_dir)}
+            record("provider_limit_recorded", None, limit)
             return get_model("mockllm/model", custom_outputs=answer), limit
         folder = Path(tempfile.mkdtemp()).resolve()
         sandbox_cls.root = str(folder)
         ledger_path = folder / "state" / "budget.sqlite"
         ledger = BudgetLedger(ledger_path)
-        args = cc.parse_args(["--i-have-user-approval", "--runs-dir", str(folder / "runs"), *argv])
+        stamp = cc.utc_stamp()
+        ledger.start_run(f"compat-{stamp}", cc.SCOPE, budget)
+        args = cc.parse_args(["--runs-dir", str(folder / "runs"), *argv])
         warm_ups = []
         previous_cwd = os.getcwd()
         try:
@@ -782,7 +824,7 @@ class OfflineRehearsalTests(unittest.TestCase):
                     mock.patch.object(runtime, "build_openrouter_model", fake_model), \
                     mock.patch("research_swarm.secrets.load_openrouter_key",
                                side_effect=AssertionError("credential must not be read")):
-                result = asyncio_run(cc.run_check(config, args, cc.utc_stamp(), images=IMAGES, ledger=ledger,
+                result = asyncio_run(cc.run_check(config, args, stamp, images=IMAGES, ledger=ledger,
                                                   ledger_path=ledger_path))
         finally:
             os.chdir(previous_cwd)
@@ -835,28 +877,35 @@ class OfflineRehearsalTests(unittest.TestCase):
         self.assertEqual(result["compose_sha256"], hashlib.sha256(compose.encode("utf-8")).hexdigest())
         settings_json = json.loads((result["run_dir"] / "settings.json").read_text())
         self.assertEqual(settings_json["effective"]["provider_limit"]["limit_remaining"], 2.0)
+        self.assertEqual((settings_json["effective"]["run_budget_usd"], settings_json["effective"]["run_id"]),
+                         ("2", result["ledger_after"]["run_id"]))
+        self.assertIsNotNone(result["ledger_after"]["ended"])
         self.assertTrue(settings_json["effective"]["inspect_dotenv"]["dotenv_disabled"])
         self.assertEqual(settings_json["effective"]["max_connections"], cc.COMPAT_MAX_CONNECTIONS)  # one agent: 1
         kinds = [e["kind"] for e in result["runtime_events"]]
-        self.assertLess(kinds.index("provider_limit_verified"), kinds.index("inference_admitted"))
+        self.assertLess(kinds.index("provider_limit_recorded"), kinds.index("inference_admitted"))
         self.assertLess(kinds.index("reasoning_cap_probe"), kinds.index("common_start"))
         snapshot = ledger.snapshot()
-        self.assertEqual((snapshot["compatibility"]["unresolved_requests"], snapshot["pilot"]["committed_usd"]), (0, "0"))
+        self.assertEqual(snapshot["compatibility"]["unresolved_requests"], 0)
+        self.assertNotIn("pilot", snapshot)  # the check never touches the pilot scope
 
-    def test_compatibility_uses_explicit_key_policy_and_separate_ledger(self):
+    def test_run_budget_stops_the_check_through_the_production_filter(self):
+        """A run budget too small for the agent's first request: the probe fits, the agent's request is
+        refused admission (abort reason admission_refused) and nothing beyond the budget is committed."""
         async def outputs(input, tools, tool_choice, config, n):
-            return _probe_output(config, truncated=False)
-
-        for flag in (None, False, True, "true"):
-            with self.subTest(flag=flag):
-                config = dict(CONFIG)
-                config.pop("allow_unlimited_provider_key", None)
-                if flag is not None:
-                    config["allow_unlimited_provider_key"] = flag
-                result, ledger, _, _, _, _ = self.rehearse(outputs, config=config)
-                self.assertIs(result["provider_limit"]["unlimited_key_authorized"], flag is True)
-                self.assertEqual(ledger.snapshot()["pilot"]["committed_usd"], "0")
-                self.assertGreater(Decimal(ledger.snapshot()["compatibility"]["committed_usd"]), 0)
+            if config.max_tokens == cc.DEFAULT_CAP_PROBE_MAX_TOKENS:
+                return _probe_output(config)
+            raise AssertionError("no agent request fits this budget")
+        probe_reservation = dataclasses.replace(SETTINGS, max_tokens=cc.DEFAULT_CAP_PROBE_MAX_TOKENS).reservation(
+            json.dumps({"messages": [], "tools": []}))
+        budget = str((probe_reservation * 3).quantize(Decimal("0.000001")))
+        result, ledger, ledger_path, served, _, _ = self.rehearse(outputs, budget=budget)
+        self.assertEqual(result["abort_reason"], "admission_refused")
+        self.assertEqual(served, [cc.DEFAULT_CAP_PROBE_MAX_TOKENS])
+        run = ledger.run_snapshot()
+        self.assertLessEqual(Decimal(run["committed_usd"]), Decimal(budget))
+        denied = [e for e in result["runtime_events"] if e["kind"] == "inference_not_admitted"]
+        self.assertEqual(denied[0]["payload"]["reason"], "budget_admission_failed")
 
     def test_failed_cap_probe_skips_the_agent_run(self):
         agent_calls = []
