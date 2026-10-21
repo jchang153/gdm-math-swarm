@@ -1348,8 +1348,13 @@ def build_openrouter_model(settings, repo_root, max_connections, *, run_budget_u
         from .provider_limit import write_record
         path = write_record(record_dir, limit, source="paid launch")
         limit = dict(limit, record=None if path is None else str(path))
+    # Inspect's OpenAI-compatible provider marks every tool `strict: true` by default;
+    # OpenAI's own endpoint then rejects Claude Code's tool schemas (optional
+    # properties such as Bash `timeout`; compat-20261021T183217Z, 400
+    # invalid_function_parameters). Other routes keep the default they passed with.
+    strict = {"strict_tools": False} if settings.model_id.startswith("openai/") else {}
     model = capture_openrouter_cost(get_model(
-        "openrouter/" + settings.model_id, api_key=key, max_retries=0,
+        "openrouter/" + settings.model_id, api_key=key, max_retries=0, **strict,
         provider=settings.request_options()["provider"], reasoning_enabled=True,
         config=GenerateConfig(max_tokens=settings.max_tokens, max_retries=0, reasoning_effort=settings.reasoning_effort,
                               reasoning_history="all", max_connections=int(max_connections), cache=False)))
