@@ -288,6 +288,9 @@ class ExtractionFallbackTests(unittest.TestCase):
             self.assertEqual(excerpt["source"], "host_fallback")
             self.assertIn("benchmark", excerpt["quote"])    # around the keyword-net match
             self.assertIn(excerpt["quote"], LONG)
+            sent = len(fx.transport.requests)
+            fx.go()                                          # refused requests are never resent
+            self.assertEqual(len(fx.transport.requests), sent)
 
     def test_locate_span(self):
         text = "Alpha beta.\n  Gamma   delta epsilon. Zeta eta."
@@ -316,6 +319,11 @@ class HelperTests(unittest.TestCase):
         self.assertIn("&lt;script&gt;", html_text)
         self.assertIn('href="#rec-A02_t0001_r"', html_text)
         self.assertEqual(render.kind_class("Direct message"), "dm")
+        multi = render.markdown_to_html("Both [A02.t0001.r, A02.t0002.x] cost \\$5.", ctx)
+        self.assertEqual(multi.count('class="cite"'), 2)
+        self.assertIn('<span class="nomath">$</span>5', multi)
+        checks = verify.verify_markdown("See [A01.t0001.r, A09.t0001.r].", {"A01.t0001.r": {"text": "x"}}.get)
+        self.assertEqual([c["exists"] for c in checks["citations"]], [True, False])
 
 
 class CliTests(unittest.TestCase):

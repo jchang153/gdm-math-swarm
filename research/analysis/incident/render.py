@@ -124,7 +124,9 @@ def _inline(text, ctx):
     text = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+|\.{0,2}/?[^)\s]*)\)",
                   lambda m: stash(f'<a href="{html.escape(m.group(2), quote=True)}">{html.escape(m.group(1))}</a>'),
                   text)
-    text = re.sub(r"\[(" + ITEM_ID + r")\]", lambda m: stash(_cite(m.group(1), ctx)), text)
+    text = verify.CITE_RE.sub(lambda m: stash("[" + ", ".join(_cite(i.group(0), ctx) for i in
+                                                            verify.ONE_ID_RE.finditer(m.group(1))) + "]"), text)
+    text = text.replace("\\$", stash('<span class="nomath">$</span>'))
     text = html.escape(text, quote=False)
     text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
     text = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"<em>\1</em>", text)
@@ -282,9 +284,10 @@ STYLE = """
 :root[data-theme="dark"]{--bg:#17181a;--fg:#e8e6e1;--muted:#a2a6ab;--rule:#34363a;--card:#202225;--accent:#8db7e3;
 --warn-bg:#3a2c12;--warn-fg:#f3cf8c;--bad:#f2867d}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 Georgia,"Iowan Old Style","Times New Roman",serif}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 Georgia,"Iowan Old Style","Times New Roman",serif;
+font-variant-numeric:lining-nums}
 main{max-width:760px;margin:0 auto;padding:28px 16px 80px}
-h1{font:700 2rem/1.25 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;margin:.4em 0 .6em}
+h1{font:700 clamp(1.5rem,4.5vw,2rem)/1.25 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;margin:.4em 0 .6em}
 h2{font:700 1.35rem/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;margin:2.2em 0 .6em;
 padding-top:.6em;border-top:1px solid var(--rule)}
 h3{font:600 1.12rem/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;margin:1.8em 0 .5em}
@@ -319,7 +322,9 @@ a.cite{font:0.8em ui-monospace,SFMono-Regular,Menlo,monospace;text-decoration:no
 .table{overflow-x:auto;margin:1em 0}
 table{border-collapse:collapse;font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
 th,td{border-bottom:1px solid var(--rule);padding:6px 8px;text-align:left;vertical-align:top}
-td code{word-break:break-all}
+.table table{min-width:980px}
+td code{word-break:break-word;font-size:11.5px}
+td:nth-child(4){white-space:nowrap}
 footer{color:var(--muted);font:13px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;margin-top:3em}
 """
 
@@ -327,7 +332,7 @@ KATEX = ('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.1
          '<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>'
          '<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" '
          'onload="renderMathInElement(document.querySelector(\'main\'),{delimiters:[{left:\'$$\',right:\'$$\','
-         'display:true},{left:\'$\',right:\'$\',display:false}],ignoredClasses:[\'excerpt\'],'
+         'display:true},{left:\'$\',right:\'$\',display:false}],ignoredClasses:[\'excerpt\',\'nomath\'],'
          'throwOnError:false})"></script>')
 
 

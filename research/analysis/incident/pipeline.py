@@ -152,6 +152,12 @@ class IncidentPipeline:
             self.units.append({"unit": unit, "model": cached.get("model"), "cached": True,
                                "cost_usd": cached.get("cost_usd")})
             return cached["text"]
+        refused = ("refused_once", "refused_twice")
+        if cached and cached.get("request_sha256") == request_sha and (cached.get("error") or {}).get("reason") in refused:
+            # A refused request is never resent identically (the judge's refusal rule); the caller falls back.
+            self.units.append({"unit": unit, "model": cached.get("model"), "cached": True, "status": cached["status"],
+                               "cost_usd": cached.get("cost_usd")})
+            raise StageError(stage, cached["error"]["reason"], cached["error"])
         self.log(f"{stage}: {unit} -> {client.route.model_id}")
         result = await client.complete(system=system, user=user, purpose=f"incident_{stage}", unit_id=unit,
                                        max_tokens=max_tokens, effort=client.route.effort,

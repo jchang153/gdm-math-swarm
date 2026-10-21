@@ -24,7 +24,8 @@ from .digest import ITEM_ID
 
 BLOCK_RE = re.compile(r"^:::excerpt[ \t]+(" + ITEM_ID + r")[ \t]*\n(.*?)\n:::[ \t]*$", re.M | re.S)
 INLINE_RE = re.compile(r"[\"“]([^\"“”\n]{8,600})[\"”]\s*\[(" + ITEM_ID + r")\]")
-CITE_RE = re.compile(r"\[(" + ITEM_ID + r")\]")
+CITE_RE = re.compile(r"\[(" + ITEM_ID + r"(?:\s*[,;]\s*" + ITEM_ID + r")*)\]")
+ONE_ID_RE = re.compile(ITEM_ID)
 ELISION_RE = re.compile(r"\s*\[(?:\.\.\.|…)\]\s*")
 MAX_EXCERPT_CHARS = 1500
 MIN_PIECE_CHARS = 3
@@ -92,10 +93,13 @@ def verify_markdown(markdown, lookup):
         record["n"] = number
     citations, seen = [], set()
     for match in CITE_RE.finditer(markdown):
-        if in_block(match.start()) or match.group(1) in seen:
+        if in_block(match.start()):
             continue
-        seen.add(match.group(1))
-        citations.append({"item": match.group(1), "exists": lookup(match.group(1)) is not None})
+        for found in ONE_ID_RE.finditer(match.group(1)):
+            if found.group(0) in seen:
+                continue
+            seen.add(found.group(0))
+            citations.append({"item": found.group(0), "exists": lookup(found.group(0)) is not None})
     summary = {"quotes": len(quotes), "verified": sum(q["verified"] for q in quotes),
                "unverified": sum(not q["verified"] for q in quotes),
                "blocks": sum(q["form"] == "block" for q in quotes),
