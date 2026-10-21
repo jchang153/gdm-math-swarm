@@ -21,9 +21,17 @@ COHORT_GLOSS = {
 }
 FLAGGED = ('exploiter', 'convert', 'exploit_promoter', 'whistleblower', 'insufficient_record')
 CHEATING = ('exploiter', 'convert', 'exploit_promoter')
-# Links kept in older published entries but no longer shown: transcripts are read in Inspect View
-# (owner, October 21, 2026); the custom transcript pages stay in the run folders.
-HIDDEN_LINKS = ('Transcripts',)
+# Links kept in catalogue entries but no longer shown: transcripts are read in Inspect View
+# (owner, October 21, 2026); the custom transcript pages stay in the run folders. The raw Inspect
+# log links ('Inspect logs', or 'Inspect log N') were only downloads (site-nologs, October 21,
+# 2026); the .eval files stay published because Inspect View reads them.
+HIDDEN_LINKS = ('Transcripts', 'Inspect logs')
+HIDDEN_PREFIX = 'Inspect log '
+
+
+def hidden_link(name):
+    """True for a catalogue link label that the pages do not show."""
+    return name in HIDDEN_LINKS or name.startswith(HIDDEN_PREFIX)
 
 STYLE = (
     # Colours are the shared site_style tokens (light/dark and the theme toggle).
@@ -74,7 +82,8 @@ const COHORTS=['exploiter','convert','exploit_promoter','whistleblower','no_misb
 const LABELS={exploiter:['exploiter','exploiters'],convert:['convert','converts'],exploit_promoter:['exploit promoter','exploit promoters'],whistleblower:['whistleblower','whistleblowers'],no_misbehavior:['no misbehavior','no misbehavior'],insufficient_record:['insufficient record','insufficient record']};
 const FLAGGED=['exploiter','convert','exploit_promoter','whistleblower','insufficient_record'];
 const CHEATING=['exploiter','convert','exploit_promoter'];
-const HIDDEN_LINKS=['Transcripts'];
+const HIDDEN_LINKS=['Transcripts','Inspect logs'];
+const hidden=n=>HIDDEN_LINKS.includes(n)||n.startsWith('Inspect log ');
 const MAX=4;
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const sum=e=>e.summary&&typeof e.summary==='object'?e.summary:null;
@@ -143,7 +152,7 @@ function compareTable(list){
   ['Agent exits',e=>Object.entries(e.agent_exits).map(([k,v])=>esc(k.replace(/_/g,' '))+': '+v).join('<br>')],
   ['Judge: graded agents',e=>{const j=judge(e);return j?esc(j.graded??j.agents)+(j.provisional?' <small>('+j.provisional+' provisional)</small>':''):null;}],
   ...COHORTS.map(k=>['Judge: '+LABELS[k][1],cohort(k)]),
-  ['Open',e=>Object.entries(e.links).filter(([n])=>!HIDDEN_LINKS.includes(n)).map(([n,u])=>'<a href="'+esc(u)+'">'+esc(n)+'</a>').join('<br>')]];
+  ['Open',e=>Object.entries(e.links).filter(([n])=>!hidden(n)).map(([n,u])=>'<a href="'+esc(u)+'">'+esc(n)+'</a>').join('<br>')]];
  return '<table><thead><tr><th scope="col">Run</th>'+list.map(e=>'<th scope="col">'+esc(e.run)+'</th>').join('')+'</tr></thead><tbody>'+
   spec.map(row=>'<tr><th scope="row">'+esc(row[0])+'</th>'+list.map(e=>'<td>'+cell(e,row)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';}
 let comparing=[];

@@ -22,7 +22,7 @@ link line ("Behavior judge: see analysis/judge/report.html" or "Behavior judge: 
 Page layout: a summary card (model, prompt variant, agents, duration, accepted and genuine tasks,
 cost, judge status), tabs Report / Conference / Behavior judge / Inspect with one-line
 explanations (agent transcripts are read in Inspect View; the site has no custom transcript viewer), the facts sections, and plain explanations of every status label shown. Raw Inspect
-logs are linked one RUN/inspect/*.eval file at a time. Light and dark mode, phone width.
+logs are not linked (they were only downloads); Inspect View reads them. Light and dark mode, phone width.
 
 Publication steps (docs/experiment-library.md):
 
@@ -34,6 +34,11 @@ Publication steps (docs/experiment-library.md):
 
 Existing results files are never replaced without --overwrite; --output-dir writes a scratch
 copy for review instead.
+
+--rerender-html re-renders only results.html from the run's existing results.json with the current
+page layout (for example to republish older runs with maintain_hf_run.py --scope site). The report
+data is not recomputed, so the flags used for the original report (ledger, caveats, stop time) are
+not needed and results.json stays byte for byte; it takes no data flags.
 
 Spending. With --ledger (a consistent copy of the budget ledger SQLite, opened immutable
 read-only) "budget.pilot" counts exactly the ledger calls whose request IDs this run admitted
@@ -53,7 +58,6 @@ import json
 from pathlib import Path
 import sqlite3
 import sys
-from urllib.parse import quote
 
 if str(Path(__file__).resolve().parent) not in sys.path:  # shared site theme lives beside this script
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -65,8 +69,8 @@ ACCEPTED = ('accepted', 'accepted_after_close')
 SCOPES = ('pilot', 'compatibility', 'analysis')
 JUDGE_REPORT = 'analysis/judge/report.html'
 # Run page tabs: (label, target, one-line plain explanation). The report is this page; the other
-# record views are separate pages next to it. Raw Inspect logs are linked one .eval file at a time
-# (a static host cannot list RUN/inspect/), like the catalogue (build_experiment_index.inspect_log_links).
+# record views are separate pages next to it. Raw Inspect logs (.eval) are not linked: they were only
+# downloads, and Inspect View reads them (site-nologs, October 21, 2026).
 TABS = (('Report', '#report', 'This page: facts computed from the run\'s own records (clock, exits, '
          'submissions, proof checker, spending).'),
         ('Conference', 'conference-view/index.html', 'What agents saw and shared: board posts, DMs, the shared '
@@ -479,14 +483,6 @@ def explanation(mapping, label):
     return 'No plain explanation is recorded for this label.'
 
 
-def inspect_links(names):
-    """Links (relative to the run directory) to each raw Inspect log: one 'Inspect logs' link, or numbered."""
-    targets = ['inspect/' + quote(n, safe='') for n in names]
-    if len(targets) == 1:
-        return [('Inspect logs', targets[0])]
-    return [(f'Inspect log {i}', t) for i, t in enumerate(targets, 1)]
-
-
 def cents(v):
     """Rounded dollars for the summary card (exact amounts stay in the Accounting table)."""
     return 'not recorded' if v is None else f'${Decimal(str(v)):,.2f}'
@@ -547,10 +543,7 @@ def tab_bar(results, logs):
             text += ' Not run for this run.'
         else:
             tabs.append(link(label, judge.get('report', href) if label == 'Behavior judge' else href))
-        extra = ''
-        if label == 'Inspect':
-            extra = (' Raw logs: ' + ' · '.join(link(n, h) for n, h in inspect_links(logs)) if logs else
-                     ' No .eval files were found when this report was built.')
+        extra = ' No .eval files were found when this report was built.' if label == 'Inspect' and not logs else ''
         help_lines.append(f'<li><strong>{esc(label)}</strong>: {esc(text)}{extra}</li>')
     return ('<nav class="tabs" aria-label="Run records">' + ''.join(tabs) + '</nav>'
             '<ul class="tabhelp">' + ''.join(help_lines) + '</ul>')
@@ -662,8 +655,7 @@ def render(results, title, inspect_logs=()):
             for n in results['researcher_notes']) + '</ul>')
     body.append(glossary(results))
     records = [('Inspect View' if label == 'Inspect' else label, href) for label, href, _ in TABS[1:]
-               if label != 'Behavior judge'] + inspect_links(logs) \
-        + list(OTHER_RECORDS)
+               if label != 'Behavior judge'] + list(OTHER_RECORDS)
     if judge['status'] != 'not_run':
         records.insert(1, ('Behavior judge', judge['report']))
     body.append('<h2>Records</h2><p>' + ' · '.join(link(label, href) for label, href in records) + '</p></main>')
@@ -691,10 +683,31 @@ def main(argv=None):
     parser.add_argument('--stop-utc', help='stop boundary (ISO 8601) for a run without a run_stop event')
     parser.add_argument('--submission-ids', choices=('public', 'serial'), default='public',
                         help='public conference IDs (default) or serial sub-NNNNNN IDs')
+    parser.add_argument('--rerender-html', action='store_true',
+                        help='only re-render results.html from the existing results.json (data unchanged)')
     args = parser.parse_args(argv)
     run = args.run_dir.resolve()
     if args.run_dir.is_symlink() or not run.is_dir():
         raise SystemExit(f'Not a run directory: {args.run_dir}')
+    if args.rerender_html:
+        if (args.ledger or args.key_usage_log or args.caveat or args.caveat_for or args.stop_reason
+                or args.stop_utc or args.submission_ids != 'public'):
+            raise SystemExit('--rerender-html takes no data flags; the report data comes from results.json')
+        source = run / 'results.json'
+        if source.is_symlink() or not source.is_file():
+            raise SystemExit(f'No results.json to re-render: {source}')
+        page = render(json.loads(source.read_text(encoding='utf-8')), args.title, inspect_logs(run))
+        target = (args.output_dir or run).resolve() / 'results.html'
+        if (target.exists() or target.is_symlink()) and not args.overwrite:
+            raise SystemExit(f'Refusing to replace existing {target} (pass --overwrite or --output-dir)')
+        if target.is_symlink():
+            raise SystemExit(f'Refusing to write through a symlink: {target}')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(target.name + '.tmp')
+        temporary.write_text(page, encoding='utf-8')
+        temporary.replace(target)
+        print(json.dumps({'results_html': str(target), 'rerendered_from': str(source)}))
+        return
     notes = ([{'subject': s, 'text': t} for s, t in args.caveat_for]
              + [{'subject': None, 'text': t} for t in args.caveat])
     if any(not n['text'].strip() for n in notes):

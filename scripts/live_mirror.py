@@ -48,7 +48,6 @@ import base64
 import datetime
 import hashlib
 import html
-import io
 import json
 import os
 from pathlib import Path
@@ -261,9 +260,11 @@ class Cloud:
             raise RuntimeError(f'remote {args["mode"]} on {vm} failed: {error.strip()[-400:]}')
 
     def discover(self, vm, root, max_age):
-        out = io.BytesIO()
-        self.ssh(vm, {'mode': 'discover', 'root': root, 'max_age': max_age}, out, timeout=300)
-        found = json.loads(out.getvalue().decode() or '[]')
+        # A real file: subprocess.run needs a file descriptor for stdout (an io.BytesIO has none).
+        with tempfile.TemporaryFile() as out:
+            self.ssh(vm, {'mode': 'discover', 'root': root, 'max_age': max_age}, out, timeout=300)
+            out.seek(0)
+            found = json.loads(out.read().decode() or '[]')
         return [r for r in found if isinstance(r, dict) and RUN_ID.fullmatch(str(r.get('run', '')))]
 
     def snapshot(self, vm, root, run, *, since_line, evals, buffer_dir, target):

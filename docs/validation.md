@@ -753,7 +753,8 @@ No blocker should remain.
    images, registers the run and its budget in the ledger, warms the page cache, loads the
    key, records its provider-side limit (informational) and starts 20 peers. The run lasts at
    most `max_run_seconds` from the common start, plus up to 120 s in-flight grace and 180 s
-   stop grace.
+   stop grace. Then start the near-live website mirror on your own computer
+   (`PYTHONPATH=src .venv/bin/python scripts/live_mirror.py --vm VM_NAME`; docs/gcp-vm.md).
 4. During the run, watch `RUN/runtime.jsonl`, `RUN/conference/events.jsonl`, `docker stats`
    and `scripts/monitor_run.py`; do not start other Docker work. The ledger stops new
    requests when the run's remaining budget cannot cover them.
