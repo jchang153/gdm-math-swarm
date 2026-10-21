@@ -71,7 +71,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 
-from build_experiment_index import INSPECT_LOGS, inspect_log_links, unlisted_runs, write_index
+from build_experiment_index import INSPECT_LOGS, inspect_log_links, newest_first, unlisted_runs, write_index
 from prepare_hf_library import judge_excluded
 from publish_hf_library import (DEFAULT_REPO, RUN_ID, batches, digest, load_bundle, matches,
                                 merge_entries, payload, remote_files, validate_lfs_additions)
@@ -907,14 +907,18 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
     listed = [x.get('run') for x in index.get('experiments', [])]
     if len(set(listed)) != len(listed):
         raise ValueError('Remote catalogue has duplicate entries')
-    if rerender:  # the entries must survive regeneration byte for byte; only the page may differ
-        if regenerate(index['experiments'])['experiments.json'] != index_bytes:
+    if rerender:  # the entries must survive regeneration byte for byte; only the page and their order may differ
+        ordered = newest_first(index['experiments'])  # catalogue order (newest first, October 21, 2026)
+        regenerated_index = regenerate(index['experiments'])['experiments.json']
+        reordered_only = (index_bytes == json.dumps(index, indent=2).encode()  # generator format, older order
+                          and regenerated_index == json.dumps({**index, 'experiments': ordered}, indent=2).encode())
+        if regenerated_index != index_bytes and not reordered_only:
             raise ValueError('The current generator does not reproduce the remote experiments.json byte for byte; '
                              're-rendering would change catalogue entries')
     elif regenerate(index['experiments']) != {'experiments.json': index_bytes, 'index.html': html}:
         raise ValueError('The current generator does not reproduce the remote catalogue byte for byte; '
                          'regenerating it would change other catalogue entries')
-    keep = index['experiments'] if rerender else others(index, run)
+    keep = ordered if rerender else others(index, run)
     regenerated = regenerate(keep)
     if json.loads(regenerated['experiments.json'])['experiments'] != keep:
         raise ValueError('Another catalogue entry would change')
@@ -933,7 +937,8 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
               'listed_before': run in listed, 'entries_before': len(listed), 'entries_after': len(keep),
               'other_entries_unchanged': len(keep), 'run_files_kept': len(folder),
               'catalogue_files': [n for n, _ in uploads], 'uploads': len(uploads),
-              'already_applied': not uploads}
+              'already_applied': not uploads,
+              'reordered': [x['run'] for x in keep] != [x for x in listed if x in {e['run'] for e in keep}]}
     if not commit or not uploads:
         return result
 
@@ -984,7 +989,7 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
             if final_files[name].lfs or not matches(data, final_files[name]):
                 raise ValueError('Catalogue file mismatch or stored as LFS after maintenance: ' + name)
         final_listed = [x['run'] for x in json.loads(fetch('experiments.json', revision, final_files))['experiments']]
-        if (final_listed != listed) if rerender else (run in final_listed):
+        if (final_listed != [x['run'] for x in keep]) if rerender else (run in final_listed):
             raise ValueError('The catalogue entries changed during re-rendering' if rerender
                              else 'The run is still listed after maintenance')
     except Exception as error:

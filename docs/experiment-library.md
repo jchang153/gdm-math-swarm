@@ -50,7 +50,8 @@ All in `scripts/`; each is documented in its own `--help` and below.
   of the local and hosted lists; `baseline100-20261015T191545Z` is unlisted (October 20, 2026).
   `--rerender-catalogue` (no `--maintain-run`, `--bundle` or `--scope`) rebuilds only `index.html`
   from the published `experiments.json` after a change to the catalogue page itself; the current
-  generator must reproduce `experiments.json` byte for byte, and no entry or run file changes.
+  generator must reproduce `experiments.json` byte for byte, apart from listing the same entries newest
+  first (it reorders an older oldest-first catalogue), and no entry or run file changes.
 - `monitor_run.py`: read-only live progress of a run on its VM (elapsed time, spending against the
   launch baseline, requests, cache, restarts, submissions and solved tasks).
 - `live_mirror.py`: near-live mirror of running runs (Inspect View, conference view, live summary) to the

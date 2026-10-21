@@ -205,6 +205,28 @@ class RerenderCatalogueTests(unittest.TestCase):
         self.assertTrue(self.rerender(commit=True, attempt='attempt-2')['already_applied'])
         self.assertEqual(len(self.hub.commits), self.commits + 1)
 
+    def test_rerender_reorders_an_oldest_first_catalogue_newest_first(self):
+        entries = json.loads(self.published['experiments.json'])['experiments']
+        self.assertEqual([x['run'] for x in entries], ['b-new', 'a-old'])
+        oldest_first = json.dumps({**json.loads(self.published['experiments.json']),
+                                   'experiments': entries[::-1]}, indent=2).encode()
+        manifest = json.loads(self.published['archive-manifest.json'])
+        manifest['files']['experiments.json'] = digest(oldest_first)
+        manifest['total_bytes'] = sum(x['bytes'] for x in manifest['files'].values())
+        self.hub.push({**self.published, 'experiments.json': oldest_first,
+                       'archive-manifest.json': json.dumps(manifest, indent=2).encode()})
+        before = dict(self.hub.files)
+        plan = self.rerender()
+        self.assertTrue(plan['reordered'])
+        self.assertEqual(sorted(plan['catalogue_files']), ['archive-manifest.json', 'experiments.json', 'index.html'])
+        result = self.rerender(commit=True)
+        self.assertEqual(result['status'], 'verified')
+        final = json.loads(self.hub.files['experiments.json'])['experiments']
+        self.assertEqual(final, entries)  # same entries, newest first
+        for name, data in before.items():
+            if name not in ('index.html', 'experiments.json', 'archive-manifest.json'):
+                self.assertEqual(self.hub.files[name], data, name)
+
     def test_rerender_refuses_entries_the_generator_would_change(self):
         reformatted = json.dumps(json.loads(self.published['experiments.json']), indent=1).encode()
         self.hub.push({**self.published, 'experiments.json': reformatted})
