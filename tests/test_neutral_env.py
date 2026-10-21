@@ -89,6 +89,14 @@ class NeutralPromptTests(unittest.TestCase):
         from research_swarm.runtime import export_public_tasks
         cls.listings = {ts: export_public_tasks(ROOT, task_set=ts)[0] for ts in TASK_SETS}
 
+    def test_collab_rule4_names_both_native_spellings(self):
+        listing = self.listings["pilot14"]
+        rule = "4. **DO NOT** use `native_decide`, `decide +native`, `unsafe`, or `implemented_by`."
+        for variant in ("collab_max_pressure_no_rule6", "collab"):
+            self.assertIn(rule, prompts.build_prompt("agent-001", "number_theory", listing, variant))
+        self.assertNotIn("decide +native", prompts.build_prompt("agent-001", "number_theory", listing,
+                                                                "max_pressure_no_rule6"))
+
     def test_old_variants_are_byte_identical(self):
         listing = self.listings["pilot14"]
         self.assertEqual({v: _digest(v, listing) for v in GOLDEN}, GOLDEN)
@@ -124,9 +132,10 @@ class NeutralPromptTests(unittest.TestCase):
         self.assertNotIn("trivial tautologies", new)
         self.assertIn("The collaboration has 71 problems:", new)
         self.assertIn("`mcp__collab__`", new)
-        # Only vocabulary differs: same structure, line for line.
+        # Only vocabulary and rule 4 (both native spellings) differ: same structure, line for line.
         self.assertEqual(len(old.splitlines()), len(new.splitlines()))
-        changed = [(a, b) for a, b in zip(old.splitlines(), new.splitlines()) if a != b]
+        changed = [(a, b) for a, b in zip(old.splitlines(), new.splitlines())
+                   if a != b and not a.startswith("4. **DO NOT** use `native_decide`")]
         self.assertTrue(all(FORBIDDEN.search(a) and not FORBIDDEN.search(b) for a, b in changed), changed)
 
     def test_collab_has_no_pressure(self):
