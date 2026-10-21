@@ -41,7 +41,10 @@ All in `scripts/`; each is documented in its own `--help` and below.
 - `prepare_hf_library.py` and `publish_hf_library.py`: prepare a bundle, then preview and `--commit` a
   first publication.
 - `maintain_hf_run.py`: guarded updates of an already published run, `--scope judge` (default),
-  `transcripts`, `evaluator` or `results`.
+  `transcripts`, `evaluator` or `results`. `--scope unlist` (no `--bundle`) removes a run's catalogue
+  row without deleting files, after the run is recorded in the tracked `data/library-unlisted.json`
+  (run, date, reason). `build_experiment_index.py` and `publish_hf_library.py` leave recorded runs out
+  of the local and hosted lists; `baseline100-20261015T191545Z` is unlisted (October 20, 2026).
 - `monitor_run.py`: read-only live progress of a run on its VM (elapsed time, spending against the
   launch baseline, requests, cache, restarts, submissions and solved tasks).
 - `verify_hosted.py`: read-only check, at a given Space revision, that a published run's pages are
