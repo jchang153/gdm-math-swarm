@@ -127,7 +127,8 @@ class GeminiModelTests(unittest.TestCase):
         self.assertEqual(options["provider"], {"only": ["google-vertex/global"], "allow_fallbacks": False,
                                                "require_parameters": True})
         self.assertEqual(options["reasoning"], {"effort": "high", "exclude": False})
-        self.assertEqual(TRACK_MODEL_IDS["gemini"], (GEMINI_MODEL_ID,))
+        self.assertEqual(TRACK_MODEL_IDS["gemini"], (GEMINI_MODEL_ID, "google/gemini-4-argon",
+                                                     "anthropic/claude-opus-5.5", "openai/gpt-5.6-sol", "z-ai/glm-5.3"))
         self.assertNotIn(GEMINI_MODEL_ID, TRACK_MODEL_IDS["ablation"])
         self.assertIn(GEMINI_MODEL_ID, KNOWN_MODEL_IDS)
         # Lower-tier reservation prices do not cover the >200K tier.

@@ -223,6 +223,37 @@ class ReasoningBridgeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual([m.get("tool_call_id") for m in wire[2:]], tool_ids)
                 self.assertNotIn(transport._PREFIX, str(wire))
 
+    async def test_glm_plain_reasoning_survives_a_multi_turn_tool_call(self):
+        """GLM 5.3 on the owner's track (docs/plan.md, "Owner multi-model max-pressure runs, October 21,
+        2026"): unsigned plain-text reasoning_details come back verbatim on the assistant message that
+        carries the tool calls; GLM is not a signed-reasoning model."""
+        from inspect_ai.model import get_model
+        from research_swarm.inspect_adapter import replayed_reasoning_blocks, replayed_signed_reasoning
+        from research_swarm.provider import GLM_MODEL_ID, SIGNED_REASONING_MODEL_IDS
+        self.assertNotIn(GLM_MODEL_ID, SIGNED_REASONING_MODEL_IDS)
+        details = [{"type": "reasoning.text", "text": "Use Nat.rec here.", "format": "unknown", "index": 0}]
+        tool_ids = ["call_e1", "call_e2"]
+        api = get_model(f"openrouter/{GLM_MODEL_ID}", api_key="unpaid-offline-test-placeholder").api
+        completion = self.gemini_completion(details, tool_ids)
+        completion.model = GLM_MODEL_ID
+        message = api.chat_choices_from_completion(completion, [])[0].message
+        blocks = await self.blocks(message)
+        self.assertEqual([b.type for b in blocks], ["thinking", "text", "tool_use", "tool_use"])
+        raw = [{"role": "user", "content": "Begin your conference research."},
+               {"role": "assistant", "content": [b.model_dump(exclude_none=True) for b in blocks]},
+               {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tool_id, "content": "ok"}
+                                            for tool_id in tool_ids]}]
+        with transport._bridge_scope(self.bridge):
+            replayed = await self.impl.messages_from_anthropic_input(raw, [])
+        self.assertEqual(replayed[1].content[0], message.content[0])
+        self.assertEqual(replayed[1].tool_calls, message.tool_calls)
+        self.assertEqual(replayed_reasoning_blocks(replayed), 1)
+        self.assertEqual(replayed_signed_reasoning(replayed), {"replayed_signed_tool_call_turns": 0})
+        assistant = (await api.messages_to_openai(replayed))[1]
+        self.assertEqual([c["id"] for c in assistant["tool_calls"]], tool_ids)
+        self.assertEqual(assistant["reasoning_details"], details)
+        self.assertNotIn(transport._PREFIX, str(assistant))
+
     async def test_without_the_transport_gemini_signatures_would_be_lost(self):
         """The pinned SDK alone renders OpenRouter reasoning as text for Claude Code, so the next request
         carries no reasoning_details: the reason research_swarm.reasoning_bridge is installed."""

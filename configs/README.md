@@ -92,6 +92,28 @@ Operator steps, in the owner's own VM checkout (never the collaborator's); none 
 6. Copy the config to `runs/phase-b/RUN_ID/launch-config.json`, set `run_dir` (for example `runs/gemini10-<UTC>`), and launch with `scripts/supervise_run.py --config runs/phase-b/RUN_ID/launch-config.json --phase-dir runs/phase-b/RUN_ID --tmux-session gdm-RUN_ID --no-shutdown` (docs/gcp-vm.md); it prints the run's budget ($400) before the launch. Its ledger is always the track's (a `--ledger` naming another file is refused). While the run (or the compatibility check) is going, it holds the launch lock `state/launch.lock`: a second pilot or compatibility check from this checkout refuses, even with a new phase directory or `run_dir`. The behavior judge bills the baseline `state/budget.sqlite` with its own per-run budget (`behavior_judge_max_usd`, $50).
 7. Uncertain holds (after the compatibility check or the run): `.venv/bin/python scripts/reconcile_ledger.py --ledger state/gemini-budget.sqlite --run-dir runs/gemini10-<UTC>` (for the compatibility check, `--run-dir runs/compat-<UTC>`; `--dry-run` only lists). On this ledger the accepted generation model defaults to `google/gemini-3.1-pro-preview` (`provider.TRACK_MODEL_IDS`). The supervisor runs the same step. Holds of empty Gemini replies that the lookup cannot find: `scripts/settle_by_key_usage.py --run-dir runs/gemini10-<UTC>` (`--dry-run` plans only).
 
+## Owner multi-model runs (`owner-<model>.json`, October 21, 2026)
+
+Four configs, one per model, for four parallel 1-hour runs on four VMs (docs/plan.md, "Owner multi-model max-pressure runs, October 21, 2026"). Each is `gemini-collab.json` with these differences:
+
+| Key | Value | Why |
+| --- | --- | --- |
+| `candidate_model_id`, `provider_settings.model_id` | `google/gemini-4-argon`, `anthropic/claude-opus-5.5`, `openai/gpt-5.6-sol`, `z-ai/glm-5.3` | The owner's four models, IDs checked in the public OpenRouter catalog on October 21, 2026 (`provider.OWNER_MULTIMODEL_IDS`, allowed on the owner's track only). |
+| `provider_route` | `google-vertex/global`, `anthropic`, `openai`, `z-ai/fp8` | Pinned first-party routes, `allow_fallbacks: false`. Vertex global as in the Gemini 3.1 run; `anthropic` and `openai` are the providers' own standard endpoints (not `fast`, `flex` or regional surcharge tiers); `z-ai/fp8` as in the collaborator's GLM runs. |
+| `provider_settings.prompt_usd_per_token`, `output_usd_per_token` | Argon `0.000002`/`0.00001`; Opus `0.000008`/`0.00002`; Sol `0.00001`/`0.00003`; GLM `0.0000014`/`0.0000044` | Upper bounds over every price the pinned route lists: Argon lists one tier ($2/$10 per million); Opus's prompt bound covers its 1-hour cache write ($8/M; prompt $4/M); Sol's covers the >272K tier's cache write ($10/M; >272K prompt $8/M, completion $30/M); GLM as the collaborator's config. |
+| `provider_settings.context_length` | 1048576, 1000000, 1050000, 1048576 | Equal to the route's catalog context (`validate_catalog`). |
+| `provider_settings.max_tokens`, `reasoning_effort` | `16384`, `high` | As the Gemini run. |
+| `agent_count`, `max_connections`, `persona_counts` | 5, 5, algebra 2 / others 1 | The owner's 5 agents; balanced allocation with the same seed. Allowed on the owner's track (agent counts 5 or 10). |
+| `agent_memory`, `judge_max_concurrent` | `"32g"`, 16 | 5 × 32 GiB = 160 GiB of agent limits on an `n2-standard-64` (about 251 GiB usable); at most 16 judge compiles of 2 GiB (32 GiB) plus the 6 GiB warm-up leaves about 50 GiB for the host, Docker and Inspect. |
+| `max_run_seconds` | 3600 | The owner's 1-hour clock (owner track clocks: 3600 or 21600). |
+| `prompt_variant`, `auto_restart` | `max_pressure_no_rule6`, `true` | The collaborator's max-pressure prompt with only rule 6 removed (no stop sentences; docs/prompts.md). |
+| `run_budget_usd`, `budget_track` | `"100"`, `gemini` | The run's own budget on the owner's track ledger `state/gemini-budget.sqlite` (one per VM checkout). |
+| `auto_behavior_judge`, `behavior_judge_max_usd` | `true`, 50 | The owner's standing judge decision. |
+| `allow_concurrent_run` | `false` | Each run has its own VM. |
+| `waived_evidence_gates` | evaluator, runtime-e2e, runtime-isolation, runtime-capacity | As the Gemini run: that evidence was measured for other agent counts and memory limits. |
+
+Per VM, before the launch (steps as for the Gemini run above, with `configs/owner-<model>.json`): the images and the Lean evidence must match that VM's images, `freeze_route.py` (unpaid), then the PAID compatibility check `compat_check.py --config configs/owner-<model>.json --max-requests 6` (each model needs its own passing evidence; Argon, Opus and Sol also need `signed_reasoning_tool_call_replay`), then `preflight.py` and `supervise_run.py`.
+
 ## Optional keys
 
 `pilot.json` leaves these out, so the code uses the default shown. To change one, add the key to the config. For the keys that a probe also takes as a flag, add the key whenever the probe used a non-default value, so the launch matches what was measured.

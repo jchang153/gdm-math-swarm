@@ -662,13 +662,22 @@ class LaunchGateTests(GateFixture):
         self.assertEqual((gate["provider_route"], gate["provider_name"]), ("google-vertex/global", "Google"))
 
     def test_gemini_model_only_on_the_gemini_track(self):
-        from research_swarm.provider import GEMINI_MODEL_ID, GLM_MODEL_ID
+        from research_swarm.provider import GEMINI_MODEL_ID, OWNER_MULTIMODEL_IDS
         config = self.gemini_config()
         self.write_capacity_for(config)
         self.assertTrue(self.evaluate_gemini()["evidence"]["approved_settings"]["passed"])
-        glm = {**config, "candidate_model_id": GLM_MODEL_ID,
-               "provider_settings": {**config["provider_settings"], "model_id": GLM_MODEL_ID}}
-        self.assertBlocked(self.evaluate_gemini(glm), "approved_settings", "candidate_model_id")
+        # The owner's multi-model runs (October 21, 2026): each of the four models, 5 agents, 1-hour clock.
+        for model in OWNER_MULTIMODEL_IDS:
+            owner = {**config, "candidate_model_id": model, "agent_count": 5, "max_connections": 5,
+                     "max_run_seconds": 3600, "provider_settings": {**config["provider_settings"], "model_id": model}}
+            self.assertTrue(self.evaluate_gemini(owner)["evidence"]["approved_settings"]["passed"], model)
+            mismatch = {**owner, "provider_settings": {**config["provider_settings"], "model_id": GEMINI_MODEL_ID}}
+            self.assertBlocked(self.evaluate_gemini(mismatch), "approved_settings", "candidate_model_id")
+        self.assertBlocked(self.evaluate_gemini({**config, "max_run_seconds": 7200}), "approved_settings",
+                           "max_run_seconds")
+        deepseek = {**config, "candidate_model_id": MODEL_ID,
+                    "provider_settings": {**config["provider_settings"], "model_id": MODEL_ID}}
+        self.assertBlocked(self.evaluate_gemini(deepseek), "approved_settings", "candidate_model_id")
         self.assertBlocked(self.evaluate_gemini({**config, "agent_count": 20, "max_connections": 20}),
                            "approved_settings", "agent_count")
         # Neither the ablation track nor the baseline may run Gemini.
@@ -683,6 +692,32 @@ class LaunchGateTests(GateFixture):
         self.assertTrue(self.evaluate_gemini(without)["evidence"]["approved_settings"]["passed"])
         self.assertBlocked(self.evaluate_gemini({**config, "allow_concurrent_run": "true"}), "approved_settings",
                            "allow_concurrent_run")
+
+    def test_owner_multimodel_configs_pass_approved_settings(self):
+        """configs/owner-<model>.json (docs/plan.md, "Owner multi-model max-pressure runs, October 21,
+        2026"): one model each, 5 agents at 32 GiB, all 71 tasks, max_pressure_no_rule6, 1-hour clock,
+        $100 run budget on the owner's track, automatic behavior judge at $50."""
+        from research_swarm.provider import OWNER_MULTIMODEL_IDS
+        from research_swarm import runtime
+        seen = {}
+        for path in sorted((ROOT / "configs").glob("owner-*.json")):
+            config = json.loads(path.read_text())
+            seen[config["candidate_model_id"]] = path.name
+            self.assertEqual(settings_from_config(config).model_id, config["candidate_model_id"])
+            for key, value in {"agent_count": 5, "max_connections": 5, "agent_memory": "32g", "task_set": "all71",
+                               "task_count": 71, "prompt_variant": "max_pressure_no_rule6", "auto_restart": True,
+                               "max_run_seconds": 3600, "run_budget_usd": "100", "budget_track": "gemini",
+                               "auto_behavior_judge": True, "behavior_judge_max_usd": 50,
+                               "system_prompt_mode": "replace"}.items():
+                self.assertEqual(config[key], value, (path.name, key))
+            settings = settings_from_config(config)
+            self.assertEqual((settings.max_tokens, settings.reasoning_effort), (16384, "high"))
+            self.assertEqual(config["persona_counts"],
+                             runtime.persona_counts(runtime.assign_personas(5, config["persona_seed"])))
+            self.write_capacity_for(config)
+            gate = self.evaluate_gemini(config)["evidence"]["approved_settings"]
+            self.assertTrue(gate["passed"], (path.name, gate["reason"]))
+        self.assertEqual(set(seen), set(OWNER_MULTIMODEL_IDS))
 
     def test_concurrent_run_override_only_on_the_gemini_track(self):
         """Review finding: the owner approved the concurrent-run override for the Gemini run only; a
@@ -737,10 +772,10 @@ class LaunchGateTests(GateFixture):
         """Review finding: an approved generation lookup on state/gemini-budget.sqlite, run as documented
         (no --expect-model), accepts the Gemini model; the baseline ledger keeps the pilot model."""
         from research_swarm import budget
-        from research_swarm.provider import ABLATION_MODEL_IDS, GEMINI_MODEL_ID
+        from research_swarm.provider import ABLATION_MODEL_IDS, GEMINI_MODEL_ID, GEMINI_MODEL_IDS
         reconcile = load_script("reconcile_ledger")
         path = self.tmp / "state" / "gemini-budget.sqlite"
-        self.assertEqual(reconcile.expected_models(path), (GEMINI_MODEL_ID,))
+        self.assertEqual(reconcile.expected_models(path), GEMINI_MODEL_IDS)
         self.assertEqual(reconcile.expected_models(self.tmp / "state" / "ablation-budget.sqlite"), ABLATION_MODEL_IDS)
         self.assertEqual(reconcile.expected_models(self.tmp / "state" / "budget.sqlite"), (MODEL_ID,))
         self.assertEqual(reconcile.expected_models(path, ["x/y"]), ("x/y",))
@@ -763,7 +798,7 @@ class LaunchGateTests(GateFixture):
         snapshot = read_snapshot(path)["pilot"]
         self.assertEqual((snapshot["unresolved_requests"], snapshot["settled_usd"]), (0, "0.042"))
         audit = json.loads(sorted((path.parent / "reconciliations").glob("reconcile-*.json"))[-1].read_text())
-        self.assertEqual(audit["expected_models"], [GEMINI_MODEL_ID])
+        self.assertEqual(audit["expected_models"], list(GEMINI_MODEL_IDS))
 
     def test_seeded_configuration_blocks_the_pilot(self):
         """S3: any seeded configuration, enabled or not, blocks the approved spontaneous pilot."""

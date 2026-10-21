@@ -143,6 +143,9 @@ def seeded_config_problems(config):
 # collaboration run authorized, October 19, 2026"); the baseline stays at
 # runtime.APPROVED_AGENT_COUNT.
 TRACK_AGENT_COUNTS = {track: spec["agent_counts"] for track, spec in BUDGET_TRACKS.items()}
+# Run clocks allowed on the owner's (gemini) track: 6 hours (October 20, 2026) or 1 hour (docs/plan.md,
+# "Owner multi-model max-pressure runs, October 21, 2026").
+OWNER_TRACK_RUN_SECONDS = (3600, 21600)
 ABLATION_AGENT_COUNTS = TRACK_AGENT_COUNTS["ablation"]
 
 # Optional prompt ablation (docs/prompts.md, "Prompt ablation variants"); the check
@@ -548,7 +551,12 @@ class _Gates:
         if track == "gemini" and self.config.get("task_set") == "all71":
             approved["task_count"] = 71  # owner decision: the whole parent pool on this track
         if track == "gemini":
-            approved["max_run_seconds"] = 21600  # owner decision, October 20, 2026: a 6-hour clock
+            # Owner decisions: a 6-hour clock (October 20, 2026) or a 1-hour clock (multi-model runs,
+            # October 21, 2026).
+            approved.pop("max_run_seconds")
+            if self.config.get("max_run_seconds") not in OWNER_TRACK_RUN_SECONDS \
+                    or not _is_int(self.config.get("max_run_seconds")):
+                approved["max_run_seconds"] = list(OWNER_TRACK_RUN_SECONDS)
         if track is None:
             # The provider settings decide the model actually called: on the baseline they
             # must name the pinned MODEL_ID as well (not only candidate_model_id).

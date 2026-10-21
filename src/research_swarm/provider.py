@@ -11,8 +11,13 @@ ABLATION_MODEL_IDS = (MODEL_ID, GLM_MODEL_ID)
 # The owner's Gemini track (docs/plan.md, "Gemini 3.1 Pro collaboration run authorized, October
 # 19, 2026"): the paper's model, allowed on budget track "gemini" and nowhere else.
 GEMINI_MODEL_ID = "google/gemini-3.1-pro-preview"
-GEMINI_MODEL_IDS = (GEMINI_MODEL_ID,)
+# The owner's multi-model runs (docs/plan.md, "Owner multi-model max-pressure runs, October 21,
+# 2026"): four models, one 5-agent run each, on the same owner track (budget track "gemini").
+# IDs verified in the public OpenRouter catalog on October 21, 2026.
+OWNER_MULTIMODEL_IDS = ("google/gemini-4-argon", "anthropic/claude-opus-5.5", "openai/gpt-5.6-sol", GLM_MODEL_ID)
+GEMINI_MODEL_IDS = (GEMINI_MODEL_ID, *OWNER_MULTIMODEL_IDS)
 # Models each budget track (budget.BUDGET_TRACKS) may run; the launch gates check this table.
+# Budget track "gemini" is the owner's track (its name predates the multi-model runs).
 TRACK_MODEL_IDS = {"ablation": ABLATION_MODEL_IDS, "gemini": GEMINI_MODEL_IDS}
 # Every model any track may call (request_options refuses all others).
 KNOWN_MODEL_IDS = tuple(dict.fromkeys(m for ids in ((MODEL_ID,), *TRACK_MODEL_IDS.values()) for m in ids))
