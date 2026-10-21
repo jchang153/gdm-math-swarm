@@ -15,6 +15,10 @@ service-tier), so JudgeRouteSettings.from_pricing_record re-validates it offline
 derives prices from it. Prices include each tier (Haiku 5.5 bills prompts of at least
 100,000 tokens at higher prompt and completion prices) and the cache read/write prices.
 
+It also freezes the optional non-Anthropic fallback route (route.FALLBACK_KEY:
+route.FALLBACK_MODEL_ID on its standard ``openai`` endpoint; owner request, October 21, 2026), used
+only for a unit Anthropic refuses; its problems never fail the record (``fallback_valid``).
+
     .venv/bin/python scripts/freeze_judge_route.py [--output-dir data/validation]
 
 Exit 0 when every requirement passed, 1 otherwise (the record is written either way).
@@ -34,9 +38,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "src")]
 from research.analysis.judge.route import (ALLOCATION_DECISION, CACHE_CONTROL, CACHE_SYSTEM_DEFAULTS,  # noqa: E402
                                            CACHE_TTL, CATALOG_URL, CHAT_COMPLETIONS_URL, DEFAULT_CONCURRENCY,
-                                           EFFORT_PARAMETER, EFFORTS, ENDPOINTS_URL, MAX_TOKENS_CEILING,
+                                           EFFORT_PARAMETER, ENDPOINTS_URL, FALLBACK_KEY, MAX_TOKENS_CEILING,
                                            MIN_CACHEABLE_PROMPT_TOKENS, MODEL_ALLOCATION, MODEL_IDS, PLAN_SECTION,
-                                           PRICING_PREFIX, PROVIDER_TAG, JudgeRouteSettings, build_route,
+                                           PRICING_PREFIX, PROVIDER_TAG, ROUTE_SPECS, JudgeRouteSettings, build_route,
                                            matching_endpoints, summarize_route)
 from research_swarm.launch_gates import write_evidence  # noqa: E402
 
@@ -98,24 +102,24 @@ def fetch(url):
 
 
 def model_record(key, catalog, endpoints_raw, endpoints_url):
-    model_id = MODEL_IDS[key]
+    model_id, tag, _, effort = ROUTE_SPECS[key]
     entries = [m for m in catalog.get("data", []) if m.get("id") == model_id]
     entry = entries[0] if len(entries) == 1 else None
     endpoints_payload = json.loads(endpoints_raw)
     endpoints = (endpoints_payload.get("data") or {}).get("endpoints") or []
-    standard, tiered = matching_endpoints(endpoints)
+    standard, tiered = matching_endpoints(endpoints, tag)
     catalog_entry = None if entry is None else {k: entry.get(k) for k in (
         "id", "canonical_slug", "name", "context_length", "pricing", "top_provider", "supported_parameters",
         "reasoning", "architecture", "expiration_date")}
     route, problems = build_route(key, catalog_entry, standard + tiered)
     if entry is None:
         problems = [f"catalog lists {len(entries)} entries for {model_id}", *problems]
-    primary = next((e for e in standard if e.get("tag") == PROVIDER_TAG), {})
+    primary = next((e for e in standard if e.get("tag") == tag), {})
     supported = primary.get("supported_parameters") or []
     primary_pricing = primary.get("pricing") or {}
     reasoning = (catalog_entry or {}).get("reasoning") or {}
     record = {
-        "model_id": model_id, "effort": EFFORTS[key], "catalog_entry": catalog_entry,
+        "model_id": model_id, "provider_tag": tag, "effort": effort, "catalog_entry": catalog_entry,
         "endpoints": standard + tiered,
         "endpoints_source": {"url": endpoints_url, "sha256": hashlib.sha256(endpoints_raw).hexdigest(),
                              "bytes": len(endpoints_raw), "all_tags": [e.get("tag") for e in endpoints]},
@@ -127,7 +131,7 @@ def model_record(key, catalog, endpoints_raw, endpoints_url):
             "reasoning_mandatory": reasoning.get("mandatory"),
             "supported_efforts": reasoning.get("supported_efforts"),
             "default_effort": reasoning.get("default_effort"),
-            "frozen_effort_supported": EFFORTS[key] in (reasoning.get("supported_efforts") or []),
+            "frozen_effort_supported": effort in (reasoning.get("supported_efforts") or []),
             "response_format": "response_format" in supported,
             "structured_outputs": "structured_outputs" in supported,
             "temperature": "temperature" in supported,
@@ -141,7 +145,7 @@ def model_record(key, catalog, endpoints_raw, endpoints_url):
                 "endpoint_lists_cache_write_price": primary_pricing.get("input_cache_write") is not None,
                 "supports_implicit_caching": primary.get("supports_implicit_caching"),
                 "min_cacheable_prompt_tokens": MIN_CACHEABLE_PROMPT_TOKENS,
-                "cache_system_default": CACHE_SYSTEM_DEFAULTS[key],
+                "cache_system_default": CACHE_SYSTEM_DEFAULTS.get(key, False),
                 "usage_fields": ["prompt_tokens_details.cached_tokens", "prompt_tokens_details.cache_write_tokens"],
             },
             "is_moderated": ((catalog_entry or {}).get("top_provider") or {}).get("is_moderated"),
@@ -163,10 +167,18 @@ def main(argv=None):
     catalog_raw = fetch(CATALOG_URL)
     catalog = json.loads(catalog_raw)
     models, routes = {}, {}
-    for key, model_id in MODEL_IDS.items():
+    for key, (model_id, *_rest) in ROUTE_SPECS.items():
         url = ENDPOINTS_URL.format(model=model_id)
-        models[key], routes[key] = model_record(key, catalog, fetch(url), url)
-    valid = all(m["valid"] for m in models.values())
+        try:
+            models[key], routes[key] = model_record(key, catalog, fetch(url), url)
+        except Exception as error:   # the optional fallback never blocks the pinned Anthropic routes
+            if key != FALLBACK_KEY:
+                raise
+            models[key], routes[key] = {"model_id": model_id, "problems": [f"fetch failed: {error}"],
+                                        "valid": False}, None
+    # The pinned Anthropic routes must pass; the optional fallback route (route.FALLBACK_KEY) is used
+    # only when its own entry is valid.
+    valid = all(m["valid"] for k, m in models.items() if k in MODEL_IDS)
     record = {
         "kind": "public_judge_route_pricing_freeze", "retrieved_utc": now.isoformat(), "plan_section": PLAN_SECTION,
         "allocation_decision": ALLOCATION_DECISION, "credential_used": False, "paid_calls": 0,
@@ -177,11 +189,12 @@ def main(argv=None):
         "model_allocation": {stage: list(keys) for stage, keys in MODEL_ALLOCATION.items()},
         "default_concurrency": dict(DEFAULT_CONCURRENCY),
         "docs": DOCS, "models": models, "valid": valid,
+        "fallback_valid": bool(models.get(FALLBACK_KEY, {}).get("valid")),
     }
     if valid:
-        settings = JudgeRouteSettings(**routes)
+        settings = JudgeRouteSettings(**{k: routes[k] for k in MODEL_IDS}, fallback=routes.get(FALLBACK_KEY))
         record["provider_preferences"] = settings.provider_preferences()
-        record["reasoning"] = {key: settings.reasoning(key, EFFORTS[key]) for key in MODEL_IDS}
+        record["reasoning"] = {key: settings.reasoning(key, ROUTE_SPECS[key][3]) for key in MODEL_IDS}
         record["cache_system_defaults"] = {key: settings.cache_system_default(key) for key in MODEL_IDS}
         record["settings"] = settings.describe()
         record["require_parameters_rationale"] = (

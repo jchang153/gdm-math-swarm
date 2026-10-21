@@ -66,6 +66,14 @@ other file is added, removed or changed, no catalogue file may be stored as LFS,
 is pinned to the planned revision. Removing the record and running publish/maintenance again
 does not re-list a run automatically; re-listing is a separate, reviewed update.
 
+--scope snapshots (no --bundle; --runs-dir, default runs/) replaces a published run's loose
+RUN/snapshots/ files with one deterministic RUN/snapshots.tar.gz and RUN/snapshots.manifest.json
+(owner, October 21, 2026: HF's 20,000-files-per-repository limit). Every deleted file must be an
+archive member with identical bytes and, for a run recorded in archive-manifest.json, the recorded
+snapshot digests must equal the archive manifest; deletions go in guarded, revision-pinned batches
+after the archive is uploaded and verified, archive-manifest.json last. The catalogue and every other
+file stay unchanged. An interrupted update continues when the scope is run again.
+
 Default: read-only plan pinned to the current Space revision. --commit first writes the
 receipt, a before-inventory, backups of the originals and the plan, then uploads in guarded
 batches (catalogue or manifest last), verifies the result against the original pre-maintenance
@@ -88,7 +96,8 @@ from prepare_hf_library import judge_excluded
 from publish_hf_library import (DEFAULT_REPO, RUN_ID, batches, digest, load_bundle, matches,
                                 merge_entries, payload, remote_files, validate_lfs_additions)
 
-SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'site', 'unlist')
+SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'site', 'unlist', 'snapshots')
+NO_BUNDLE = ('unlist', 'snapshots')
 REPLACEABLE = ('results.html', 'results.json')
 INSPECT_VIEW = 'inspect-view/'
 INSPECT_PAGE = INSPECT_VIEW + 'index.html'
@@ -278,8 +287,9 @@ def load_origin(directory, repo, run, required, scope='judge', replace_judge=Fal
 def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=None,
                  backup_dir=None, operation=None, resume_from=None, scope='judge', replace_judge=False):
     bundle = Path(bundle)
-    if scope not in SCOPES or scope == 'unlist':
-        raise ValueError('Unknown maintenance scope: ' + str(scope) + ' (unlist uses unlist_run)')
+    if scope not in SCOPES or scope in NO_BUNDLE:
+        raise ValueError('Unknown maintenance scope: ' + str(scope) + ' (unlist uses unlist_run, snapshots '
+                         'archive_snapshots)')
     if replace_judge and scope != 'judge':
         raise ValueError('--replace-judge applies only to the judge scope')
     if run in unlisted_runs():
@@ -1054,6 +1064,203 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
     return result
 
 
+DELETE_BATCH = 1000  # loose snapshot deletions per guarded commit
+
+
+def archive_snapshots(api, download, *, run, runs_dir, commit=False, repo=DEFAULT_REPO, receipt=None,
+                      backup_dir=None, operation=None, delete_operation=None):
+    """--scope snapshots: replace one published run's loose RUN/snapshots/ files with RUN/snapshots.tar.gz
+    and RUN/snapshots.manifest.json (owner, October 21, 2026: HF's 20,000-file repository limit).
+
+    The archive is built deterministically from the local run records (runs_dir/RUN/snapshots/, the
+    same bytes prepare_hf_library.py writes). Before any write every published loose snapshot file must
+    be a member of the archive with identical bytes, and for a run recorded in archive-manifest.json the
+    recorded snapshot digests must equal the archive manifest exactly, so nothing deleted is lost. A run
+    that is published only partly (absent from archive-manifest.json) may hold a subset. Commits, each
+    pinned to the expected parent revision: the two archive files, then the loose files' deletions in
+    batches, then (for a recorded run) archive-manifest.json, whose loose snapshot records are replaced
+    by the two archive files. Nothing else is added, removed or changed; .gitattributes may only gain an
+    exact LFS rule for the archive. The catalogue is not touched (an unlisted run may be archived too).
+    An interrupted update is continued by running the scope again: the remaining loose files are
+    verified the same way. Uses the operator's own HF SDK login."""
+    from prepare_hf_library import SNAPSHOT_ARCHIVE, SNAPSHOT_MANIFEST, SNAPSHOTS_DIR, check_snapshot_archive, \
+        snapshot_archive, snapshot_files
+    if not isinstance(run, str) or not RUN_ID.fullmatch(run):
+        raise ValueError('Invalid run ID')
+    check_outputs(None, receipt, backup_dir, commit, operation)
+    if commit and delete_operation is None:
+        raise ValueError('Committing requires a delete operation factory')
+    source = Path(runs_dir) / run
+    if source.is_symlink() or not source.is_dir():
+        raise ValueError('Local run records not found: ' + str(source))
+    packed = snapshot_archive(source, run)
+    if packed is None:
+        raise ValueError(f'The local run has no {SNAPSHOTS_DIR}/ files to archive: {source}')
+    archive, archive_manifest = packed
+    entries = check_snapshot_archive(archive, archive_manifest, run)
+    local = dict(snapshot_files(source))
+    prefix = run + '/'
+    archive_name, manifest_name = prefix + SNAPSHOT_ARCHIVE, prefix + SNAPSHOT_MANIFEST
+    planned = {archive_name: archive, manifest_name: archive_manifest}
+
+    info = api.repo_info(repo, repo_type='space', files_metadata=True)
+    if not info.private:
+        raise ValueError('Maintenance requires a private Space')
+    base = info.sha
+    remote = remote_files(api, repo, base)
+    current = inventory(remote)
+
+    def fetch(name, revision=base, listing=None):
+        listing = remote if listing is None else listing
+        data = Path(download(repo, name, repo_type='space', revision=revision)).read_bytes()
+        if not matches(data, listing[name]):
+            raise ValueError('Remote metadata mismatch: ' + name)
+        return data
+
+    if not any(n.startswith(prefix) for n in remote):
+        raise ValueError('Run is not published: ' + run)
+    if MANIFEST not in remote:
+        raise ValueError('Remote file required for maintenance is missing: ' + MANIFEST)
+    loose = sorted(n for n in remote if n.startswith(prefix + SNAPSHOTS_DIR + '/'))
+    unknown = [n for n in loose if n[len(prefix):] not in entries]
+    if unknown:
+        raise ValueError(f'{len(unknown)} published snapshot file(s) are not in the local archive; nothing is deleted: '
+                         + ', '.join(unknown[:EXAMPLES]))
+    differing = [n for n in loose if not matches(local[n[len(prefix):]].read_bytes(), remote[n])]
+    if differing:
+        raise ValueError(f'{len(differing)} published snapshot file(s) differ from the archived bytes; nothing is '
+                         'deleted: ' + ', '.join(differing[:EXAMPLES]))
+    for name, data in planned.items():
+        if name in remote and not matches(data, remote[name]):
+            raise ValueError('A different archive file is already published: ' + name)
+    root = json.loads(fetch(MANIFEST))
+    if root.get('schema') != 'gdm-private-space/1' or root.get('warnings'):
+        raise ValueError('Remote archive manifest needs review before maintenance')
+    recorded_run = run in root.get('runs', [])
+    recorded = {n: d for n, d in root['files'].items() if n.startswith(prefix + SNAPSHOTS_DIR + '/')}
+    expected_records = {prefix + name: d for name, d in entries.items()}
+    if recorded_run:
+        if recorded and recorded != expected_records:
+            raise ValueError('The snapshot records of the published archive manifest differ from the local archive '
+                             '(missing or changed members); nothing is deleted')
+        if not recorded and (loose or any(root['files'].get(n) != digest(d) for n, d in planned.items())):
+            raise ValueError('The archive manifest records no loose snapshots but the run is not fully archived; '
+                             'review the Space')
+    elif recorded:
+        raise ValueError('The archive manifest records snapshot files of a run it does not list; review the Space')
+    new_root = root
+    if recorded_run and recorded:
+        files = {n: d for n, d in root['files'].items() if n not in recorded}
+        files.update({n: digest(d) for n, d in planned.items()})
+        new_root = {**root, 'files': files, 'total_bytes': sum(x['bytes'] for x in files.values())}
+    root_bytes = json.dumps(new_root, indent=2).encode() if new_root is not root else None
+    uploads = [(n, d) for n, d in planned.items() if n not in remote]
+    deletions = [n for n in loose]
+    result = {'operation': 'maintain-run', 'scope': 'snapshots', 'repo': repo, 'private': True, 'run': run,
+              'base_revision': base, 'committed': False, 'recorded_in_archive_manifest': recorded_run,
+              'archive': {'path': archive_name, 'bytes': len(archive), 'sha256': digest(archive)['sha256'],
+                          'members': len(entries), 'member_bytes': sum(x['bytes'] for x in entries.values())},
+              'loose_published': len(loose), 'loose_verified_against_archive': len(loose),
+              'loose_recorded': len(recorded), 'to_upload': [n for n, _ in uploads], 'to_delete': len(deletions),
+              'archive_manifest_update': root_bytes is not None,
+              'files_before': len(remote),
+              'files_after': len(remote) - len(deletions) + len(uploads),
+              'already_applied': not uploads and not deletions and root_bytes is None}
+    if not commit or result['already_applied']:
+        return result
+
+    backup_dir, receipt = Path(backup_dir), Path(receipt)
+    revision, committed_batches = base, 0
+
+    def write_receipt(status):
+        write_json(receipt, {**result, 'last_revision': revision, 'committed_batches': committed_batches,
+                             'status': status})
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    write_receipt('writing backups; nothing uploaded')
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        write_json(backup_dir / INVENTORY, {'operation': 'maintain-run', 'scope': 'snapshots', 'repo': repo,
+                                            'run': run, 'revision': base, 'origin_revision': base,
+                                            'resume_from': None, 'files': current})
+        saved = [MANIFEST, *([ATTRIBUTES] if ATTRIBUTES in remote else [])]
+        for name in saved:
+            target = backup_dir / ORIGINAL / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(fetch(name))
+        for name, data in planned.items():  # the archive holds the bytes of every deleted file
+            (backup_dir / name.rsplit('/', 1)[1]).write_bytes(data)
+        write_json(backup_dir / 'deleted.json', deletions)
+        write_json(backup_dir / PLAN, result)
+        result.update(backup_dir=str(backup_dir))
+        write_receipt('backups written; nothing uploaded')
+
+        def guarded_commit(message, operations):
+            nonlocal revision, committed_batches
+            latest = api.repo_info(repo, repo_type='space')
+            if not latest.private or latest.sha != revision:
+                raise ValueError('Space changed concurrently or is no longer private; run the scope again '
+                                 '(it continues from the current state)')
+            response = api.create_commit(repo_id=repo, repo_type='space', parent_commit=revision,
+                                         commit_message=message, operations=operations)
+            revision, committed_batches = response.oid, committed_batches + 1
+            write_receipt('committing')
+
+        if uploads:
+            guarded_commit(f'Archive snapshots of {run}: add {SNAPSHOT_ARCHIVE} and {SNAPSHOT_MANIFEST}',
+                           [operation(path_in_repo=n, path_or_fileobj=d) for n, d in uploads])
+            listing = remote_files(api, repo, revision)
+            for name, data in planned.items():
+                if name not in listing or not matches(data, listing[name]):
+                    raise ValueError('Archive upload mismatch; nothing deleted: ' + name)
+        for start in range(0, len(deletions), DELETE_BATCH):
+            batch = deletions[start:start + DELETE_BATCH]
+            guarded_commit(f'Archive snapshots of {run}: remove {len(batch)} loose snapshot files '
+                           f'(kept in {SNAPSHOT_ARCHIVE})', [delete_operation(path_in_repo=n) for n in batch])
+        if root_bytes is not None:
+            guarded_commit(f'Archive snapshots of {run}: record the archive in {MANIFEST}',
+                           [operation(path_in_repo=MANIFEST, path_or_fileobj=root_bytes)])
+        final = api.repo_info(repo, repo_type='space', files_metadata=True)
+        if not final.private or final.sha != revision:
+            raise ValueError('Space changed before verification; inspect the latest revision')
+        final_files = remote_files(api, repo, revision)
+        state = inventory(final_files)
+        expected_names = (set(current) - set(deletions)) | set(planned)
+        if set(state) != expected_names:
+            raise ValueError(f'Remote file inventory changed unexpectedly: missing '
+                             f'{sorted(expected_names - set(state))[:EXAMPLES]}, unexpected '
+                             f'{sorted(set(state) - expected_names)[:EXAMPLES]}')
+        attributes = 'unchanged'
+        for name in sorted(current):
+            if name in deletions or name in planned or (name == MANIFEST and root_bytes is not None):
+                continue
+            if not same(current[name], state[name]):
+                if name != ATTRIBUTES:
+                    raise ValueError('Unrelated remote file changed: ' + name)
+                validate_lfs_additions(fetch(ATTRIBUTES), fetch(ATTRIBUTES, revision, final_files), {run},
+                                       {archive_name}, final_files)
+                attributes = 'exact LFS rule for the archive'
+        for name, data in [*planned.items(), *([(MANIFEST, root_bytes)] if root_bytes is not None else [])]:
+            if not matches(data, final_files[name]):
+                raise ValueError('File hash mismatch after maintenance: ' + name)
+        if final_files[manifest_name].lfs:
+            raise ValueError(f'{manifest_name} is stored as LFS')
+    except Exception as error:
+        try:
+            write_receipt('failed: ' + type(error).__name__ + (': ' + str(error) if isinstance(error, ValueError) else ''))
+        except Exception as receipt_error:  # never hide the original error
+            print(f'Could not record the failure in the receipt {receipt}: {type(receipt_error).__name__}: '
+                  f'{receipt_error}', file=sys.stderr)
+        raise
+    result.update(committed=True, final_revision=revision, committed_batches=committed_batches, status='verified',
+                  verification={'final_files': len(state), 'deleted_loose_files': len(deletions),
+                                'loose_files_left': sum(n.startswith(prefix + SNAPSHOTS_DIR + '/') for n in state),
+                                'verified_preserved_files': len(set(current) - set(deletions) - set(planned)
+                                                                - ({MANIFEST} if root_bytes is not None else set())),
+                                'gitattributes': attributes})
+    write_receipt('verified')
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     target = parser.add_mutually_exclusive_group(required=True)
@@ -1071,13 +1278,18 @@ def main(argv=None):
                              'is removed (index.html, experiments.json, archive-manifest.json), no file deleted; inspect: only '
                              'RUN/inspect-view/index.html and the Inspect log links of the catalogue entry; site: only the '
                              'generated pages (results.html, existing conference-view pages, existing judge HTML '
-                             'pages), never data or the catalogue entry')
+                             'pages), never data or the catalogue entry; '
+                             'snapshots: RUN/snapshots/ loose files replaced by RUN/snapshots.tar.gz and its '
+                             'manifest (verified member by member), catalogue unchanged')
     parser.add_argument('--replace-judge', action='store_true',
                         help='judge scope only: replace published judge files of another judge build (for example '
                              'a re-run under a newer rubric) instead of refusing them; published judge files the '
                              'bundle lacks are still refused and nothing is deleted')
     parser.add_argument('--bundle', type=Path,
-                        help='prepare_hf_library.py bundle containing exactly this run (not used by unlist)')
+                        help='prepare_hf_library.py bundle containing exactly this run (not used by unlist or '
+                             'snapshots)')
+    parser.add_argument('--runs-dir', type=Path, default=Path(__file__).resolve().parents[1] / 'runs',
+                        help='snapshots scope: local run records the archive is built from (default runs/)')
     parser.add_argument('--repo-id', default=DEFAULT_REPO)
     parser.add_argument('--commit', action='store_true', help='Upload; otherwise only print the plan')
     parser.add_argument('--receipt', type=Path, help='New host-only receipt path outside the bundle')
@@ -1097,10 +1309,11 @@ def main(argv=None):
                                     repo=args.repo_id, receipt=args.receipt, backup_dir=args.backup_dir,
                                     operation=CommitOperationAdd), indent=2))
         return
-    if (args.scope == 'unlist') == (args.bundle is not None):
-        parser.error('--bundle is required, except for --scope unlist, which takes none')
-    if args.resume_from is not None and args.scope == 'unlist':
-        parser.error('--scope unlist is a single guarded commit; rerun the dry run instead of resuming')
+    if (args.scope in NO_BUNDLE) == (args.bundle is not None):
+        parser.error('--bundle is required, except for --scope unlist or snapshots, which take none')
+    if args.resume_from is not None and args.scope in NO_BUNDLE:
+        parser.error('--scope ' + args.scope + ' takes no --resume-from; run it again, it continues from the '
+                     'current state')
     if args.commit and (args.receipt is None or args.backup_dir is None):
         parser.error('--commit requires --receipt and --backup-dir')
     if args.replace_judge and args.scope != 'judge':
@@ -1109,6 +1322,13 @@ def main(argv=None):
         if path is not None and args.bundle is not None and not outside(path, args.bundle):
             parser.error(flag + ' must be outside the immutable prepared bundle')
     from huggingface_hub import HfApi, CommitOperationAdd, hf_hub_download
+    if args.scope == 'snapshots':
+        from huggingface_hub import CommitOperationDelete
+        print(json.dumps(archive_snapshots(HfApi(), hf_hub_download, run=args.maintain_run, runs_dir=args.runs_dir,
+                                           commit=args.commit, repo=args.repo_id, receipt=args.receipt,
+                                           backup_dir=args.backup_dir, operation=CommitOperationAdd,
+                                           delete_operation=CommitOperationDelete), indent=2))
+        return
     if args.scope == 'unlist':
         print(json.dumps(unlist_run(HfApi(), hf_hub_download, run=args.maintain_run, commit=args.commit,
                                     repo=args.repo_id, receipt=args.receipt, backup_dir=args.backup_dir,

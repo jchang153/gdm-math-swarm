@@ -511,6 +511,44 @@ resume and verification). Prepare each run's bundle with the viewer of its origi
 it per run, plan first, as for the other scopes. Published `results.html` pages still link `inspect/`
 until their reports are regenerated and republished.
 
+## Snapshot archives (HF file limit)
+
+HF limits a repository to 20,000 files, and the Space reached it (19,937 files at revision
+`8c79494`), mostly runtime file snapshots (`RUN/snapshots/AGENT/SHA256`, thousands of small
+content-addressed blobs per run). The owner decided on October 21, 2026: "just go ahead and merge
+files". `prepare_hf_library.py` therefore publishes each run's `snapshots/` folder as one
+deterministic `RUN/snapshots.tar.gz` (sorted members, zero times and owners, fixed modes, no gzip
+name or time: preparing it again gives the same bytes) plus `RUN/snapshots.manifest.json`
+(schema `gdm-snapshot-archive/1`: the archive's size and SHA-256 and every member's path, size and
+SHA-256). No page loads snapshot files at runtime: the conference view embeds each captured file in
+its own pages when it is exported, and Inspect View reads only its logs. Preparation refuses a page
+that links or fetches a loose `snapshots/` path (link the conference view's captured-file pages
+instead), and publication refuses a bundle with loose snapshot files, checks that each manifest
+describes its archive exactly and screens every archive member for credential patterns. The archive
+matches the Space's existing `*.tar.*` LFS rule, so it is stored as LFS (a download) with
+`.gitattributes` unchanged.
+
+`maintain_hf_run.py --maintain-run RUN_ID --scope snapshots` (no `--bundle`; `--runs-dir`, default
+`runs/`) converts an already-published run. It builds the same archive from the local records and,
+before any write, requires every published loose snapshot file to be an archive member with identical
+bytes (Git blob or LFS hash) and, for a run recorded in `archive-manifest.json`, the recorded snapshot
+digests to equal the archive manifest exactly; a partly published run (not yet recorded) may hold a
+subset. With `--commit --receipt FILE --backup-dir DIR` it writes the before-inventory, the original
+`archive-manifest.json` and `.gitattributes`, the archive and its manifest (which hold every deleted
+file's bytes), `deleted.json` and the plan, then commits, each pinned to the expected parent revision:
+the two archive files (verified before anything is deleted), the deletions in batches of 1,000, and
+last, for a recorded run, `archive-manifest.json` with the loose records replaced by the two archive
+files. The catalogue and every other file stay unchanged; the final state is verified against the base
+inventory. An interrupted update continues by running the scope again (the remaining loose files are
+verified the same way); a completed one reports `already_applied`.
+
+```bash
+OUT=runs/phase-b/hf-library-preparation/snapshot-archives-YYYYMMDD
+python scripts/maintain_hf_run.py --maintain-run RUN_ID --scope snapshots          # plan only
+python scripts/maintain_hf_run.py --maintain-run RUN_ID --scope snapshots --commit \
+  --receipt "$OUT/RUN_ID.receipt.json" --backup-dir "$OUT/RUN_ID"
+```
+
 ## Near-live mirror
 
 The owner chose a near-live view of runs on the website while they are going ("option 1 (near-live)",
@@ -864,6 +902,25 @@ SDK/HTTP checks, not interactive browser tests. Locally the first (v3) build is 
 `runs/gemini10-20261020T054602Z/analysis/judge-v3-first-run/`. Before-inventory, original copies of
 the replaced files, plan, receipt and checks are in the ignored
 `runs/phase-b/judge-plain-publication-gemini10-20261020T054602Z/attempt-1/` directory.
+
+The snapshot archive update of October 21, 2026 (owner: "just go ahead and merge files") took the Space
+from 19,937 files at revision `8c79494d17e2019581825dbef5cded93f9a17d58` to 6,444 at
+`fb4537604e86e83eb2d8b17a309749a06954722c` with `--scope snapshots` for `pilot` (772 loose files),
+`baseline8g100` (2,058), `cache100` (3,191), `gemini10` (6,308) and the partly published
+`owner-gemini4-20261021T183937Z` (862) and `owner-glm53-20261021T184313Z` (314 of 993); every receipt
+reads `verified` and `.gitattributes` was unchanged. The unlisted `baseline100-20261015T191545Z` keeps its
+1,827 loose files (outside the requested scope; the same command converts it). The four owner runs were
+then published with archived snapshots from `owner-multimodel-20261021-archived` (prepared from the
+same staged records and Inspect bundles as the interrupted `owner-multimodel-20261021`, identical apart
+from the archives) at `5dfa2d10f0969a187415b5b8f1a695472c0c4482` (654 uploads, 6,441 files preserved),
+and the GLM behavior judge re-run, which had landed (paid, 5 of 5 agents graded), was added with the
+judge scope at `3b1420e8004a85d2f35a3e4d24e033f1e9c8b88d` (22 judge files added, both reports replaced,
+7,089 files preserved). The catalogue lists 8 runs newest first (GLM, Gemini 4, GPT 5.6, Opus 5.5,
+gemini10, cache100, baseline8g100, pilot), every catalogue link resolves, the archive manifest records
+exactly the 7,114 run and catalogue files, and `scripts/verify_hosted.py` passed for the four new runs,
+GLM's judge report and evidence browser and `gemini10`. The Space then held 7,117 files. Receipts and
+backups are in the ignored `runs/phase-b/hf-library-preparation/snapshot-archives-20261021/` directory and
+next to the two bundles.
 
 The new site (owner request, October 21, 2026: run list and compare view, run page summary card and tabs,
 light/dark theme, phone layout, no custom transcript viewer) was rolled out with the site scope after the

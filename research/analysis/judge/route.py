@@ -101,6 +101,27 @@ PROVIDER_TAG = "anthropic"
 PROVIDER_NAME = "Anthropic"
 # Response ``service_tier`` values that mean the standard tier (or an unreported one).
 STANDARD_SERVICE_TIERS = (None, "", "default", "standard")
+# Non-Anthropic fallback route (owner request, October 21, 2026): when Anthropic refuses a unit
+# (``finish_reason`` content_filter / ``native_finish_reason`` refusal, e.g. its Terms-of-Service block
+# on transcripts of another lab's model), a caller may send that unit once to this model instead of
+# resending the refused content to Anthropic. Optional: a pricing record without a valid ``fallback``
+# entry simply has no fallback. Pinned to the standard OpenAI endpoint, no router fallbacks; never
+# marked for prompt caching (OpenAI caching is implicit).
+FALLBACK_KEY = "fallback"
+FALLBACK_MODEL_ID = "openai/gpt-5.6-sol"
+FALLBACK_PROVIDER_TAG = "openai"
+FALLBACK_PROVIDER_NAME = "OpenAI"
+FALLBACK_EFFORT = "high"
+FALLBACK_CONCURRENCY = 8
+ROUTE_KEYS = (*MODEL_KEYS, FALLBACK_KEY)
+# key -> (model id, provider tag, provider name, frozen effort)
+ROUTE_SPECS = {**{key: (MODEL_IDS[key], PROVIDER_TAG, PROVIDER_NAME, EFFORTS[key]) for key in MODEL_KEYS},
+               FALLBACK_KEY: (FALLBACK_MODEL_ID, FALLBACK_PROVIDER_TAG, FALLBACK_PROVIDER_NAME, FALLBACK_EFFORT)}
+
+
+def provider_name(key):
+    """The provider that must serve ``key``'s requests (``Anthropic``, or ``OpenAI`` for the fallback)."""
+    return ROUTE_SPECS[key][2]
 
 CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
 CATALOG_URL = "https://openrouter.ai/api/v1/models"
@@ -198,6 +219,18 @@ _OBSERVED = {
                        True, _ALL_EFFORTS, _OBSERVED_PARAMETERS),
 }
 
+# The fallback route as observed 2026-10-21 (public catalog, tag "openai"): offline tests only; a paid
+# run takes it from a fresh pricing record's ``fallback`` entry.
+OBSERVED_FALLBACK = ModelRoute(FALLBACK_KEY, FALLBACK_MODEL_ID, "openai/gpt-5.6-sol-20260709", FALLBACK_EFFORT, 1050000,
+                               128000, (PriceTier(0, "0.000004", "0.00002", "0.0000004", "0.000005", None,
+                                                  FALLBACK_PROVIDER_TAG),
+                                        PriceTier(272000, "0.000008", "0.00003", "0.0000008", "0.00001", None,
+                                                  FALLBACK_PROVIDER_TAG)),
+                               None, ("max", "xhigh", "high", "medium", "low", "none"),
+                               tuple(sorted(("reasoning", "include_reasoning", "seed", "max_tokens", "response_format",
+                                             "structured_outputs", "tools", "tool_choice", "verbosity",
+                                             "reasoning_effort"))))
+
 
 def _marks_cache(serialized_body):
     data = serialized_body if isinstance(serialized_body, (bytes, bytearray)) else str(serialized_body).encode("utf-8")
@@ -224,6 +257,8 @@ class JudgeRouteSettings:
     pricing_verified: bool = False
     pricing_record: str | None = None
     pricing_record_sha256: str | None = None
+    # The optional non-Anthropic fallback route (``FALLBACK_KEY``); None without one.
+    fallback: ModelRoute | None = None
 
     def __post_init__(self):
         if self.prompt_cache not in (None, True, False):
@@ -271,19 +306,36 @@ class JudgeRouteSettings:
             if problems:
                 raise ValueError(f"Pricing record {key} no longer validates: " + "; ".join(problems))
             routes[key] = route
+        fallback = None
+        entry = models.get(FALLBACK_KEY)
+        if isinstance(entry, dict):   # optional: an invalid fallback entry only means no fallback
+            route, problems = build_route(FALLBACK_KEY, entry.get("catalog_entry"), entry.get("endpoints"))
+            fallback = None if problems else route
         return cls(**routes, prompt_cache=prompt_cache, pricing_verified=True, pricing_record=str(path),
-                   pricing_record_sha256=hashlib.sha256(raw).hexdigest())
+                   pricing_record_sha256=hashlib.sha256(raw).hexdigest(), fallback=fallback)
 
     # -- request pieces -----------------------------------------------------
     def route(self, key) -> ModelRoute:
+        if key == FALLBACK_KEY:
+            if self.fallback is None:
+                raise ValueError("These judge route settings have no fallback route (the pricing record lacks a "
+                                 "valid fallback entry)")
+            return self.fallback
         if key not in MODEL_KEYS:
-            raise ValueError(f"Unknown judge model {key!r}; expected one of {MODEL_KEYS}")
+            raise ValueError(f"Unknown judge model {key!r}; expected one of {ROUTE_KEYS}")
         return getattr(self, key)
 
-    def provider_preferences(self):
+    @property
+    def has_fallback(self):
+        return self.fallback is not None
+
+    def provider_preferences(self, key=None):
+        """Provider pin of ``key``'s requests (default: the Anthropic models'): only that provider's
+        standard endpoint, no router fallbacks."""
         if self.provider_tag != PROVIDER_TAG or self.allow_fallbacks:
             raise ValueError("The judge route is pinned to Anthropic with no fallbacks (plan, Route and key)")
-        return {"order": [self.provider_tag], "only": [self.provider_tag], "allow_fallbacks": False,
+        tag = ROUTE_SPECS[key][1] if key == FALLBACK_KEY else self.provider_tag
+        return {"order": [tag], "only": [tag], "allow_fallbacks": False,
                 "require_parameters": bool(self.require_parameters)}
 
     def reasoning(self, key, effort):
@@ -298,6 +350,8 @@ class JudgeRouteSettings:
         route = self.route(key)
         if self.prompt_cache is False:
             return False
+        if key == FALLBACK_KEY:
+            return False   # explicit cache_control is Anthropic's mechanism; OpenAI caches implicitly
         wanted = True if self.prompt_cache is True else CACHE_SYSTEM_DEFAULTS[key]
         return bool(wanted and route.supports_prompt_cache)
 
@@ -417,7 +471,10 @@ class JudgeRouteSettings:
                 "cache_saving_usd": str(uncached_equivalent - total)}
 
     def describe(self):
-        return json.loads(json.dumps(asdict(self), default=str))
+        data = asdict(self)
+        if data.get("fallback") is None:   # unchanged description (and sha256) without a fallback route
+            data.pop("fallback", None)
+        return json.loads(json.dumps(data, default=str))
 
     def sha256(self):
         return hashlib.sha256(json.dumps(self.describe(), sort_keys=True).encode("utf-8")).hexdigest()
@@ -474,20 +531,20 @@ def build_route(key, catalog_entry, endpoints, *, max_tokens_ceiling=MAX_TOKENS_
     and write prices on every tier. Prices take every standard Anthropic endpoint's tiers.
     """
     problems = []
-    model_id = MODEL_IDS.get(key)
-    if model_id is None:
+    if key not in ROUTE_SPECS:
         return None, [f"unknown model key {key!r}"]
+    model_id, tag, provider, effort = ROUTE_SPECS[key]
     catalog_entry = catalog_entry or {}
     if catalog_entry.get("id") != model_id:
         problems.append(f"catalog entry id {catalog_entry.get('id')!r} is not {model_id}")
-    standard, _ = matching_endpoints(endpoints)
-    primary = [e for e in standard if e.get("tag") == PROVIDER_TAG]
+    standard, _ = matching_endpoints(endpoints, tag)
+    primary = [e for e in standard if e.get("tag") == tag]
     if len(primary) != 1:
-        problems.append(f"expected exactly one standard {PROVIDER_TAG!r} endpoint, found {len(primary)}")
+        problems.append(f"expected exactly one standard {tag!r} endpoint, found {len(primary)}")
         return None, problems
     endpoint = primary[0]
-    if endpoint.get("provider_name") != PROVIDER_NAME:
-        problems.append(f"endpoint provider {endpoint.get('provider_name')!r} is not {PROVIDER_NAME}")
+    if endpoint.get("provider_name") != provider:
+        problems.append(f"endpoint provider {endpoint.get('provider_name')!r} is not {provider}")
     if endpoint.get("status") != 0:
         problems.append(f"Anthropic endpoint status {endpoint.get('status')!r} (0 = available)")
     supported = tuple(endpoint.get("supported_parameters") or ())
@@ -498,8 +555,8 @@ def build_route(key, catalog_entry, endpoints, *, max_tokens_ceiling=MAX_TOKENS_
         problems.append(f"Anthropic endpoint does not list {EFFORT_PARAMETER!r} (effort control)")
     reasoning = catalog_entry.get("reasoning") or {}
     efforts = tuple(reasoning.get("supported_efforts") or ())
-    if EFFORTS[key] not in efforts:
-        problems.append(f"effort {EFFORTS[key]!r} not among supported efforts {list(efforts)}")
+    if effort not in efforts:
+        problems.append(f"effort {effort!r} not among supported efforts {list(efforts)}")
     context = endpoint.get("context_length")
     max_out = endpoint.get("max_completion_tokens")
     if not isinstance(context, int) or context <= 0:
@@ -532,11 +589,11 @@ def build_route(key, catalog_entry, endpoints, *, max_tokens_ceiling=MAX_TOKENS_
                                    str(item.get("tag"))))
     if not any(t.min_prompt_tokens == 0 for t in tiers):
         problems.append("no base price tier")
-    if CACHE_SYSTEM_DEFAULTS[key] and any(t.cache_read is None or t.cache_write is None for t in tiers):
+    if CACHE_SYSTEM_DEFAULTS.get(key, False) and any(t.cache_read is None or t.cache_write is None for t in tiers):
         problems.append(f"{key} caches its system prompt by default but a tier lacks cache read/write prices")
     if problems:
         return None, problems
-    route = ModelRoute(key, model_id, catalog_entry.get("canonical_slug"), EFFORTS[key], context, max_out,
+    route = ModelRoute(key, model_id, catalog_entry.get("canonical_slug"), effort, context, max_out,
                        tuple(sorted(tiers, key=lambda t: (t.min_prompt_tokens, t.endpoint_tag))),
                        reasoning.get("mandatory"), efforts, tuple(sorted(supported)))
     return route, []
@@ -552,4 +609,4 @@ def summarize_route(route: ModelRoute):
             "max_cache_write_1h_usd_per_token": top("cache_write_1h"),
             "tier_thresholds": sorted({t.min_prompt_tokens for t in route.tiers}),
             "supports_prompt_cache": route.supports_prompt_cache,
-            "cache_system_default": CACHE_SYSTEM_DEFAULTS[route.key] and route.supports_prompt_cache}
+            "cache_system_default": CACHE_SYSTEM_DEFAULTS.get(route.key, False) and route.supports_prompt_cache}

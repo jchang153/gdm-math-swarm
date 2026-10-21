@@ -56,7 +56,12 @@ Per request (``complete``), under an ``asyncio.Semaphore(max_concurrency)``:
    OpenRouter's reported cost (``provider_reported_cost``); an HTTP 4xx other than
    408, or a connection never established, settles ``unbilled_error`` at 0; 408, 5xx,
    timeouts, dropped connections, unparseable bodies and cancellation stay
-   ``uncertain`` (the reservation is retained until ``reconcile()``).
+   ``uncertain`` (the reservation is retained until ``reconcile()``). A 200 response that reports
+   no usage cost (Anthropic's content_filter/refusal block reports none) is looked up in
+   OpenRouter's generation record (unpaid GET with the host key, ``fetch_generation``) and settled
+   at its ``total_cost``; a refusal without usage that OpenRouter never recorded (HTTP 404) was not
+   billed and settles at 0; a failed lookup keeps the hold ``uncertain``.
+   ``reconcile_archived_holds`` does the same for leftover holds from archived responses.
 5. Classify: refusal (``finish_reason == "content_filter"``, ``native_finish_reason``
    ``refusal``/``content_filter``, a non-empty ``message.refusal``, or an error with
    ``error_type`` ``refusal``/``content_policy_violation``/flagged input) is retried
@@ -112,8 +117,8 @@ from pathlib import Path
 from research_swarm.budget import DEFAULT_JUDGE_RUN_BUDGET_USD, BudgetExceeded, BudgetLedger
 from research_swarm.inspect_adapter import openrouter_reported_cost
 
-from .route import (CACHE_CONTROL, CACHE_TTL, DEFAULT_CONCURRENCY, MODEL_KEYS, PROVIDER_NAME, STANDARD_SERVICE_TIERS,
-                    JudgeRouteSettings)
+from .route import (CACHE_CONTROL, CACHE_TTL, DEFAULT_CONCURRENCY, FALLBACK_CONCURRENCY, FALLBACK_KEY, ROUTE_KEYS,
+                    PROVIDER_NAME, STANDARD_SERVICE_TIERS, JudgeRouteSettings, provider_name)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ANALYSIS_SCOPE = "analysis"
@@ -138,6 +143,15 @@ _REFUSAL_FINISH = frozenset({"content_filter", "refusal"})
 _HEADER_ALLOWLIST = ("content-type", "content-length", "date", "x-generation-id", "x-openrouter-generation-id",
                      "x-request-id", "retry-after", "server")
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
+# A 200 response that carries no usage cost (e.g. Anthropic's content_filter/refusal block, which
+# reports no usage) is looked up in OpenRouter's generation record (unpaid GET, host key) and settled
+# at its ``total_cost``; owner request, October 21, 2026. A refused response without usage whose
+# generation OpenRouter never recorded (HTTP 404 on every lookup) was not billed: settled at 0
+# (``unbilled_error``). A failed lookup (network, other HTTP status, model mismatch) keeps the hold.
+GENERATION_URL = "https://openrouter.ai/api/v1/generation?id={id}"
+GENERATION_LOOKUP_DELAYS_S = (2.0, 4.0)   # waits before the second and third lookup
+GENERATION_LOOKUP_TIMEOUT_S = 30.0
+NOT_RECORDED = "not_recorded"            # what a lookup returns for HTTP 404
 _PURPOSE = re.compile(r"^[a-z][a-z0-9_-]{0,40}$")
 
 
@@ -326,6 +340,127 @@ def fake_http_error(status, *, error_type=None, message="error", metadata=None, 
     if usage is not None:
         payload["usage"] = usage
     return TransportResponse(status, json.dumps(payload).encode("utf-8"), {"content-type": "application/json"})
+
+
+# ---------------------------------------------------------------------------
+# Generation lookups (unpaid) for responses that report no usage cost
+
+def fetch_generation(generation_id, key, timeout=GENERATION_LOOKUP_TIMEOUT_S):
+    """OpenRouter's generation record ``data`` for ``generation_id`` (unpaid GET with the host key,
+    no proxies, no redirects), ``NOT_RECORDED`` on HTTP 404; other failures raise."""
+    import urllib.parse
+    if not key:
+        raise RuntimeError("no key loaded")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+    request = urllib.request.Request(GENERATION_URL.format(id=urllib.parse.quote(str(generation_id), safe="")),
+                                     headers={"Authorization": f"Bearer {key}"})
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            data = json.loads(response.read()).get("data")
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return NOT_RECORDED
+        raise RuntimeError(f"generation lookup HTTP {error.code}") from None
+    if not isinstance(data, dict):
+        raise RuntimeError("generation lookup returned no data")
+    return data
+
+
+def unreported_response(body):
+    """For a raw 200 response body without a reported usage cost: ``{"generation_id", "model",
+    "refused"}`` (``refused``: an Anthropic-style refusal signal with no usage at all), else None."""
+    try:
+        payload = json.loads((body or b"").decode("utf-8") if isinstance(body, (bytes, bytearray)) else body)
+    except (UnicodeDecodeError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("id"), str) or not payload["id"]:
+        return None
+    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else None
+    if openrouter_reported_cost(usage) is not None:
+        return None
+    choices = payload.get("choices") if isinstance(payload.get("choices"), list) else []
+    choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+    message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+    refusal = message.get("refusal")
+    refused = (choice.get("finish_reason") in _REFUSAL_FINISH or choice.get("native_finish_reason") in _REFUSAL_FINISH
+               or (isinstance(refusal, str) and bool(refusal.strip())))
+    return {"generation_id": payload["id"], "model": payload.get("model"), "refused": bool(refused and not usage)}
+
+
+def generation_settlement(found, data, accepted_models):
+    """``(cost, basis, note)`` settling a no-usage response from its generation ``data`` (a lookup
+    result), or None to keep the hold. ``found`` is ``unreported_response``'s record."""
+    if data == NOT_RECORDED:
+        if found.get("refused"):
+            return (Decimal(0), "unbilled_error", f"refused without usage; OpenRouter has no generation record for "
+                                                  f"{found['generation_id']} (HTTP 404): not billed")
+        return None
+    if not isinstance(data, dict):
+        return None
+    model = str(data.get("model") or "")
+    if not any(m and m in model for m in accepted_models):
+        return None
+    cost = _decimal_or_none(data.get("total_cost"))
+    if cost is None or cost < 0:
+        return None
+    if cost == 0:
+        return (Decimal(0), "unbilled_error", f"OpenRouter generation {found['generation_id']} total_cost 0")
+    return (cost, "provider_reported_cost", f"OpenRouter generation {found['generation_id']} total_cost {cost}")
+
+
+def reconcile_archived_holds(ledger_path, archive_dirs, lookup, *, scope=ANALYSIS_SCOPE, sleep=None):
+    """Startup pass: settle this tool's leftover ``uncertain`` ledger holds whose archived 200 response
+    reported no usage cost (``unreported_response``), from OpenRouter's generation record, through the
+    ledger's reconciliation path (``BudgetLedger.reconcile``, audit row). ``lookup(generation_id)``
+    returns the record's ``data``, ``NOT_RECORDED`` or raises; a failure keeps the hold. Returns the
+    audit entries (no secrets)."""
+    from research_swarm.budget import list_requests
+    path = Path(ledger_path)
+    if not path.exists():
+        return []
+    archived = {}
+    for folder in archive_dirs or ():
+        folder = Path(folder)
+        if not folder.is_dir():
+            continue
+        for meta_path in folder.rglob("*.response.meta.json"):
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                body = meta_path.with_name(meta_path.name[:-len(".meta.json")] + ".body").read_bytes()
+            except (OSError, ValueError):
+                continue
+            if meta.get("http_status") != 200 or not meta.get("ledger_request_id"):
+                continue
+            found = unreported_response(body)
+            if found:
+                archived[str(meta["ledger_request_id"])] = found
+    holds = [r for r in list_requests(path, states=("uncertain",), scope=scope) if r["request_id"] in archived]
+    if not holds:
+        return []
+    ledger = BudgetLedger(path)
+    entries = []
+    for hold in holds:
+        found = archived[hold["request_id"]]
+        entry = {"request_id": hold["request_id"], "agent": hold.get("agent"), "reserved_usd": hold.get("reserved_usd"),
+                 "generation_id": found["generation_id"], "refused_without_usage": found["refused"]}
+        try:
+            data = lookup(found["generation_id"])
+        except Exception as error:
+            entries.append(dict(entry, outcome=f"lookup_failed: {type(error).__name__}"))
+            continue
+        decided = generation_settlement(found, data, [found.get("model")])
+        if decided is None:
+            entries.append(dict(entry, outcome="kept", detail="not recorded" if data == NOT_RECORDED else
+                                "model mismatch or no total_cost"))
+            continue
+        cost, basis, note = decided
+        try:
+            result = ledger.reconcile(hold["request_id"], str(cost), basis, note=note + " (judge client startup pass)")
+        except ValueError as error:   # resolved concurrently
+            entries.append(dict(entry, outcome=f"refused: {error}"))
+            continue
+        entries.append(dict(entry, outcome="reconciled", cost_usd=str(cost), basis=basis, new_state=result["state"]))
+    return entries
 
 
 # ---------------------------------------------------------------------------
@@ -781,15 +916,15 @@ class JudgeClient:
     """
     def __init__(self, model_key, ledger_path, scope=ANALYSIS_SCOPE, archive_dir=None, settings=None, http=None,
                  max_concurrency=None, *, paid_authorized=False, ledger_caps=None, key_loader=None, verify_limit=None,
-                 credentials_root=None, repo_root=None, run_limit=None, run_id=None):
-        if model_key not in MODEL_KEYS:
-            raise ValueError(f"Unknown judge model {model_key!r}; expected one of {MODEL_KEYS}")
+                 credentials_root=None, repo_root=None, run_limit=None, run_id=None, generation_lookup=None):
+        if model_key not in ROUTE_KEYS:
+            raise ValueError(f"Unknown judge model {model_key!r}; expected one of {ROUTE_KEYS}")
         if run_limit is not None and not isinstance(run_limit, RunLimit):
             raise ValueError("run_limit must be a RunLimit (shared by the invocation's clients) or None")
         if archive_dir is None:
             raise ValueError("archive_dir is required (raw requests/responses are archived before parsing)")
         if max_concurrency is None:
-            max_concurrency = DEFAULT_CONCURRENCY[model_key]
+            max_concurrency = DEFAULT_CONCURRENCY.get(model_key, FALLBACK_CONCURRENCY)
         if isinstance(max_concurrency, bool) or not isinstance(max_concurrency, int) or max_concurrency < 1:
             raise ValueError("max_concurrency must be a positive integer")
         if credentials_root is not None and repo_root is not None:
@@ -870,6 +1005,17 @@ class JudgeClient:
         self.limit_report = None
         self.sleep = asyncio.sleep          # HTTP 429 back-off (outside the semaphore)
         self.jitter = random.random         # spreads the back-off of concurrent requests
+        # Generation lookup for a 200 response without usage cost (``fetch_generation``; tests inject
+        # one). The paid path looks up with the loaded key; a fake transport without one never looks up.
+        if generation_lookup is None and self._paid:
+            generation_lookup = self.lookup_generation
+        self._generation_lookup = generation_lookup
+
+    def lookup_generation(self, generation_id):
+        """OpenRouter's generation record (``fetch_generation``) with this client's key (paid path)."""
+        if not self._prepared:
+            self.prepare()
+        return fetch_generation(generation_id, self._key)
 
     @property
     def run_limit(self):
@@ -1069,7 +1215,7 @@ class JudgeClient:
             [{"role": "user", "content": user}]
         body = {"model": self.route.model_id, "messages": messages, "max_tokens": max_tokens,
                 "reasoning": self.settings.reasoning(self.model_key, effort),
-                "provider": self.settings.provider_preferences()}
+                "provider": self.settings.provider_preferences(self.model_key)}
         if response_format is not None:
             body["response_format"] = response_format
         return body
@@ -1266,7 +1412,11 @@ class JudgeClient:
                 settlement = self._settle(request_id, None, None)
                 return _Outcome("grading_failed", "archive_failed_after_response", settlement=settlement,
                                 paths=paths, request_id=request_id, detail={"error": type(ex).__name__})
-            outcome = self._interpret(response, request_id)
+            looked_up = None
+            if int(response.status) == 200 and self._generation_lookup is not None:
+                looked_up = await self._unreported_cost(response.body, stem, paths)
+            outcome = (self._interpret(response, request_id) if looked_up is None else
+                       self._interpret(response, request_id, looked_up=looked_up))
             outcome.paths = paths + outcome.paths
             outcome.request_id = request_id
             return outcome
@@ -1282,8 +1432,45 @@ class JudgeClient:
         return self._write_json(stem.with_name(stem.name + ".error.json"), {
             "schema": ARCHIVE_SCHEMA, "kind": kind, "created_at": _now(), **detail})
 
-    def _interpret(self, response, request_id):
-        """Classify an archived response and settle its reservation."""
+    async def _unreported_cost(self, body, stem, paths):
+        """``(cost, basis, note)`` for a 200 response that reports no usage cost, from OpenRouter's
+        generation record (looked up up to 1 + len(GENERATION_LOOKUP_DELAYS_S) times while it is not
+        yet recorded), else None (the hold is kept as uncertain). The lookup is archived next to the
+        response (``.generation.json``)."""
+        found = unreported_response(body)
+        if found is None:
+            return None
+        accepted = [self.route.model_id, self.route.canonical_slug]
+        data, error, tries = None, None, 0
+        for delay in (0.0, *GENERATION_LOOKUP_DELAYS_S):
+            if delay:
+                await self.sleep(delay)
+            tries += 1
+            try:
+                data = await asyncio.to_thread(self._generation_lookup, found["generation_id"])
+                error = None
+            except Exception as ex:
+                data, error = None, type(ex).__name__
+                continue
+            if data != NOT_RECORDED:
+                break
+        decided = None if error else generation_settlement(found, data, accepted)
+        try:
+            paths.append(self._write_json(stem.with_name(stem.name + ".generation.json"), {
+                "schema": ARCHIVE_SCHEMA, "kind": "generation_lookup", "created_at": _now(),
+                "generation_id": found["generation_id"], "refused_without_usage": found["refused"], "tries": tries,
+                "error": error, "not_recorded": data == NOT_RECORDED,
+                "reported": {k: data.get(k) for k in ("model", "total_cost", "provider_name", "finish_reason",
+                                                      "native_finish_reason")} if isinstance(data, dict) else None,
+                "settlement": None if decided is None else {"cost_usd": str(decided[0]), "basis": decided[1],
+                                                            "note": decided[2]}}))
+        except Exception:
+            pass
+        return decided
+
+    def _interpret(self, response, request_id, looked_up=None):
+        """Classify an archived response and settle its reservation (``looked_up``: the generation
+        record's settlement of a 200 response that reports no usage cost, ``_unreported_cost``)."""
         status = int(response.status)
         payload = None
         try:
@@ -1317,7 +1504,11 @@ class JudgeClient:
             return _Outcome("grading_failed", "unparseable_response", settlement=settlement)
         usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else None
         reported = openrouter_reported_cost(usage)
-        settlement = self._settle(request_id, reported, "provider_reported_cost" if reported is not None else None)
+        if reported is None and looked_up is not None:
+            cost, basis, note = looked_up
+            settlement = dict(self._settle(request_id, cost, basis), source="generation_lookup", note=note)
+        else:
+            settlement = self._settle(request_id, reported, "provider_reported_cost" if reported is not None else None)
         generation_id = payload.get("id") if isinstance(payload.get("id"), str) else None
         discount = payload.get("cache_discount", (usage or {}).get("cache_discount"))
         common = {"settlement": settlement, "usage": usage, "generation_id": generation_id,
@@ -1371,7 +1562,7 @@ class JudgeClient:
         """Non-empty description when the response was not served by the pinned route."""
         problems = {}
         provider = payload.get("provider")
-        if provider is not None and str(provider).strip().lower() != PROVIDER_NAME.lower():
+        if provider is not None and str(provider).strip().lower() != provider_name(self.model_key).lower():
             problems["provider"] = provider
         model = payload.get("model")
         accepted = {self.route.model_id, self.route.canonical_slug}
