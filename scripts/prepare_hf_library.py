@@ -15,6 +15,8 @@ import shutil
 import tarfile
 
 from build_experiment_index import build
+from incident_site import INCIDENT_DIR, add_incident_tab, incident_excluded, incident_files, unpublished_links
+from publish_hf_library import SECRET
 from space_navigation import private_space_navigation
 from site_style import themed
 
@@ -140,7 +142,30 @@ def run_excluded(relative, transcript_export=False):
     for ``maintain_hf_run.py --scope transcripts`` of runs published with one) and judge files off the
     allowlist."""
     parts = Path(relative).parts
-    return (not transcript_export and bool(parts) and parts[0] in LOCAL_ONLY_DIRS) or judge_excluded(relative)
+    return ((not transcript_export and bool(parts) and parts[0] in LOCAL_ONLY_DIRS) or judge_excluded(relative)
+            or incident_excluded(relative))
+
+
+def incident_publication(source):
+    """None when a run has no incident report; else its included and locally excluded incident paths.
+    Only report.html, report.md and evidence.json are published
+    (scripts/incident_site.py); each is screened for credential-like content and the published page
+    must not link the incident files that stay local."""
+    names = incident_files(source)
+    if not names:
+        return None
+    folder = source / INCIDENT_DIR
+    included = [f'{INCIDENT_DIR}/{name}' for name in names]
+    for name in included:
+        data = (source / name).read_bytes()
+        if SECRET.search(data):
+            raise ValueError(f'Credential-like content in {name}; not published')
+        if name.endswith('.html') and unpublished_links(data.decode('utf-8', 'replace')):
+            raise ValueError(f'{name} links incident files that are not published (raw/, units/, route-pricing/, '
+                             'digest.json, state.json or run-budgets.json)')
+    excluded = sorted(p.relative_to(source).as_posix() for p in folder.rglob('*')
+                      if (p.is_file() or p.is_symlink()) and p.relative_to(source).as_posix() not in included)
+    return {'included': included, 'excluded': excluded}
 
 
 # Runtime file snapshots (RUN/snapshots/AGENT/SHA256: thousands of small content-addressed blobs) are
@@ -272,7 +297,7 @@ def main():
                         help='keep RUN/transcripts/ (only to maintain the transcript pages of a run published '
                              'before October 21, 2026 with maintain_hf_run.py --scope transcripts)')
     args = parser.parse_args()
-    selected, judge_plans = [], {}
+    selected, judge_plans, incident_plans = [], {}, {}
     for specification in args.run:
         run_id, bundle = specification.split('=', 1)
         if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]*', run_id):
@@ -286,6 +311,7 @@ def main():
         if not (viewer / 'index.html').is_file() or not (viewer / 'logs/listing.json').is_file():
             raise ValueError(f'Incomplete Inspect bundle for {run_id}')
         judge_plans[run_id] = judge_publication(source)
+        incident_plans[run_id] = incident_publication(source)
         selected.append((run_id, source, viewer))
     if len({row[0] for row in selected}) != len(selected):
         raise ValueError('Duplicate run IDs')
@@ -308,6 +334,9 @@ def main():
                 raise ValueError(f'{run_id}/{page.relative_to(output / run_id).as_posix()} links loose snapshot '
                                  'files, which are published only inside snapshots.tar.gz; link the conference '
                                  "view's captured-file pages instead")
+        if incident_plans[run_id] is not None:  # the run page's Incident report tab (navigation only)
+            page = output / run_id / 'results.html'
+            page.write_text(add_incident_tab(page.read_text(encoding='utf-8')), encoding='utf-8')
         # The generated views only; archived pages (e.g. results.legacy.html) stay as recorded.
         views = [output / run_id / 'results.html', *sorted((output / run_id / 'conference-view').glob('*.html'))]
         for page in views:
@@ -351,10 +380,18 @@ This archive must be hosted in a **private** Space. Do not upload credentials.
               for run, plan in judge_plans.items() if plan is not None}
     if judged:  # record which local judge records were deliberately left out
         manifest['behavior_judge'] = judged
+    incidents = {run: {'included': plan['included'], 'excluded': len(plan['excluded'])}
+                 for run, plan in incident_plans.items() if plan is not None}
+    for run, plan in incidents.items():  # the published copies (report.html themed) are screened again
+        for name in plan['included']:
+            if f'{run}/{name}' not in files or SECRET.search((output / run / name).read_bytes()):
+                raise ValueError(f'{run}/{name} is missing from the bundle or has credential-like content')
+    if incidents:  # which incident files are published; the rest of analysis/incident/ stays local
+        manifest['incident_report'] = incidents
     (output / 'archive-manifest.json').write_text(json.dumps(manifest, indent=2))
     print(json.dumps({'output': str(output), 'runs': manifest['runs'],
                       'files': len(files), 'bytes': manifest['total_bytes'],
-                      'behavior_judge': judged}))
+                      'behavior_judge': judged, 'incident_report': incidents}))
 
 
 if __name__ == '__main__':
