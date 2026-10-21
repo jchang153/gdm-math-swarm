@@ -114,6 +114,10 @@ Four configs, one per model, for four parallel 1-hour runs on four VMs (docs/pla
 
 Per VM, before the launch (steps as for the Gemini run above, with `configs/owner-<model>.json`): the images and the Lean evidence must match that VM's images, `freeze_route.py` (unpaid), then the PAID compatibility check `compat_check.py --config configs/owner-<model>.json --max-requests 6` (each model needs its own passing evidence; Argon, Opus and Sol also need `signed_reasoning_tool_call_replay`), then `preflight.py` and `supervise_run.py`.
 
+## Neutral collaboration twins (`owner-collab-pressure-<model>.json`, `owner-collab-glm-5.3.json`, October 21, 2026)
+
+`owner-collab-pressure-<model>.json` is `owner-<model>.json` for each of the four models with only `experiment` and `prompt_variant: "collab_max_pressure_no_rule6"` changed; `owner-collab-glm-5.3.json` is the GLM config with `prompt_variant: "collab"` (an example of the no-pressure variant). Either variant switches on the neutral environment (docs/prompts.md, "Neutral collaboration variants"). The paid compatibility check follows the config's neutral environment, so run it with the twin config itself (`compat_check.py --config configs/owner-collab-pressure-<model>.json`); its first run is also the runtime confirmation of the neutral Claude Code settings on 2.1.296.
+
 ## Optional keys
 
 `pilot.json` leaves these out, so the code uses the default shown. To change one, add the key to the config. For the keys that a probe also takes as a flag, add the key whenever the probe used a non-default value, so the launch matches what was measured.

@@ -311,7 +311,12 @@ class PromptVariantTests(unittest.TestCase):
         self.assertEqual(prompts.variant_sections(), {'INTRODUCTION': prompts.INTRODUCTION,
                                                       'PROBLEMS_FOOTER': prompts.PROBLEMS_FOOTER, 'PACE': prompts.PACE,
                                                       'SEPARATOR': prompts.SEPARATOR,
-                                                      'INTEGRITY_PROMPT': INTEGRITY_PROMPT})
+                                                      'INTEGRITY_PROMPT': INTEGRITY_PROMPT,
+                                                      'PROBLEM_COUNT': prompts.PROBLEM_COUNT,
+                                                      'ENVIRONMENT': prompts.ENVIRONMENT,
+                                                      'SUBMISSIONS': prompts.SUBMISSIONS,
+                                                      'COMMUNICATION': prompts.COMMUNICATION,
+                                                      'NOTES': prompts.NOTES})
 
     def test_collaboration_continuous_removes_both_ending_sentences(self):
         text = build_prompt('agent-001', 'algebra', None, 'collaboration_continuous')
@@ -329,7 +334,8 @@ class PromptVariantTests(unittest.TestCase):
                    'no_rule6': [self.RULE6], 'lenient': [self.STOP, self.DETECTION, self.REJECTION, self.RULE6]}
         self.assertEqual(set(removed) | {prompts.BASELINE_VARIANT, 'skills_eval', 'skills_eval_lenient',
                                          'collaboration', 'collaboration_continuous', 'max_pressure',
-                                         'max_pressure_integrity', 'max_pressure_no_rule6'},
+                                         'max_pressure_integrity', 'max_pressure_no_rule6',
+                                         'collab_max_pressure_no_rule6', 'collab'},
                          set(prompts.PROMPT_VARIANTS))
         for variant, passages in removed.items():
             text = build_prompt('agent-001', 'algebra', None, variant)

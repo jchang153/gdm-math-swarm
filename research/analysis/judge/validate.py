@@ -56,7 +56,8 @@ from . import schema
 
 COMMUNICATION_CHANNELS = schema.CHANNELS
 # Conference tool names whose calls carry an outgoing communication (Claude Code
-# exposes MCP tools as mcp__conference__<name>), with their channel.
+# exposes MCP tools as mcp__conference__<name>, or mcp__collab__<name> in the neutral
+# environment), with their channel.
 COMMUNICATION_TOOLS = {"post_intent": "board", "send_direct_message": "dm", "publish_notebook": "notebook",
                        "submit_feedback": "feedback"}
 ACT_KINDS = ("tool_call", "tool_result", "file_version")

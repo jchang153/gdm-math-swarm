@@ -114,6 +114,7 @@ sys.path.insert(0, str(ROOT / "src"))
 os.environ.setdefault("INSPECT_DISPLAY", "plain")  # eval_async has no display argument
 
 from research_swarm import runtime  # noqa: E402
+from research_swarm.tools import canonical_tool_name  # noqa: E402
 from research_swarm.budget import (DEFAULT_LEDGER_PATH, BudgetExceeded, BudgetLedger, describe_budget,  # noqa: E402
                                    ledger_path_for, list_requests, run_budget)
 from research_swarm.inspect_adapter import _rejected_without_generation, classify_generate_error  # noqa: E402
@@ -129,6 +130,9 @@ COMPAT_MAX_CONNECTIONS = 1  # one agent, one in-flight request (as in the pilot:
 DEFAULT_MAX_REQUESTS = 12
 DEFAULT_MAX_MINUTES = 10
 CONFERENCE_PREFIX = "mcp__conference__"
+# Conference tools as the agent calls them: mcp__conference__* or, in the neutral collaborative
+# environment (prompts.NEUTRAL_VARIANTS), mcp__collab__* (tools.canonical_tool_name).
+CONFERENCE_PREFIXES = (CONFERENCE_PREFIX, "mcp__collab__")
 # Launch gates (research_swarm.launch_gates.evaluate) that must pass before any paid call.
 REQUIRED_GATES = ("fixed_task_manifest", "frozen_dataset", "approved_settings", "budget_track", "run_budget",
                   "route_pricing", "credential_presence", "runtime-e2e", "runtime-isolation")
@@ -527,7 +531,7 @@ def build_checks(*, agent_id, events, conference_events, activity, settings, abo
     bash = [c for c in calls if c["function"] == "Bash" and not c["parse_error"] and executed(c)]
 
     def identity_bound(call):
-        tool = call["function"][len(CONFERENCE_PREFIX):]
+        tool = canonical_tool_name(call["function"])
         try:
             text = results[call["id"]]["text"] or ""
         except (KeyError, TypeError):
@@ -540,7 +544,7 @@ def build_checks(*, agent_id, events, conference_events, activity, settings, abo
             ok = re.match(r'\s*\{\s*"ok"\s*:\s*true\b', text) is not None
         return ok and any(
             e.get("agent_id") == agent_id and e.get("tool") == tool for e in conference_events)
-    conference = [c for c in calls if c["function"].startswith(CONFERENCE_PREFIX) and not c["parse_error"]
+    conference = [c for c in calls if c["function"].startswith(CONFERENCE_PREFIXES) and not c["parse_error"]
                   and executed(c)]
     bound = [c for c in conference if identity_bound(c)]
 
@@ -569,7 +573,7 @@ def build_checks(*, agent_id, events, conference_events, activity, settings, abo
             f"{len(bash)} built-in Bash call(s) parsed and executed; {len(parse_failures)} tool call(s) with a parse "
             f"error out of {len(calls)}"),
         "conference_tool_call": _check(
-            bool(bound), f"{len(bound)} of {len(conference)} executed {CONFERENCE_PREFIX}* call(s) returned ok and "
+            bool(bound), f"{len(bound)} of {len(conference)} executed conference-tool call(s) returned ok and "
                          f"appear in the conference log under {agent_id}"),
         "reasoning_replay_accepted": _check(
             bool(accepted), f"{len(accepted)} of {len(replays)} request(s) replaying earlier reasoning returned "
@@ -732,8 +736,15 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path, provide
     from inspect_ai import eval_async
     from research_swarm.inspect_adapter import (InstructionArchive, budget_filter, claude_code_env,
                                                 credentials_in_environment, disable_inspect_dotenv)
-    from research_swarm.prompts import INITIAL_MESSAGE, build_prompt
-    from research_swarm.tools import TOOL_DEFINITIONS
+    from research_swarm.neutral_env import NEUTRAL_ENVIRONMENT_VERSION
+    from research_swarm.prompts import BASELINE_VARIANT, build_prompt, initial_message, neutral_environment
+    from research_swarm.tools import tool_definitions
+    # The neutral collaborative environment follows the config (same prompt, tools and filter
+    # as the run); every other config keeps the baseline prompt, as before.
+    variant = config.get("prompt_variant", BASELINE_VARIANT)
+    neutral = neutral_environment(variant)
+    neutral_args = {"neutral": True} if neutral else {}
+    prompt_variant = variant if neutral else BASELINE_VARIANT
     dotenv = disable_inspect_dotenv()  # before anything Inspect runs; the builder below is the only .env reader
     persona = args.persona or runtime.assign_personas(
         runtime.APPROVED_AGENT_COUNT, int(config.get("persona_seed", runtime.DEFAULT_PERSONA_SEED)))[AGENT_ID]
@@ -763,19 +774,21 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path, provide
         archive = InstructionArchive(run_dir / "instructions", record)
 
         def filter_for(agent_id):
-            inner = budget_filter(agent_id, ledger, settings, barrier, record, SCOPE, archive, clock.stop)
+            inner = budget_filter(agent_id, ledger, settings, barrier, record, SCOPE, archive, clock.stop,
+                                  **neutral_args)
             guards[agent_id] = AbortGuard(inner, clock, record, ledger, agent_id=agent_id,
                                           max_requests=args.max_requests)
             return guards[agent_id]
         compose = runtime.make_compose(run_dir, config, images["agent"]["id"])
-        solver = runtime.peer_solver(conference=conference, definitions=TOOL_DEFINITIONS, personas=personas,
-                                     prompt_for=lambda a, p: build_prompt(a, p, listing), filter_for=filter_for,
+        solver = runtime.peer_solver(conference=conference, definitions=tool_definitions(neutral), personas=personas,
+                                     prompt_for=lambda a, p: build_prompt(a, p, listing, prompt_variant),
+                                     filter_for=filter_for, **neutral_args,
                                      run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,
                                      auto_memory=auto_memory, in_flight_grace=in_flight_grace)
         task = runtime.build_task(agent_ids=[AGENT_ID], files=runtime.agent_files(task_files), solver=solver,
                                   compose=compose, metadata={"condition": "paid-compatibility-check",
                                                              "personas": personas},
-                                  initial_message=INITIAL_MESSAGE)
+                                  initial_message=initial_message(prompt_variant))
         # The credential is read here (inside the shared builder) and nowhere else; the
         # key's provider-side limit is recorded (unpaid, informational) before any paid request.
         # One agent: one in-flight request (the pilot's rule, max_connections == agent count).
@@ -788,7 +801,8 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path, provide
                           "run_id": before["run_id"], "run_budget_usd": before["budget_usd"],
                           "run_budget_source": before["budget_source"],
                           "ledger_path": str(ledger_path), "system_prompt_mode": mode, "claude_auto_memory": auto_memory,
-                          "claude_code_env": claude_code_env(auto_memory),
+                          "claude_code_env": claude_code_env(auto_memory, neutral=neutral),
+                          "neutral_environment": NEUTRAL_ENVIRONMENT_VERSION if neutral else None,
                           "compose_sha256": runtime.compose_fingerprint(config, images["agent"]["id"]),
                           "judge": {k: getattr(compiler, k, None) for k in ("image", "timeout", "memory", "cpus",
                                                                             "max_concurrent")},

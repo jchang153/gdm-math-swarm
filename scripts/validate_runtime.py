@@ -1030,7 +1030,7 @@ def build_checks(result):
             note="replace mode: besides the conference prompt only Claude Code's billing header and identity "
                  f"line remain (at most {REPLACE_MAX_OTHER_SYSTEM_CHARS} characters; append would add thousands)"),
         "disallowed_tools_absent": check(
-            bool(offered) and not disallowed_offered and any(t.startswith("mcp__conference__") for t in offered)
+            bool(offered) and not disallowed_offered and any(t.startswith(("mcp__conference__", "mcp__collab__")) for t in offered)
             and "a1-webfetch" in r["agent-001"] and "a1-agent" in r["agent-001"],
             offered_tools=offered, disallowed_offered=disallowed_offered,
             webfetch_call_result=r["agent-001"].get("a1-webfetch", "")[:300],

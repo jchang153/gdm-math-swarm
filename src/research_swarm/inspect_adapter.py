@@ -110,17 +110,57 @@ CLAUDE_CODE_ENV = {
 }
 
 
-def claude_code_env(auto_memory=True, extra=None):
+# Neutral collaborative environment (prompts.NEUTRAL_VARIANTS): Claude Code's state
+# directory moves from ~/.claude to a neutral path (session transcripts, large tool
+# outputs persisted under projects/, auto-memory, and the post-compaction "read the full
+# transcript at" note), and the billing-header system line is switched off at the source
+# (CLAUDE_CODE_ATTRIBUTION_HEADER=0; the bridge filter strips it as well). Verified by
+# static inspection of Claude Code 2.1.299 (the closest available build; the pinned
+# 2.1.296 binary is only in the VM image): needs runtime confirmation on 2.1.296.
+NEUTRAL_CONFIG_DIR = "/home/researcher/.agent"
+NEUTRAL_CLAUDE_CODE_ENV = {
+    "CLAUDE_CONFIG_DIR": NEUTRAL_CONFIG_DIR,
+    "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+}
+# User settings in the neutral config directory, written before each launch. Inspect SWE
+# seeds ~/.claude/settings.json (an apiKeyHelper) on every launch, which Claude Code no longer
+# reads once CLAUDE_CONFIG_DIR is set, so the helper is repeated here (it prints the bridge's
+# placeholder token from the CLI's own environment; the bridge ignores client credentials).
+# Empty attribution texts (and the older includeCoAuthoredBy switch) make Claude Code send
+# no git-attribution reminder at all (2.1.299: no remote session, empty commit and PR texts).
+NEUTRAL_SETTINGS = {
+    "apiKeyHelper": "printenv ANTHROPIC_AUTH_TOKEN",
+    "includeCoAuthoredBy": False,
+    "attribution": {"commit": "", "pr": ""},
+}
+
+
+def claude_code_env(auto_memory=True, extra=None, neutral=False):
     """Effective Claude Code environment.
 
     Inspect SWE disables Claude Code auto-memory ("1"); ``auto_memory=True`` sets
     "0", keeping Claude Code's normal behavior (approved, docs/plan.md "Effective
-    agent system prompt").
+    agent system prompt"). ``neutral`` adds ``NEUTRAL_CLAUDE_CODE_ENV``.
     """
     env = dict(CLAUDE_CODE_ENV)
     env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "0" if auto_memory else "1"
+    if neutral:
+        env.update(NEUTRAL_CLAUDE_CODE_ENV)
     env.update(extra or {})
     return env
+
+
+async def prepare_neutral_home(sbox, settings=None):
+    """Write the neutral Claude Code user settings into the agent's own container (as the
+    agent user) before a launch. Returns the sandbox exec result's success flag."""
+    script = ('import json, os, sys\n'
+              'd = sys.argv[1]\n'
+              'os.makedirs(d, mode=0o700, exist_ok=True)\n'
+              'p = os.path.join(d, "settings.json")\n'
+              'open(p, "w").write(sys.argv[2])\n')
+    result = await sbox.exec(["python3", "-I", "-c", script, NEUTRAL_CONFIG_DIR,
+                              json.dumps(settings or NEUTRAL_SETTINGS, sort_keys=True)], timeout=30)
+    return bool(result.success)
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +344,28 @@ async def read_agent_file(sbox, path, allowed_roots, max_bytes, allowed_suffixes
     return payload
 
 
-def conference_tools(conference, agent_id, definitions, sbox=None, record=None, stop=None):
+# Neutral environment: service-generated reply texts the agent would otherwise see with
+# conference vocabulary (exact texts from research_swarm.conference), and the neutral
+# wording that replaces them. Only the reply's top-level "error" text is rewritten, never
+# agent-authored content.
+NEUTRAL_REPLY_TEXTS = (
+    ("Internal conference error; the request was not completed.", "Internal error; the request was not completed."),
+    ("The conference is closed.", "The collaboration is closed."),
+    ("get_conference_status lists participant identifiers.", "get_status lists participant identifiers."),
+)
+
+
+def neutral_reply(response):
+    """``response`` with conference vocabulary removed from its service-generated error text."""
+    if not isinstance(response, dict) or not isinstance(response.get("error"), str):
+        return response
+    text = response["error"]
+    for old, new in NEUTRAL_REPLY_TEXTS:
+        text = text.replace(old, new)
+    return response if text == response["error"] else {**response, "error": text}
+
+
+def conference_tools(conference, agent_id, definitions, sbox=None, record=None, stop=None, neutral=False):
     """Bridged Inspect tools bound to ``agent_id``; arguments never choose identity.
 
     ``sbox`` is the calling agent's own sandbox (captured in that sample's
@@ -312,6 +373,8 @@ def conference_tools(conference, agent_id, definitions, sbox=None, record=None, 
     ``stop`` (the run clock's event): once set, no new conference action starts.
     The solver lets an in-flight model request finish after the stop, so the CLI
     may still issue a call in that window; it is refused and recorded.
+    A definition's ``internal_name`` (neutral tool definitions) is the conference
+    action it calls; ``neutral`` rewrites service-generated reply texts.
     """
     from inspect_ai.tool import ToolDef, ToolParams
     record = record or (lambda *args: None)
@@ -322,6 +385,8 @@ def conference_tools(conference, agent_id, definitions, sbox=None, record=None, 
         def bind(name, spec):
             def closed():
                 record("conference_action_after_stop", agent_id, {"tool": name})
+                if neutral:
+                    return {"ok": False, "error": "run_ended", "message": "The run has ended."}
                 return {"ok": False, "error": "conference_closed",
                         "message": "The conference run has ended."}
 
@@ -330,7 +395,8 @@ def conference_tools(conference, agent_id, definitions, sbox=None, record=None, 
                 # already started may finish; queued actions have not started yet.
                 if stop is not None and stop.is_set():
                     return closed()
-                return conference.action(agent_id, name, args)
+                response = conference.action(agent_id, name, args)
+                return neutral_reply(response) if neutral else response
 
             async def execute(**args):
                 args = dict(args)
@@ -371,7 +437,7 @@ def conference_tools(conference, agent_id, definitions, sbox=None, record=None, 
         schema = copy.deepcopy(definition["inputSchema"])
         for name, prop in schema.get("properties", {}).items():
             prop.setdefault("description", f"The {name.replace('_', ' ')} for this action.")
-        result.append(ToolDef(bind(definition["name"], spec), name=definition["name"],
+        result.append(ToolDef(bind(definition.get("internal_name", definition["name"]), spec), name=definition["name"],
                               description=definition["description"],
                               parameters=ToolParams.model_validate(schema), max_output=0).as_tool())
     return result
@@ -697,7 +763,12 @@ def output_kind(output):
 # Bridge filter: barrier, budget admission, frozen settings, archiving
 
 class InstructionArchive:
-    """Researcher-side archive of every distinct system prompt + tool set the CLI sends."""
+    """Researcher-side archive of every distinct system prompt + tool set the CLI sends.
+
+    In the neutral environment the filter also archives what the model received after
+    ``neutral_env.neutralize_request`` (``stage="received"``, under ``received/``, record
+    kind ``effective_instructions_received``); the CLI's own text stays archived as sent.
+    """
     def __init__(self, directory, record):
         from pathlib import Path
         self.directory = Path(directory)
@@ -705,7 +776,7 @@ class InstructionArchive:
         self.seen = set()
         self.lock = threading.Lock()
 
-    def observe(self, agent_id, messages, tools):
+    def observe(self, agent_id, messages, tools, stage="sent", version=None):
         from inspect_ai.model import ChatMessageSystem
         system = []
         for message in messages:
@@ -719,15 +790,21 @@ class InstructionArchive:
                               for t in tools), key=lambda d: d["name"])
         digest = hashlib.sha256(json.dumps([text, definitions], sort_keys=True).encode("utf-8")).hexdigest()
         with self.lock:
-            if (agent_id, digest) in self.seen:
+            if (agent_id, stage, digest) in self.seen:
                 return
-            self.seen.add((agent_id, digest))
-        self.directory.mkdir(parents=True, exist_ok=True)
-        path = self.directory / f"{agent_id}-{digest[:16]}.json"
-        path.write_text(json.dumps({"agent_id": agent_id, "system_blocks": system, "tools": tool_names,
-                                    "tool_definitions": definitions}, indent=2, ensure_ascii=False))
-        self.record("effective_instructions", agent_id,
-                    {"sha256": digest, "path": str(path), "system_blocks": len(system), "tools": tool_names})
+            self.seen.add((agent_id, stage, digest))
+        received = stage == "received"
+        directory = self.directory / "received" if received else self.directory
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{agent_id}-{digest[:16]}.json"
+        body = {"agent_id": agent_id, "system_blocks": system, "tools": tool_names, "tool_definitions": definitions}
+        if received:
+            body.update(stage=stage, neutral_environment=version)
+        path.write_text(json.dumps(body, indent=2, ensure_ascii=False))
+        payload = {"sha256": digest, "path": str(path), "system_blocks": len(system), "tools": tool_names}
+        if received:
+            payload["neutral_environment"] = version
+        self.record("effective_instructions_received" if received else "effective_instructions", agent_id, payload)
 
 
 # Transient SQLite contention while admitting (BudgetLedger already waits up to
@@ -771,7 +848,8 @@ def _settle_unbilled(ledger, request_id, record, agent_id):
         return "uncertain"
 
 
-def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", archive=None, stop=None):
+def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", archive=None, stop=None,
+                  neutral=False):
     """Bridge GenerateFilter: barrier, admission, frozen settings, settlement.
 
     The returned coroutine function carries ``.state`` which the solver reads at
@@ -783,12 +861,18 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     ``budget_admission_failed`` or ``budget_ledger_unavailable``), ``last_error`` (billing classification of the
     last generation error) and ``last_output_kind`` (``output_kind`` of the last
     finished output, after truncated tool calls are stripped).
+
+    ``neutral`` (neutral collaborative environment): before admission, the request is
+    passed through ``neutral_env.neutralize_request`` (deterministic; versioned
+    ``NEUTRAL_ENVIRONMENT_VERSION``), which removes the scaffold's product identity text.
     """
     from inspect_ai.model import Model
     from inspect_ai.util import LimitExceededError
     from .prompt_cache import TOKEN_COUNTER_NORMALIZATION_VERSION, normalize_token_counters
+    from .neutral_env import NEUTRAL_ENVIRONMENT_VERSION, neutralize_request
     from .openrouter_params import install_openrouter_max_tokens
     install_openrouter_max_tokens()  # GPT families: keep the route's max_tokens (openrouter_params)
+    ended = "The run has ended." if neutral else "Conference run has ended."
     state = {"requests": 0, "finished": 0, "last_stop_reason": None, "consecutive_truncations": 0,
              "truncated_responses": 0, "unbilled_errors": 0, "uncertain": 0, "in_flight": 0,
              "last_request_outcome": None, "last_denial": None, "last_error": None, "last_output_kind": None}
@@ -800,6 +884,11 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     async def intercept(model: Model, messages, tools, tool_choice, config):
         if archive is not None:
             archive.observe(agent_id, messages, tools)
+        neutralized = None
+        if neutral:
+            messages, tools, neutralized = neutralize_request(messages, tools)
+            if archive is not None:
+                archive.observe(agent_id, messages, tools, stage="received", version=NEUTRAL_ENVIRONMENT_VERSION)
         # Claude Code's historical token counters are status context. Keeping
         # them as system messages breaks provider prefix caching; preserve their
         # text and chronological position without mutating the scaffold history.
@@ -807,7 +896,7 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
         await barrier.ready(agent_id)
         if stop is not None and stop.is_set():
             deny("run_stopped")
-            raise LimitExceededError("time", value=0, limit=0, message="Conference run has ended.")
+            raise LimitExceededError("time", value=0, limit=0, message=ended)
         request = json.dumps({"messages": [m.model_dump(mode="json") for m in messages],
                               "tools": [t.model_dump(mode="json") for t in tools]}, ensure_ascii=False)
         reservation = settings.reservation(request)
@@ -826,7 +915,7 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
             import anyio
             await anyio.lowlevel.checkpoint()
             if stop is not None and stop.is_set():
-                raise LimitExceededError("time", value=0, limit=0, message="Conference run has ended.")
+                raise LimitExceededError("time", value=0, limit=0, message=ended)
         except BaseException:
             basis = await _in_thread(_settle_unbilled, ledger, request_id, record, agent_id)
             deny("run_stopped" if stop is not None and stop.is_set() else "cancelled_before_dispatch",
@@ -836,19 +925,21 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
         state["in_flight"] += 1
         try:
             return await _generate(model, messages, tools, tool_choice, config, request, request_id, reservation,
-                                   normalized_counters)
+                                   normalized_counters, neutralized)
         finally:
             state["in_flight"] -= 1
 
     async def _generate(model, messages, tools, tool_choice, config, request, request_id, reservation,
-                        normalized_counters):
+                        normalized_counters, neutralized=None):
         record("inference_admitted", agent_id, {"request_id": request_id, "reserved_usd": str(reservation),
                                                 "request_bytes": len(request.encode("utf-8")),
                                                 "replayed_reasoning_blocks": replayed_reasoning_blocks(messages),
                                                 **replayed_signed_reasoning(messages),
                                                 **({"prompt_cache_normalization": TOKEN_COUNTER_NORMALIZATION_VERSION,
                                                     "normalized_token_counters": normalized_counters}
-                                                   if normalized_counters else {})})
+                                                   if normalized_counters else {}),
+                                                **({"neutral_environment": NEUTRAL_ENVIRONMENT_VERSION,
+                                                    "neutralized": neutralized} if neutralized is not None else {})})
         # num_choices stays unset: `n` is not in the route's supported parameters
         # and require_parameters would make the provider refuse it.
         frozen = config.model_copy(update={"max_tokens": settings.max_tokens, "max_retries": 0,
@@ -912,12 +1003,14 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
 
 
 def build_claude_agent(prompt, tools, filter, env=None, cwd="/workspace", *, system_prompt_mode="replace",
-                       auto_memory=True):
+                       auto_memory=True, neutral=False):
     """Genuine Claude Code (pinned image binary) with identity-bound bridged tools.
 
     ``system_prompt_mode``: "replace" (approved default since October 19, 2026:
     conference prompt only) or "append" (built-in prompt plus the conference prompt,
-    as in the four October 15-16 baseline runs).
+    as in the four October 15-16 baseline runs). ``neutral``: the bridged tools' MCP
+    server is ``collab`` (tools ``mcp__collab__*``) and the neutral Claude Code
+    environment applies (``NEUTRAL_CLAUDE_CODE_ENV``).
     """
     if system_prompt_mode not in SYSTEM_PROMPT_MODES:
         raise ValueError(f"system_prompt_mode must be one of {SYSTEM_PROMPT_MODES}")
@@ -925,11 +1018,13 @@ def build_claude_agent(prompt, tools, filter, env=None, cwd="/workspace", *, sys
     install_reasoning_bridge()
     from inspect_ai.agent import BridgedToolsSpec
     from inspect_swe import claude_code
+    from .tools import MCP_SERVER, NEUTRAL_MCP_SERVER
     prompt_args = {"system_prompt": prompt} if system_prompt_mode == "append" else {"replace_system_prompt": prompt}
     return claude_code(**prompt_args, version="sandbox", cwd=cwd, effort="high",
-                       bridged_tools=[BridgedToolsSpec(name="conference", tools=tools)], filter=filter,
+                       bridged_tools=[BridgedToolsSpec(name=NEUTRAL_MCP_SERVER if neutral else MCP_SERVER,
+                                                       tools=tools)], filter=filter,
                        disallowed_tools=list(DISALLOWED_TOOLS), permission_mode="bypassPermissions",
-                       retry_refusals=0, retry_uncaught_errors=0, env=claude_code_env(auto_memory, env))
+                       retry_refusals=0, retry_uncaught_errors=0, env=claude_code_env(auto_memory, env, neutral))
 
 
 def installed_versions():

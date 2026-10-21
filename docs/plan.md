@@ -1,5 +1,19 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Neutral collaboration environment, October 21, 2026
+
+Owner's decisions (relayed by the integrating session): agents must understand the environment
+simply as a collaborative setting for solving math problems: no "Claude Code", "Claude" or
+"Anthropic" mentions and no "conference" vocabulary anywhere agent-visible, implemented as new
+prompt variants so old variants and runs stay unchanged and comparable: (a)
+`collab_max_pressure_no_rule6` (the `max_pressure_no_rule6` content with all leaks fixed) and (b)
+`collab` (plain collaborative framing, no pressure). Either variant switches on the neutral
+environment (`neutral-env-v1`) for everything agent-visible; internal names stay. Details,
+verification status and remaining leaks: docs/prompts.md, "Neutral collaboration variants".
+Configs: `configs/owner-collab-pressure-<model>.json` (the four owner models, otherwise identical to
+`configs/owner-<model>.json`) and the example `configs/owner-collab-glm-5.3.json` (`collab`).
+Proposed, not yet launched; each launch still needs its own run budget as usual.
+
 ## Runtime checks never block launches, October 21, 2026
 
 Owner (chat): "yes, waive runtime checks (and all future runtime checks)". The runtime-e2e,

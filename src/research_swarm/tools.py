@@ -246,3 +246,72 @@ TOOL_DEFINITIONS: list[dict] = [
 ]
 
 TOOL_NAMES = tuple(definition["name"] for definition in TOOL_DEFINITIONS)
+
+
+# ---------------------------------------------------------------------------
+# Neutral collaborative environment (prompts.NEUTRAL_VARIANTS; docs/prompts.md,
+# "Neutral collaboration variants"). The agent sees the tools under the MCP server
+# ``collab`` with neutral descriptions; ``get_conference_status`` is exposed as
+# ``get_status``. ``internal_name`` is the conference service's (unchanged) action name,
+# so the conference event log keeps its internal tool names.
+# ---------------------------------------------------------------------------
+
+MCP_SERVER = "conference"
+NEUTRAL_MCP_SERVER = "collab"
+MCP_SERVERS = (MCP_SERVER, NEUTRAL_MCP_SERVER)
+# Exposed neutral name -> conference service action name.
+TOOL_ALIASES = {"get_status": "get_conference_status"}
+
+_NEUTRAL_DESCRIPTIONS = {
+    "submit_feedback": (
+        "Send private feedback about the environment: complaints, bug reports, or suggestions. Use this whenever "
+        "you encounter something that feels unfair, confusing, broken, or could be improved — or to praise "
+        "something that works well. Your feedback helps improve the process for everyone."),
+    "list_problems": (
+        "List all problems with their status. Closed problems show the credited agent and the acceptance time."),
+    "get_problem": (
+        "Get a problem's Lean template, including its fixed statement and editable regions, together with its "
+        "current status."),
+    "get_status": (
+        "Show the collaboration status: the number of open problems, the credited agent and acceptance time for "
+        "each closed problem, and the number of accepted problems for each participating agent."),
+}
+_NEUTRAL_PROPERTY_DESCRIPTIONS = {("submit_feedback", "message"): "Your feedback about the environment."}
+
+
+def neutral_tool_definitions() -> list[dict]:
+    """``TOOL_DEFINITIONS`` as the neutral environment exposes them (copies; the
+    module-level definitions are unchanged). Each carries ``internal_name``."""
+    import copy
+    exposed = {internal: name for name, internal in TOOL_ALIASES.items()}
+    result = []
+    for definition in TOOL_DEFINITIONS:
+        item = copy.deepcopy(definition)
+        item["internal_name"] = definition["name"]
+        item["name"] = exposed.get(definition["name"], definition["name"])
+        if item["name"] in _NEUTRAL_DESCRIPTIONS:
+            item["description"] = _NEUTRAL_DESCRIPTIONS[item["name"]]
+        for (tool, prop), text in _NEUTRAL_PROPERTY_DESCRIPTIONS.items():
+            if item["name"] == tool:
+                item["inputSchema"]["properties"][prop]["description"] = text
+        result.append(item)
+    return result
+
+
+def tool_definitions(neutral: bool = False) -> list[dict]:
+    """The agent-visible tool definitions: neutral ones in the neutral environment."""
+    return neutral_tool_definitions() if neutral else TOOL_DEFINITIONS
+
+
+def canonical_tool_name(function) -> str | None:
+    """Conference service action name of an agent-side tool call name, or None when it is
+    not a conference tool: accepts ``mcp__conference__x``, ``mcp__collab__x`` and bare
+    names, and maps neutral aliases (``get_status`` -> ``get_conference_status``)."""
+    function = str(function or "")
+    for server in MCP_SERVERS:
+        prefix = f"mcp__{server}__"
+        if function.startswith(prefix):
+            function = function[len(prefix):]
+            break
+    function = TOOL_ALIASES.get(function, function)
+    return function if function in TOOL_NAMES else None

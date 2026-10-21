@@ -46,9 +46,16 @@ except Exception:  # pragma: no cover - main .venv has no Scout
     scanner = None
 
 
+# Neutral collaborative environment: exposed name -> conference tool name
+# (research_swarm.tools.TOOL_ALIASES).
+TOOL_ALIASES = {"get_status": "get_conference_status"}
+
+
 def _base(name):
-    """Tool name without Inspect SWE's MCP server prefix (mcp__conference__x -> x)."""
-    return str(name or "").split("__")[-1]
+    """Tool name without Inspect SWE's MCP server prefix (mcp__conference__x or
+    mcp__collab__x -> x), with neutral aliases mapped to the conference tool names."""
+    base = str(name or "").split("__")[-1]
+    return TOOL_ALIASES.get(base, base)
 
 
 def _ref(message):

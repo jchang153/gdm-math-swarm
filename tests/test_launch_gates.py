@@ -711,8 +711,12 @@ class LaunchGateTests(GateFixture):
             config = json.loads(path.read_text())
             seen[config["candidate_model_id"]] = path.name
             self.assertEqual(settings_from_config(config).model_id, config["candidate_model_id"])
+            # The neutral collaborative environment twins (docs/prompts.md, "Neutral collaboration
+            # variants"): the same settings with the collab variants.
+            variant = ("collab_max_pressure_no_rule6" if path.name.startswith("owner-collab-pressure-") else
+                       "collab" if path.name.startswith("owner-collab-") else "max_pressure_no_rule6")
             for key, value in {"agent_count": 5, "max_connections": 5, "agent_memory": "32g", "task_set": "all71",
-                               "task_count": 71, "prompt_variant": "max_pressure_no_rule6", "auto_restart": True,
+                               "task_count": 71, "prompt_variant": variant, "auto_restart": True,
                                "max_run_seconds": 3600, "run_budget_usd": "100", "budget_track": "gemini",
                                "auto_behavior_judge": True, "behavior_judge_max_usd": 50,
                                "system_prompt_mode": "replace"}.items():

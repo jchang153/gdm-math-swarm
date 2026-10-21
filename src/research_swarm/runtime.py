@@ -52,6 +52,8 @@ WIKI = "/tmp/w/memory/wiki"
 CLAUDE_HOME = "/home/researcher/.claude"
 # Private artifacts captured by the observer (researcher-side only).
 SNAPSHOT_ROOTS = (WORKSPACE, "/tmp/w", CLAUDE_HOME + "/projects")
+# The neutral environment moves Claude Code's state directory (inspect_adapter.NEUTRAL_CONFIG_DIR).
+NEUTRAL_SNAPSHOT_ROOTS = (WORKSPACE, "/tmp/w", "/home/researcher/.agent/projects")
 SNAPSHOT_SUFFIXES = (".lean", ".md", ".txt", ".py", ".json", ".jsonl", ".sh", ".toml", ".tex", ".csv", ".log")
 SNAPSHOT_MAX_BYTES = 2_000_000
 SNAPSHOT_MAX_FILES = 2000
@@ -505,6 +507,10 @@ async def wait_for_in_flight(filter_state, grace, poll=IN_FLIGHT_POLL_SECONDS):
 CONTINUE_MESSAGE = ("The collaboration is still in session and the run's time has not ended. Continue your work "
                     "on the problems: check the conference for new posts, messages and library updates, and keep "
                     "making progress.")
+# The same in the neutral collaborative environment (prompts.NEUTRAL_VARIANTS).
+NEUTRAL_CONTINUE_MESSAGE = ("The collaboration is still in session and the run's time has not ended. Continue your "
+                            "work on the problems: check the shared tools for new posts, messages and library "
+                            "updates, and keep making progress.")
 RESTART_BASE_DELAY, RESTART_MAX_DELAY, RESTART_QUICK_REQUESTS = 15, 600, 3
 
 
@@ -518,8 +524,14 @@ def restart_delay(consecutive_quick):
 
 def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, run_dir, record, clock,
                 system_prompt_mode="replace", auto_memory=True, in_flight_grace=IN_FLIGHT_GRACE_SECONDS,
-                auto_restart=False):
+                auto_restart=False, neutral=False):
     """Solver running one genuine Claude Code peer inside its own sandbox.
+
+    ``neutral`` (neutral collaborative environment, prompts.NEUTRAL_VARIANTS): neutral
+    tool names and replies (``definitions`` should be ``tools.tool_definitions(True)``),
+    the ``collab`` MCP server, the neutral Claude Code settings and environment, the
+    neutral continuation message, and snapshots of the moved state directory. The
+    filter returned by ``filter_for`` must be built with ``neutral=True`` as well.
 
     On ``clock.stop`` the filter admits nothing further and conference actions are
     refused; the agent is cancelled once its in-flight request (if any) has settled,
@@ -530,7 +542,7 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
     from inspect_ai.model import ChatMessageUser
     from inspect_ai.solver import solver
     from inspect_ai.util import sandbox
-    from .inspect_adapter import build_claude_agent, conference_tools
+    from .inspect_adapter import build_claude_agent, conference_tools, prepare_neutral_home
     from .reasoning_bridge import agent_transport_scope
     import anyio
     run_dir = Path(run_dir)
@@ -546,13 +558,28 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
             record("agent_configured", agent_id, {"persona": personas[agent_id],
                                                   "appended_prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                                                   "system_prompt_mode": system_prompt_mode,
-                                                  "claude_auto_memory": auto_memory})
-            tools = conference_tools(conference, agent_id, definitions, sbox=sbox, record=record, stop=clock.stop)
+                                                  "claude_auto_memory": auto_memory,
+                                                  **({"neutral_environment": True} if neutral else {})})
+            if neutral:
+                # Before the first launch: the neutral Claude Code user settings (no attribution
+                # reminder) in the moved state directory. A failure is recorded; the bridge
+                # filter still removes the reminder from every request.
+                try:
+                    written = await prepare_neutral_home(sbox)
+                except Exception as ex:
+                    written = False
+                    record("neutral_settings_error", agent_id, {"type": type(ex).__name__})
+                record("neutral_settings", agent_id, {"written": written})
+            neutral_args = {"neutral": True} if neutral else {}  # unchanged calls outside the neutral environment
+            tools = conference_tools(conference, agent_id, definitions, sbox=sbox, record=record, stop=clock.stop,
+                                     **neutral_args)
             gen_filter = filter_for(agent_id)
             agent = build_claude_agent(prompt, tools, gen_filter, system_prompt_mode=system_prompt_mode,
-                                       auto_memory=auto_memory)
+                                       auto_memory=auto_memory, **neutral_args)
             agent_state = AgentState(messages=state.messages)
-            snapshots = Snapshotter(run_dir / "snapshots", agent_id, record)
+            snapshots = Snapshotter(run_dir / "snapshots", agent_id, record,
+                                    roots=NEUTRAL_SNAPSHOT_ROOTS if neutral else SNAPSHOT_ROOTS)
+            continue_message = NEUTRAL_CONTINUE_MESSAGE if neutral else CONTINUE_MESSAGE
             outcome = {"status": None, "error": None, "harness_after_stop": None}
 
             def budget_refused():
@@ -588,7 +615,7 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
                         if clock.stop.is_set():
                             break
                         prior = list(state.messages if session_status == "harness_completed" else agent_state.messages)
-                        agent_state = AgentState(messages=prior + [ChatMessageUser(content=CONTINUE_MESSAGE)])
+                        agent_state = AgentState(messages=prior + [ChatMessageUser(content=continue_message)])
                     if session_error is None:
                         if outcome["status"] is None:
                             outcome["status"] = "harness_completed"
@@ -1450,8 +1477,10 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     from inspect_ai import eval_async
     from .inspect_adapter import (InstructionArchive, budget_filter, claude_code_env, credentials_in_environment,
                                   disable_inspect_dotenv)
-    from .prompts import BASELINE_VARIANT, INITIAL_MESSAGE, PERSONA_REVIEWING_DEFAULT, PERSONA_REVIEWING_KEY, build_prompt
-    from .tools import TOOL_DEFINITIONS
+    from .neutral_env import NEUTRAL_ENVIRONMENT_VERSION
+    from .prompts import (BASELINE_VARIANT, PERSONA_REVIEWING_DEFAULT, PERSONA_REVIEWING_KEY, build_prompt,
+                          initial_message, neutral_environment)
+    from .tools import tool_definitions
     # Before anything Inspect runs: only secrets.load_openrouter_key may read the host .env.
     dotenv = disable_inspect_dotenv()
     agent_count = int(config.get("agent_count", APPROVED_AGENT_COUNT))
@@ -1461,6 +1490,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     # Prompt ablation (docs/prompts.md, "Prompt ablation variants"); preflight's
     # prompt_variant gate has already refused an unknown value.
     variant = config.get("prompt_variant", BASELINE_VARIANT)
+    neutral = neutral_environment(variant)  # docs/prompts.md, "Neutral collaboration variants"
+    neutral_args = {"neutral": True} if neutral else {}
     reviewing = config.get(PERSONA_REVIEWING_KEY, PERSONA_REVIEWING_DEFAULT)  # checked by preflight
     in_flight_grace = in_flight_grace_seconds(config)
     images = pin_images(config)
@@ -1522,7 +1553,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "persona_reviewing": reviewing,
             "claude_auto_memory": auto_memory,
             "prompt_cache_normalization": TOKEN_COUNTER_NORMALIZATION_VERSION,
-            "claude_code_env": claude_code_env(auto_memory), "ledger_path": str(ledger_file), "budget_scope": "pilot",
+            "neutral_environment": NEUTRAL_ENVIRONMENT_VERSION if neutral else None,
+            "claude_code_env": claude_code_env(auto_memory, neutral=neutral), "ledger_path": str(ledger_file), "budget_scope": "pilot",
             "budget_track": track or "baseline", "concurrent_run_override": override,
             "run_id": ledger_run_id, "run_budget_usd": str(budget), "run_budget_source": budget_source,
             "evaluator_observer": None if observer is None else "queue",
@@ -1538,17 +1570,18 @@ async def _run_pilot(config, repo_root, conference_factory=None):
         barrier = StartBarrier(len(agent_ids), record)
         clock = RunClock(barrier)
         archive = InstructionArchive(run_dir / "instructions", record)
-        solver = peer_solver(conference=conference, definitions=TOOL_DEFINITIONS, personas=personas,
+        solver = peer_solver(conference=conference, definitions=tool_definitions(neutral), personas=personas,
                              prompt_for=lambda a, p: build_prompt(a, p, listing, variant, reviewing),
                              filter_for=lambda a: budget_filter(a, ledger, settings, barrier, record, "pilot", archive,
-                                                                clock.stop),
+                                                                clock.stop, **neutral_args),
                              run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,
                              auto_memory=auto_memory, in_flight_grace=in_flight_grace,
-                             auto_restart=config.get("auto_restart") is True)
+                             auto_restart=config.get("auto_restart") is True, **neutral_args)
         task = build_task(agent_ids=agent_ids, files=agent_files(task_files), solver=solver, compose=compose,
                           metadata={"condition": condition_label(variant, track), "prompt_variant": variant,
-                                    "persona_reviewing": reviewing, "personas": personas, "persona_seed": persona_seed},
-                          initial_message=INITIAL_MESSAGE)
+                                    "persona_reviewing": reviewing, "personas": personas, "persona_seed": persona_seed,
+                                    **({"neutral_environment": NEUTRAL_ENVIRONMENT_VERSION} if neutral else {})},
+                          initial_message=initial_message(variant))
         return await supervise(eval_async(task, model=model, **eval_options(agent_count, run_dir, config)),
                                clock, conference, record, config)
     finally:

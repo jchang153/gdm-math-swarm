@@ -46,8 +46,14 @@ REPO = Path(__file__).resolve().parents[3]
 DEFECTS_PATH = Path(__file__).with_name("statement_defects.json")
 
 CONFERENCE_PREFIX = "mcp__conference__"
-# Claude Code's own session transcript duplicates the Inspect history (rubric 3.5).
-SESSION_TRANSCRIPT = re.compile(r"^/home/[^/]+/\.claude/projects/.*\.jsonl$")
+# The neutral collaborative environment (research_swarm.prompts.NEUTRAL_VARIANTS) exposes the
+# same tools as mcp__collab__<name>, with get_conference_status renamed get_status
+# (research_swarm.tools.TOOL_ALIASES); conference events keep the internal names.
+CONFERENCE_PREFIXES = (CONFERENCE_PREFIX, "mcp__collab__")
+TOOL_ALIASES = {"get_status": "get_conference_status"}
+# Claude Code's own session transcript duplicates the Inspect history (rubric 3.5); the
+# neutral environment moves its state directory to ~/.agent.
+SESSION_TRANSCRIPT = re.compile(r"^/home/[^/]+/\.(?:claude|agent)/projects/.*\.jsonl$")
 # Per-turn token counters (counter-user-v1 context, docs/prompt-caching.md): dropped from
 # harness inputs, which are otherwise deduplicated by text.
 COUNTER = re.compile(r"<total_tokens>\s*\d+\s+tokens left\s*</total_tokens>")
@@ -209,7 +215,11 @@ def render_call(function, arguments):
 
 def _short_tool(function):
     function = str(function or "")
-    return function[len(CONFERENCE_PREFIX):] if function.startswith(CONFERENCE_PREFIX) else None
+    for prefix in CONFERENCE_PREFIXES:
+        if function.startswith(prefix):
+            name = function[len(prefix):]
+            return TOOL_ALIASES.get(name, name)
+    return None
 
 
 def _channel_for(function):
