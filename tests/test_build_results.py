@@ -104,7 +104,8 @@ class BuildResultsTest(unittest.TestCase):
         self.assertEqual(data['behavior_judge'], {'status': 'not_run'})
         self.assertIn('Behavior judge: not run', page)
         self.assertNotIn('Researcher notes', page)
-        self.assertIn('small{color:#596579}', page)
+        self.assertIn('small{color:var(--muted)}', page)
+        self.assertIn('id="site-theme"', page)
         entry = build_index(Path(self.tmp.name))
         self.assertEqual(entry['warnings'], [])
         catalogue = json.loads((Path(self.tmp.name) / 'experiments.json').read_text())['experiments'][0]
