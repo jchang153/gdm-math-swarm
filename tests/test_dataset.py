@@ -4,7 +4,7 @@ import json
 import random
 import tempfile
 import unittest
-from research_swarm.dataset import FrozenDataset
+from research_swarm.dataset import FrozenDataset, native_evaluation_spellings
 ROOT = Path(__file__).resolve().parents[1]
 
 class DatasetTests(unittest.TestCase):
@@ -21,7 +21,7 @@ class DatasetTests(unittest.TestCase):
             self.assertEqual(source.count('-- EDITABLE END'),2)
             for keyword in ('axiom','sorry','macro','syntax'):
                 self.assertNotIn(keyword,source)
-            self.assertNotIn('native_decide',source)
+            self.assertEqual(native_evaluation_spellings(source),[])
             self.assertNotIn('formal_proof',source)
             self.assertNotIn('http',source)
             self.assertIn('fail "Provide a complete proof."',source)

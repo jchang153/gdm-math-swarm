@@ -424,22 +424,43 @@ class ConferenceState:
             db.close()
 
 
-def load_templates(repo_root):
-    """task_id -> template source from the frozen manifest (researcher-side files)."""
+def load_templates(repo_root, base="data"):
+    """task_id -> template source from the frozen manifest (researcher-side files).
+
+    ``base`` is a dataset revision directory: ``data`` (current) or an archived
+    ``data/revisions/v<N>`` (docs/dataset.md, "Revisions").
+    """
     root = Path(repo_root)
     try:
-        manifest = json.loads((root / "data" / "manifest.json").read_text(encoding="utf-8"))
+        manifest = json.loads((root / base / "manifest.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     templates = {}
     for task in manifest.get("tasks", []):
-        path = root / task.get("template_path", "")
+        path = root / base / "templates" / Path(task.get("template_path", "")).name
         try:
             data = path.read_bytes()
         except OSError:
             continue
         if hashlib.sha256(data).hexdigest() == task.get("sha256"):
             templates[task["task_id"]] = data.decode("utf-8")
+    return templates
+
+
+def load_run_templates(repo_root, recorded):
+    """task_id -> template for a run: per task, the dataset revision whose template hash equals
+    the run's recorded ``template_sha256`` (runs before 2026-10-21 used revision 1); else current."""
+    root = Path(repo_root)
+    current = load_templates(root)
+    archived = [load_templates(root, base.relative_to(root).as_posix())
+                for base in sorted((root / "data" / "revisions").glob("v*")) if base.is_dir()]
+    templates = dict(current)
+    for task_id, sha in recorded.items():
+        for candidate in [current] + archived:
+            source = candidate.get(task_id)
+            if source is not None and hashlib.sha256(source.encode()).hexdigest() == sha:
+                templates[task_id] = source
+                break
     return templates
 
 
@@ -1187,7 +1208,8 @@ def build(run_dir, *, repo_root=REPO_ROOT, templates=None, include_inspect=True,
     problems = []
     state = ConferenceState(run_dir)
     if templates is None:
-        templates = load_templates(repo_root) if repo_root else {}
+        templates = (load_run_templates(repo_root, {t: i["template_sha256"] for t, i in state.tasks.items()})
+                     if repo_root else {})
     template_check = {}
     for task_id, info in state.tasks.items():
         source = templates.get(task_id)

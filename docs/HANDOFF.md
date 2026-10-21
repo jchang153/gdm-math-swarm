@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-21 by Claude (Opus 5.5) session (site publish).
+Last updated: 2026-10-21 by Claude (Opus 5.5) session (dataset revision 2).
 
 ## What the project is
 
@@ -256,6 +256,17 @@ is being merged into main via `collab-env`.
    the removal of raw Inspect log download links are on main and published (see
    "Where things live"). The near-live mirror (`scripts/live_mirror.py`) is
    available for the next launch; it has not yet been used on a live run.
+
+3. **Dataset revision 2: on main, NOT yet on any VM (2026-10-21).** Five non-pilot
+   templates (the four `WrittenOnTheWallII_Test_*` and `Erdos1148_erdos_1148_variants_weaker`)
+   no longer contain sibling theorems proved with `decide +native` (124 removed). Configs
+   pin the new hashes, so **the next launch must ship the new `data/` with the git bundle**
+   (the VM's checkout still has revision 1, and the launch gates will refuse a mismatch).
+   Revision 1 is archived in `data/revisions/v1/`; old runs resolve to it automatically for
+   re-evaluation and analysis. Not compiled locally (no Lean on the Mac): run
+   `scripts/validate_dataset.py` (declarations) on the VM before or at the next launch.
+   **Confound:** all runs before this change saw those `decide +native` sibling proofs next
+   to the `native_decide` ban. Details: docs/dataset.md, "Revisions"; docs/plan.md.
 
 ## Next steps / open items
 

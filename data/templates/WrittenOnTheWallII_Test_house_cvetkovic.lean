@@ -30,41 +30,7 @@ abbrev Star5 : SimpleGraph (Fin 1 ⊕ Fin 5) := completeBipartiteGraph (Fin 1) (
 
 instance : DecidableRel Star5.Adj := by unfold Star5 completeBipartiteGraph; infer_instance
 
-theorem house_indep : α(HouseGraph) = 2 := by
-  rw [indep_num_eq_computable]; decide +native
-
-theorem house_dom : dominationNumber HouseGraph = 2 := by
-  rw [dom_num_eq_computable]; decide +native
-
-theorem house_avg_dist : averageDistance HouseGraph = 7/5 := by
-  rw [avg_dist_eq_computable, show computable_avg_dist HouseGraph = (7 / 5 : ℚ) from by decide +native]
-  norm_num
-
 theorem house_order : n HouseGraph = 5 := by simp [n]
-
-theorem house_size : HouseGraph.edgeFinset.card = 6 := by
-  decide +native
-
-theorem house_szeged : szegedIndex HouseGraph = 24 := by
-  rw [szeged_eq_computable]; decide +native
-
-theorem house_wiener : wienerIndex HouseGraph = 14 := by
-  rw [wiener_eq_computable]; decide +native
-
-theorem house_min_deg : HouseGraph.minDegree = 2 := by
-  decide +native
-
-theorem house_max_deg : HouseGraph.maxDegree = 3 := by
-  decide +native
-
-theorem house_avg_deg : averageDegree HouseGraph = 12/5 := by
-  unfold averageDegree; simp [Fintype.card_fin]; decide +native
-
-theorem house_residue : residue HouseGraph = 0 := by
-  unfold residue; decide +native
-
-theorem house_annihilation : annihilationNumber HouseGraph = 3 := by
-  decide +native
 
 -- EDITABLE START
 -- EDITABLE END

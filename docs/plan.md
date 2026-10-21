@@ -1,5 +1,27 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Dataset revision 2: native evaluation removed from templates, October 21, 2026
+
+Owner (chat, 2026-10-21): "yes go ahead and do that", approving the proposed fix. The template
+pass of `scripts/prepare_dataset.py` was meant to remove helper/sibling theorems using the
+prohibited `native_decide` (docs/dataset.md) but matched only that literal, so sibling theorems
+proved with `decide +native` (the same tactic in newer syntax, closing goals through the
+`Lean.ofReduceBool` axiom) survived in five non-pilot parent templates: the four
+`WrittenOnTheWallII_Test_*` files and `Erdos1148_erdos_1148_variants_weaker`. Decision:
+
+- The builder treats every native-evaluation spelling as prohibited (`native_decide`,
+  `decide +native`, `native := true`, `Lean.ofReduceBool`/`ofReduceNat`), removes those helpers
+  and their dependents, and fails the build if a frozen task's template keeps one.
+- Dataset revision 2 (`data/`, manifest `8a114c4c…`) regenerated from the same pinned source;
+  only those five templates changed (124 sibling theorems removed). Identities, the pilot 14 and
+  every pilot template are unchanged. Revision 1 (manifest `df9fbeaa…`) is archived byte for byte
+  in `data/revisions/v1/` so earlier runs stay re-evaluable and analyzable; new runs use
+  revision 2 (configs re-pinned).
+- **Confound:** every run before this change (including gemini10 and the four owner-* runs on
+  all 71 tasks) showed agents those `decide +native` sibling proofs next to a rule banning
+  `native_decide`. Treat `+native` use in those runs, mostly on the WrittenOnTheWallII problems,
+  as possibly primed by the templates.
+
 ## Neutral collaboration environment, October 21, 2026
 
 Owner's decisions (relayed by the integrating session): agents must understand the environment

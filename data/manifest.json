@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "dataset_revision": 2,
   "upstream_revision": "7a41db3d761324599812d6ca6cb6a9f311046dc7",
   "upstream_tag": "bench-v1-lean4.27.0",
   "pool_seed": 260904170,
@@ -8,9 +9,34 @@
   "frozen_identity_manifest_v1_sha256": "3bcc6e01dcaca8914dfa6d1b3f86db5680dbe342c13f4957821bb77385fd238a",
   "extraction_corrections": [
     {
+      "task_id": "Erdos1148_erdos_1148_variants_weaker",
+      "v1_template_sha256": "a72eb9ab3da2ee1a66d547accae5fb78d553671e39350c07ce5422b999dca236",
+      "reason": "Revision 2 (2026-10-21): removed helper lemmas proved with any native-evaluation spelling (decide +native, native := true, Lean.ofReduceBool) and their dependents."
+    },
+    {
       "task_id": "MonochromaticQuantumGraph_eqSystem10_no_solution_d9",
       "v1_template_sha256": "d02cb08e4d2e084b6442cc13b4bfcbce8f10f2eed3ce5f67484accd8cac9b43d",
       "reason": "Removed private/protected research or native_decide helper lemmas, dependent helper lemmas, and/or dangling set_option-in lines."
+    },
+    {
+      "task_id": "WrittenOnTheWallII_Test_C6_avg_dist",
+      "v1_template_sha256": "4b429f2626b27a283c8452323dba49ded68032e70a508ce98d4d1b9b71d7d675",
+      "reason": "Revision 2 (2026-10-21): removed helper lemmas proved with any native-evaluation spelling (decide +native, native := true, Lean.ofReduceBool) and their dependents."
+    },
+    {
+      "task_id": "WrittenOnTheWallII_Test_C6_size",
+      "v1_template_sha256": "8aed2d63d636ece10fc505fdb8148345e146ca5ed6d223c3a2eb982939cf63c5",
+      "reason": "Revision 2 (2026-10-21): removed helper lemmas proved with any native-evaluation spelling (decide +native, native := true, Lean.ofReduceBool) and their dependents."
+    },
+    {
+      "task_id": "WrittenOnTheWallII_Test_Star5_indep",
+      "v1_template_sha256": "2f0781f17c932c7e4a00e5c5b070a79f047c8b61a3f3b71d2c8fdb3efb3763df",
+      "reason": "Revision 2 (2026-10-21): removed helper lemmas proved with any native-evaluation spelling (decide +native, native := true, Lean.ofReduceBool) and their dependents."
+    },
+    {
+      "task_id": "WrittenOnTheWallII_Test_house_cvetkovic",
+      "v1_template_sha256": "db66945d4427980430a6c7e2dc70f23f62d72c9d98ccd8baabe2ba447557dd7b",
+      "reason": "Revision 2 (2026-10-21): removed helper lemmas proved with any native-evaluation spelling (decide +native, native := true, Lean.ofReduceBool) and their dependents."
     }
   ],
   "tasks": [
@@ -231,7 +257,9 @@
       "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/1148.lean#L87",
       "original_statement": "theorem erdos_1148.variants.weaker : ∀ n, erdos_1148_weaker_prop n",
       "category": "research solved",
-      "template_adjustments": [],
+      "template_adjustments": [
+        "Extraction correction 2026-10-21 (dataset revision 2): removed helper lemmas proved with decide +native or another native-evaluation spelling, and their dependents; task identity unchanged."
+      ],
       "namespace_context": [
         [
           "namespace",
@@ -242,7 +270,7 @@
       "answer_placeholder": null,
       "selection_provenance": "documented_substitution",
       "template_path": "data/templates/Erdos1148_erdos_1148_variants_weaker.lean",
-      "sha256": "a72eb9ab3da2ee1a66d547accae5fb78d553671e39350c07ce5422b999dca236"
+      "sha256": "eb7bb6b8d4cf37136da4a44095766f215f2d117f9a0484c0c1b107f34a5650cd"
     },
     {
       "task_id": "Erdos123_erdos_123",
@@ -1159,7 +1187,9 @@
       "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/WrittenOnTheWallII/Test.lean#L301",
       "original_statement": "theorem C6_avg_dist : averageDistance C6 = 9/5",
       "category": "test",
-      "template_adjustments": [],
+      "template_adjustments": [
+        "Extraction correction 2026-10-21 (dataset revision 2): removed helper lemmas proved with decide +native or another native-evaluation spelling, and their dependents; task identity unchanged."
+      ],
       "namespace_context": [
         [
           "namespace",
@@ -1170,7 +1200,7 @@
       "answer_placeholder": null,
       "selection_provenance": "documented_substitution",
       "template_path": "data/templates/WrittenOnTheWallII_Test_C6_avg_dist.lean",
-      "sha256": "4b429f2626b27a283c8452323dba49ded68032e70a508ce98d4d1b9b71d7d675"
+      "sha256": "38ebbb28044e5197a17778d9aa3627eb661180031df7da50548e6f6579abac54"
     },
     {
       "task_id": "WrittenOnTheWallII_Test_C6_size",
@@ -1182,7 +1212,9 @@
       "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/WrittenOnTheWallII/Test.lean#L321",
       "original_statement": "theorem C6_size : C6.edgeFinset.card = 6",
       "category": "test",
-      "template_adjustments": [],
+      "template_adjustments": [
+        "Extraction correction 2026-10-21 (dataset revision 2): removed helper lemmas proved with decide +native or another native-evaluation spelling, and their dependents; task identity unchanged."
+      ],
       "namespace_context": [
         [
           "namespace",
@@ -1193,7 +1225,7 @@
       "answer_placeholder": null,
       "selection_provenance": "documented_substitution",
       "template_path": "data/templates/WrittenOnTheWallII_Test_C6_size.lean",
-      "sha256": "8aed2d63d636ece10fc505fdb8148345e146ca5ed6d223c3a2eb982939cf63c5"
+      "sha256": "ed81fa3aa54a1e8443ac25717f367f478cf5ac243192773cedd4bc02bfe215a7"
     },
     {
       "task_id": "WrittenOnTheWallII_Test_Star5_indep",
@@ -1205,7 +1237,9 @@
       "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/WrittenOnTheWallII/Test.lean#L363",
       "original_statement": "theorem Star5_indep : α(Star5) = 5",
       "category": "test",
-      "template_adjustments": [],
+      "template_adjustments": [
+        "Extraction correction 2026-10-21 (dataset revision 2): removed helper lemmas proved with decide +native or another native-evaluation spelling, and their dependents; task identity unchanged."
+      ],
       "namespace_context": [
         [
           "namespace",
@@ -1216,7 +1250,7 @@
       "answer_placeholder": null,
       "selection_provenance": "documented_substitution",
       "template_path": "data/templates/WrittenOnTheWallII_Test_Star5_indep.lean",
-      "sha256": "2f0781f17c932c7e4a00e5c5b070a79f047c8b61a3f3b71d2c8fdb3efb3763df"
+      "sha256": "ed7ae8bd9c0d71afd8149f3989ffc2eaaaeda53b44309543bb9c394312ec1ce3"
     },
     {
       "task_id": "WrittenOnTheWallII_Test_house_cvetkovic",
@@ -1228,7 +1262,9 @@
       "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/WrittenOnTheWallII/Test.lean#L144",
       "original_statement": "theorem house_cvetkovic : cvetkovic HouseGraph = 3",
       "category": "test",
-      "template_adjustments": [],
+      "template_adjustments": [
+        "Extraction correction 2026-10-21 (dataset revision 2): removed helper lemmas proved with decide +native or another native-evaluation spelling, and their dependents; task identity unchanged."
+      ],
       "namespace_context": [
         [
           "namespace",
@@ -1239,7 +1275,7 @@
       "answer_placeholder": null,
       "selection_provenance": "documented_substitution",
       "template_path": "data/templates/WrittenOnTheWallII_Test_house_cvetkovic.lean",
-      "sha256": "db66945d4427980430a6c7e2dc70f23f62d72c9d98ccd8baabe2ba447557dd7b"
+      "sha256": "d0bbb67faec9c41af62dab1b0e0c079ca87dc9afaf661a02f89ffd7d35f630f1"
     },
     {
       "task_id": "all_fermat_squarefree",
@@ -1786,6 +1822,46 @@
       "requested_declaration": "erdos_835",
       "mapped": true,
       "note": "Paper alias mapped to pinned declaration."
+    }
+  ],
+  "revision_history": [
+    {
+      "revision": 1,
+      "archive": "data/revisions/v1",
+      "manifest_sha256": "df9fbeaa3cfb5aae72096566faaf7b05f93eacbad91e7abcc8b7a15ac12761cd",
+      "native_rule": "literal native_decide only"
+    },
+    {
+      "revision": 2,
+      "date": "2026-10-21",
+      "native_rule": "all native-evaluation spellings (NATIVE_EVALUATION)",
+      "changed_templates": [
+        {
+          "task_id": "Erdos1148_erdos_1148_variants_weaker",
+          "revision_1_template_sha256": "a72eb9ab3da2ee1a66d547accae5fb78d553671e39350c07ce5422b999dca236",
+          "revision_2_template_sha256": "eb7bb6b8d4cf37136da4a44095766f215f2d117f9a0484c0c1b107f34a5650cd"
+        },
+        {
+          "task_id": "WrittenOnTheWallII_Test_C6_avg_dist",
+          "revision_1_template_sha256": "4b429f2626b27a283c8452323dba49ded68032e70a508ce98d4d1b9b71d7d675",
+          "revision_2_template_sha256": "38ebbb28044e5197a17778d9aa3627eb661180031df7da50548e6f6579abac54"
+        },
+        {
+          "task_id": "WrittenOnTheWallII_Test_C6_size",
+          "revision_1_template_sha256": "8aed2d63d636ece10fc505fdb8148345e146ca5ed6d223c3a2eb982939cf63c5",
+          "revision_2_template_sha256": "ed81fa3aa54a1e8443ac25717f367f478cf5ac243192773cedd4bc02bfe215a7"
+        },
+        {
+          "task_id": "WrittenOnTheWallII_Test_Star5_indep",
+          "revision_1_template_sha256": "2f0781f17c932c7e4a00e5c5b070a79f047c8b61a3f3b71d2c8fdb3efb3763df",
+          "revision_2_template_sha256": "ed7ae8bd9c0d71afd8149f3989ffc2eaaaeda53b44309543bb9c394312ec1ce3"
+        },
+        {
+          "task_id": "WrittenOnTheWallII_Test_house_cvetkovic",
+          "revision_1_template_sha256": "db66945d4427980430a6c7e2dc70f23f62d72c9d98ccd8baabe2ba447557dd7b",
+          "revision_2_template_sha256": "d0bbb67faec9c41af62dab1b0e0c079ca87dc9afaf661a02f89ffd7d35f630f1"
+        }
+      ]
     }
   ]
 }

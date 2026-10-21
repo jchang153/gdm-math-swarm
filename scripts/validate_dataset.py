@@ -68,7 +68,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
-from research_swarm.dataset import FrozenDataset  # noqa: E402
+from research_swarm.dataset import FrozenDataset, native_evaluation_spellings  # noqa: E402
 from research_swarm.judge import answer_span, editable_spans, immutable_segments  # noqa: E402
 from research_swarm.keyword_filter import check_keywords  # noqa: E402
 from research_swarm.lean import (DockerLeanCompiler, JUDGE_LABEL, SORRY_WARNING, image_id,  # noqa: E402
@@ -200,6 +200,9 @@ def static_checks(task, source) -> dict:
     matched = check_keywords(source).matched_keywords
     if matched:
         problems.append(f'template contains forbidden keywords {list(matched)}')
+    native = native_evaluation_spellings(source)
+    if native:
+        problems.append(f'template contains native evaluation {native}')
     return dict(info, problems=problems, fatal=fatal)
 
 

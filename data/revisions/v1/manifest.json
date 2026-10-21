@@ -1,0 +1,1791 @@
+{
+  "schema_version": 1,
+  "upstream_revision": "7a41db3d761324599812d6ca6cb6a9f311046dc7",
+  "upstream_tag": "bench-v1-lean4.27.0",
+  "pool_seed": 260904170,
+  "selection_method": "Named mappings plus 15 test, 20 solved and remaining open substitutions sampled without replacement from lexically eligible declarations.",
+  "compilation_validation": "pending",
+  "frozen_identity_manifest_v1_sha256": "3bcc6e01dcaca8914dfa6d1b3f86db5680dbe342c13f4957821bb77385fd238a",
+  "extraction_corrections": [
+    {
+      "task_id": "MonochromaticQuantumGraph_eqSystem10_no_solution_d9",
+      "v1_template_sha256": "d02cb08e4d2e084b6442cc13b4bfcbce8f10f2eed3ce5f67484accd8cac9b43d",
+      "reason": "Removed private/protected research or native_decide helper lemmas, dependent helper lemmas, and/or dangling set_option-in lines."
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "Buchi_buchi_false_M4",
+      "title": "Büchi's problem — buchi_false_M4",
+      "theorem_name": "Buchi.buchi_false_M4",
+      "source_path": "FormalConjectures/Wikipedia/Buchi.lean",
+      "answer_based": false,
+      "description_url": "https://en.wikipedia.org/wiki/B%C3%BCchi%27s_problem",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/Buchi.lean#L99",
+      "original_statement": "theorem buchi_false_M4 : ¬ IsBuchi 4",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Buchi"
+        ]
+      ],
+      "source_sha256": "0bfe7b5f84dab2cec7e5289b75bd2f6cefb229440c1ae18d4913fec5a0cb8907",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Buchi_buchi_false_M4.lean",
+      "sha256": "68129efa1f108c24f1ae87f81b6ea3833c95913240966854f84063947d3390cb"
+    },
+    {
+      "task_id": "DedekindNumber_M'_three",
+      "title": "Dedekind Numbers — M'_three",
+      "theorem_name": "DedekindNumber.M'_three",
+      "source_path": "FormalConjectures/Wikipedia/DedekindNumber.lean",
+      "answer_based": false,
+      "description_url": "https://en.wikipedia.org/wiki/Dedekind_number",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/DedekindNumber.lean#L102",
+      "original_statement": "theorem M'_three : M' 3 = 20",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "DedekindNumber"
+        ]
+      ],
+      "source_sha256": "9ea897a84987f9d996ca389b9bc3a8e0102dda04786a32a81468fb1601a92dec",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/DedekindNumber_M'_three.lean",
+      "sha256": "91cb5e169ecf3a4f358210502889947f5625f615e520c85ca6e36bc2e0bcdd76"
+    },
+    {
+      "task_id": "Erdos1059_allFactorialSubtractionsComposite_101",
+      "title": "Erdős Problem 1059 — allFactorialSubtractionsComposite_101",
+      "theorem_name": "Erdos1059.allFactorialSubtractionsComposite_101",
+      "source_path": "FormalConjectures/ErdosProblems/1059.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/1059",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/1059.lean#L88",
+      "original_statement": "theorem allFactorialSubtractionsComposite_101 : AllFactorialSubtractionsComposite 101",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos1059"
+        ]
+      ],
+      "source_sha256": "86c81766e9ddcaa57ba95bf1d692b6c10c4b4a7a714f160e96ecd2451ab288e0",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos1059_allFactorialSubtractionsComposite_101.lean",
+      "sha256": "c14e3b877c1498d97cd284567e4d060f359e90ac0175ccbb2e4280b936e10dec"
+    },
+    {
+      "task_id": "Erdos1074_erdos_1074_variants_EHSNumbers_init",
+      "title": "Erdős Problem 1074 — erdos_1074.variants.EHSNumbers_init",
+      "theorem_name": "Erdos1074.erdos_1074.variants.EHSNumbers_init",
+      "source_path": "FormalConjectures/ErdosProblems/1074.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/1074",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/1074.lean#L113",
+      "original_statement": "theorem erdos_1074.variants.EHSNumbers_init :\n    nth EHSNumbers '' (Set.Icc 0 6) = {8, 9, 13, 14, 15, 16, 17}",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos1074"
+        ]
+      ],
+      "source_sha256": "b2e22be706fc8163100c9340cb6169e552959f2a022489ad6edb44273485353e",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos1074_erdos_1074_variants_EHSNumbers_init.lean",
+      "sha256": "59a16d3a139cb5352db22d1df2da5ac13023c55d7c58c8418eee064997eb6ef6"
+    },
+    {
+      "task_id": "Erdos1085_erdos_1085_variants_upper_d3",
+      "title": "Erdős Problem 1085 — erdos_1085.variants.upper_d3",
+      "theorem_name": "Erdos1085.erdos_1085.variants.upper_d3",
+      "source_path": "FormalConjectures/ErdosProblems/1085.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/1085",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/1085.lean#L59",
+      "original_statement": "theorem erdos_1085.variants.upper_d3 : answer(sorry) ↔\n    (fun n ↦ (f 3 n : ℝ)) =O[atTop] (fun n : ℕ ↦ (n : ℝ) ^ (4/3 : ℝ) * log (log n))",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos1085"
+        ]
+      ],
+      "source_sha256": "dee44c25a66fb0dfdea40a5ffaffb89366332a8101e5462fa3337272bd319432",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos1085_erdos_1085_variants_upper_d3.lean",
+      "sha256": "9e4d3a292168296208f4a26fca29588bcf526272deb62f48ebef7dc37071a5c4"
+    },
+    {
+      "task_id": "Erdos1085_erdos_1085_variants_upper_d4_erdos",
+      "title": "Erdős Problem 1085 — erdos_1085.variants.upper_d4_erdos",
+      "theorem_name": "Erdos1085.erdos_1085.variants.upper_d4_erdos",
+      "source_path": "FormalConjectures/ErdosProblems/1085.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/1085",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/1085.lean#L73",
+      "original_statement": "theorem erdos_1085.variants.upper_d4_erdos (hd : 4 ≤ d) :\n    ∃ g : ℕ → ℝ, Tendsto g atTop (𝓝 0) ∧\n      ∀ n, f d n ≤ (↑(d / 2 - 1) / (2 * ↑(d / 2)) + g n) * n ^ 2",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos1085"
+        ]
+      ],
+      "source_sha256": "dee44c25a66fb0dfdea40a5ffaffb89366332a8101e5462fa3337272bd319432",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos1085_erdos_1085_variants_upper_d4_erdos.lean",
+      "sha256": "57c1c3f1a332a9ac9a54288b4361250b3c15a11abf9d786b76bdcec6ff86f42f"
+    },
+    {
+      "task_id": "Erdos1092_f_asymptotic_2",
+      "title": "Erdős Problem 1092 — f_asymptotic_2",
+      "theorem_name": "Erdos1092.f_asymptotic_2",
+      "source_path": "FormalConjectures/ErdosProblems/1092.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/1092",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/1092.lean#L58",
+      "original_statement": "theorem f_asymptotic_2 : answer(sorry) ↔\n    (fun (n : ℕ) => (n : ℝ)) =o[atTop] (fun (n : ℕ) => (f 2 n : ℝ))",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos1092"
+        ]
+      ],
+      "source_sha256": "8cdef94cd22eb541a9a9a996f7cdd3f8a098debd8dc8b0d0ced686ab3b134320",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos1092_f_asymptotic_2.lean",
+      "sha256": "cb8482d8b4d8dd75c9db40cad1accd5069f2e6b0d0e9b5119cf4279d36747dcd"
+    },
+    {
+      "task_id": "Erdos10_erdos_10_variants_granville_soundararajan_odd",
+      "title": "Erdős Problem 10 — erdos_10.variants.granville_soundararajan_odd",
+      "theorem_name": "Erdos10.erdos_10.variants.granville_soundararajan_odd",
+      "source_path": "FormalConjectures/ErdosProblems/10.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/10",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/10.lean#L63",
+      "original_statement": "theorem erdos_10.variants.granville_soundararajan_odd :\n    {n : ℕ | Odd n ∧ 1 < n} ⊆ sumPrimeAndTwoPows 3 ∧\n      {n : ℕ | Even n ∧ n ≠ 0} ⊆ sumPrimeAndTwoPows 4",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos10"
+        ]
+      ],
+      "source_sha256": "2f17c787d7f9ed77d0fecd13ab8d148e15f16e5343dbdc6991698ed4c291a52d",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos10_erdos_10_variants_granville_soundararajan_odd.lean",
+      "sha256": "4039eee083a1923e8558bded056618aeec5f9b36b21d559e53532a1ea7b1f842"
+    },
+    {
+      "task_id": "Erdos1102_erdos_1102_lower_density_Q_exists",
+      "title": "Erdős Problem 1102 — erdos_1102.lower_density_Q_exists",
+      "theorem_name": "Erdos1102.erdos_1102.lower_density_Q_exists",
+      "source_path": "FormalConjectures/ErdosProblems/1102.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/1102",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/1102.lean#L91",
+      "original_statement": "theorem erdos_1102.lower_density_Q_exists :\n    ∃ A : ℕ → ℕ, StrictMono A ∧\n    (∀ j, Squarefree (A j)) ∧\n    HasPropertyQ (range A) ∧\n    Tendsto (fun j : ℕ  ↦ (j / A j : ℝ)) atTop (𝓝 (6 / Real.pi^2))",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos1102"
+        ]
+      ],
+      "source_sha256": "918dfdadc0808ddafc8f66d96b03ce51facad8333d6bd18a6996f0e77d427887",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos1102_erdos_1102_lower_density_Q_exists.lean",
+      "sha256": "b27891ac648572533d804f2f3d50813ebbee5a4f50c24e9662bf24e29e00a123"
+    },
+    {
+      "task_id": "Erdos1148_erdos_1148_variants_weaker",
+      "title": "Erdős Problem 1148 — erdos_1148.variants.weaker",
+      "theorem_name": "Erdos1148.erdos_1148.variants.weaker",
+      "source_path": "FormalConjectures/ErdosProblems/1148.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/1148",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/1148.lean#L87",
+      "original_statement": "theorem erdos_1148.variants.weaker : ∀ n, erdos_1148_weaker_prop n",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos1148"
+        ]
+      ],
+      "source_sha256": "001fdfa65cf1289cdbeeb1e6cd16e7c53560342271e1eb2bc0b2d56b2be62dff",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos1148_erdos_1148_variants_weaker.lean",
+      "sha256": "a72eb9ab3da2ee1a66d547accae5fb78d553671e39350c07ce5422b999dca236"
+    },
+    {
+      "task_id": "Erdos123_erdos_123",
+      "title": "Erdős Problem 123 — erdos_123",
+      "theorem_name": "Erdos123.erdos_123",
+      "source_path": "FormalConjectures/ErdosProblems/123.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/123",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/123.lean#L75",
+      "original_statement": "theorem erdos_123 : answer(sorry) ↔ ∀ a > 1, ∀ b > 1, ∀ c > 1, PairwiseCoprime a b c →\n    IsDComplete (↑(powers a) * ↑(powers b) * ↑(powers c))",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos123"
+        ]
+      ],
+      "source_sha256": "c96a45640a58c9106ef59e0ffd08a99f9ff10d397e24166f7e570f9c1632183c",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos123_erdos_123.lean",
+      "sha256": "f5fcc463f285d3d77ee3618a59039a17ea86297a87865bd172fcaab6238476a1"
+    },
+    {
+      "task_id": "Erdos141_exists_three_consecutive_primes_in_ap",
+      "title": "Erdős Problem 141 — exists_three_consecutive_primes_in_ap",
+      "theorem_name": "Erdos141.exists_three_consecutive_primes_in_ap",
+      "source_path": "FormalConjectures/ErdosProblems/141.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/141",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/141.lean#L61",
+      "original_statement": "theorem exists_three_consecutive_primes_in_ap : ∃ (s : Set ℕ), s.IsAPAndPrimeProgressionOfLength 3",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos141"
+        ]
+      ],
+      "source_sha256": "a46f65c9f84f55e87a8955ae139a7ca33d8319a9f6f51a9dd2299c3ec64f41c4",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos141_exists_three_consecutive_primes_in_ap.lean",
+      "sha256": "ada6f4eeb797106a0b43a6f309edff2cba4e003f716149acc41ad3382fc87234"
+    },
+    {
+      "task_id": "Erdos195_erdos_195_variants_leq_5_bound",
+      "title": "Erdős Problem 195 — erdos_195.variants.leq_5_bound",
+      "theorem_name": "Erdos195.erdos_195.variants.leq_5_bound",
+      "source_path": "FormalConjectures/ErdosProblems/195.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/195",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/195.lean#L45",
+      "original_statement": "theorem erdos_195.variants.leq_5_bound :\n    5 ≥ sSup {k : ℕ | ∀ f : ℤ ≃ ℤ, HasMonotoneAP f k}",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos195"
+        ]
+      ],
+      "source_sha256": "2e86cace58fa93a544325e34d2f034fc30eb6eb8439d06f6ace8df72f7290c7a",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos195_erdos_195_variants_leq_5_bound.lean",
+      "sha256": "3a8a927c79a82e67ddb535959f183f81f019a2152fe81b7a63a4c31bce93d6dc"
+    },
+    {
+      "task_id": "Erdos204_erdos_204",
+      "title": "Erdős Problem 204 — erdos_204",
+      "theorem_name": "Erdos204.erdos_204",
+      "source_path": "FormalConjectures/ErdosProblems/204.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/204",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/204.lean#L44",
+      "original_statement": "theorem erdos_204 : answer(False) ↔ ∃ (n : ℕ) (a : ℕ → ℤ),\n    let D := {d : ℕ | d ∣ n ∧ d > 1}\n    (∀ x : ℤ, ∃ d ∈ D, x ≡ a d [ZMOD d]) ∧\n    (∀ d ∈ D, ∀ d' ∈ D, d ≠ d' → (∃ x : ℤ, x ≡ a d [ZMOD d] ∧ x ≡ a d' [ZMOD d']) →\n      Nat.gcd d d' = 1)",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos204"
+        ]
+      ],
+      "source_sha256": "ac73148172bb47a80a5c23887c681515ef58af9d981162105955fd8623dab0a9",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos204_erdos_204.lean",
+      "sha256": "3041fb9c5556f74cad069633c31f086f706d38664ee42c7ed2e4343aa852b2e7"
+    },
+    {
+      "task_id": "Erdos23_erdos_23_variants_n1_tight",
+      "title": "Erdős Problem 23 — erdos_23.variants.n1_tight",
+      "theorem_name": "Erdos23.erdos_23.variants.n1_tight",
+      "source_path": "FormalConjectures/ErdosProblems/23.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/23",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/23.lean#L46",
+      "original_statement": "theorem erdos_23.variants.n1_tight :\n    ∃ (G : SimpleGraph (Fin 5)), G.CliqueFree 3 ∧ ∀ (H : SimpleGraph (Fin 5)),\n        H ≤ G → H.IsBipartite → 1 ≤ (G.edgeFinset \\ H.edgeFinset).card",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos23"
+        ]
+      ],
+      "source_sha256": "8b20c21bea38e6d7678706d625967986e7cb84064849a68896f5c570974e5937",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos23_erdos_23_variants_n1_tight.lean",
+      "sha256": "9062a70dcf136276c9c8864773ec25e8c4adda82621915c0fbdfccdbc0260f00"
+    },
+    {
+      "task_id": "Erdos323_erdos_323_variants_k_eq_2",
+      "title": "Erdős Problem 323 — erdos_323.variants.k_eq_2",
+      "theorem_name": "Erdos323.erdos_323.variants.k_eq_2",
+      "source_path": "FormalConjectures/ErdosProblems/323.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/323",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/323.lean#L63",
+      "original_statement": "theorem erdos_323.variants.k_eq_2 :\n    ∃ c > 0, (fun (x : ℕ) ↦ (f 2 2 x : ℝ)) ~[atTop]\n      (fun (x : ℕ) ↦ c * (x : ℝ) / Real.sqrt (Real.log (x : ℝ)))",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos323"
+        ]
+      ],
+      "source_sha256": "69dce97915489768889a4143655b77e2f88fe294acbd8b232e4a5c2ec2b31795",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos323_erdos_323_variants_k_eq_2.lean",
+      "sha256": "029c08dbdd2e53721bf68d1268722cd839d231136ac5a31f36a904350d5c12f4"
+    },
+    {
+      "task_id": "Erdos340_greedySidon_go_singleton_two",
+      "title": "Erdős Problem 340 — greedySidon_go_singleton_two",
+      "theorem_name": "Erdos340.greedySidon_go_singleton_two",
+      "source_path": "FormalConjectures/ErdosProblems/340.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/340",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/340.lean#L42",
+      "original_statement": "theorem greedySidon_go_singleton_two : (greedySidon.go {1} (by simp [IsSidon]) 2).val = 2",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos340"
+        ]
+      ],
+      "source_sha256": "c5a4a3a2bc917631e613aa9aad8f17384fa365cd09ff704210677c1f126f70f7",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos340_greedySidon_go_singleton_two.lean",
+      "sha256": "3e0d21d2211f0cb76511edcc8c240387a570c3ed025cbf92c4b4d27b100e7401"
+    },
+    {
+      "task_id": "Erdos36_minimum_overlap_variants_upper_erdos_1955",
+      "title": "Erdős Problem 36 — minimum_overlap.variants.upper.erdos_1955",
+      "theorem_name": "Erdos36.minimum_overlap.variants.upper.erdos_1955",
+      "source_path": "FormalConjectures/ErdosProblems/36.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/36",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/36.lean#L145",
+      "original_statement": "theorem minimum_overlap.variants.upper.erdos_1955 :\n    atTop.limsup MinOverlapQuotient ≤ (1 : ℝ) / 2",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos36"
+        ]
+      ],
+      "source_sha256": "4beb986a0abc79b08b381bf51e0d7f64e1415c105ae74664abdd7fa46177ec9f",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos36_minimum_overlap_variants_upper_erdos_1955.lean",
+      "sha256": "5a2e4f2a3da63e46a252d91085b78b400981e4cd3e5a90c5e52fe52a2ad01265"
+    },
+    {
+      "task_id": "Erdos539_erdos_539",
+      "title": "Erdős Problem 539 — erdos_539",
+      "theorem_name": "Erdos539.erdos_539",
+      "source_path": "FormalConjectures/ErdosProblems/539.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/539",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/539.lean#L60",
+      "original_statement": "theorem erdos_539 :\n    (fun n ↦ (cofactorThreshold n : ℝ)) =Θ[atTop] (answer(sorry) : ℕ → ℝ)",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos539"
+        ]
+      ],
+      "source_sha256": "8567eb125435db5347d89cab1ca3995c51c5a6df78ee1ca879fca44e34eecbbc",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos539_erdos_539.lean",
+      "sha256": "a5ccef25c213923185d54b4896b51e2b02e39fdce5248acdd080904c4590df74"
+    },
+    {
+      "task_id": "Erdos539_erdos_539_variants_sq_isBigO",
+      "title": "Erdős Problem 539 — erdos_539.variants.sq_isBigO",
+      "theorem_name": "Erdos539.erdos_539.variants.sq_isBigO",
+      "source_path": "FormalConjectures/ErdosProblems/539.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/539",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/539.lean#L74",
+      "original_statement": "theorem erdos_539.variants.sq_isBigO :\n    (fun n : ℕ ↦ √n) =O[atTop] fun n ↦ (cofactorThreshold n : ℝ)",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos539"
+        ]
+      ],
+      "source_sha256": "8567eb125435db5347d89cab1ca3995c51c5a6df78ee1ca879fca44e34eecbbc",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos539_erdos_539_variants_sq_isBigO.lean",
+      "sha256": "0e66a443f08bd35daea2d5721bc7fbe4aad101df317b1982435746af508c3a87"
+    },
+    {
+      "task_id": "Erdos567_erdos_567_parts_ii",
+      "title": "Erdős Problem 567 — erdos_567.parts.ii",
+      "theorem_name": "Erdos567.erdos_567.parts.ii",
+      "source_path": "FormalConjectures/ErdosProblems/567.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/567",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/567.lean#L69",
+      "original_statement": "theorem erdos_567.parts.ii : answer(sorry) ↔ IsRamseySizeLinear K33",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos567"
+        ]
+      ],
+      "source_sha256": "6eff801ac9819fdaa92d74806233ca960ef4dfa995b71f4ee6aa7e282683df5a",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos567_erdos_567_parts_ii.lean",
+      "sha256": "3ac9f54f731b7ea6c86caca50469f4d746338df31323424772efe7b1112cc820"
+    },
+    {
+      "task_id": "Erdos56_maxWeaklyDivisible_one",
+      "title": "Erdős Problem 56 — maxWeaklyDivisible_one",
+      "theorem_name": "Erdos56.maxWeaklyDivisible_one",
+      "source_path": "FormalConjectures/ErdosProblems/56.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/56",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/56.lean#L67",
+      "original_statement": "theorem maxWeaklyDivisible_one {k : ℕ} (hk : k ≠ 0) : MaxWeaklyDivisible 1 k = 1",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos56"
+        ]
+      ],
+      "source_sha256": "4e5ccf9f7f2d6772a041ea7fe91952bae290531e94c9f23902a715e99a8a45dc",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos56_maxWeaklyDivisible_one.lean",
+      "sha256": "93ee6536bc31673ebe5d69b28d2851a296807af83574fb8f9873c8e707baeeb6"
+    },
+    {
+      "task_id": "Erdos680_erdos_680_parts_ii",
+      "title": "Erdős Problem 680 — erdos_680.parts.ii",
+      "theorem_name": "Erdos680.erdos_680.parts.ii",
+      "source_path": "FormalConjectures/ErdosProblems/680.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/680",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/680.lean#L47",
+      "original_statement": "theorem erdos_680.parts.ii : answer(sorry) ↔ ∀ ε > 0, ∃ C > 0,\n    ¬ ∀ᶠ (n : ℕ) in Filter.atTop, ∃ k ≠ 0,\n    Nat.minFac (n + k) > exp ((1 + ε) * √k) + C",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos680"
+        ]
+      ],
+      "source_sha256": "3f5c488f2d7371c6e41395e8c5a9eeed2e444a4cd21935a47891480422ba570a",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos680_erdos_680_parts_ii.lean",
+      "sha256": "63c99e13f065d4ca03979b635bd7687510e8ee4e4ab8575beb90bc84bffa55f1"
+    },
+    {
+      "task_id": "Erdos699_sylvester_schur",
+      "title": "Erdős Problem 699 — sylvester_schur",
+      "theorem_name": "Erdos699.sylvester_schur",
+      "source_path": "FormalConjectures/ErdosProblems/699.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/699",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/699.lean#L29",
+      "original_statement": "theorem sylvester_schur (n i : ℕ) (hi : 1 ≤ i) (hi_half : i ≤ n / 2) :\n    ∃ p : ℕ, p.Prime ∧ i < p ∧ p ∣ Nat.choose n i",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos699"
+        ]
+      ],
+      "source_sha256": "79ece19dab73169c7134fc183ca58efab0b49451674e737a397510c2c411a974",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos699_sylvester_schur.lean",
+      "sha256": "dc76c3f6d26d99353bdf9ce34fa9df058a4c6be0d968d40aa0a49c3f7930aaf8"
+    },
+    {
+      "task_id": "Erdos6_erdos_6_variants_decreasing",
+      "title": "Erdős Problem 6 — erdos_6.variants.decreasing",
+      "theorem_name": "Erdos6.erdos_6.variants.decreasing",
+      "source_path": "FormalConjectures/ErdosProblems/6.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/6",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/6.lean#L60",
+      "original_statement": "theorem erdos_6.variants.decreasing (m : ℕ) :\n    {n | ∀ i ∈ Finset.range m, primeGap (n + i) > primeGap (n + i + 1)}.Infinite",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos6"
+        ]
+      ],
+      "source_sha256": "d12c63b618fe5e5f88fbb09a2208d8946a05df03aa80fd71bc3606d37d14b753",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos6_erdos_6_variants_decreasing.lean",
+      "sha256": "d4f31ebf8550a378f5938c6e81346c5830078def7d973fade9f495a907c9c5f0"
+    },
+    {
+      "task_id": "Erdos812_erdos_812_parts_i",
+      "title": "Erdős Problem 812 — erdos_812.parts.i",
+      "theorem_name": "Erdos812.erdos_812.parts.i",
+      "source_path": "FormalConjectures/ErdosProblems/812.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/812",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/812.lean#L40",
+      "original_statement": "theorem erdos_812.parts.i :\n    answer(sorry) ↔ ∃ c > 0, ∀ᶠ n in atTop, (R (n + 1) : ℝ) / (R n : ℝ) ≥ 1 + c",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos812"
+        ]
+      ],
+      "source_sha256": "80ab0d05f4cc9ed423c10b1a21f47dc3d965c937f29ec888edb94d749a049dc0",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos812_erdos_812_parts_i.lean",
+      "sha256": "a00bbc9d505ba83c097bae7d96752813b43680309572b69970c2a21dcfe79800"
+    },
+    {
+      "task_id": "Erdos835_chromaticNumber_johnson_2k_k_lower_bound_odd",
+      "title": "Erdős Problem 835 — chromaticNumber_johnson_2k_k_lower_bound_odd",
+      "theorem_name": "Erdos835.chromaticNumber_johnson_2k_k_lower_bound_odd",
+      "source_path": "FormalConjectures/ErdosProblems/835.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/835",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/835.lean#L122",
+      "original_statement": "theorem chromaticNumber_johnson_2k_k_lower_bound_odd (hk : 3 ≤ k) (hk' : k ≤ 300) (hk_odd : Odd k) :\n    k + 1 < J(2 * k, k).chromaticNumber",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos835"
+        ]
+      ],
+      "source_sha256": "bb4030391a6b451fb438b45a5497f4fcadf943e6ab23b9619173665f3d34711c",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos835_chromaticNumber_johnson_2k_k_lower_bound_odd.lean",
+      "sha256": "f61ffe99ca9354a04570a340a4fb00f2b442db28a84dffae4eed5078a31d0ff2"
+    },
+    {
+      "task_id": "Erdos835_johnsonGraph_2k_k_chromaticNumber_known_cases",
+      "title": "Erdős Problem 835 — johnsonGraph_2k_k_chromaticNumber_known_cases",
+      "theorem_name": "Erdos835.johnsonGraph_2k_k_chromaticNumber_known_cases",
+      "source_path": "FormalConjectures/ErdosProblems/835.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/835",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/835.lean#L75",
+      "original_statement": "theorem johnsonGraph_2k_k_chromaticNumber_known_cases (k : ℕ) (hk : 3 ≤ k) (hk' : k ≤ 8) :\n    J(2 * k, k).chromaticNumber > k + 1",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos835"
+        ]
+      ],
+      "source_sha256": "bb4030391a6b451fb438b45a5497f4fcadf943e6ab23b9619173665f3d34711c",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos835_johnsonGraph_2k_k_chromaticNumber_known_cases.lean",
+      "sha256": "9a5f53e89580aed96b5ab4423d1453a90e80bd47503fc82ee13d030da94e6743"
+    },
+    {
+      "task_id": "Erdos885_erdos_885_variants_k_eq_4",
+      "title": "Erdős Problem 885 — erdos_885.variants.k_eq_4",
+      "theorem_name": "Erdos885.erdos_885.variants.k_eq_4",
+      "source_path": "FormalConjectures/ErdosProblems/885.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/885",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/885.lean#L78",
+      "original_statement": "theorem erdos_885.variants.k_eq_4 :\n    ∃ Ns : Finset ℕ,\n      (∀ n ∈ Ns, 1 ≤ n) ∧\n      Ns.card = 4 ∧\n      (⋂ n ∈ Ns, factorDifferenceSet n).ncard ≥ 4",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos885"
+        ]
+      ],
+      "source_sha256": "883e4ca16653fd5f864ae60c379a2a423542088edb8f4227948db7bdbb6b9547",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos885_erdos_885_variants_k_eq_4.lean",
+      "sha256": "c705f65b319fb8473efd2c5106342a81f39a84f291844c8bcf14d83cc3239039"
+    },
+    {
+      "task_id": "Erdos891_erdos_891",
+      "title": "Erdős Problem 891 — erdos_891",
+      "theorem_name": "Erdos891.erdos_891",
+      "source_path": "FormalConjectures/ErdosProblems/891.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/891",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/891.lean#L38",
+      "original_statement": "theorem erdos_891 :\n    answer(sorry) ↔\n      ∀ k ≥ 2, ∀ᶠ n in atTop,\n      ∃ m ∈ Ico n (n + ∏ i ∈ range k, i.nth Nat.Prime), k < ω m",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos891"
+        ]
+      ],
+      "source_sha256": "a37a9cbc284b02986763d22ff0c0a92b00968c21a3dc3303cf8a3aa94a4757d8",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Erdos891_erdos_891.lean",
+      "sha256": "d01bd68d0dbbd13fcddcc1f914c357db21b08ffd82d8666363684bf18d84d746"
+    },
+    {
+      "task_id": "EulerBrick_cuboidThree",
+      "title": "Open questions regarding the existence of Euler bricks — cuboidThree",
+      "theorem_name": "EulerBrick.cuboidThree",
+      "source_path": "FormalConjectures/Wikipedia/EulerBrick.lean",
+      "answer_based": false,
+      "description_url": "https://en.wikipedia.org/wiki/Euler_brick",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/EulerBrick.lean#L141",
+      "original_statement": "theorem cuboidThree : CuboidThree",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "EulerBrick"
+        ],
+        [
+          "section",
+          "Cuboid"
+        ]
+      ],
+      "source_sha256": "1cabe26d55fe93bc808f2c5fcbb12cbd78e3e497a3e33ef510df29edb9a2e67b",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/EulerBrick_cuboidThree.lean",
+      "sha256": "cd066c41222026b74572f67a78e7a3f6f667bf7472144390d3b14ee61db8e4ad"
+    },
+    {
+      "task_id": "GRH_implies_riemannHypothesis",
+      "title": "Riemann Hypothesis and its generalizations — implies_riemannHypothesis",
+      "theorem_name": "GRH.implies_riemannHypothesis",
+      "source_path": "FormalConjectures/Millenium/RiemannHypothesis.lean",
+      "answer_based": false,
+      "description_url": "https://www.claymath.org/wp-content/uploads/2022/05/riemann.pdf",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Millenium/RiemannHypothesis.lean#L88",
+      "original_statement": "theorem implies_riemannHypothesis :\n    type_of% (generalized_riemann_hypothesis 1 1) ↔ RiemannHypothesis",
+      "category": "test",
+      "template_adjustments": [
+        "Expand type_of% of a removed unproved GRH theorem into its original proposition; no proof/assumption of GRH is supplied."
+      ],
+      "namespace_context": [
+        [
+          "namespace",
+          "GRH"
+        ]
+      ],
+      "source_sha256": "31bc68fe45cd4bd1a896e71da6b7bd7459a18572a7d85878b66ddd15adb0130c",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/GRH_implies_riemannHypothesis.lean",
+      "sha256": "d90f24ecbcfe1a3cb4a4d6a8a7fb31b2e37b1e57735a3b9a357eabe40ebd0549"
+    },
+    {
+      "task_id": "Green14_W_3_11",
+      "title": "Ben Green's Open Problem 14 — W_3_11",
+      "theorem_name": "Green14.W_3_11",
+      "source_path": "FormalConjectures/GreensOpenProblems/14.lean",
+      "answer_based": false,
+      "description_url": "https://people.maths.ox.ac.uk/greenbj/papers/open-problems.pdf#problem.14",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/GreensOpenProblems/14.lean#L181",
+      "original_statement": "theorem W_3_11 : W 3 11 = 114",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Green14"
+        ]
+      ],
+      "source_sha256": "8a4f3cadcd08daf62d5d617c0e5ce93adfc26cb8440cc1893888a15f42d628c5",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Green14_W_3_11.lean",
+      "sha256": "7e9d00fd6515ea4473ddd074e61b445a9b6e307071ea1d31540e4659a9c90300"
+    },
+    {
+      "task_id": "Green14_W_3_29_lower",
+      "title": "Ben Green's Open Problem 14 — W_3_29_lower",
+      "theorem_name": "Green14.W_3_29_lower",
+      "source_path": "FormalConjectures/GreensOpenProblems/14.lean",
+      "answer_based": true,
+      "description_url": "https://people.maths.ox.ac.uk/greenbj/papers/open-problems.pdf#problem.14",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/GreensOpenProblems/14.lean#L254",
+      "original_statement": "theorem W_3_29_lower : answer(sorry) ↔ W 3 29 ≥ 868",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Green14"
+        ]
+      ],
+      "source_sha256": "8a4f3cadcd08daf62d5d617c0e5ce93adfc26cb8440cc1893888a15f42d628c5",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Green14_W_3_29_lower.lean",
+      "sha256": "c142256f208e8d0c6d9ffad55436e7fc48a3a20615a883f8ae0e105a6625c4d9"
+    },
+    {
+      "task_id": "Green26_green_26_variants_yu25",
+      "title": "Green's Open Problem 26 — green_26.variants.yu25",
+      "theorem_name": "Green26.green_26.variants.yu25",
+      "source_path": "FormalConjectures/GreensOpenProblems/26.lean",
+      "answer_based": false,
+      "description_url": "https://people.maths.ox.ac.uk/greenbj/papers/open-problems.pdf#problem.26",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/GreensOpenProblems/26.lean#L63",
+      "original_statement": "theorem green_26.variants.yu25 :\n    ∀ n : ℕ,\n    ∀ A : Fin 4 → Set (𝔽₃ n), (∀ i, IsCube (A i)) →\n      ∑ i, A i = univ",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Green26"
+        ]
+      ],
+      "source_sha256": "932fc1307c32cf76937d94e3a159c56e4af6ab9e9640572ed6443f930ad3adb5",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Green26_green_26_variants_yu25.lean",
+      "sha256": "84aca3fd039aa850782eb5224a1f4563872d8dcedf4153fcbcfa734670c42ab2"
+    },
+    {
+      "task_id": "Green27_green_27_variants_previous_lower",
+      "title": "Green's Open Problem 27 — green_27.variants.previous_lower",
+      "theorem_name": "Green27.green_27.variants.previous_lower",
+      "source_path": "FormalConjectures/GreensOpenProblems/27.lean",
+      "answer_based": false,
+      "description_url": "https://people.maths.ox.ac.uk/greenbj/papers/open-problems.pdf#problem.27",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/GreensOpenProblems/27.lean#L91",
+      "original_statement": "theorem green_27.variants.previous_lower :\n  (fun p ↦ Real.log (p : ℝ)) =O[primesAtTop] m",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Green27"
+        ]
+      ],
+      "source_sha256": "411e477d220659f5bf3f427483edb6600e6e92f21c39d516774d563948992c59",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Green27_green_27_variants_previous_lower.lean",
+      "sha256": "d25bce7afea07dd8313829f2469a3051d2e11f1ae99bb8dc05cc02d3fdccb554"
+    },
+    {
+      "task_id": "Green32_green_32_variants_szemeredi_regime",
+      "title": "Green's Open Problem 32 — green_32.variants.szemeredi_regime",
+      "theorem_name": "Green32.green_32.variants.szemeredi_regime",
+      "source_path": "FormalConjectures/GreensOpenProblems/32.lean",
+      "answer_based": false,
+      "description_url": "https://people.maths.ox.ac.uk/greenbj/papers/open-problems.pdf#problem.32",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/GreensOpenProblems/32.lean#L111",
+      "original_statement": "theorem green_32.variants.szemeredi_regime :\n    ∀ c, 0 < c ∧ c < 1 → ∀ ω : ℕ → ℝ, ω ~[atTop] (fun p ↦ c * p) →\n      HasLargeGapDilate ω",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Green32"
+        ]
+      ],
+      "source_sha256": "d95103f7aa1aa3631ffd5428e3f4939982de432e081e92be3553aba4fa31571d",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Green32_green_32_variants_szemeredi_regime.lean",
+      "sha256": "e799664ad643c56e70c9d2e5f62746fbed4432374a8fa73fbb742a680247911f"
+    },
+    {
+      "task_id": "Green32_hasCosetHole_empty",
+      "title": "Green's Open Problem 32 — hasCosetHole_empty",
+      "theorem_name": "Green32.hasCosetHole_empty",
+      "source_path": "FormalConjectures/GreensOpenProblems/32.lean",
+      "answer_based": false,
+      "description_url": "https://people.maths.ox.ac.uk/greenbj/papers/open-problems.pdf#problem.32",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/GreensOpenProblems/32.lean#L144",
+      "original_statement": "theorem hasCosetHole_empty (n : ℕ) :\n    HasCosetHole (∅ : Finset (Fin n → ZMod 2)) 0",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Green32"
+        ]
+      ],
+      "source_sha256": "d95103f7aa1aa3631ffd5428e3f4939982de432e081e92be3553aba4fa31571d",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Green32_hasCosetHole_empty.lean",
+      "sha256": "b2622e035bb41da4fa703ff15704e732e055c21595af8c98274917502407ae06"
+    },
+    {
+      "task_id": "Green38_green_38_test_zero_mem_validCardinalities",
+      "title": "Green's Open Problem 38 — green_38.test_zero_mem_validCardinalities",
+      "theorem_name": "Green38.green_38.test_zero_mem_validCardinalities",
+      "source_path": "FormalConjectures/GreensOpenProblems/38.lean",
+      "answer_based": false,
+      "description_url": "https://people.maths.ox.ac.uk/greenbj/papers/open-problems.pdf#problem.38",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/GreensOpenProblems/38.lean#L107",
+      "original_statement": "theorem green_38.test_zero_mem_validCardinalities {n : ℕ} :\n    0 ∈ ValidCardinalities n",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Green38"
+        ]
+      ],
+      "source_sha256": "a26b73fb3f8e2c4d1e34be4f4b952e58de05c1a4c1b20b44c89ac784da08f042",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Green38_green_38_test_zero_mem_validCardinalities.lean",
+      "sha256": "396a96ab37e495c6232ee9be3ea786db02ba1447d629cceff0d21ab2a94593b1"
+    },
+    {
+      "task_id": "InscribedSquare_inscribed_rectangle_problem",
+      "title": "Inscribed square problem — inscribed_rectangle_problem",
+      "theorem_name": "InscribedSquare.inscribed_rectangle_problem",
+      "source_path": "FormalConjectures/Wikipedia/InscribedSquare.lean",
+      "answer_based": true,
+      "description_url": "https://en.wikipedia.org/wiki/Inscribed_square_problem",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/InscribedSquare.lean#L64",
+      "original_statement": "theorem inscribed_rectangle_problem :\n    answer(sorry) ↔ ∀ (γ : Circle → ℝ²) (hγ : IsEmbedding γ) (r : ℝ) (hr : r > 0),\n      ∃ t₁ t₂ t₃ t₄, IsRectangle (γ t₁) (γ t₂) (γ t₃) (γ t₄) r",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "InscribedSquare"
+        ]
+      ],
+      "source_sha256": "42b9c274d20d5da0d319babdf41ebaea19de86e8df570bde2078227c5bca2d3a",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/InscribedSquare_inscribed_rectangle_problem.lean",
+      "sha256": "45b07f11985759dc936cab2faa3e8f3ba2f8cefdf2a0728744f050cf42c96ce8"
+    },
+    {
+      "task_id": "InvariantSubspaceProblem_Invariant_subspace_problem_l1",
+      "title": "Invariant Subspace Problem — Invariant_subspace_problem_l1",
+      "theorem_name": "InvariantSubspaceProblem.Invariant_subspace_problem_l1",
+      "source_path": "FormalConjectures/Wikipedia/InvariantSubspaceProblem.lean",
+      "answer_based": false,
+      "description_url": "https://en.wikipedia.org/wiki/Invariant_subspace_problem",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/InvariantSubspaceProblem.lean#L116",
+      "original_statement": "theorem Invariant_subspace_problem_l1 :\n    ∃ (T : (lp (fun (_ : ℕ) => ℂ) 1) →L[ℂ] (lp (fun (_ : ℕ) => ℂ) 1)),\n    IsEmpty (ClosedInvariantSubspace T)",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "InvariantSubspaceProblem"
+        ]
+      ],
+      "source_sha256": "2d6951fbcfc15843980f589b314396623e12aa9eb5ce6ae82683d482ef57d8e8",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/InvariantSubspaceProblem_Invariant_subspace_problem_l1.lean",
+      "sha256": "60dcf211ea2e995b7eb0d1e5c99d9c9dbec5b8ec1faae504f3453b70a2d4ca59"
+    },
+    {
+      "task_id": "MagicSquares_exists_semi_magic_square_cubes",
+      "title": "Magic Squares — exists_semi_magic_square_cubes",
+      "theorem_name": "MagicSquares.exists_semi_magic_square_cubes",
+      "source_path": "FormalConjectures/Wikipedia/MagicSquares.lean",
+      "answer_based": true,
+      "description_url": "https://en.wikipedia.org/wiki/Magic_square_of_squares",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/MagicSquares.lean#L62",
+      "original_statement": "theorem exists_semi_magic_square_cubes :\n    answer(sorry) ↔ ∃ m : Fin 3 → Fin 3 → ℕ, ∃ t : ℕ,\n       m.Injective2 ∧\n       (∀ i j, ∃ n : ℕ, 0 < n ∧ m i j = n ^ 3) ∧\n       (∀ i, ∑ j, m i j = t) ∧\n       (∀ j, ∑ i, m i j = t)",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "MagicSquares"
+        ]
+      ],
+      "source_sha256": "ca1551442a98f268f3677960d6994067190637ce5ab3e8cfe52a1308040f1fd6",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/MagicSquares_exists_semi_magic_square_cubes.lean",
+      "sha256": "186b732fa4a07b7519ea2d51999e2f59465d7cc8c100a94c894951863055b581"
+    },
+    {
+      "task_id": "MonochromaticQuantumGraph_eqSystem10_no_solution_d9",
+      "title": "Monochromatic quantum graphs (inherited vertex colorings) — eqSystem10_no_solution_d9",
+      "theorem_name": "MonochromaticQuantumGraph.eqSystem10_no_solution_d9",
+      "source_path": "FormalConjectures/Paper/MonochromaticQuantumGraph.lean",
+      "answer_based": true,
+      "description_url": "https://mathoverflow.net/questions/311325",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Paper/MonochromaticQuantumGraph.lean#L520",
+      "original_statement": "theorem eqSystem10_no_solution_d9 :\n    answer(sorry) ↔\n      ¬ ∃ W : WeightsN 10 9 ℂ, EqSystemN 10 9 W",
+      "category": "research open",
+      "template_adjustments": [
+        "Extraction correction 2026-10-13: removed private/protected research or native_decide helpers, dependent helper lemmas, and dangling set_option ... in lines; task identity unchanged."
+      ],
+      "namespace_context": [
+        [
+          "namespace",
+          "MonochromaticQuantumGraph"
+        ]
+      ],
+      "source_sha256": "f2e749569264d57d7b0f1f07fb97cb8308930db1b36e17f10877d0f255503eda",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/MonochromaticQuantumGraph_eqSystem10_no_solution_d9.lean",
+      "sha256": "4522a8f0e67ae0f6f8c0a0d1173fb61b380ac0416a03f8006ca5e9803f0fb202"
+    },
+    {
+      "task_id": "NoetherProblem_noether_problem_variants_three",
+      "title": "Rational_variety — noether_problem.variants.three",
+      "theorem_name": "NoetherProblem.noether_problem.variants.three",
+      "source_path": "FormalConjectures/Wikipedia/NoetherProblem.lean",
+      "answer_based": false,
+      "description_url": "https://en.wikipedia.org/wiki/Rational_variety",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/NoetherProblem.lean#L85",
+      "original_statement": "theorem noether_problem.variants.three {K L ι G : Type}\n    [Field K] [Field L] [Fintype ι] [Algebra K L]\n    [IsRationalExtension K L ι] (hι : Fintype.card ι = 3) :\n    HasNoetherProperty K L ι",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "NoetherProblem"
+        ]
+      ],
+      "source_sha256": "7482b3b12e92019196500932d578ed11d387a5a908136545ece3fc3d50b899f9",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/NoetherProblem_noether_problem_variants_three.lean",
+      "sha256": "88334ce09fcf03bddf3c4d47b1074eaf348e5c9b14d0e1baac3b30c14d81fcb5"
+    },
+    {
+      "task_id": "OeisA287616_conjecture",
+      "title": "Sum of a triangular number, a generalized pentagonal number, and a generalized heptagonal number — conjecture",
+      "theorem_name": "OeisA287616.conjecture",
+      "source_path": "FormalConjectures/OEIS/287616.lean",
+      "answer_based": false,
+      "description_url": "https://oeis.org/A287616",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/OEIS/287616.lean#L65",
+      "original_statement": "theorem conjecture (n : ℕ) : IsSumOfTriangularAndGeneralizedPolygonal n",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "OeisA287616"
+        ]
+      ],
+      "source_sha256": "187baab481ef4815aeaadeb24f5e88c2dfe508d61698a81a545f08be9c25d35a",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/OeisA287616_conjecture.lean",
+      "sha256": "c0ba487770b02886c29e608ac2361d21b3c64a70cf62311a928391a2f9ea75b6"
+    },
+    {
+      "task_id": "SquarePacking_least_three_square_packing_in_circle",
+      "title": "Packing — least_three_square_packing_in_circle",
+      "theorem_name": "SquarePacking.least_three_square_packing_in_circle",
+      "source_path": "FormalConjectures/Wikipedia/SquarePacking.lean",
+      "answer_based": true,
+      "description_url": "https://en.wikipedia.org/wiki/Square_packing",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/SquarePacking.lean#L137",
+      "original_statement": "theorem least_three_square_packing_in_circle :\n    IsLeast {r : ℝ | Nonempty (Packing 3 UnitSquare (Circle r))} answer(sorry)",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "SquarePacking"
+        ]
+      ],
+      "source_sha256": "050ceb74b0cc35c089cd1372e2f6b7e2ee7a7e82e929707a8906e17047c76f0b",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/SquarePacking_least_three_square_packing_in_circle.lean",
+      "sha256": "cc98d6ad08d8278ff03d33b33e8889d3da4aa221e2d8b785777609be497bc6b3"
+    },
+    {
+      "task_id": "SumOfThreeCubes_isSumOfThreeCubes_iff_mod_9",
+      "title": "Sum of three cubes — isSumOfThreeCubes_iff_mod_9",
+      "theorem_name": "SumOfThreeCubes.isSumOfThreeCubes_iff_mod_9",
+      "source_path": "FormalConjectures/Wikipedia/SumOfThreeCubes.lean",
+      "answer_based": true,
+      "description_url": "https://en.wikipedia.org/wiki/Sums_of_three_cubes",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/SumOfThreeCubes.lean#L90",
+      "original_statement": "theorem isSumOfThreeCubes_iff_mod_9 :\n    answer(sorry) ↔ ∀ n : ℤ, IsSumOfThreeCubes n ↔ ¬(n ≡ 4 [ZMOD 9] ∨ n ≡ 5 [ZMOD 9])",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "SumOfThreeCubes"
+        ]
+      ],
+      "source_sha256": "4ed567554f0cd6f66355c54e61b3f8e0d05c60c0db8688c7195a5c7d2a8876bc",
+      "answer_placeholder": "default",
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/SumOfThreeCubes_isSumOfThreeCubes_iff_mod_9.lean",
+      "sha256": "3621070a10da6f2d878ecd3641aca238144a6bb6837ac221158b699bfe08a88a"
+    },
+    {
+      "task_id": "Transcendental_exp_mul_pi_transcendental",
+      "title": "Open questions on transcendence of numbers — exp_mul_pi_transcendental",
+      "theorem_name": "Transcendental.exp_mul_pi_transcendental",
+      "source_path": "FormalConjectures/Wikipedia/Transcendental.lean",
+      "answer_based": false,
+      "description_url": "https://en.wikipedia.org/wiki/Transcendental_number",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/Transcendental.lean#L40",
+      "original_statement": "theorem exp_mul_pi_transcendental : Transcendental ℚ (exp 1 * π)",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Transcendental"
+        ]
+      ],
+      "source_sha256": "ccde966ccd363ce4f4f5190ac20e02487597512a785a85ab97e63ec47b5db80e",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/Transcendental_exp_mul_pi_transcendental.lean",
+      "sha256": "501b9c65a5972937ca11c36c56171e81482c396e8bc2dc2fec176037a2975e05"
+    },
+    {
+      "task_id": "WrittenOnTheWallII_GraphConjecture16_conjecture16",
+      "title": "Written on the Wall II - Conjecture 16 — conjecture16",
+      "theorem_name": "WrittenOnTheWallII.GraphConjecture16.conjecture16",
+      "source_path": "FormalConjectures/WrittenOnTheWallII/GraphConjecture16.lean",
+      "answer_based": false,
+      "description_url": "http://cms.dt.uh.edu/faculty/delavinae/research/wowII/",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/WrittenOnTheWallII/GraphConjecture16.lean#L42",
+      "original_statement": "theorem conjecture16 (G : SimpleGraph α) (h : G.Connected) :\n    letI maxL := (Finset.univ.image (fun v => indepNeighborsCard G v)).max' (by simp)\n    letI r := G.radius.toNat\n    2 * ((r : ℝ) - 1) + (maxL : ℝ) ≤ b G",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "WrittenOnTheWallII.GraphConjecture16"
+        ]
+      ],
+      "source_sha256": "da6fcfa2fc44b455fd8f37eca422f88cbc3e0f6ca94dae10eed447b2580b0e03",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/WrittenOnTheWallII_GraphConjecture16_conjecture16.lean",
+      "sha256": "1889d629c3246fe0ffd5b99dc6c1b4bda0a97c6bfb61bf44010706a1db1a0bc6"
+    },
+    {
+      "task_id": "WrittenOnTheWallII_Test_C6_avg_dist",
+      "title": "Testing Graph Invariants — C6_avg_dist",
+      "theorem_name": "WrittenOnTheWallII.Test.C6_avg_dist",
+      "source_path": "FormalConjectures/WrittenOnTheWallII/Test.lean",
+      "answer_based": false,
+      "description_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/WrittenOnTheWallII/Test.lean",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/WrittenOnTheWallII/Test.lean#L301",
+      "original_statement": "theorem C6_avg_dist : averageDistance C6 = 9/5",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "WrittenOnTheWallII.Test"
+        ]
+      ],
+      "source_sha256": "592e4d04a31c17a5696cdbaa6584b288b13ffbfe52708beef929a2ad49eeb635",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/WrittenOnTheWallII_Test_C6_avg_dist.lean",
+      "sha256": "4b429f2626b27a283c8452323dba49ded68032e70a508ce98d4d1b9b71d7d675"
+    },
+    {
+      "task_id": "WrittenOnTheWallII_Test_C6_size",
+      "title": "Testing Graph Invariants — C6_size",
+      "theorem_name": "WrittenOnTheWallII.Test.C6_size",
+      "source_path": "FormalConjectures/WrittenOnTheWallII/Test.lean",
+      "answer_based": false,
+      "description_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/WrittenOnTheWallII/Test.lean",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/WrittenOnTheWallII/Test.lean#L321",
+      "original_statement": "theorem C6_size : C6.edgeFinset.card = 6",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "WrittenOnTheWallII.Test"
+        ]
+      ],
+      "source_sha256": "592e4d04a31c17a5696cdbaa6584b288b13ffbfe52708beef929a2ad49eeb635",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/WrittenOnTheWallII_Test_C6_size.lean",
+      "sha256": "8aed2d63d636ece10fc505fdb8148345e146ca5ed6d223c3a2eb982939cf63c5"
+    },
+    {
+      "task_id": "WrittenOnTheWallII_Test_Star5_indep",
+      "title": "Testing Graph Invariants — Star5_indep",
+      "theorem_name": "WrittenOnTheWallII.Test.Star5_indep",
+      "source_path": "FormalConjectures/WrittenOnTheWallII/Test.lean",
+      "answer_based": false,
+      "description_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/WrittenOnTheWallII/Test.lean",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/WrittenOnTheWallII/Test.lean#L363",
+      "original_statement": "theorem Star5_indep : α(Star5) = 5",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "WrittenOnTheWallII.Test"
+        ]
+      ],
+      "source_sha256": "592e4d04a31c17a5696cdbaa6584b288b13ffbfe52708beef929a2ad49eeb635",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/WrittenOnTheWallII_Test_Star5_indep.lean",
+      "sha256": "2f0781f17c932c7e4a00e5c5b070a79f047c8b61a3f3b71d2c8fdb3efb3763df"
+    },
+    {
+      "task_id": "WrittenOnTheWallII_Test_house_cvetkovic",
+      "title": "Testing Graph Invariants — house_cvetkovic",
+      "theorem_name": "WrittenOnTheWallII.Test.house_cvetkovic",
+      "source_path": "FormalConjectures/WrittenOnTheWallII/Test.lean",
+      "answer_based": false,
+      "description_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/WrittenOnTheWallII/Test.lean",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/WrittenOnTheWallII/Test.lean#L144",
+      "original_statement": "theorem house_cvetkovic : cvetkovic HouseGraph = 3",
+      "category": "test",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "WrittenOnTheWallII.Test"
+        ]
+      ],
+      "source_sha256": "592e4d04a31c17a5696cdbaa6584b288b13ffbfe52708beef929a2ad49eeb635",
+      "answer_placeholder": null,
+      "selection_provenance": "documented_substitution",
+      "template_path": "data/templates/WrittenOnTheWallII_Test_house_cvetkovic.lean",
+      "sha256": "db66945d4427980430a6c7e2dc70f23f62d72c9d98ccd8baabe2ba447557dd7b"
+    },
+    {
+      "task_id": "all_fermat_squarefree",
+      "title": "Open questions about Fermat numbers — all_fermat_squarefree",
+      "theorem_name": "Fermat.all_fermat_squarefree",
+      "source_path": "FormalConjectures/Wikipedia/Fermat.lean",
+      "answer_based": true,
+      "description_url": "https://en.wikipedia.org/wiki/Fermat_number",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/Fermat.lean#L52",
+      "original_statement": "theorem all_fermat_squarefree : answer(sorry) ↔ ∀ n : ℕ, Squarefree n.fermatNumber",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Fermat"
+        ]
+      ],
+      "source_sha256": "04e0a63e9f1ba31425dc2cc5b78228cc999d2c37e0fb44df6c8da5fd56144292",
+      "answer_placeholder": "default",
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/all_fermat_squarefree.lean",
+      "sha256": "30a94b152dc46b4fc8446e62e52797e5f5fdf376eb517e3f0dfa4706d3586286"
+    },
+    {
+      "task_id": "catalan_conjecture",
+      "title": "Catalan's conjecture and related Diophantine equations — catalans_conjecture",
+      "theorem_name": "Catalan.catalans_conjecture",
+      "source_path": "FormalConjectures/Wikipedia/Catalan.lean",
+      "answer_based": false,
+      "description_url": "https://en.wikipedia.org/wiki/Catalan%27s_conjecture",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/Catalan.lean#L34",
+      "original_statement": "theorem catalans_conjecture (a b x y : ℕ) (ha : 1 < a) (hb : 1 < b) (hx : 0 < x) (hy : 0 < y)\n    (heq : x ^ a - y ^ b = 1) : a = 2 ∧ b = 3 ∧ x = 3 ∧ y = 2",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Catalan"
+        ]
+      ],
+      "source_sha256": "4d6a944a1cec1df6928207be2cdf44ad0b1e7bdc89263f9812fc93037f6b152c",
+      "answer_placeholder": null,
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/catalan_conjecture.lean",
+      "sha256": "86bc20e6947d21e8be64887305bddb3bfcbbbd84358db756a99c5706a956c8cd"
+    },
+    {
+      "task_id": "complexity_three_pow",
+      "title": "Mathoverflow 75792 — complexity_three_pow",
+      "theorem_name": "Mathoverflow75792.complexity_three_pow",
+      "source_path": "FormalConjectures/Mathoverflow/75792.lean",
+      "answer_based": true,
+      "description_url": "https://mathoverflow.net/a/75792",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Mathoverflow/75792.lean#L201",
+      "original_statement": "theorem complexity_three_pow : answer(True) ↔ ∀ n : ℕ, 0 < n → complexity (3 ^ n) = 3 * n",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Mathoverflow75792"
+        ]
+      ],
+      "source_sha256": "5ea44273b4ac049f08491ea98573f322f824e1585ad76c9638a19e4835621a91",
+      "answer_placeholder": null,
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/complexity_three_pow.lean",
+      "sha256": "566595cda540db22eead0629f23b29c1ec643e2f3a028be290b8fb44d53ef17b"
+    },
+    {
+      "task_id": "complexity_two_pow",
+      "title": "Mathoverflow 75792 — complexity_two_pow",
+      "theorem_name": "Mathoverflow75792.complexity_two_pow",
+      "source_path": "FormalConjectures/Mathoverflow/75792.lean",
+      "answer_based": true,
+      "description_url": "https://mathoverflow.net/a/75792",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Mathoverflow/75792.lean#L206",
+      "original_statement": "theorem complexity_two_pow : answer(sorry) ↔ ∀ n : ℕ, 0 < n → complexity (2 ^ n) = 2 * n",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Mathoverflow75792"
+        ]
+      ],
+      "source_sha256": "5ea44273b4ac049f08491ea98573f322f824e1585ad76c9638a19e4835621a91",
+      "answer_placeholder": "default",
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/complexity_two_pow.lean",
+      "sha256": "7c83d5635d02a7575da018fb6a1525feab64c1aac117d0cb7028be18933d859d"
+    },
+    {
+      "task_id": "erdos_1064",
+      "title": "Erdős Problem 1064 — erdos_1064",
+      "theorem_name": "Erdos1064.erdos_1064",
+      "source_path": "FormalConjectures/ErdosProblems/1064.lean",
+      "answer_based": false,
+      "description_url": "https://www.erdosproblems.com/1064",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/1064.lean#L36",
+      "original_statement": "theorem erdos_1064 : {n | φ n > φ (n - φ n)}.HasDensity 1",
+      "category": "research solved",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos1064"
+        ]
+      ],
+      "source_sha256": "69aac1694c49724544747ba9934a01ffe038f72bb72a0ed8d7fa3a6ddbc069c4",
+      "answer_placeholder": null,
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/erdos_1064.lean",
+      "sha256": "7de27d864a033017718bab3cabe21691b4263ac01583ae465530a6fa782292d1"
+    },
+    {
+      "task_id": "erdos_18a",
+      "title": "Erdős Problem 18 — erdos_18a",
+      "theorem_name": "Erdos18.erdos_18a",
+      "source_path": "FormalConjectures/ErdosProblems/18.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/18",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/18.lean#L136",
+      "original_statement": "theorem erdos_18a : answer(sorry) ↔\n    ∃ C : ℝ, 0 < C ∧ ∃ᶠ m in atTop, Nat.IsPractical m ∧\n      (practicalH m : ℝ) < (log (log m)) ^ C",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos18"
+        ]
+      ],
+      "source_sha256": "2c5a0d9575b3603fc47c63e037ea3ff207256891056e6eabb07461579947348a",
+      "answer_placeholder": "default",
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/erdos_18a.lean",
+      "sha256": "588221eea4bc0fb7ca2dce9bc365f74eec2a66a5db7b8b4e00af80e11383b184"
+    },
+    {
+      "task_id": "erdos_263_part_i",
+      "title": "Erdős Problem 263 — erdos_263.parts.i",
+      "theorem_name": "Erdos263.erdos_263.parts.i",
+      "source_path": "FormalConjectures/ErdosProblems/263.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/263",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/263.lean#L48",
+      "original_statement": "theorem erdos_263.parts.i : answer(sorry) ↔ IsIrrationalitySequence (fun n : ℕ => 2 ^ 2 ^ n)",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos263"
+        ]
+      ],
+      "source_sha256": "5afedbc27fbf4b953bbb4605f4c2463309de0713b60c3efc7134b2528faa5595",
+      "answer_placeholder": "default",
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/erdos_263_part_i.lean",
+      "sha256": "48622d5ff6aca8e925553276273ce77eca992e725e5bbddde4ad5e8c9ef50f41"
+    },
+    {
+      "task_id": "erdos_400_part_i",
+      "title": "Erdős Problem 400 — erdos_400.parts.i",
+      "theorem_name": "Erdos400.erdos_400.parts.i",
+      "source_path": "FormalConjectures/ErdosProblems/400.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/400",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/400.lean#L42",
+      "original_statement": "theorem erdos_400.parts.i :\n    answer(sorry) ↔ ∀ᵉ (k ≥ 2), ∃ c : ℝ,\n      (fun x : ℕ ↦ (∑ n ∈ Icc 1 x, (g k n : ℝ))) ~[atTop]\n      (fun x : ℕ ↦ c * x * Real.log x)",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos400"
+        ]
+      ],
+      "source_sha256": "13806755b77dde025ff949651e46afd4a5a1dc6b1e6f6762ff5ecd5bb8f1f349",
+      "answer_placeholder": "default",
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/erdos_400_part_i.lean",
+      "sha256": "6ab69083e3e1538f0a60b8614620e580df9545e48101241f37744c1b30276c55"
+    },
+    {
+      "task_id": "erdos_835",
+      "title": "Erdős Problem 835 — erdos_835",
+      "theorem_name": "Erdos835.erdos_835",
+      "source_path": "FormalConjectures/ErdosProblems/835.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/835",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/835.lean#L48",
+      "original_statement": "theorem erdos_835 : (∃ k > 2, Property k) ↔ answer(sorry)",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos835"
+        ]
+      ],
+      "source_sha256": "bb4030391a6b451fb438b45a5497f4fcadf943e6ab23b9619173665f3d34711c",
+      "answer_placeholder": "default",
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/erdos_835.lean",
+      "sha256": "53f21a6b2dd15e0e1433a22840fb8f3ef5efafb6d278011677ce8f204cfa8ce3"
+    },
+    {
+      "task_id": "erdos_91",
+      "title": "Erdős Problem 91 — erdos_91",
+      "theorem_name": "Erdos91.erdos_91",
+      "source_path": "FormalConjectures/ErdosProblems/91.lean",
+      "answer_based": true,
+      "description_url": "https://www.erdosproblems.com/91",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/ErdosProblems/91.lean#L147",
+      "original_statement": "theorem erdos_91 :\n    (∀ᶠ n : ℕ in atTop, ¬ UniqueMinimizer n) ↔ answer(sorry)",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Erdos91"
+        ]
+      ],
+      "source_sha256": "972f7ec7986676b0b90254b8009011dc1137f71c056f9e362ac56a691c84ceed",
+      "answer_placeholder": "default",
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/erdos_91.lean",
+      "sha256": "bd2c4ae81289a79d9caf50d6cb32e501c00a2d4a4e19d595d0033b7bd8212bf4"
+    },
+    {
+      "task_id": "euclid_squarefree",
+      "title": "Euclid Numbers conjecture — euclid_numbers_are_square_free",
+      "theorem_name": "EuclidNumbers.euclid_numbers_are_square_free",
+      "source_path": "FormalConjectures/Wikipedia/Euclid.lean",
+      "answer_based": true,
+      "description_url": "https://en.wikipedia.org/wiki/Euclid_number",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/Euclid.lean#L43",
+      "original_statement": "theorem euclid_numbers_are_square_free : answer(sorry) ↔ (∀ n, Squarefree (Euclid n))",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "EuclidNumbers"
+        ]
+      ],
+      "source_sha256": "7f7fa6d12b5e6217fddab632ae9fd372a6cf79726fcdd6c71f59f84c40ffa86d",
+      "answer_placeholder": "default",
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/euclid_squarefree.lean",
+      "sha256": "50e2ca62e4df55dfc5a6e17a6dea1c412c74480b8a049443039d8ee78c5a18c6"
+    },
+    {
+      "task_id": "fermat_composite",
+      "title": "Open questions about Fermat numbers — fermat_number_are_composite",
+      "theorem_name": "Fermat.fermat_number_are_composite",
+      "source_path": "FormalConjectures/Wikipedia/Fermat.lean",
+      "answer_based": true,
+      "description_url": "https://en.wikipedia.org/wiki/Fermat_number",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/Fermat.lean#L31",
+      "original_statement": "theorem fermat_number_are_composite : answer(sorry) ↔ ∀ n > 4, ¬Prime n.fermatNumber",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Fermat"
+        ]
+      ],
+      "source_sha256": "04e0a63e9f1ba31425dc2cc5b78228cc999d2c37e0fb44df6c8da5fd56144292",
+      "answer_placeholder": "default",
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/fermat_composite.lean",
+      "sha256": "0c3f01d19ce82b90f6c8f5081128d08e885cc0987195dcfa436c073e662d5f1e"
+    },
+    {
+      "task_id": "greens14",
+      "title": "Ben Green's Open Problem 14 — green_14_polynomial",
+      "theorem_name": "Green14.green_14_polynomial",
+      "source_path": "FormalConjectures/GreensOpenProblems/14.lean",
+      "answer_based": true,
+      "description_url": "https://people.maths.ox.ac.uk/greenbj/papers/open-problems.pdf#problem.14",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/GreensOpenProblems/14.lean#L67",
+      "original_statement": "theorem green_14_polynomial :\n    answer(sorry) ↔ ∀ k ≥ 4, ∃ d : ℕ, (fun r => (W k r : ℝ)) =O[atTop] fun r => (r : ℝ) ^ d",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Green14"
+        ]
+      ],
+      "source_sha256": "8a4f3cadcd08daf62d5d617c0e5ce93adfc26cb8440cc1893888a15f42d628c5",
+      "answer_placeholder": "default",
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/greens14.lean",
+      "sha256": "abffedbdde712e456b58fc1dfb127562c974f95e5abdcd8a2c686f7f4ec1b5fd"
+    },
+    {
+      "task_id": "infinite_fermat_primes",
+      "title": "Open questions about Fermat numbers — infinite_fermat_primes",
+      "theorem_name": "Fermat.infinite_fermat_primes",
+      "source_path": "FormalConjectures/Wikipedia/Fermat.lean",
+      "answer_based": true,
+      "description_url": "https://en.wikipedia.org/wiki/Fermat_number",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/Fermat.lean#L38",
+      "original_statement": "theorem infinite_fermat_primes : answer(sorry) ↔ Infinite {n : ℕ | Prime n.fermatNumber}",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Fermat"
+        ]
+      ],
+      "source_sha256": "04e0a63e9f1ba31425dc2cc5b78228cc999d2c37e0fb44df6c8da5fd56144292",
+      "answer_placeholder": "default",
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/infinite_fermat_primes.lean",
+      "sha256": "371aeaf6a8d000937c1bf2b5c964c4599f6faeb2f2b988f6866cc823f083f964"
+    },
+    {
+      "task_id": "jacobian_conjecture",
+      "title": "Jacobian conjecture — jacobian_conjecture",
+      "theorem_name": "JacobianConjecture.jacobian_conjecture",
+      "source_path": "FormalConjectures/Wikipedia/JacobianConjecture.lean",
+      "answer_based": false,
+      "description_url": "https://en.wikipedia.org/wiki/Jacobian_conjecture",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/JacobianConjecture.lean#L72",
+      "original_statement": "theorem jacobian_conjecture (F : RegularFunction k σ σ)\n    (H : IsUnit F.Jacobian.det) :\n    ∃ (G : RegularFunction k σ σ), G.comp F = id k σ ∧\n    F.comp G = id k σ",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "JacobianConjecture"
+        ],
+        [
+          "section",
+          "Conjecture"
+        ]
+      ],
+      "source_sha256": "22a6a801d27ae1a8b225171bbd4a12099c1a5643471273bd8eb11ee206957ced",
+      "answer_placeholder": null,
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/jacobian_conjecture.lean",
+      "sha256": "94218d92919ed46117f631d261aa0bc5233e49932b2986df0b3f0c440f944b38"
+    },
+    {
+      "task_id": "pillai_conjecture",
+      "title": "Catalan's conjecture and related Diophantine equations — pillais_conjecture",
+      "theorem_name": "Catalan.pillais_conjecture",
+      "source_path": "FormalConjectures/Wikipedia/Catalan.lean",
+      "answer_based": false,
+      "description_url": "https://en.wikipedia.org/wiki/Catalan%27s_conjecture",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/Catalan.lean#L43",
+      "original_statement": "theorem pillais_conjecture (a b c : ℕ) (ha : 0 < a) (hb : 0 < b) (hc : 0 < c) :\n    { (x, y, m, n) : (ℕ × ℕ × ℕ × ℕ) |\n      1 < x ∧ 1 < y ∧ 1 < m ∧ 1 < n ∧ (m, n) ≠ (2, 2) ∧\n      a * x^n - b * y^m = c }.Finite",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Catalan"
+        ]
+      ],
+      "source_sha256": "4d6a944a1cec1df6928207be2cdf44ad0b1e7bdc89263f9812fc93037f6b152c",
+      "answer_placeholder": null,
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/pillai_conjecture.lean",
+      "sha256": "08e68cb7be0181cbad05c7abd8a490006441460d944de2e8cbbae2fe89b50247"
+    },
+    {
+      "task_id": "schanuel_conjecture",
+      "title": "Schanuel's Conjecture — schanuel_conjecture",
+      "theorem_name": "Schanuel.schanuel_conjecture",
+      "source_path": "FormalConjectures/Wikipedia/Schanuel.lean",
+      "answer_based": false,
+      "description_url": "https://en.wikipedia.org/wiki/Schanuel%27s_conjecture",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/Schanuel.lean#L36",
+      "original_statement": "theorem schanuel_conjecture (n : ℕ) (z : Fin n → ℂ) (h : LinearIndependent ℚ z) :\n    let hinj := algebraMap ℚ (adjoin ℚ (Set.range z ∪ Set.range (cexp ∘ z))) |>.injective\n    n ≤ Algebra.trdeg ℚ (adjoin ℚ (Set.range z ∪ Set.range (cexp ∘ z)))",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Schanuel"
+        ]
+      ],
+      "source_sha256": "7c4c1a334fd2a6f709648b062a9e8963edcbe339a564a534bae096af93560f32",
+      "answer_placeholder": null,
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/schanuel_conjecture.lean",
+      "sha256": "8b231ec828470c73bbd9f5fa5e8bc1c93def7deb0d42140073d25351ff22a781"
+    },
+    {
+      "task_id": "sendov_conjecture",
+      "title": "Sendov's conjecture — sendov_conjecture",
+      "theorem_name": "Sendov.sendov_conjecture",
+      "source_path": "FormalConjectures/Wikipedia/Sendov.lean",
+      "answer_based": false,
+      "description_url": "https://en.wikipedia.org/wiki/Sendov%27s_conjecture",
+      "source_url": "https://github.com/google-deepmind/formal-conjectures/blob/7a41db3d761324599812d6ca6cb6a9f311046dc7/FormalConjectures/Wikipedia/Sendov.lean#L52",
+      "original_statement": "theorem sendov_conjecture (n : ℕ) (hn : 2 ≤ n) : n.SatisfiesSendovConjecture",
+      "category": "research open",
+      "template_adjustments": [],
+      "namespace_context": [
+        [
+          "namespace",
+          "Sendov"
+        ]
+      ],
+      "source_sha256": "bf3aaca1ec6edc5dad36f557786953d8b6827fc47a3a3869a74371b04895c8bc",
+      "answer_placeholder": null,
+      "selection_provenance": "paper_named",
+      "template_path": "data/templates/sendov_conjecture.lean",
+      "sha256": "0f04f94e2f1d7de6afb032f40d8ea8e0b2cc09a4550a7236800cafa2892f51e9"
+    }
+  ],
+  "paper_mappings": [
+    {
+      "paper_id": "fermat_composite",
+      "source_path": "Wikipedia/Fermat.lean",
+      "requested_declaration": "fermat_number_are_composite",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "infinite_fermat_primes",
+      "source_path": "Wikipedia/Fermat.lean",
+      "requested_declaration": "infinite_fermat_primes",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "all_fermat_squarefree",
+      "source_path": "Wikipedia/Fermat.lean",
+      "requested_declaration": "all_fermat_squarefree",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "euclid_squarefree",
+      "source_path": "Wikipedia/Euclid.lean",
+      "requested_declaration": "euclid_numbers_are_square_free",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "erdos_263_part_i",
+      "source_path": "ErdosProblems/263.lean",
+      "requested_declaration": "erdos_263.parts.i",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "erdos_18a",
+      "source_path": "ErdosProblems/18.lean",
+      "requested_declaration": "erdos_18a",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "complexity_two_pow",
+      "source_path": "Mathoverflow/75792.lean",
+      "requested_declaration": "complexity_two_pow",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "complexity_three_pow",
+      "source_path": "Mathoverflow/75792.lean",
+      "requested_declaration": "complexity_three_pow",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "erdos_91",
+      "source_path": "ErdosProblems/91.lean",
+      "requested_declaration": "erdos_91",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "erdos_400_part_i",
+      "source_path": "ErdosProblems/400.lean",
+      "requested_declaration": "erdos_400.parts.i",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "erdos_1064",
+      "source_path": "ErdosProblems/1064.lean",
+      "requested_declaration": "erdos_1064",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "pillai_conjecture",
+      "source_path": "Wikipedia/Catalan.lean",
+      "requested_declaration": "pillais_conjecture",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "catalan_conjecture",
+      "source_path": "Wikipedia/Catalan.lean",
+      "requested_declaration": "catalans_conjecture",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "sendov_conjecture",
+      "source_path": "Wikipedia/Sendov.lean",
+      "requested_declaration": "sendov_conjecture",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "schanuel_conjecture",
+      "source_path": "Wikipedia/Schanuel.lean",
+      "requested_declaration": "schanuel_conjecture",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "jacobian_conjecture",
+      "source_path": "Wikipedia/JacobianConjecture.lean",
+      "requested_declaration": "jacobian_conjecture",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    },
+    {
+      "paper_id": "greens14",
+      "source_path": "GreensOpenProblems/14.lean",
+      "requested_declaration": "green_14_polynomial",
+      "mapped": true,
+      "note": "Identifier mapping reconstructed; Green 14 variant not recoverable exactly."
+    },
+    {
+      "paper_id": "erdos_835",
+      "source_path": "ErdosProblems/835.lean",
+      "requested_declaration": "erdos_835",
+      "mapped": true,
+      "note": "Paper alias mapped to pinned declaration."
+    }
+  ]
+}

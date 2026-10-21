@@ -28,6 +28,7 @@ from pathlib import Path
 from .budget import BudgetLedger, fresh_run_id, run_budget
 from .provider import ProviderSettings, settings_from_config  # noqa: F401 (ProviderSettings re-exported)
 from .prompt_cache import TOKEN_COUNTER_NORMALIZATION_VERSION
+from .dataset import CURRENT_REVISION as CURRENT_DATASET_REVISION
 
 AGENT_IMAGE = "gdm-math-swarm-agent:local"
 LEAN_IMAGE = "gdm-math-swarm-lean:local"
@@ -1550,6 +1551,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                                                 ("max_concurrent", "max_concurrent"))},
             "lean_warm_up": warm_up, "system_prompt_mode": mode, "prompt_variant": variant,
             "task_set": task_set, "task_ids": [t["task_id"] for t in listing],
+            "dataset_revision": CURRENT_DATASET_REVISION,
             "persona_reviewing": reviewing,
             "claude_auto_memory": auto_memory,
             "prompt_cache_normalization": TOKEN_COUNTER_NORMALIZATION_VERSION,

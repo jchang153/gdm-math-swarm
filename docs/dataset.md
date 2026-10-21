@@ -10,10 +10,11 @@ The pilot 14 is a simple uniform random sample without replacement from sorted p
 
 | File | SHA-256 | Role |
 | --- | --- | --- |
-| `data/manifest.json` | `df9fbeaa3cfb5aae…` | Parent 71: identities, original statements, template hashes, corrections (host-only; never exported) |
-| `data/pilot_subset.json` | `ec268a618b57bc2e…` | Seed, method, the 14 ids in sample order, and `parent_manifest_sha256` = SHA-256 of `data/manifest.json` |
+| `data/manifest.json` | `8a114c4c2f6345b8…` | Parent 71, dataset revision 2: identities, original statements, template hashes, corrections, `revision_history` (host-only; never exported) |
+| `data/pilot_subset.json` | `e6051779e2495f6f…` | Seed, method, the 14 ids in sample order, and `parent_manifest_sha256` = SHA-256 of `data/manifest.json` |
 | `data/templates/<task_id>.lean` | per task in the manifest | Sanitized templates, hash-checked on every read (`DatasetTask.template_source`) |
 | `data/toolchain.lock.json`, `data/vendor/` | — | Toolchain pins and support code only (no problem trees) |
+| `data/revisions/v1/` | manifest `df9fbeaa3cfb5aae…`, subset `ec268a618b57bc2e…` | Archived dataset revision 1 (manifest, subset, 71 templates), for runs before 2026-10-21 |
 
 `configs/pilot.json` pins both hashes (`fixed_task_manifest`), and the launch gates `fixed_task_manifest` and `frozen_dataset` check them against the files on disk. `FrozenDataset` refuses to load unless the parent hash matches, there are 71 tasks and 14 distinct pilot ids.
 
@@ -24,17 +25,38 @@ Task identities are frozen. The pilot identities are the original v1 sample (pla
 `scripts/prepare_dataset.py` therefore extracts in two passes over the same pinned source:
 
 1. **Identity pass** (`candidates(source, corrected=False)`): the original v1 extraction and lexical eligibility rules. The 18 named mappings and the seeded substitutions are selected from these candidates, then the 14 pilot ids are sampled. The script stops unless the sample equals `FROZEN_PILOT_IDS`.
-2. **Template pass** (`candidates(source, corrected=True)`): the corrected extraction, which additionally removes `private`/`protected` research or `native_decide` helper lemmas, helper lemmas that depend on removed ones, and dangling `set_option ... in` lines. For each selected declaration (matched by fully qualified theorem name) the corrected template is emitted. If it differs from the v1 template, the change is recorded in `extraction_corrections` (task id, v1 template SHA-256, reason) and in that task's `template_adjustments`. The script stops if the corrected pass loses a frozen task.
+2. **Template pass** (`candidates(source, corrected=True)`): the corrected extraction, which additionally removes `private`/`protected` research or native-evaluation helper lemmas (revision 2: any spelling in `NATIVE_EVALUATION`; revision 1: the literal `native_decide` only), helper lemmas that depend on removed ones, and dangling `set_option ... in` lines. For each selected declaration (matched by fully qualified theorem name) the corrected template is emitted. If it differs from the v1 template, the change is recorded in `extraction_corrections` (task id, v1 template SHA-256, reason) and in that task's `template_adjustments`. The script stops if the corrected pass loses a frozen task.
 
-The manifest records `frozen_identity_manifest_v1_sha256` = `3bcc6e01dcaca891…` (the v1 parent manifest). The script records this constant but does not recompute it; the identity check it performs is the pilot-id comparison, which depends on the full sorted parent id list. As of October 13, 2026, `data/manifest.json` has the same 71 task ids in the same order as the v1 manifest, and differs from it only by one recorded correction to the non-pilot template `MonochromaticQuantumGraph_eqSystem10_no_solution_d9` (plus the two manifest fields that record corrections). No pilot template has a correction; `tests/test_dataset.py` asserts this.
+The manifest records `frozen_identity_manifest_v1_sha256` = `3bcc6e01dcaca891…` (the v1 parent manifest). The script records this constant but does not recompute it; the identity check it performs is the pilot-id comparison, which depends on the full sorted parent id list. As of October 13, 2026, `data/manifest.json` has the same 71 task ids in the same order as the v1 manifest, and differs from it only by one recorded correction to the non-pilot template `MonochromaticQuantumGraph_eqSystem10_no_solution_d9` (plus the two manifest fields that record corrections). No pilot template has a correction; `tests/test_dataset.py` asserts this. That describes revision 1 (`data/revisions/v1/`); revision 2 (2026-10-21) adds five more non-pilot corrections, see "Revisions".
 
 **Corrections.** A further extraction correction must keep identities, be recorded in `extraction_corrections`, and refresh the recorded hashes (the manifest hash in `data/pilot_subset.json` and the pin in `configs/pilot.json`, through the integrator) before any run. A correction to a pilot template also changes what agents see and is caught by the test above; it needs the user's decision. Never resample, and never edit `data/` by hand.
+
+## Revisions
+
+Template text is versioned by dataset revision; task identities and the pilot 14 are the same in every revision.
+
+| Revision | Location | Manifest SHA-256 | Native rule |
+| --- | --- | --- | --- |
+| 1 | `data/revisions/v1/` (archived) | `df9fbeaa3cfb5aae72096566faaf7b05f93eacbad91e7abcc8b7a15ac12761cd` | literal `native_decide` only |
+| 2 (current, 2026-10-21) | `data/` | `8a114c4c2f6345b8846426900ce9afb2d851565546f925c308cd23e2ead1e653` | every native-evaluation spelling |
+
+Revision 2 changed five non-pilot templates, removing sibling theorems proved with `decide +native` (docs/plan.md, "Dataset revision 2"). Old → new template SHA-256 (also in the manifest's `revision_history`):
+
+| Task | Removed | Revision 1 | Revision 2 |
+| --- | --- | --- | --- |
+| `Erdos1148_erdos_1148_variants_weaker` | 1 | `a72eb9ab…` | `eb7bb6b8…` |
+| `WrittenOnTheWallII_Test_C6_avg_dist` | 34 | `4b429f26…` | `38ebbb28…` |
+| `WrittenOnTheWallII_Test_C6_size` | 35 | `8aed2d63…` | `ed81fa3a…` |
+| `WrittenOnTheWallII_Test_Star5_indep` | 43 | `2f0781f1…` | `ed7ae8bd…` |
+| `WrittenOnTheWallII_Test_house_cvetkovic` | 11 | `db66945d…` | `d0bbb67f…` |
+
+`prepare_dataset.py --revision 1` reproduces `data/revisions/v1/` byte for byte; the default reproduces `data/`. `FrozenDataset(repo, revision=N)` loads either. New runs record `dataset_revision` in `settings.json`; `run_dataset_revision` resolves a saved run's revision from that, else its pinned parent manifest hash, else its conference template hashes, so `scripts/evaluate_run.py` and the analysis timeline use the templates the run actually showed. Every run before 2026-10-21 resolves to revision 1 and saw the `decide +native` sibling proofs: a confound for any `+native` analysis of those runs. Revision 2 templates have not been compiled locally (no Lean toolchain on the owner's Mac); `scripts/validate_dataset.py` static checks pass, and the removed theorems are self-contained `decide +native` facts that nothing remaining references.
 
 ### Research snapshots (researcher-only, not canonical)
 
 | Directory | Manifest SHA-256 | Status |
 | --- | --- | --- |
-| `research/dataset/v1-reproduction/` | `3bcc6e01…` (the frozen identity manifest) | The original v1 output and its generator `prepare_dataset_v1.py`: 71 templates, the same task and pilot ids. Reference for identities. Its `MonochromaticQuantumGraph_eqSystem10_no_solution_d9` template predates the recorded correction; all other templates are identical to `data/templates/`. |
+| `research/dataset/v1-reproduction/` | `3bcc6e01…` (the frozen identity manifest) | The original v1 output and its generator `prepare_dataset_v1.py`: 71 templates, the same task and pilot ids. Reference for identities. Its `MonochromaticQuantumGraph_eqSystem10_no_solution_d9` template predates the recorded correction; all other templates are identical to revision 1 (`data/revisions/v1/templates/`). |
 | `research/dataset/current-1511-snapshot/` | `a1ea0872…` | The out-of-session 15:11 PDT regeneration, which replaced pilot slot 2 with `Erdos6_erdos_6_variants_increasing`; 14 of its 71 parent identities differ from the canonical pool. Superseded; the user approved restoring the v1 identities. Its `templates/` also holds 16 files its manifest does not reference. Kept for traceability only. |
 
 Neither snapshot is read by any run, gate or test; only `data/` is canonical.
@@ -43,7 +65,7 @@ Neither snapshot is read by any run, gate or test; only `data/` is canonical.
 
 * Strip source comments and problem-specific attributes, including formal-proof URLs. The upstream license is retained as `data/UPSTREAM_LICENSE`.
 * Retain imports, namespaces, variables, definitions, and already-proved `test` supporting lemmas needed before the target.
-* Remove earlier research theorems and incomplete/helper lemmas using prohibited `native_decide`. Exclude the target's actual proof and all subsequent source declarations.
+* Remove earlier research theorems and incomplete/helper lemmas using prohibited native evaluation: `native_decide`, `decide +native`, `decide (config := {native := true})`, `Lean.ofReduceBool`/`ofReduceNat` (revision 2). A template that still contains one is ineligible; for a frozen task the build fails. Exclude the target's actual proof and all subsequent source declarations.
 * Insert an empty preamble and proof body using the paper's repeated `-- EDITABLE START` / `-- EDITABLE END` markers. The proof placeholder `fail "Provide a complete proof."` deliberately fails rather than admitting the theorem.
 * For upstream `answer(sorry)` only, substitute `answer(default)` as a type-directed editable syntactic placeholder, not an asserted correct answer. Preserve upstream supplied `answer(True)`/`answer(False)`. All answer-based targets allow the answer field to change under the approved judge rules. All 8 answer-based pilot templates use `answer(default)`.
 * Close open sections/namespaces. Store the original statement and fully-qualified declaration identity in the host-only manifest for the research evaluator.

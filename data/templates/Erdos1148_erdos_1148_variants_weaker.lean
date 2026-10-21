@@ -20,9 +20,6 @@ private instance (n : ℕ) : Decidable (Erdos1148Prop n) :=
                 z, Finset.mem_range.mpr ?_, h1, h2, h3, h4⟩
         all_goals (simp only [Nat.lt_succ_iff]; exact Nat.le_sqrt'.mpr ‹_›))
 
-theorem erdos_1148.variants.lower_bound : ¬ Erdos1148Prop 6563 := by
-  decide +native
-
 def erdos_1148_weaker_prop (n : ℕ) : Prop :=
   ∃ x y z : ℕ, n = x ^ 2 + y ^ 2 - z ^ 2 ∧
     (x ^ 2 : ℝ) ≤ n + 2 * Real.sqrt n ∧
