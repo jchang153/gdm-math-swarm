@@ -134,6 +134,8 @@ ABLATION_BUDGET_TRACK = "ablation"
 ABLATION_LEDGER_RELATIVE = Path("state") / "ablation-budget.sqlite"
 GEMINI_BUDGET_TRACK = "gemini"
 GEMINI_LEDGER_RELATIVE = Path("state") / "gemini-budget.sqlite"
+CLAUDE_BUDGET_TRACK = "claude"
+CLAUDE_LEDGER_RELATIVE = Path("state") / "claude-budget.sqlite"
 # History only (never read for admission): the cumulative caps these ledgers had before the per-run
 # budget (ablation pilot $160, later $310 on seeded-ablation; Gemini pilot $462.38, compatibility
 # $10). Their ``scopes`` rows stay in the ledger files as ``legacy_cap_usd``.
@@ -150,6 +152,10 @@ BUDGET_TRACKS = {
     GEMINI_BUDGET_TRACK: {"ledger": GEMINI_LEDGER_RELATIVE, "agent_counts": frozenset({10}), "concurrent_run": True,
                           "plan_section": "Gemini 3.1 Pro collaboration run authorized, October 19, 2026"},
 }
+# The owner's Claude Opus 5.5 track (owner request, October 21, 2026: a 5-agent, 1-hour run).
+BUDGET_TRACKS[CLAUDE_BUDGET_TRACK] = {"ledger": CLAUDE_LEDGER_RELATIVE, "agent_counts": frozenset({5}),
+                                      "concurrent_run": False,
+                                      "plan_section": "Claude Opus 5.5 run (owner request, October 21, 2026)"}
 
 
 def track_ledger_relative(track) -> Path:
