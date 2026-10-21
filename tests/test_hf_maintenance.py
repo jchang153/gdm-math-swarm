@@ -1459,3 +1459,138 @@ class EvaluatorMaintenanceTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class InspectMaintenanceTests(unittest.TestCase):
+    """--scope inspect: only RUN/inspect-view/index.html and the run's catalogue Inspect log links change.
+    The published state is built as before the fix: an Inspect View without the redirect-following
+    navigation and an 'Inspect logs' link to the unlistable RUN/inspect/ directory."""
+    prepare, records, receipt, edit_remote, assert_no_maintenance_commit = (
+        MaintenanceTests.prepare, MaintenanceTests.records, MaintenanceTests.receipt, MaintenanceTests.edit_remote,
+        MaintenanceTests.assert_no_maintenance_commit)
+    LOG = '2026-10-16T02-14-38-00-00_gdm-math-swarm_X.eval'
+
+    @staticmethod
+    def eval_log():
+        import zipfile
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, 'w') as archive:
+            archive.writestr('header.json', '{}')
+        return data.getvalue()
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.runs = self.root / 'runs'
+        self.viewer = self.root / 'viewer'
+        (self.viewer / 'assets').mkdir(parents=True)
+        (self.viewer / 'logs').mkdir()
+        (self.viewer / 'index.html').write_text(
+            '<!doctype html><html><head><script type="module" crossorigin src="./assets/index.js"></script>'
+            '</head><body></body></html>')
+        (self.viewer / 'assets' / 'index.js').write_text('export {}')
+        (self.viewer / 'logs' / 'listing.json').write_text('{}')
+        (self.viewer / 'logs' / self.LOG).write_bytes(self.eval_log())
+        for run in (OTHER, RUN):
+            make_run(self.runs, run)
+            (self.runs / run / 'inspect').mkdir()
+            (self.runs / run / 'inspect' / self.LOG).write_bytes(self.eval_log())
+        self.hub = Hub(self.root)
+        import build_experiment_index
+        import space_navigation
+        old_links = lambda run, names: {'Inspect logs': run + '/inspect/'}  # noqa: E731
+        with patch.object(space_navigation, 'FOLLOW_LOG_REDIRECTS', ''), \
+                patch.object(build_experiment_index, 'inspect_log_links', old_links):
+            publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
+                    operation=operation)
+        # Since publication the local report changed; the inspect scope must not publish it.
+        results = json.loads((self.runs / RUN / 'results.json').read_text())
+        (self.runs / RUN / 'results.json').write_text(json.dumps({**results, 'elapsed_seconds': 1.0}))
+        self.bundle = self.prepare('inspect', RUN)
+        self.published = dict(self.hub.files)
+        self.base = self.hub.sha
+        self.publish_commits = len(self.hub.commits)
+        self.page = RUN + '/inspect-view/index.html'
+
+    def maintain(self, commit=False, attempt='attempt-1', bundle=None, **kwargs):
+        if commit:
+            kwargs.setdefault('backup_dir', self.records(attempt))
+            kwargs.setdefault('receipt', self.records(attempt) / 'receipt.json')
+        return maintain_run(bundle or self.bundle, self.hub, self.hub.download, run=RUN, commit=commit,
+                            operation=operation, scope='inspect', **kwargs)
+
+    def test_published_state_reproduces_the_broken_links(self):
+        self.assertNotIn(b"redirect:'follow'", self.published[self.page])
+        self.assertIn(b"redirect:'follow'", (self.bundle / self.page).read_bytes())
+        entry = json.loads(self.published['experiments.json'])['experiments'][-1]
+        self.assertEqual(entry['links']['Inspect logs'], RUN + '/inspect/')
+
+    def test_dry_run_and_commit_replace_only_the_viewer_page_and_log_links(self):
+        plan = self.maintain()
+        self.assertEqual((plan['scope'], plan['replaced'], plan['to_replace'], plan['added']),
+                         ('inspect', [self.page], [self.page], []))
+        self.assertEqual(plan['catalogue']['entry_diff'], {'links': {
+            'added': {}, 'removed': {}, 'changed': {'Inspect logs': {
+                'old': RUN + '/inspect/', 'new': RUN + '/inspect/' + self.LOG}}}})
+        skipped = {r['path'] for r in plan['skipped_local_differences']['names']}
+        self.assertIn(RUN + '/results.json', skipped)
+        self.assert_no_maintenance_commit()
+        result = self.maintain(commit=True)
+        self.assertEqual(result['status'], 'verified')
+        final = self.hub.files
+        self.assertEqual(set(final), set(self.published))
+        for name, data in self.published.items():
+            if name == self.page:
+                self.assertEqual(final[name], (self.bundle / name).read_bytes())
+            elif name not in CATALOGUE:
+                self.assertEqual(final[name], data, name)
+        old, new = (json.loads(x['experiments.json'])['experiments'] for x in (self.published, final))
+        self.assertEqual([e for e in new if e['run'] != RUN], [e for e in old if e['run'] != RUN])
+        old_entry, new_entry = (next(e for e in x if e['run'] == RUN) for x in (old, new))
+        self.assertEqual(list(new_entry['links']), list(old_entry['links']))
+        self.assertEqual({**new_entry, 'links': {}}, {**old_entry, 'links': {}})  # not the bundle's entry
+        self.assertIn(f'href="{RUN}/inspect/{self.LOG}">Inspect logs</a>', final['index.html'].decode())
+        self.assertNotIn(f'href="{RUN}/inspect/">', final['index.html'].decode())
+        manifest = json.loads(final[MANIFEST])
+        for name, info in manifest['files'].items():
+            self.assertEqual(digest(final[name]), info, name)
+        commits = self.hub.commits[self.publish_commits:]
+        self.assertTrue(all(c['message'].endswith('Inspect log links') for c in commits))
+        self.assertEqual(self.receipt()['verification']['gitattributes'], 'unchanged')
+
+    def test_page_without_redirect_fix_refused(self):
+        import space_navigation
+        with patch.object(space_navigation, 'FOLLOW_LOG_REDIRECTS', ''):
+            old = self.prepare('without-fix', RUN)
+        with self.assertRaisesRegex(ValueError, 'redirect-following'):
+            self.maintain(bundle=old)
+
+    def test_other_viewer_refused(self):
+        self.edit_remote({RUN + '/inspect-view/assets/index.js': b'export const other = 1'})
+        with self.assertRaisesRegex(ValueError, 'Inspect View of the bundle.*differing'):
+            self.maintain()
+        self.assertEqual(len(self.hub.commits), self.publish_commits)
+
+    def test_run_without_published_log_refused(self):
+        files = {k: v for k, v in self.published.items() if not k.startswith(RUN + '/inspect/')}
+        self.hub.push(files)
+        with self.assertRaisesRegex(ValueError, 'no published Inspect log'):
+            self.maintain()
+
+
+class InspectLogLinkTests(unittest.TestCase):
+    def test_links_point_at_files_not_the_directory(self):
+        from build_experiment_index import inspect_log_links
+        self.assertEqual(inspect_log_links('r', ['a.eval', 'listing.json']), {'Inspect logs': 'r/inspect/a.eval'})
+        self.assertEqual(inspect_log_links('r', ['b.eval', 'a.eval']),
+                         {'Inspect log 1': 'r/inspect/a.eval', 'Inspect log 2': 'r/inspect/b.eval'})
+        self.assertEqual(inspect_log_links('r', []), {})
+        with tempfile.TemporaryDirectory() as tmp:
+            run = make_run(tmp, 'run-a')
+            (run / 'inspect').mkdir()
+            (run / 'inspect' / 'x.eval').write_bytes(b'PK')
+            import build_experiment_index
+            build_experiment_index.build(tmp)
+            entry = json.loads((Path(tmp) / 'experiments.json').read_text())['experiments'][0]
+            self.assertEqual(entry['links']['Inspect logs'], 'run-a/inspect/x.eval')

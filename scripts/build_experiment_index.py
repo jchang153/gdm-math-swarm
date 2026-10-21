@@ -15,6 +15,21 @@ from zoneinfo import ZoneInfo
 from space_navigation import private_space_navigation
 
 ROOT = Path(__file__).resolve().parents[1]
+INSPECT_LOGS = 'Inspect logs'
+
+
+def inspect_log_links(run, names):
+    """Catalogue links to a run's raw Inspect logs (file names under RUN/inspect/).
+
+    A static host cannot list a directory (the hosted Space redirects RUN/inspect/ off-site), so
+    each .eval file is linked directly: 'Inspect logs' for a single log, else one numbered link
+    per log in name order.
+    """
+    logs = sorted(n for n in names if n.endswith('.eval') and '/' not in n)
+    targets = [quote(run, safe='') + '/inspect/' + quote(n, safe='') for n in logs]
+    if len(targets) == 1:
+        return {INSPECT_LOGS: targets[0]}
+    return {f'Inspect log {i}': t for i, t in enumerate(targets, 1)}
 
 
 def build(runs, hosted=False):
@@ -50,10 +65,13 @@ def build(runs, hosted=False):
                                  ('Inspect View', 'inspect-view/index.html'),
                                  ('Timeline', 'analysis/timeline.md'),
                                  # Researcher-only post-hoc transcript judge (docs/plan.md, Oct 17).
-                                 ('Behavior judge', 'analysis/judge/report.html'),
-                                 ('Inspect logs', 'inspect/')]:
+                                 ('Behavior judge', 'analysis/judge/report.html')]:
                 if (path.parent / target).exists():
                     entry['links'][name] = quote(path.parent.name, safe='') + '/' + target
+            logs = path.parent / 'inspect'
+            if logs.is_dir():
+                entry['links'].update(inspect_log_links(path.parent.name, [
+                    p.name for p in logs.iterdir() if p.is_file() and not p.is_symlink()]))
             entries.append(entry)
         except (ValueError, KeyError, TypeError, OSError) as error:
             warnings.append(f'{path.parent.name}: {type(error).__name__}')
