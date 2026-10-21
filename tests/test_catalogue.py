@@ -96,6 +96,22 @@ class CataloguePageTests(unittest.TestCase):
         # Entries published before the summary: placeholders, filled in the browser.
         self.assertIn('<span class="c-accepted"><span class="pending"', page)
 
+    def test_transcript_pages_are_not_linked(self):
+        """Transcripts are read in Inspect View (owner, Oct 21, 2026); older entries keep the link field."""
+        runs = self.root / 'runs'
+        run = make_run(runs, 'fresh')
+        (run / 'transcripts').mkdir(exist_ok=True)
+        (run / 'transcripts/index.html').write_text('<!doctype html><title>t</title>')
+        build(runs, unlisted=set())
+        built = json.loads((runs / 'experiments.json').read_text())['experiments'][0]
+        self.assertNotIn('Transcripts', built['links'])
+        self.assertNotIn('transcripts/index.html', (runs / 'index.html').read_text())
+        older = entry('a-old', 1, links={'Report': 'a-old/results.html', 'Transcripts': 'a-old/transcripts/index.html'})
+        page, index = self.write([older])
+        self.assertEqual(json.loads(index)['experiments'][0]['links'], older['links'])  # entry unchanged
+        self.assertNotIn('href="a-old/transcripts/index.html"', page)
+        self.assertIn("HIDDEN_LINKS=['Transcripts']", page)
+
     def test_hosted_page_is_self_contained_dark_mode_and_mobile(self):
         page, _ = self.write([entry('a-old', 1)])
         self.assertIn('id="private-space-navigation"', page)

@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
-from catalogue_page import CHEATING, COHORT_GLOSS, COHORT_LABELS, COHORTS, FLAGGED, SCRIPT, STYLE
+from catalogue_page import CHEATING, COHORT_GLOSS, COHORT_LABELS, COHORTS, FLAGGED, HIDDEN_LINKS, SCRIPT, STYLE
 from space_navigation import private_space_navigation
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -91,7 +91,8 @@ def build(runs, hosted=False, unlisted=None):
                      'distinct_verified_tasks': len(distinct),
                      'task_count': config.get('task_count'), 'agent_exits': data['agent_exits'],
                      'links': {}, 'summary': run_summary(path.parent, data)}
-            for name, target in [('Report', 'results.html'), ('Transcripts', 'transcripts/index.html'),
+            for name, target in [('Report', 'results.html'),
+                                 # Transcripts are read in Inspect View (owner, Oct 21, 2026).
                                  ('Conference', 'conference-view/index.html'),
                                  ('Inspect View', 'inspect-view/index.html'),
                                  ('Timeline', 'analysis/timeline.md'),
@@ -188,7 +189,8 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
     esc = html.escape
     rows = []
     for e in entries:
-        links = ' · '.join(f'<a href="{esc(url, quote=True)}">{esc(name)}</a>' for name, url in e['links'].items())
+        links = ' · '.join(f'<a href="{esc(url, quote=True)}">{esc(name)}</a>' for name, url in e['links'].items()
+                           if name not in HIDDEN_LINKS)
         summary = e.get('summary') if isinstance(e.get('summary'), dict) else None
         pending = '<span class="pending" title="Not in this catalogue entry">…</span>'
         variant = (esc(summary['prompt_variant']) if summary and summary.get('prompt_variant')
@@ -238,7 +240,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
             '<meta name="color-scheme" content="light dark">'
             '<title>GDM Math Swarm experiments</title><style>' + STYLE + '</style></head><body>'
             '<h1>GDM Math Swarm experiments</h1>'
-            '<p>A private library of saved runs: results, full agent transcripts, independent evaluations and timelines.</p>'
+            '<p>A private library of saved runs: results, Inspect logs (read agent transcripts in Inspect View), independent evaluations and timelines.</p>'
             f'<p><strong>{len(entries)} saved experiment(s)</strong>, newest first. Tick 2 to 4 runs to compare them side by side.</p>'
             '<div class="toolbar"><label class="grow">Find<input id="filter" type="search" placeholder="Date, run, model, condition…"></label>'
             '<label>Model<select id="f-model"><option value="">All</option></select></label>'

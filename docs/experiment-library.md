@@ -484,6 +484,10 @@ genuine tasks (weak operational acceptance vs. distinct independently genuine st
 pilot cost and the behavior judge's cohort counts or "not run". Rows filter by text, model, prompt
 variant and judge outcome and sort by any column; ticking 2-4 runs opens a side-by-side comparison
 (solves, cost, cost per genuine task, agent exits, judge cohorts), shareable as `#compare=RUN,RUN`.
+The catalogue links no custom transcript pages (owner, October 21, 2026: agent transcripts are
+read in Inspect View); new entries carry no `Transcripts` link, and the page hides that link in
+entries published earlier (the entries themselves are unchanged). `export_transcripts.py` remains
+for local use.
 Each new entry carries a derived `summary` (`prompt_variant`, `accepted_tasks` from
 `operationally_accepted_tasks`, and `judge`: only the cohort counts of a published
 `analysis/judge/report.json`, no finding text). Entries published earlier have none: the hosted page
