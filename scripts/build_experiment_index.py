@@ -162,7 +162,7 @@ const list=document.getElementById('live-runs');for(const e of d.runs){if(!e||!o
 const li=document.createElement('li'),base='live/'+encodeURIComponent(e.run)+'/',strong=document.createElement('strong');strong.textContent=e.run;li.append(strong);
 const facts=[e.state_label,e.model,e.agents!=null?e.agents+' agents':null,e.solved!=null?e.solved+' solved (conference judge)':null,e.updated_utc?'updated '+new Date(e.updated_utc).toLocaleString():null].filter(Boolean);
 li.append(document.createTextNode(' · '+facts.join(' · ')+' · '));
-for(const [label,path] of [['Live summary','index.html'],['Inspect View','inspect-view/index.html'],['Conference','conference-view/index.html']]){const a=document.createElement('a');a.href=base+path;a.textContent=label;li.append(a,document.createTextNode(' '));}
+for(const [i,[label,path]] of [['Live summary','index.html'],['Inspect View','inspect-view/index.html'],['Conference','conference-view/index.html']].entries()){const a=document.createElement('a');a.href=base+path;a.textContent=label;if(i)li.append(document.createTextNode(' · '));li.append(a);}
 list.append(li);}document.getElementById('live').hidden=!list.children.length;}).catch(()=>{});})();</script>'''
 
 

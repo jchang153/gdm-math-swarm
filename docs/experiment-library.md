@@ -88,8 +88,8 @@ run-specific spending separately from the cumulative ledger and any uncertain ho
 
 Agent transcripts are read in Inspect View (owner, October 21, 2026). `scripts/export_transcripts.py`
 still writes an offline `RUN/transcripts/` view for local use, but `prepare_hf_library.py` leaves that
-folder out of every bundle and refuses a page that still links it (an older `results.html` or
-conference view: regenerate it). `--include-transcript-export` keeps the folder only to maintain the
+folder out of every bundle and refuses a generated view that still links it (an older `results.html`
+or conference view: regenerate it; archived pages such as `results.legacy.html` are copied as recorded). `--include-transcript-export` keeps the folder only to maintain the
 transcript pages of a run published before then (`maintain_hf_run.py --scope transcripts`). Write the
 report with `scripts/build_results.py`, which `prepare_hf_library.py` and `publish_hf_library.py` require
 (they refuse a run without `results.json` and `results.html`). The publication steps are:

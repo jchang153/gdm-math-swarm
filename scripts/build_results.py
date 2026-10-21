@@ -521,8 +521,8 @@ def summary_card(results):
     if pilot.get('held_usd') not in (None, '0'):
         spend_note += f'; {cents(pilot["held_usd"])} still held'
     tiles = [('Model', c['model'], c['provider_route'] or c['provider']),
-             ('Prompt variant', c['prompt_variant'] or 'default', 'as recorded in settings.json'
-              if c['prompt_variant'] else 'none recorded'),
+             ('Prompt variant', c['prompt_variant'] or 'not recorded', 'as recorded in settings.json'
+              if c['prompt_variant'] else 'settings.json names none'),
              ('Agents', c['agents'], f'{voluntary} ended on their own · {errors} errors'),
              ('Duration', duration(results['elapsed_seconds']), f'stop: {results["stop_reason"]}'),
              ('Accepted tasks', f'{results["operationally_accepted_tasks"]} of {tasks}',

@@ -197,8 +197,11 @@ def main():
     for run_id, source, viewer in selected:
         copy_records(source, output / run_id,
                      skip=lambda relative: run_excluded(relative, args.include_transcript_export))
-        for page in sorted((output / run_id).rglob('*.html')):
-            if not args.include_transcript_export and TRANSCRIPT_LINK.search(page.read_text(errors='replace')):
+        # The generated views only; archived pages (e.g. results.legacy.html) stay as recorded.
+        views = [output / run_id / 'results.html', *sorted((output / run_id / 'conference-view').glob('*.html'))]
+        for page in views:
+            if not args.include_transcript_export and page.is_file() \
+                    and TRANSCRIPT_LINK.search(page.read_text(errors='replace')):
                 raise ValueError(f'{run_id}/{page.relative_to(output / run_id).as_posix()} links the unpublished '
                                  'transcript export; regenerate it with the current build_results.py / '
                                  'export_conference.py')

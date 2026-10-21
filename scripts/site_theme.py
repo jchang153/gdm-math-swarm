@@ -14,7 +14,7 @@ BASE = (
         'border-bottom:1px solid var(--line);vertical-align:top}th{font-size:13px;color:var(--muted)}'
         '.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}.scroll table{min-width:640px}'
         '.crumbs{font-size:14px;margin:0 0 10px}'
-        '.card{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));background:var(--card);'
+        '.card{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));background:var(--card);'
         'border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:16px 0}'
         '.tile{background:var(--card);padding:12px 14px;box-shadow:0 0 0 .5px var(--line);overflow-wrap:break-word}.tile .k{font-size:12px;color:var(--muted);'
         'text-transform:uppercase;letter-spacing:.04em}.tile .v{font-size:19px;font-weight:600;margin-top:2px;line-height:1.25}'
@@ -31,7 +31,7 @@ BASE = (
         '.b-info{color:var(--info);background:var(--info-bg)}.b-muted{color:var(--muted)}'
         'dl.gloss{display:grid;grid-template-columns:minmax(120px,max-content) 1fr;gap:4px 14px;font-size:14px}'
         'dl.gloss dt{font-family:ui-monospace,monospace}dl.gloss dd{margin:0}'
-        '@media (max-width:640px){body{padding:16px 16px 48px;font-size:15px}.tabs a,.tabs span{padding:8px 10px}'
+        '@media (max-width:640px){body{padding:16px 16px 48px;font-size:15px}.card{grid-template-columns:1fr 1fr}.tile .v{font-size:17px}.tabs a,.tabs span{padding:8px 10px}'
         'dl.gloss{grid-template-columns:1fr}dl.gloss dd{margin-bottom:6px}}')
 
 
