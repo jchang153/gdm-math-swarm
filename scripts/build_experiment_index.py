@@ -108,13 +108,17 @@ def build(runs, hosted=False, unlisted=None):
     return {**write_index(runs, entries, warnings, hosted=hosted), 'unlisted': hidden}
 
 
+def newest_first(entries):
+    """Catalogue order: newest first by actual start time (owner request, October 21, 2026); ties by run ID, reversed."""
+    return sorted(entries, key=lambda e: (datetime.datetime.fromisoformat(
+        e['start_utc'].replace('Z', '+00:00')).timestamp(), e['run']), reverse=True)
+
+
 def write_index(runs, entries, warnings=(), *, hosted=False):
     """Render catalogue entries, including previously published remote runs."""
     runs = Path(runs)
     runs.mkdir(parents=True, exist_ok=True)
-    entries = list(entries)
-    entries.sort(key=lambda e: (datetime.datetime.fromisoformat(
-        e['start_utc'].replace('Z', '+00:00')).timestamp(), e['run']))
+    entries = newest_first(entries)
     esc = html.escape
     rows = []
     for e in entries:

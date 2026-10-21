@@ -465,7 +465,8 @@ python scripts/publish_hf_library.py \
 ```
 
 You only need to prepare **your new runs**. The publisher merges their catalogue
-entries with all existing remote entries and sorts by actual start time. It
+entries with all existing remote entries and lists them newest first by actual start time
+(owner request, October 21, 2026; the local `runs/index.html` uses the same order). It
 preserves existing Space configuration and run files, refuses conflicting run IDs,
 requires a private Space, verifies bundle hashes, and screens obvious credential
 filenames and token patterns (including compressed Inspect logs). Pattern scanning

@@ -14,7 +14,7 @@ import re
 import tempfile
 import zipfile
 
-from build_experiment_index import unlisted_runs, write_index
+from build_experiment_index import newest_first, unlisted_runs, write_index
 
 DEFAULT_REPO = 'gdm-math-swarm/gdm-math-swarm-experiments'
 ROOT_FILES = {'README.md', 'robots.txt', 'index.html', 'experiments.json'}
@@ -124,8 +124,7 @@ def merge_entries(existing, incoming):
             if run in combined and entry != combined[run]:
                 raise ValueError('Existing catalogue entry differs: ' + run)
             combined[run] = entry
-    return sorted(combined.values(), key=lambda x: (
-        datetime.datetime.fromisoformat(x['start_utc'].replace('Z', '+00:00')).timestamp(), x['run']))
+    return newest_first(combined.values())
 
 
 def payload(data):

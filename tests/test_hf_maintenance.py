@@ -1683,7 +1683,7 @@ class InspectMaintenanceTests(unittest.TestCase):
     def test_published_state_reproduces_the_broken_links(self):
         self.assertNotIn(b"redirect:'follow'", self.published[self.page])
         self.assertIn(b"redirect:'follow'", (self.bundle / self.page).read_bytes())
-        entry = json.loads(self.published['experiments.json'])['experiments'][-1]
+        entry = next(x for x in json.loads(self.published['experiments.json'])['experiments'] if x['run'] == RUN)
         self.assertEqual(entry['links']['Inspect logs'], RUN + '/inspect/')
 
     def test_dry_run_and_commit_replace_only_the_viewer_page_and_log_links(self):
