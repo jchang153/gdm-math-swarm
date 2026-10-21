@@ -684,7 +684,11 @@ class _Gates:
                             or f"WAIVED by the owner for this run: {waiver['note']}", waived=True)
         path, record = newest_evidence(self.validation, prefix)
         if path is None:
-            return self.add(prefix, False, f"no {prefix}-<UTC>.json evidence in {self.rel(self.validation)}")
+            # Owner decision, October 21, 2026: "waive runtime checks (and all future runtime
+            # checks)". Runtime/evaluator evidence is informational and never blocks a launch.
+            return self.add(prefix, True, f"INFORMATIONAL (not blocking): no {prefix}-<UTC>.json evidence in "
+                            f"{self.rel(self.validation)}", informational=True,
+                            warnings=[f"no {prefix} evidence"])
         problems = []
         if record.get("all_required_passed") is not True:
             problems.append("all_required_passed is not true")
@@ -716,7 +720,9 @@ class _Gates:
                 if missing:
                     problems.append("validated_config lacks " + ", ".join(missing))
                 details["validated_config"] = validated
-        self.add(prefix, not problems, "; ".join(problems) or "passed against current images", path, **details)
+        # Informational only (owner decision, October 21, 2026): problems are recorded as warnings.
+        self.add(prefix, True, ("INFORMATIONAL (not blocking): " + "; ".join(problems)) if problems
+                 else "passed against current images", path, informational=True, warnings=problems, **details)
 
     def compose_problems(self, record, details):
         """X3: the probed compose text must equal what make_compose writes for this config and agent image."""

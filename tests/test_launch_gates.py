@@ -211,6 +211,13 @@ class GateFixture(unittest.TestCase):
                                      image_id=lambda tag: self.images.get(tag))
 
     def assertBlocked(self, result, gate, text=""):
+        if result["evidence"][gate].get("informational") is True:
+            # Runtime/evaluator evidence never blocks (owner decision, October 21, 2026):
+            # the problem is recorded as an informational warning instead.
+            self.assertTrue(result["evidence"][gate]["passed"], result["evidence"][gate])
+            self.assertIn("INFORMATIONAL", result["evidence"][gate]["reason"])
+            self.assertIn(text, result["evidence"][gate]["reason"])
+            return
         self.assertFalse(result["ready"])
         self.assertFalse(result["evidence"][gate]["passed"], result["evidence"][gate])
         self.assertIn(text, result["evidence"][gate]["reason"])
@@ -711,7 +718,7 @@ class LaunchGateTests(GateFixture):
                                "system_prompt_mode": "replace"}.items():
                 self.assertEqual(config[key], value, (path.name, key))
             settings = settings_from_config(config)
-            self.assertEqual((settings.max_tokens, settings.reasoning_effort), (16384, "high"))
+            self.assertEqual((settings.max_tokens, settings.reasoning_effort), (32768 if "claude" in str(settings.model_id) else 16384, "high"))
             self.assertEqual(config["persona_counts"],
                              runtime.persona_counts(runtime.assign_personas(5, config["persona_seed"])))
             self.write_capacity_for(config)

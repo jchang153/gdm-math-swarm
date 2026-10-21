@@ -51,7 +51,7 @@ class ClaudeSettingsTests(unittest.TestCase):
     def test_config_pins_first_party_route_and_covers_cache_write_price(self):
         s = self.settings
         self.assertEqual((s.model_id, s.provider_route, s.max_tokens, s.reasoning_effort, s.context_length),
-                         (CLAUDE_MODEL_ID, "anthropic", 16384, "high", 1000000))
+                         (CLAUDE_MODEL_ID, "anthropic", 32768, "high", 1000000))
         self.assertEqual(self.config["candidate_model_id"], CLAUDE_MODEL_ID)
         self.assertEqual(validate_catalog(catalog(), s)["tag"], "anthropic")
         # Settlement prices cache writes at the prompt bound: the listed $4/M prompt price alone is

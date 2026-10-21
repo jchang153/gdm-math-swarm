@@ -1,5 +1,13 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Runtime checks never block launches, October 21, 2026
+
+Owner (chat): "yes, waive runtime checks (and all future runtime checks)". The runtime-e2e,
+runtime-isolation, runtime-capacity and evaluator evidence gates are informational on every
+track: a missing or mismatched record is recorded as a warning in the launch evidence and
+never blocks. Also "yes raise opus response length limit": configs/owner-claude-opus-5.5.json
+max_tokens 32768.
+
 ## Owner multi-model max-pressure runs, October 21, 2026
 
 The repository owner asked in chat on October 21, 2026 to "start 4 runs in parallel, one per
