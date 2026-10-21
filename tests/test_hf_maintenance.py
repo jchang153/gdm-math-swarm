@@ -1715,8 +1715,9 @@ class InspectMaintenanceTests(unittest.TestCase):
         old_entry, new_entry = (next(e for e in x if e['run'] == RUN) for x in (old, new))
         self.assertEqual(list(new_entry['links']), list(old_entry['links']))
         self.assertEqual({**new_entry, 'links': {}}, {**old_entry, 'links': {}})  # not the bundle's entry
-        self.assertIn(f'href="{RUN}/inspect/{self.LOG}">Inspect logs</a>', final['index.html'].decode())
-        self.assertNotIn(f'href="{RUN}/inspect/">', final['index.html'].decode())
+        self.assertEqual(new_entry['links']['Inspect logs'], f'{RUN}/inspect/{self.LOG}')
+        # The entry keeps the .eval link as data; the page does not show it (site-nologs).
+        self.assertNotIn(f'href="{RUN}/inspect/', final['index.html'].decode())
         manifest = json.loads(final[MANIFEST])
         for name, info in manifest['files'].items():
             self.assertEqual(digest(final[name]), info, name)

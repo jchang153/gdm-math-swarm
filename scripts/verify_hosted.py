@@ -10,6 +10,9 @@ as a download), and that each hosted page returns HTTP 200 as ``text/html``, not
 with exactly the bytes stored at that revision once HF's injected creator-metadata script is
 removed. With ``--bundle`` the stored files are also compared with the prepared bundle. An optional
 ``--range-path`` (for example a run's Inspect ``.eval`` log) must answer a byte-range request with 206.
+No served page may link a raw ``RUN/inspect/*.eval`` log (site-nologs, October 21, 2026: the link was
+only a download; the logs stay published for Inspect View). Pages published earlier fail this check
+until they are re-rendered.
 Exits 1 when any check fails; the record lists every check.
 """
 import argparse
@@ -28,6 +31,8 @@ PAGES = ("index.html", "{run}/results.html", "{run}/conference-view/index.html",
 # HF injects this one script into served HTML; remove only it before comparing bytes.
 CREATOR_SCRIPT = re.compile(rb'<script>window\.huggingface=\{variables:\{"SPACE_CREATOR_USER_ID":"[0-9a-f]+"\}\};</script>')
 LFS_POINTER = b"version https://git-lfs.github.com/spec/"
+# A link to a raw Inspect log under RUN/inspect/ (the catalogue's and run page's former download links).
+LOG_DOWNLOAD_LINK = re.compile(rb'href="[^"]*\binspect/[^"/]*\.eval"')
 
 
 def sha256(data):
@@ -67,6 +72,7 @@ def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, 
               and "attachment" not in disposition.lower() and not response.content.startswith(LFS_POINTER),
               path=page, status=response.status_code, content_type=kind, content_disposition=disposition or None)
         check("served_exact", body == stored, path=page, served_sha256=sha256(body), stored_sha256=sha256(stored))
+        check("no_log_download_link", not LOG_DOWNLOAD_LINK.search(body), path=page)
     if range_path:
         response = session.get(f"{info.host}/{range_path}", headers={**headers, "Range": "bytes=0-63"}, timeout=45,
                                follow_redirects=True)

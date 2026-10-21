@@ -167,7 +167,15 @@ class VerifyHostedTest(unittest.TestCase):
         self.assertEqual(record["revision"], "abc123")
         self.assertEqual({c["check"] for c in record["checks"]},
                          {"private", "current_revision", "stored", "not_lfs", "bundle_match", "served_html",
-                          "served_exact", "range_206"})
+                          "served_exact", "no_log_download_link", "range_206"})
+
+    def test_detects_raw_inspect_log_download_link(self):
+        page = self.root / "index.html"
+        page.write_bytes(b'<!doctype html><a href="demo-run/inspect/a.eval">Inspect logs</a>'
+                         b'<a href="demo-run/inspect-view/index.html">Inspect View</a>')
+        record = self.run_verify()
+        self.assertEqual([(c["check"], c["path"]) for c in record["checks"] if not c["ok"]],
+                         [("no_log_download_link", "index.html")])
 
     def test_detects_lfs_download_and_moved_revision(self):
         page = "demo-run/results.html"

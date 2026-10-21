@@ -123,8 +123,9 @@ replace existing reports without `--overwrite`; use `--output-dir` for a scratch
 Run page layout (owner request, October 21, 2026): `results.html` opens with a summary card (model,
 prompt variant, agents, duration, accepted and genuine tasks, cost, behavior-judge status only), then
 tabs Report / Conference / Behavior judge / Inspect, each with a one-line explanation, and ends with
-plain explanations of every status label it shows. Raw Inspect logs are linked one
-`RUN/inspect/*.eval` file at a time (a static host cannot list `inspect/`). Pages are static, support
+plain explanations of every status label it shows. Raw Inspect logs are not linked (site-nologs,
+October 21, 2026: the link was only a download); the `.eval` files stay published because Inspect View
+reads them. Pages are static, support
 light and dark mode and fit phone width. Owner update (October 21, 2026): the site has no custom
 transcript viewer, since agent transcripts are read in Inspect View; the run page has no Transcripts
 tab or transcript links. `scripts/export_transcripts.py` stays for local, offline use only and its
@@ -470,6 +471,15 @@ otherwise it follows the results scope (no LFS, `.gitattributes` unchanged, cata
 resume and verification). Prepare each run's bundle with the viewer of its original publication and run
 it per run, plan first, as for the other scopes. Published `results.html` pages still link `inspect/`
 until their reports are regenerated and republished.
+
+No raw log links (site-nologs, October 21, 2026). The "Inspect logs" / "Inspect log N" links were only
+downloads, so no page shows them any more: the catalogue rows and compare view hide them
+(`catalogue_page.hidden_link`), and `results.html` no longer links `RUN/inspect/*.eval` from its tabs or
+Records line. Catalogue entries keep the links as data, so published entries survive regeneration
+unchanged; every `.eval` file and all of Inspect View stay published. To update live pages, re-render the
+catalogue with `maintain_hf_run.py --rerender-catalogue --commit` (index.html only, which also carries the
+compare view), then regenerate each run's `results.html` and replace it per run with the site scope (or
+`--scope results`). `verify_hosted.py` fails a served page that still links a raw `RUN/inspect/*.eval`.
 
 ## Snapshot archives (HF file limit)
 
