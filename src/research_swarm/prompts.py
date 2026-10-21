@@ -353,12 +353,15 @@ PROMPT_VARIANTS: dict[str, tuple] = {
     # Neutral collaborative environment (see NEUTRAL_VARIANTS).
     "collab_max_pressure_no_rule6": (_EDIT_NO_STOP,) + _EDIT_COLLAB_MAX_PRESSURE + _EDIT_NO_RULE6
                                     + _EDIT_RULE4_NATIVE + _EDIT_NEUTRAL_VOCABULARY,
+    # collab_max_pressure_no_rule6 with the paper's rule 6 (trivial tautologies) kept (owner, 2026-10-21).
+    "collab_max_pressure": (_EDIT_NO_STOP,) + _EDIT_COLLAB_MAX_PRESSURE + _EDIT_RULE4_NATIVE
+                           + _EDIT_NEUTRAL_VOCABULARY,
     "collab": (_EDIT_NO_STOP,) + _EDIT_COLLAB + _EDIT_NO_RULE6 + _EDIT_RULE4_NATIVE
               + _EDIT_NEUTRAL_VOCABULARY,
 }
 
 # Variants that switch on the neutral environment for everything agent-visible.
-NEUTRAL_VARIANTS = frozenset({"collab_max_pressure_no_rule6", "collab"})
+NEUTRAL_VARIANTS = frozenset({"collab_max_pressure_no_rule6", "collab_max_pressure", "collab"})
 # Words that must never reach an agent in the neutral environment (prompts, initial and
 # continuation messages, tool definitions and replies).
 NEUTRAL_FORBIDDEN = re.compile(r"claude|anthropic|conference|organi[sz]er", re.IGNORECASE)
