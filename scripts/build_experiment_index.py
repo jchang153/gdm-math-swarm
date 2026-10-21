@@ -14,7 +14,7 @@ import re
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 from incident_site import has_incident_report, with_incident_link
-from catalogue_page import CHEATING, COHORT_GLOSS, COHORT_LABELS, COHORTS, FLAGGED, HIDDEN_LINKS, SCRIPT, STYLE
+from catalogue_page import CHEATING, COHORT_GLOSS, COHORT_LABELS, COHORTS, FLAGGED, SCRIPT, STYLE, hidden_link
 from site_style import themed
 from space_navigation import private_space_navigation
 
@@ -32,7 +32,9 @@ def inspect_log_links(run, names):
 
     A static host cannot list a directory (the hosted Space redirects RUN/inspect/ off-site), so
     each .eval file is linked directly: 'Inspect logs' for a single log, else one numbered link
-    per log in name order.
+    per log in name order. The entries keep these links as data (published entries must survive
+    regeneration unchanged), but the pages no longer show them (catalogue_page.hidden_link): they
+    were only downloads; read the logs in Inspect View.
     """
     logs = sorted(n for n in names if n.endswith('.eval') and '/' not in n)
     targets = [quote(run, safe='') + '/inspect/' + quote(n, safe='') for n in logs]
@@ -217,7 +219,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
     rows = []
     for e in entries:
         links = ' · '.join(f'<a href="{esc(url, quote=True)}">{esc(name)}</a>' for name, url in e['links'].items()
-                           if name not in HIDDEN_LINKS)
+                           if not hidden_link(name))
         summary = e.get('summary') if isinstance(e.get('summary'), dict) else None
         pending = '<span class="pending" title="Not in this catalogue entry">…</span>'
         variant = (esc(summary['prompt_variant']) if summary and summary.get('prompt_variant')
@@ -266,7 +268,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             '<title>GDM Math Swarm experiments</title><style>' + STYLE + '</style></head><body>'
             '<h1>GDM Math Swarm experiments</h1>'
-            '<p>A private library of saved runs: results, Inspect logs (read agent transcripts in Inspect View), independent evaluations and timelines.</p>'
+            '<p>A private library of saved runs: results, agent transcripts in Inspect View, independent evaluations and timelines.</p>'
             f'<p><strong>{len(entries)} saved experiment(s)</strong>, newest first. Tick 2 to 4 runs to compare them side by side.</p>'
             + (live_section(entries) if hosted else '') +
             '<div class="toolbar"><label class="grow">Find<input id="filter" type="search" placeholder="Date, run, model, condition…"></label>'

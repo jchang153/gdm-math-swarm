@@ -158,10 +158,11 @@ class BuildResultsTest(unittest.TestCase):
         self.assertIn('href="inspect-view/index.html"', tabs)
         self.assertIn('Behavior judge · not run', tabs)
         self.assertNotIn('href="analysis/judge/report.html"', page)
-        # Raw Inspect logs: each .eval file, never the unlistable directory.
-        self.assertNotIn('href="inspect/"', page)
-        self.assertIn('href="inspect/a.eval">Inspect log 1</a>', page)
-        self.assertIn('href="inspect/b%20log.eval">Inspect log 2</a>', page)
+        # Raw Inspect logs are not linked (only downloads); Inspect View reads them.
+        self.assertNotIn('href="inspect/', page)
+        self.assertNotIn('.eval', page)
+        self.assertNotIn('>Inspect log', page)
+        self.assertNotIn('No .eval files were found', page)
         self.assertNotIn('notes.txt', page)
         # Plain explanations only for labels present in this run.
         gloss = page.split('id="statuses"', 1)[1]
@@ -181,7 +182,8 @@ class BuildResultsTest(unittest.TestCase):
         (run / 'inspect').mkdir()
         (run / 'inspect' / 'only.eval').write_bytes(b'x')
         _, page = generate(run)
-        self.assertIn('href="inspect/only.eval">Inspect logs</a>', page)
+        self.assertNotIn('href="inspect/', page)
+        self.assertNotIn('Inspect logs', page)
         tabs = page.split('<nav class="tabs"', 1)[1].split('</nav>', 1)[0]
         self.assertIn('<a href="analysis/judge/report.html">Behavior judge</a>', tabs)
         self.assertNotIn('no_misbehavior', page)
@@ -199,6 +201,24 @@ class BuildResultsTest(unittest.TestCase):
         (run / 'evaluations' / 'evaluations.jsonl').write_text(rows)
         with self.assertRaisesRegex(ValueError, 'does not match'):
             build_results.build(run)
+
+    def test_rerender_html_keeps_results_json(self):
+        run = make_run(self.tmp.name)
+        generate(run, '--caveat', 'Kept note')
+        data_bytes = (run / 'results.json').read_bytes()
+        (run / 'results.html').write_text('<!doctype html><html><a href="transcripts/index.html">old</a></html>')
+        with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
+            build_results.main(['--run-dir', str(run), '--rerender-html'])  # no --overwrite
+        with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
+            build_results.main(['--run-dir', str(run), '--rerender-html', '--overwrite', '--caveat', 'x'])
+        with contextlib.redirect_stdout(io.StringIO()):
+            build_results.main(['--run-dir', str(run), '--rerender-html', '--overwrite'])
+        page = (run / 'results.html').read_text()
+        self.assertEqual((run / 'results.json').read_bytes(), data_bytes)
+        self.assertIn('Kept note', page)
+        self.assertIn('id="site-theme"', page)
+        self.assertNotIn('transcripts/', page)
+        self.assertEqual(page, build_results.render(json.loads(data_bytes), None, build_results.inspect_logs(run)))
 
     def test_ledger_counts_only_this_runs_requests(self):
         run = make_run(self.tmp.name)

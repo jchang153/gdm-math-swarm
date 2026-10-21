@@ -111,7 +111,28 @@ class CataloguePageTests(unittest.TestCase):
         page, index = self.write([older])
         self.assertEqual(json.loads(index)['experiments'][0]['links'], older['links'])  # entry unchanged
         self.assertNotIn('href="a-old/transcripts/index.html"', page)
-        self.assertIn("HIDDEN_LINKS=['Transcripts']", page)
+        self.assertIn("HIDDEN_LINKS=['Transcripts','Inspect logs']", page)
+
+    def test_inspect_log_links_are_kept_as_data_but_not_shown(self):
+        """site-nologs: the raw .eval links were only downloads; the entry keeps them, no page shows them."""
+        runs = self.root / 'runs'
+        run = make_run(runs, 'b-new')
+        (run / 'inspect').mkdir(exist_ok=True)
+        (run / 'inspect' / 'one.eval').write_bytes(b'x')
+        (run / 'inspect-view').mkdir(exist_ok=True)
+        (run / 'inspect-view' / 'index.html').write_text('<!doctype html><title>v</title>')
+        build(runs, unlisted=set())
+        built = json.loads((runs / 'experiments.json').read_text())['experiments'][0]
+        self.assertEqual(built['links']['Inspect logs'], 'b-new/inspect/one.eval')
+        self.assertIn('href="b-new/inspect-view/index.html">Inspect View</a>', (runs / 'index.html').read_text())
+        self.assertNotIn('href="b-new/inspect/', (runs / 'index.html').read_text())
+        several = entry('a-old', 1, links={'Report': 'a-old/results.html', 'Inspect log 1': 'a-old/inspect/a.eval',
+                                           'Inspect log 2': 'a-old/inspect/b.eval'})
+        page, index = self.write([several])
+        self.assertEqual(json.loads(index)['experiments'][0]['links'], several['links'])  # entry unchanged
+        self.assertNotIn('href="a-old/inspect/', page)
+        self.assertNotIn('>Inspect log', page)
+        self.assertIn("n.startsWith('Inspect log ')", page)  # the compare view hides them too
 
     def test_hosted_page_is_self_contained_dark_mode_and_mobile(self):
         page, _ = self.write([entry('a-old', 1)])

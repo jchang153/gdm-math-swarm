@@ -43,8 +43,9 @@ All in `scripts/`; each is documented in its own `--help` and below.
 - `prepare_hf_library.py` and `publish_hf_library.py`: prepare a bundle, then preview and `--commit` a
   first publication.
 - `maintain_hf_run.py`: guarded updates of an already published run, `--scope judge` (default),
-  `transcripts`, `evaluator`, `results`, `inspect` or `incident` (`--replace-judge` replaces an already
-  published judge build; `incident`: see "Incident report outputs"). `--scope unlist` (no `--bundle`) removes a run's catalogue row without deleting files,
+  `transcripts`, `evaluator`, `results`, `inspect`, `site` or `incident` (`--replace-judge` replaces an already
+  published judge build; `site` republishes only regenerated page presentation, see "Site scope" below;
+  `incident` publishes incident reports, see "Incident report outputs"). `--scope unlist` (no `--bundle`) removes a run's catalogue row without deleting files,
   after the run is recorded in the tracked `data/library-unlisted.json`
   (run, date, reason). `build_experiment_index.py` and `publish_hf_library.py` leave recorded runs out
   of the local and hosted lists; `baseline100-20261015T191545Z` is unlisted (October 20, 2026).
@@ -123,8 +124,9 @@ replace existing reports without `--overwrite`; use `--output-dir` for a scratch
 Run page layout (owner request, October 21, 2026): `results.html` opens with a summary card (model,
 prompt variant, agents, duration, accepted and genuine tasks, cost, behavior-judge status only), then
 tabs Report / Conference / Behavior judge / Inspect, each with a one-line explanation, and ends with
-plain explanations of every status label it shows. Raw Inspect logs are linked one
-`RUN/inspect/*.eval` file at a time (a static host cannot list `inspect/`). Pages are static, support
+plain explanations of every status label it shows. Raw Inspect logs are not linked (site-nologs,
+October 21, 2026: the link was only a download); the `.eval` files stay published because Inspect View
+reads them. Pages are static, support
 light and dark mode and fit phone width. Owner update (October 21, 2026): the site has no custom
 transcript viewer, since agent transcripts are read in Inspect View; the run page has no Transcripts
 tab or transcript links. `scripts/export_transcripts.py` stays for local, offline use only and its
@@ -455,6 +457,46 @@ published) and prepare a single-run bundle as for the other scopes, then run
 `python scripts/maintain_hf_run.py --scope results --maintain-run "$RUN_ID" --bundle "$BUNDLE"` (plan)
 and the same with `--commit --backup-dir "$OUT/attempt-1" --receipt "$OUT/attempt-1/maintenance-receipt.json"`.
 
+### Site scope
+
+`--scope site` rolls a new site look out to an already published run (owner request, October 21, 2026: run
+page summary card and tabs, shared light/dark theme, phone layout, no custom transcript links). It replaces
+only generated views that differ from the bundle: `RUN/results.html`, the existing `RUN/conference-view/`
+pages (with its `manifest.json`) and the existing HTML pages of the published behavior-judge build. It never
+changes data or adds or deletes files: `RUN/results.json` and every non-HTML judge file must equal the
+published ones, the conference and judge page sets must equal the published ones, every replaced page must
+carry the shared site theme, and the catalogue entry stays the published one (the catalogue page reads newer
+fields from the run's own records). Raw records, Inspect logs, Inspect View, evaluator records and the
+transcript pages of runs published before October 21 are untouched (the catalogue and run pages no longer
+link those transcript pages). Otherwise it follows the results scope: no LFS, `.gitattributes` unchanged,
+guarded batches with the manifest last, backups under `original/`, receipt, resume and verification.
+
+Rollout (all listed runs; nothing in `runs/RUN/` except the derived `results.html` and `conference-view/`
+changes, and the previous versions are first copied to a backup folder):
+
+```bash
+OUT=runs/phase-b/site-publication-YYYYMMDD
+BUNDLE=runs/phase-b/hf-library-preparation/site-$RUN_ID
+VIEWER=...   # the Inspect View bundle used for this run's publication
+# 1. Re-render the catalogue page (entries byte for byte), plan first.
+python scripts/maintain_hf_run.py --rerender-catalogue
+python scripts/maintain_hf_run.py --rerender-catalogue --commit --backup-dir "$OUT/catalogue" \
+  --receipt "$OUT/catalogue/receipt.json"
+# 2. Per run: re-render the report page from its existing results.json (no data flags needed),
+#    rebuild the conference view, prepare a single-run bundle with the viewer of its publication.
+python scripts/build_results.py --run-dir "runs/$RUN_ID" --rerender-html --overwrite
+python scripts/export_conference.py --run-dir "runs/$RUN_ID"
+python3 scripts/prepare_hf_library.py --run "$RUN_ID=$VIEWER" --output-dir "$BUNDLE"
+python scripts/maintain_hf_run.py --scope site --maintain-run "$RUN_ID" --bundle "$BUNDLE"   # plan only
+python scripts/maintain_hf_run.py --scope site --maintain-run "$RUN_ID" --bundle "$BUNDLE" --commit \
+  --backup-dir "$OUT/$RUN_ID/attempt-1" --receipt "$OUT/$RUN_ID/attempt-1/maintenance-receipt.json"
+# 3. Check the hosted pages at the final revision.
+python scripts/verify_hosted.py --run "$RUN_ID" --revision "$REVISION" --bundle "$BUNDLE"
+```
+
+The plan's `evaluator` block adds `judge_pages` (count, `file_sets_equal`, replaced) and
+`results_json_unchanged: true`; `catalogue.files` is only `archive-manifest.json` and `entry_diff` is empty.
+
 Hosted Inspect links (October 20, 2026). HF stores each run's `.eval` logs (25 to 60 MB) as LFS/Xet
 and serves them through a same-origin redirect to its CDN (which allows CORS and byte ranges). Inspect
 View fetches logs with `redirect: "error"`, so the hosted viewer showed "Failed to fetch". The Space
@@ -470,6 +512,15 @@ otherwise it follows the results scope (no LFS, `.gitattributes` unchanged, cata
 resume and verification). Prepare each run's bundle with the viewer of its original publication and run
 it per run, plan first, as for the other scopes. Published `results.html` pages still link `inspect/`
 until their reports are regenerated and republished.
+
+No raw log links (site-nologs, October 21, 2026). The "Inspect logs" / "Inspect log N" links were only
+downloads, so no page shows them any more: the catalogue rows and compare view hide them
+(`catalogue_page.hidden_link`), and `results.html` no longer links `RUN/inspect/*.eval` from its tabs or
+Records line. Catalogue entries keep the links as data, so published entries survive regeneration
+unchanged; every `.eval` file and all of Inspect View stay published. To update live pages, re-render the
+catalogue with `maintain_hf_run.py --rerender-catalogue --commit` (index.html only, which also carries the
+compare view), then regenerate each run's `results.html` and replace it per run with the site scope (or
+`--scope results`). `verify_hosted.py` fails a served page that still links a raw `RUN/inspect/*.eval`.
 
 ## Incident report outputs
 
@@ -551,6 +602,11 @@ conference view and a short live summary; it does not publish the custom transcr
 (`export_transcripts.py` stays in the repository for local use). `scripts/live_mirror.py` runs on the
 operator's own computer, never on a VM, with the operator's own gcloud login and HF login
 (`pip install -e '.[publication]'`, `hf auth login`):
+
+Start it from the operator's computer with every launch, as soon as the supervisor has started the run
+(docs/gcp-vm.md, "Supervise an authorized run unattended"), naming the launch's VM; it keeps running across
+runs, mirrors whatever is running on the named VMs and stops mirroring a run after its final pass. Leave it in
+its own terminal (or `tmux new -s live-mirror`) and stop it with Ctrl-C when no run is going:
 
 ```bash
 PYTHONPATH=src .venv/bin/python scripts/live_mirror.py --vm collab-vm-1 --vm owner-vm
@@ -909,3 +965,21 @@ exactly the 7,114 run and catalogue files, and `scripts/verify_hosted.py` passed
 GLM's judge report and evidence browser and `gemini10`. The Space then held 7,117 files. Receipts and
 backups are in the ignored `runs/phase-b/hf-library-preparation/snapshot-archives-20261021/` directory and
 next to the two bundles.
+
+The new site (owner request, October 21, 2026: run list and compare view, run page summary card and tabs,
+light/dark theme, phone layout, no custom transcript viewer) was rolled out with the site scope after the
+other workflow published the four `owner-*-20261021` runs and archived older runs' loose snapshot files into
+`snapshots.tar.gz`. The published catalogue page was already the current generator's output (no re-render
+needed), and the four owner runs were published with the current generators (site plans: 0 uploads). The four
+older listed runs were updated in sequence from base revision `3b1420e8004a85d2f35a3e4d24e033f1e9c8b88d`:
+pilot (`2a136c91720589c3851dc52dd560c20fae3cd7a9`, 163 uploads), baseline8g100
+(`8837561b30f689b59df49523b9ca3ee2a3c201c2`, 555), cache100 (`5d00cbeb7aa8cd4f4b66a0a872e126b45c353c8e`, 588,
+including 16 judge pages) and gemini10 (`ca19ca0a320dc096ca296af202dc0143fe472715`, 1,677, including 11 judge
+pages). Each replaced `results.html` (re-rendered from the unchanged `results.json`), the conference-view pages
+and the judge HTML pages, with the archive manifest last; every receipt is `verified` against its base with the
+7,117-file inventory unchanged, `.gitattributes` unchanged and catalogue entries unchanged. `baseline100` stays
+unlisted and was not touched. At the final revision `scripts/verify_hosted.py` checked every replaced HTML page
+of the four runs (private, regular file, bundle bytes, HTTP 200 inline HTML with exact stored bytes) and the
+catalogue and one owner run's default pages. These are SDK/HTTP checks, not interactive browser tests. Plans,
+receipts, backups of the replaced files, hosted checks and the local copies of the previous derived views are in
+the ignored `runs/phase-b/site-publication-20261021/` directory.
