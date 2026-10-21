@@ -702,6 +702,8 @@ def main(argv=None):
         if source.is_symlink() or not source.is_file():
             raise SystemExit(f'No results.json to re-render: {source}')
         page = render(json.loads(source.read_text(encoding='utf-8')), args.title, inspect_logs(run))
+        if has_incident_report(run):  # same navigation as a full build
+            page = add_incident_tab(page)
         target = (args.output_dir or run).resolve() / 'results.html'
         if (target.exists() or target.is_symlink()) and not args.overwrite:
             raise SystemExit(f'Refusing to replace existing {target} (pass --overwrite or --output-dir)')

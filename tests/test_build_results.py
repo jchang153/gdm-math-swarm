@@ -220,6 +220,18 @@ class BuildResultsTest(unittest.TestCase):
         self.assertNotIn('transcripts/', page)
         self.assertEqual(page, build_results.render(json.loads(data_bytes), None, build_results.inspect_logs(run)))
 
+    def test_rerender_html_adds_incident_tab_when_report_exists(self):
+        run = make_run(self.tmp.name)
+        generate(run)
+        incident = run / 'analysis' / 'incident'
+        incident.mkdir(parents=True)
+        (incident / 'report.html').write_text('<!doctype html><title>Incident</title>')
+        with contextlib.redirect_stdout(io.StringIO()):
+            build_results.main(['--run-dir', str(run), '--rerender-html', '--overwrite'])
+        page = (run / 'results.html').read_text()
+        self.assertIn('analysis/incident/report.html', page)
+        self.assertIn('Incident report', page)
+
     def test_ledger_counts_only_this_runs_requests(self):
         run = make_run(self.tmp.name)
         ledger = Path(self.tmp.name) / 'ledger.sqlite'
