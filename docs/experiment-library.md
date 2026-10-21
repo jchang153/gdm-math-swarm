@@ -27,8 +27,10 @@ and analyses and uses their own provider key, never the user's (docs/plan.md,
 "Collaborator budgets and keys"); they record that decision in docs/plan.md before
 any paid call, and the ledger enforces the cap they set.
 
-The static app contains the experiment catalogue, per-run reports, HTML transcripts,
-native Inspect View, and original run records. Inspect View renders the saved
+The static app contains the experiment catalogue, per-run reports, the conference
+view, native Inspect View (where agent transcripts are read), and original run records.
+Runs published before October 21, 2026 also carry their custom HTML transcript pages;
+the site no longer links them. Inspect View renders the saved
 Inspect logs; it does not run or judge agents. The independent evaluator records
 remain separate from conference acceptance. No VM, Docker, model key or inference
 is required to browse. Local originals and host ledger backups are retained.
@@ -56,8 +58,8 @@ All in `scripts/`; each is documented in its own `--help` and below.
   see "Near-live mirror" below.
 - `verify_hosted.py`: read-only check, at a given Space revision, that a published run's pages are
   stored as regular files and served as HTML (not LFS downloads) with their exact stored bytes.
-- `site_style.py`: the shared look of every generated page (catalogue, report, transcripts,
-  conference). Generators write colours as its `var(--...)` tokens and pass finished pages through
+- `site_style.py`: the shared look of every generated page (catalogue, report, conference, live
+  summary; also the local-only transcript export). Generators write colours as its `var(--...)` tokens and pass finished pages through
   `themed()`, which adds light/dark tokens following `prefers-color-scheme`, a corner Theme toggle
   (auto/light/dark, remembered per browser in `localStorage` only) and a phone layout (16px gutters,
   no page-wide horizontal scroll; wide tables scroll inside themselves). It loads nothing external
@@ -84,7 +86,11 @@ not create experiments, run proof evaluation, or invent a results report: first
 complete the run and save its checked `results.json` and `results.html`, preserving
 run-specific spending separately from the cumulative ledger and any uncertain holds.
 
-Export the completed run with `python scripts/export_transcripts.py --run-dir runs/RUN_ID`. Then write the
+Agent transcripts are read in Inspect View (owner, October 21, 2026). `scripts/export_transcripts.py`
+still writes an offline `RUN/transcripts/` view for local use, but `prepare_hf_library.py` leaves that
+folder out of every bundle and refuses a page that still links it (an older `results.html` or
+conference view: regenerate it). `--include-transcript-export` keeps the folder only to maintain the
+transcript pages of a run published before then (`maintain_hf_run.py --scope transcripts`). Write the
 report with `scripts/build_results.py`, which `prepare_hf_library.py` and `publish_hf_library.py` require
 (they refuse a run without `results.json` and `results.html`). The publication steps are:
 
@@ -142,9 +148,9 @@ Also run `python3 scripts/export_conference.py --run-dir runs/RUN_ID` to generat
 `conference-view/index.html` and per-file captured-version pages before preparing
 the upload bundle. This offline exporter reads the saved conference database,
 cross-checks its events against JSONL, binds independent evaluations to exact
-submission identity/source hashes, verifies library/snapshot hashes, and links
-timeline messages to existing transcript anchors where available. It uses no
-model calls or running containers.
+submission identity/source hashes and verifies library/snapshot hashes. Its header
+links the run's Inspect View for agent transcripts; records carry no links to the
+custom transcript pages. It uses no model calls or running containers.
 
 The conference tabs show board posts, participant-grouped private DMs, shared
 library revisions, submissions with conference and independent judgments,
@@ -153,7 +159,7 @@ timeline. Search, agent/task/type filters and pagination operate locally in the
 page. Empty sections are explicit. Board posts have no recorded reply relationship;
 the viewer does not invent threads. Untimed events remain unknown. File captures
 are observations rather than a complete edit history, and were not automatically
-available to peers. SDK session JSONL is covered by the agent transcript viewer;
+available to peers. SDK sessions are read in Inspect View;
 task templates and build manifests are omitted from the private working-file list.
 
 Conference exports compress their embedded JSON records with gzip/base64 and

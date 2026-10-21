@@ -98,28 +98,8 @@ def export(run):
         if row['kind'] != event['kind'] or json.loads(row['payload']) != event['payload']:
             raise ValueError('Database/event-log content mismatch')
 
-    # Bind existing transcript message IDs to their real HTML anchors.
-    message_links = {}
-    for file in (run / 'transcripts').glob('agent-*.html'):
-        for match in re.finditer(r'<article id="(message-\d+)">(?:(?!</article>).)*?<small>Message ID: (.*?)</small>', file.read_text(), re.S):
-            message_links[file.stem, html.unescape(match[2])] = '../transcripts/' + file.name + '#' + match[1]
-    call_links = {}
-    for entry in timeline:
-        ref = entry.get('ref', {})
-        target = message_links.get((entry.get('agent_id'), ref.get('message_id')))
-        if target:
-            for call in entry.get('tool_calls', []):
-                call_links[call['id']] = target
-            if entry.get('call_id'):
-                call_links[entry['call_id']] = target
-
-    def transcript(agent, call_id=None):
-        if call_id in call_links:
-            return call_links[call_id]
-        if agent and re.fullmatch(r'agent-\d+', agent) and (run / 'transcripts' / (agent + '.html')).exists():
-            return '../transcripts/' + agent + '.html'
-        return None
-
+    # No per-record transcript links: agent transcripts are read in Inspect View (owner, October 21,
+    # 2026); the custom transcript pages (scripts/export_transcripts.py) are local-only and unpublished.
     def record(category, identity, title, text, timestamp, agents=(), task='', detail=None, links=None):
         return dict(category=category, id=identity, title=title, text=text or '', timestamp=timestamp,
                     agents=[a for a in agents if a], task=task or '', detail=detail,
@@ -128,8 +108,7 @@ def export(run):
     records = []
     for row in tables['posts']:
         records.append(record('board', 'post-' + str(row['post_id']), row['intent_type'], row['message'], row['posted_at'],
-                       [row['agent_id']], detail={'tags': json.loads(row['tags'])},
-                       links=[['Agent transcript', transcript(row['agent_id'])]]))
+                       [row['agent_id']], detail={'tags': json.loads(row['tags'])}))
     # The board stores posts, not a reply graph. Do not invent reply threads.
     conversations = defaultdict(list)
     for row in tables['messages']:
@@ -137,16 +116,15 @@ def export(run):
     for peers, rows in sorted(conversations.items()):
         rows.sort(key=lambda r: (r['sent_at'], r['message_id']))
         records.append(record('dms', 'dm-' + '-'.join(peers), ' ↔ '.join(peers), '', rows[0]['sent_at'], peers,
-                       detail={'messages': rows}, links=[['Transcript ' + a, transcript(a)] for a in peers]))
+                       detail={'messages': rows}))
     for row in tables['feedback']:
         records.append(record('feedback', 'feedback-' + str(row['feedback_id']), 'Organizer feedback', row['message'],
-                       row['submitted_at'], [row['agent_id']], links=[['Agent transcript', transcript(row['agent_id'])]]))
+                       row['submitted_at'], [row['agent_id']]))
     for row in tables['library']:
         if hashlib.sha256(row['content'].encode()).hexdigest() != row['sha256']:
             raise ValueError('Library source hash mismatch')
         records.append(record('library', 'library-' + str(row['artifact_id']), row['path'], row['content'], row['published_at'],
-                       [row['author']], row['task_id'], detail={k: v for k, v in row.items() if k != 'content'},
-                       links=[['Author transcript', transcript(row['author'])]]))
+                       [row['author']], row['task_id'], detail={k: v for k, v in row.items() if k != 'content'}))
     # A run whose independent evaluation has not run yet (e.g. refused) shows every submission as
     # "not independently evaluated" and records the evaluation source as absent.
     evaluations_path = run / 'evaluations/evaluations.jsonl'
@@ -166,9 +144,9 @@ def export(run):
                                             if evaluation else {'validity': 'not independently evaluated'})
         records.append(record('submissions', sid, sid + ' · ' + row['outcome'], row['source'], row['submitted_at'],
                        [row['agent_id']], row['task_id'], detail=detail,
-                       links=[['Agent transcript', transcript(row['agent_id'])], ['Evaluation records', '../evaluations/evaluations.jsonl']]))
+                       links=[['Evaluation records', '../evaluations/evaluations.jsonl']]))
 
-    # Browse only workspace working files and notes; SDK session JSONL already has a transcript viewer.
+    # Browse only workspace working files and notes; SDK sessions are in the Inspect logs.
     versions = defaultdict(list)
     for line_number, entry in enumerate(runtime, 1):
         p = entry.get('payload', {})
@@ -209,15 +187,12 @@ def export(run):
         records.append(record('files', identity, path, f'{len(rows)} captured version(s). {note}', rows[-1]['timestamp'], [agent],
                        detail={'captures': len(rows), 'empty': all(not r['content'] for r in rows),
                                'capture_modes': dict(Counter(r['mode'] for r in rows))},
-                       links=[['View captured versions', filename], ['Agent transcript', transcript(agent)]]))
+                       links=[['View captured versions', filename]]))
 
     for entry in timeline:
         agent = entry.get('agent_id'); ref = entry.get('ref', {})
-        target = message_links.get((agent, ref.get('message_id'))) or transcript(agent, entry.get('call_id'))
-        if entry.get('source') == 'conference':
-            target = transcript(agent, entry.get('call_id'))
         text = entry.get('summary') or ''
-        # Preserve provenance and useful fields; full tool outputs remain in original transcripts.
+        # Preserve provenance and useful fields; full tool outputs remain in the Inspect logs.
         detail = {'source': entry['source'], 'reference': ref, 'conference_seq': entry.get('conference_seq'),
                   'ids': entry.get('ids', {})}
         if entry['source'] != 'inspect':
@@ -225,8 +200,7 @@ def export(run):
         payload = entry.get('payload', {})
         task = payload.get('problem_id') or payload.get('task_id') or entry.get('ids', {}).get('problem_id') or ''
         records.append(record('activity', 'activity-' + str(entry['order']), entry['kind'], text,
-                       entry.get('timestamp'), [agent], task=task, detail=detail,
-                       links=[['Transcript message' if (agent, ref.get('message_id')) in message_links else 'Agent transcript', target]]))
+                       entry.get('timestamp'), [agent], task=task, detail=detail))
     counts = {category: 0 for category in ('board', 'dms', 'library', 'submissions', 'feedback', 'files', 'activity')}
     counts.update(Counter(r['category'] for r in records))
     warnings = ['Private files are researcher-only and were not automatically shared with peers.',
@@ -240,7 +214,7 @@ def export(run):
                 conference_events=len(events), timeline_entries=len(timeline), captured_files=len(versions))
     # Script-safe JSON; agent-controlled strings are rendered only with textContent.
     encoded = json.dumps(data, ensure_ascii=True).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
-    body = '''<p><a href="../../index.html">Experiment library</a> · <a href="../results.html">Run report</a> · <a href="../transcripts/index.html">Agent transcripts</a></p>
+    body = '''<p><a href="../../index.html">Experiment library</a> · <a href="../results.html">Run report</a> · <a href="../inspect-view/index.html">Agent transcripts (Inspect View)</a></p>
 <h1>Inside the conference</h1><p id="run" class="muted"></p>
 <p class="banner">Researcher view: private conversations and captured private files appear here alongside public conference activity. Agents did not have access to this combined view.</p>
 <nav id="tabs" aria-label="Conference sections"></nav><p id="intro"></p>

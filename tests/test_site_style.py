@@ -1,5 +1,6 @@
 """Every generated library page carries the shared light/dark theme and phone layout."""
 from pathlib import Path
+import json
 import re
 import sys
 import tempfile
@@ -126,6 +127,48 @@ class GeneratedPagesTest(unittest.TestCase):
                 self.assertIn('id="private-space-navigation"', text)
             for page in inspect:
                 self.assertNotIn(MARKER, page.read_text())
+
+
+class TranscriptExportNotPublishedTest(unittest.TestCase):
+    """Owner, October 21, 2026: agent transcripts are read in Inspect View; the custom export stays local."""
+
+    def prepare(self, root, *extra):
+        from unittest.mock import patch
+        sys.path.insert(0, str(ROOT / 'tests'))
+        import prepare_hf_library
+        output = root / ('bundle' + str(len(list(root.glob('bundle*')))))
+        argv = ['prepare_hf_library.py', '--runs-dir', str(root / 'runs'), '--output-dir', str(output),
+                '--run', f'r1={self.viewer}', *extra]
+        with patch.object(sys, 'argv', argv), patch('builtins.print'):
+            prepare_hf_library.main()
+        return output
+
+    def test_prepare_leaves_out_the_transcript_export_and_refuses_pages_linking_it(self):
+        sys.path.insert(0, str(ROOT / 'tests'))
+        from test_judge_publication import make_run, make_viewer
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.viewer = make_viewer(root)
+            make_run(root / 'runs', 'r1')
+            run = root / 'runs' / 'r1'
+            (run / 'transcripts').mkdir(exist_ok=True)
+            (run / 'transcripts' / 'index.html').write_text('<!doctype html><title>t</title>')
+            (run / 'conference-view' / 'index.html').write_text('<p><a href="inspect-view">x</a></p>')
+            output = self.prepare(root)
+            self.assertFalse((output / 'r1' / 'transcripts').exists())
+            manifest = json.loads((output / 'archive-manifest.json').read_text())
+            self.assertFalse([n for n in manifest['files'] if '/transcripts/' in n])
+            # Kept only on request, for maintaining runs published with the export.
+            self.assertTrue((self.prepare(root, '--include-transcript-export') / 'r1/transcripts/index.html').is_file())
+            (run / 'conference-view' / 'index.html').write_text('<a href="../transcripts/index.html">old</a>')
+            with self.assertRaisesRegex(ValueError, 'links the unpublished transcript export'):
+                self.prepare(root)
+
+    def test_generated_pages_do_not_link_transcript_pages(self):
+        import build_results
+        import export_conference
+        for module in (build_results, export_conference):
+            self.assertNotRegex(Path(module.__file__).read_text(), r'transcripts/(?:index|agent)')
 
 
 if __name__ == '__main__':

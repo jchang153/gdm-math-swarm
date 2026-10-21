@@ -74,7 +74,7 @@ class PublicationTests(unittest.TestCase):
         self.bundle = self.root / 'bundle'
         self.bundle.mkdir()
         self.new = entry('a-new', 20)
-        for name in ('results.json', 'results.html', 'transcripts/index.html',
+        for name in ('results.json', 'results.html',
                      'conference-view/index.html', 'inspect-view/index.html',
                      'inspect-view/logs/listing.json'):
             f = self.bundle / 'a-new' / name
