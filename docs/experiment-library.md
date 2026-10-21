@@ -46,6 +46,9 @@ All in `scripts/`; each is documented in its own `--help` and below.
   after the run is recorded in the tracked `data/library-unlisted.json`
   (run, date, reason). `build_experiment_index.py` and `publish_hf_library.py` leave recorded runs out
   of the local and hosted lists; `baseline100-20261015T191545Z` is unlisted (October 20, 2026).
+  `--rerender-catalogue` (no `--maintain-run`, `--bundle` or `--scope`) rebuilds only `index.html`
+  from the published `experiments.json` after a change to the catalogue page itself; the current
+  generator must reproduce `experiments.json` byte for byte, and no entry or run file changes.
 - `monitor_run.py`: read-only live progress of a run on its VM (elapsed time, spending against the
   launch baseline, requests, cache, restarts, submissions and solved tasks).
 - `verify_hosted.py`: read-only check, at a given Space revision, that a published run's pages are
@@ -490,6 +493,29 @@ preserves existing Space configuration and run files, refuses conflicting run ID
 requires a private Space, verifies bundle hashes, and screens obvious credential
 filenames and token patterns (including compressed Inspect logs). Pattern scanning
 is not a universal secret-detection guarantee; review new data sources before upload.
+
+### Catalogue page
+
+`build_experiment_index.py` renders the run list and compare view (owner request, October 21,
+2026; vanilla CSS/JS, no external resources, light and dark mode, cards below 760 px). Columns:
+start (newest first), model with condition and route, prompt variant, agents, duration, accepted /
+genuine tasks (weak operational acceptance vs. distinct independently genuine statements), settled
+pilot cost and the behavior judge's cohort counts or "not run". Rows filter by text, model, prompt
+variant and judge outcome and sort by any column; ticking 2-4 runs opens a side-by-side comparison
+(solves, cost, cost per genuine task, agent exits, judge cohorts), shareable as `#compare=RUN,RUN`.
+The catalogue links no custom transcript pages (owner, October 21, 2026: agent transcripts are
+read in Inspect View); new entries carry no `Transcripts` link, and the page hides that link in
+entries published earlier (the entries themselves are unchanged). `export_transcripts.py` remains
+for local use.
+Each new entry carries a derived `summary` (`prompt_variant`, `accepted_tasks` from
+`operationally_accepted_tasks`, and `judge`: only the cohort counts of a published
+`analysis/judge/report.json`, no finding text). Entries published earlier have none: the hosted page
+reads the same fields from that run's published `results.json` and judge `report.json` in the
+browser (same-origin; nothing changes in the entry), and transcripts maintenance compares such an
+entry without the bundle's summary. The page is a deterministic function of the entries. After a
+page change, the published `index.html` no longer matches the generator, so maintenance scopes that
+regenerate the catalogue refuse until `maintain_hf_run.py --rerender-catalogue --commit` (or the
+next publication) rebuilds it.
 
 Uploads use guarded `HfApi.create_commit` batches of at most 120 files and roughly
 4 MB, with larger files alone. The catalogue and manifest are committed last.

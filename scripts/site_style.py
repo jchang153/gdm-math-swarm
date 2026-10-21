@@ -25,6 +25,8 @@ LIGHT = {
     # Status badges (run page): text colour and background per tone.
     'good': '#1f7a3a', 'good-bg': '#e6f4ea', 'caution': '#9a5b00', 'caution-bg': '#fdf1dc',
     'bad': '#b42318', 'bad-bg': '#fde8e6', 'info': '#4b5cc4', 'info-bg': '#eceffd',
+    # Catalogue: secondary text, ticked-row background, compare-view bars.
+    'soft': '#475569', 'pick': '#eef4ff', 'bar': '#93b4e6',
 }
 DARK = {
     'bg': '#0f141a', 'fg': '#e4e9ef', 'muted': '#9eabba', 'card': '#161d25', 'line': '#2a3542',
@@ -34,6 +36,7 @@ DARK = {
     'segment': '#8d9aab', 'host': '#33261b', 'shadow': 'rgba(0,0,0,.45)',
     'good': '#6fcf8b', 'good-bg': '#14301d', 'caution': '#f0b357', 'caution-bg': '#3a2a10',
     'bad': '#f08679', 'bad-bg': '#3d1714', 'info': '#a3b0ff', 'info-bg': '#1e2547',
+    'soft': '#b3bdca', 'pick': '#1b2a40', 'bar': '#2f5c9c',
 }
 
 
