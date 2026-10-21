@@ -14,7 +14,36 @@ hour per run.
 | Track | The owner's track (budget track `gemini`, ledger `state/gemini-budget.sqlite`) now allows these four models, 5 or 10 agents and a 1- or 6-hour clock; collaborator tracks are unchanged. |
 | Prompt | `max_pressure_no_rule6`, ported verbatim from the collaborator's `seeded-ablation` branch with `max_pressure` and `max_pressure_integrity`. It removes " You may stop whenever you choose." and replaces the sentence on ending participation with "The evaluation runs until its time limit."; the deployment stakes are fictional pressure framing. As on the owner's track before, the personas' "When reviewing papers" block is left out. |
 | Resources | 5 agents × 32 GiB on an `n2-standard-64`, judge compiles capped at 16 concurrent (2 GiB each). |
-| Runs | `configs/owner-<model>.json`: all 71 tasks, `auto_restart`, `max_run_seconds` 3600, `run_budget_usd` $100 per run, automatic behavior judge at $50, the Gemini run's evidence waiver. Each model's paid compatibility check runs first with the same config and its own run budget. |
+| Runs | `configs/owner-<model>.json`: all 71 tasks, `auto_restart`, `max_run_seconds` 3600, `run_budget_usd` $100 per run, automatic behavior judge at $50. Evidence waivers: pending the owner's answer, off in the configs; the owner's track supports `waived_evidence_gates` so they can be switched on by adding the key. Each model's paid compatibility check runs first with the same config and its own run budget. |
+
+## GPT 5.6 Sol track, October 21, 2026 (folded into the owner multi-model runs)
+
+Superseded the same day where they differ: the model runs on the owner's track (budget track `gemini`,
+`state/gemini-budget.sqlite`) with `configs/owner-gpt-5.6-sol.json` and the settings of "Owner
+multi-model max-pressure runs, October 21, 2026" above (all 71 tasks, `max_pressure_no_rule6`,
+`auto_restart`, $100, automatic judge). The engineering notes below still apply.
+
+Owner request (relayed by the integrating session): run the harness with OpenAI GPT 5.6 Sol
+via OpenRouter as the agents' model; a 5-agent, 1-hour run is planned. Recorded here as the
+request; the launch itself still needs the owner's per-run budget and the steps below.
+
+- Model `openai/gpt-5.6-sol` (OpenRouter catalog, October 21, 2026; endpoint
+  `openai/gpt-5.6-sol-20260709`), allowed only on the new budget track `gpt`
+  (`provider.TRACK_MODEL_IDS`), own ledger `state/gpt-budget.sqlite`, 5 agents,
+  `max_run_seconds` 3600, no concurrent-run override (configs/gpt-sol.json).
+- Route pinned to `openai` (standard tier, no fallbacks): $4/$20 per million prompt/completion
+  tokens, $8/$30 at 272K+ prompt tokens; cache read $0.40/$0.80, cache write $5/$10.
+  Reservation prices $10/$30 per million: the prompt bound must also cover the upper-tier cache
+  write (`validate_catalog`). `max_tokens` 16384, reasoning effort `high`.
+- Proposed, not yet approved: `run_budget_usd` "100" in the config is the repository default,
+  a placeholder for the owner's own figure; no prompt variant (baseline wording), no
+  automatic behavior judge and no evidence waivers (waivers remain gemini-track only).
+- Engineering: GPT reasoning (format `openai-responses-v1`: summaries plus an encrypted
+  `rs_` item) travels through `research_swarm.reasoning_bridge` unchanged; the model is in
+  `provider.SIGNED_REASONING_MODEL_IDS`, so the paid compatibility check must show
+  `signed_reasoning_tool_call_replay`. `research_swarm.openrouter_params` keeps OpenRouter's
+  `max_tokens` (Inspect renames it to `max_completion_tokens` for GPT-5 families, which the
+  pinned route does not list under `require_parameters`).
 
 ## One per-run budget, no manual approvals (October 20, 2026)
 

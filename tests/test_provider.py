@@ -181,3 +181,62 @@ class Gemini4ArgonModelTests(unittest.TestCase):
         tiered = self.catalog(overrides=[{"min_prompt_tokens": 200000, "prompt": "0.000004", "completion": "0.000015"}])
         with self.assertRaisesRegex(ValueError, "time-dependent"):
             validate_catalog(tiered, settings)
+
+class GptModelTests(unittest.TestCase):
+    """GPT 5.6 Sol on the owner's track (docs/plan.md, "Owner multi-model max-pressure runs, October 21, 2026")."""
+    CONFIG = Path(__file__).resolve().parents[1] / "configs" / "owner-gpt-5.6-sol.json"
+
+    def catalog(self):
+        # OpenRouter catalog, October 21, 2026: openai/gpt-5.6-sol on the standard "openai" route
+        # $4/$20 per million prompt/completion tokens, $8/$30 at >= 272K prompt tokens (cache read
+        # $0.40/$0.80, cache write $5/$10); the flex tier is cheaper, Azure lists max_completion_tokens.
+        def endpoint(tag, scale, parameter="max_tokens"):
+            def price(value):
+                return str(Decimal(value) * scale)
+            return {"tag": tag, "status": 0, "context_length": 1050000, "max_completion_tokens": 128000,
+                    "supported_parameters": ["include_reasoning", parameter, "reasoning", "reasoning_effort",
+                                             "response_format", "seed", "structured_outputs", "tool_choice",
+                                             "tools", "verbosity"],
+                    "pricing": {"prompt": price("0.000004"), "completion": price("0.00002"),
+                                "input_cache_read": price("0.0000004"), "input_cache_write": price("0.000005"),
+                                "discount": 0,
+                                "overrides": [{"min_prompt_tokens": 272000, "prompt": price("0.000008"),
+                                               "completion": price("0.00003"),
+                                               "input_cache_read": price("0.0000008"),
+                                               "input_cache_write": price("0.00001")}]}}
+        return {"data": {"id": "openai/gpt-5.6-sol", "endpoints": [
+            endpoint("openai/flex", Decimal("0.5")), endpoint("openai", Decimal(1)),
+            endpoint("azure", Decimal(1), "max_completion_tokens")]}}
+
+    def test_config_settings_cover_the_upper_tier_and_cache_writes_on_the_pinned_route(self):
+        import json
+        from research_swarm.budget import BUDGET_TRACKS
+        from research_swarm.provider import (GPT_SOL_MODEL_ID, KNOWN_MODEL_IDS, SIGNED_REASONING_MODEL_IDS,
+                                             TRACK_MODEL_IDS)
+        config = json.loads(self.CONFIG.read_text())
+        settings = settings_from_config(config)
+        self.assertEqual((settings.model_id, settings.provider_route), (GPT_SOL_MODEL_ID, "openai"))
+        self.assertEqual((settings.max_tokens, settings.reasoning_effort), (16384, "high"))
+        self.assertEqual(validate_catalog(self.catalog(), settings)["tag"], "openai")
+        options = settings.request_options()
+        self.assertEqual(options["provider"], {"only": ["openai"], "allow_fallbacks": False,
+                                               "require_parameters": True})
+        self.assertEqual(options["reasoning"], {"effort": "high", "exclude": False})
+        self.assertIn(GPT_SOL_MODEL_ID, TRACK_MODEL_IDS["gemini"])  # the owner's track
+        self.assertNotIn(GPT_SOL_MODEL_ID, TRACK_MODEL_IDS["ablation"])
+        self.assertIn(GPT_SOL_MODEL_ID, KNOWN_MODEL_IDS)
+        # Encrypted reasoning must be replayed with tool calls: the compatibility check requires it.
+        self.assertIn(GPT_SOL_MODEL_ID, SIGNED_REASONING_MODEL_IDS)
+        self.assertEqual(config["budget_track"], "gemini")
+        self.assertIn(config["agent_count"], BUDGET_TRACKS["gemini"]["agent_counts"])
+        self.assertEqual((config["max_connections"], config["max_run_seconds"]), (5, 3600))
+        # The upper-tier prompt price ($8/M) alone does not cover the upper-tier cache write ($10/M).
+        lower = ProviderSettings(**{**frozen_fields(settings), "prompt_usd_per_token": "0.000008"})
+        with self.assertRaisesRegex(ValueError, "input_cache_write"):
+            validate_catalog(self.catalog(), lower)
+        with self.assertRaises(ValueError):  # base-tier output price
+            validate_catalog(self.catalog(), ProviderSettings(**{**frozen_fields(settings),
+                                                                 "output_usd_per_token": "0.00002"}))
+        # A route without max_tokens (Azure lists only max_completion_tokens) is refused.
+        with self.assertRaises(ValueError):
+            validate_catalog(self.catalog(), ProviderSettings(**{**frozen_fields(settings), "provider_route": "azure"}))

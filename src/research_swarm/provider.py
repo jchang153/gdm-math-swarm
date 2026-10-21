@@ -19,7 +19,11 @@ GEMINI_MODEL_ID = "google/gemini-3.1-pro-preview"
 GEMINI4_MODEL_ID = "google/gemini-4-argon"
 # Claude Opus 5.5: route "anthropic" (first party), docs/prompt-caching.md.
 CLAUDE_MODEL_ID = "anthropic/claude-opus-5.5"
-OWNER_MULTIMODEL_IDS = (GEMINI4_MODEL_ID, CLAUDE_MODEL_ID, "openai/gpt-5.6-sol", GLM_MODEL_ID)
+# GPT 5.6 Sol: reasoning comes back as OpenRouter reasoning_details in format openai-responses-v1
+# (summaries plus an encrypted reasoning item), which the reasoning bridge carries through Claude
+# Code's replay; research_swarm.openrouter_params keeps the route's max_tokens.
+GPT_SOL_MODEL_ID = "openai/gpt-5.6-sol"
+OWNER_MULTIMODEL_IDS = (GEMINI4_MODEL_ID, CLAUDE_MODEL_ID, GPT_SOL_MODEL_ID, GLM_MODEL_ID)
 GEMINI_MODEL_IDS = (GEMINI_MODEL_ID, *OWNER_MULTIMODEL_IDS)
 # Models each budget track (budget.BUDGET_TRACKS) may run; the launch gates check this table.
 # Budget track "gemini" is the owner's track (its name predates the multi-model runs).
@@ -30,7 +34,7 @@ KNOWN_MODEL_IDS = tuple(dict.fromkeys(m for ids in ((MODEL_ID,), *TRACK_MODEL_ID
 # encrypted payload, e.g. Gemini thought signatures) and must be passed back on later turns with
 # tool calls. Their live compatibility check must show such a replay accepted
 # (``signed_reasoning_tool_call_replay``, scripts/compat_check.py).
-SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID, GEMINI4_MODEL_ID)
+SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID, GEMINI4_MODEL_ID, GPT_SOL_MODEL_ID)
 # Anthropic thinking blocks are signed too (reasoning_details format anthropic-claude-v1).
 SIGNED_REASONING_MODEL_IDS += (CLAUDE_MODEL_ID,)
 # Anthropic models get OpenRouter's top-level automatic prompt caching (request_options). Inspect
@@ -75,7 +79,7 @@ class ProviderSettings:
         are covered by FRAMING_TOKEN_ALLOWANCE. Capped at the route context length.
         The same argument is assumed for the other tracks' models (GLM's BPE vocabulary;
         Gemini's SentencePiece vocabulary with byte fallback, whose pieces also cover at
-        least one byte each). Replayed reasoning, including Gemini's encrypted thought
+        least one byte each; GPT's byte-level o200k BPE). Replayed reasoning, including Gemini's encrypted thought
         signatures, is part of the serialized request and so of the bound. An
         unexpected excess shows up as an estimate_violation, which blocks the scope.
         """

@@ -59,13 +59,6 @@
   "budget_track": "gemini",
   "prompt_variant": "max_pressure_no_rule6",
   "auto_restart": true,
-  "waived_evidence_gates": [
-    "evaluator",
-    "runtime-e2e",
-    "runtime-isolation",
-    "runtime-capacity"
-  ],
-  "evidence_waiver_approval": "Owner multi-model runs (docs/plan.md, \"Owner multi-model max-pressure runs, October 21, 2026\"): the evaluator, runtime-e2e, runtime-isolation and runtime-capacity evidence was recorded for other agent counts and memory limits (5 agents at 32 GiB here); waived as for the owner's Gemini run of October 20, 2026.",
   "auto_behavior_judge": true,
   "behavior_judge_max_usd": 50
 }

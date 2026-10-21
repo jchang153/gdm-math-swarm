@@ -110,7 +110,7 @@ Four configs, one per model, for four parallel 1-hour runs on four VMs (docs/pla
 | `run_budget_usd`, `budget_track` | `"100"`, `gemini` | The run's own budget on the owner's track ledger `state/gemini-budget.sqlite` (one per VM checkout). |
 | `auto_behavior_judge`, `behavior_judge_max_usd` | `true`, 50 | The owner's standing judge decision. |
 | `allow_concurrent_run` | `false` | Each run has its own VM. |
-| `waived_evidence_gates` | evaluator, runtime-e2e, runtime-isolation, runtime-capacity | As the Gemini run: that evidence was measured for other agent counts and memory limits. |
+| `waived_evidence_gates` | absent (off) | Pending the owner's answer. The owner's track already supports it: add `"waived_evidence_gates": ["evaluator", "runtime-e2e", "runtime-isolation", "runtime-capacity"]` (optional note `evidence_waiver_approval`) to switch it on, since that evidence was measured for other agent counts and memory limits. Without it, `runtime-capacity` evidence must match 5 agents at 32 GiB. |
 
 Per VM, before the launch (steps as for the Gemini run above, with `configs/owner-<model>.json`): the images and the Lean evidence must match that VM's images, `freeze_route.py` (unpaid), then the PAID compatibility check `compat_check.py --config configs/owner-<model>.json --max-requests 6` (each model needs its own passing evidence; Argon, Opus and Sol also need `signed_reasoning_tool_call_replay`), then `preflight.py` and `supervise_run.py`.
 

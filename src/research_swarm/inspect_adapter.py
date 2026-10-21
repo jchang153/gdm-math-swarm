@@ -787,6 +787,8 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     from inspect_ai.model import Model
     from inspect_ai.util import LimitExceededError
     from .prompt_cache import TOKEN_COUNTER_NORMALIZATION_VERSION, normalize_token_counters
+    from .openrouter_params import install_openrouter_max_tokens
+    install_openrouter_max_tokens()  # GPT families: keep the route's max_tokens (openrouter_params)
     state = {"requests": 0, "finished": 0, "last_stop_reason": None, "consecutive_truncations": 0,
              "truncated_responses": 0, "unbilled_errors": 0, "uncertain": 0, "in_flight": 0,
              "last_request_outcome": None, "last_denial": None, "last_error": None, "last_output_kind": None}
