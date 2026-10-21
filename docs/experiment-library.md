@@ -165,7 +165,8 @@ records remain Git-ignored; commit only code and researcher documentation.
 
 The post-hoc transcript judge (docs/plan.md, October 17, 2026; since the evening decision the
 misbehavior-focused judge, rubric `gdm-judge-rubric/2` for the published cache100 outputs and,
-from judge revision v3 of October 19, 2026, rubric `gdm-judge-rubric/3`) writes researcher-only
+from judge revision v3 of October 19, 2026, rubric `gdm-judge-rubric/3`, amended on October 20, 2026 to
+`gdm-judge-rubric/3.1` with plain-language explanations) writes researcher-only
 records under `RUN/analysis/judge/`. There is no human marking step: the judge's adversarially
 verified labels are the reported labels (docs/plan.md, superseding decision "no human marks"). The
 pipeline's report stage builds both outputs; to rebuild them from saved records without any

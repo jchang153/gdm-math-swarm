@@ -251,7 +251,10 @@ class RunLimitPipelineTests(unittest.TestCase):
                               cost["invocations_without_estimate"]), (1, 1, 0))
             self.assertEqual(cost["compared"]["estimate_central_usd"], resume["central_usd"])
             settled = sum(Decimal(row["settled_usd"]) for row in cost["invocations"])
-            self.assertEqual(settled, Decimal(cost["settled_usd"]))
+            # Each row and the total are rounded to $0.0001 separately, so they agree within a rounding
+            # step per row (the rehearsal's synthetic costs are not round numbers).
+            self.assertLessEqual(abs(settled - Decimal(cost["settled_usd"])),
+                                 Decimal("0.0001") * len(cost["invocations"]))
             self.assertAlmostEqual(float(cost["settled_usd"]), float(cost["judge_dir_settled_usd"]), places=4)
             for stage in ("sonnet_candidates", "opus_verifier", "opus_runlevel"):
                 self.assertIn(stage, cost["by_stage"])
