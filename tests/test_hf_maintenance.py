@@ -98,6 +98,9 @@ class Hub:
             raise RuntimeError('simulated upload interruption')
         files = dict(self.files)
         for op in operations:
+            if getattr(op, 'delete', False):
+                del files[op.path_in_repo]
+                continue
             data = op.path_or_fileobj
             files[op.path_in_repo] = Path(data).read_bytes() if isinstance(data, str) else data
             if self.lfs_upload(op.path_in_repo, files[op.path_in_repo]) and not self.tracked(files, op.path_in_repo):

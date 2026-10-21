@@ -56,6 +56,12 @@ def screen(path):
     safe_path(path.name)
     if SECRET.search(path.read_bytes()):
         raise ValueError('Credential-like content detected; upload refused')
+    if path.name.endswith('.tar.gz'):  # a run's snapshot archive (prepare_hf_library.py): screen every member
+        from prepare_hf_library import snapshot_archive_members
+        for name, data in snapshot_archive_members(path.read_bytes()).items():
+            safe_path(name)
+            if SECRET.search(data):
+                raise ValueError('Credential-like content in snapshot archive; upload refused')
     if path.suffix == '.eval':
         try:
             import zipfile_zstd  # noqa: F401; registers Inspect's ZIP method
@@ -95,6 +101,18 @@ def load_bundle(bundle):
         if digest(path.read_bytes()) != info:
             raise ValueError('Bundle checksum mismatch: ' + name)
         screen(path)
+    from prepare_hf_library import SNAPSHOT_ARCHIVE, SNAPSHOT_MANIFEST, SNAPSHOTS_DIR, check_snapshot_archive
+    loose = sorted(n for n in actual if n.split('/')[1:2] == [SNAPSHOTS_DIR])
+    if loose:
+        raise ValueError(f'Bundle has {len(loose)} loose snapshot file(s) (for example {loose[0]}); prepare it again '
+                         'with the current prepare_hf_library.py, which archives them per run')
+    for run in runs:
+        archived = [run + '/' + name in actual for name in (SNAPSHOT_ARCHIVE, SNAPSHOT_MANIFEST)]
+        if any(archived) and not all(archived):
+            raise ValueError(f'{run} needs both {SNAPSHOT_ARCHIVE} and {SNAPSHOT_MANIFEST}')
+        if all(archived):
+            check_snapshot_archive((bundle / run / SNAPSHOT_ARCHIVE).read_bytes(),
+                                   (bundle / run / SNAPSHOT_MANIFEST).read_bytes(), run)
     catalogue = json.loads((bundle / 'experiments.json').read_text())
     if catalogue.get('warnings'):
         raise ValueError('Bundle catalogue has warnings')
