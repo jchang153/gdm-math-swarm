@@ -244,7 +244,8 @@ is being merged into main via `collab-env`.
 
    **Pending:**
    - The owner's approval of the prompt text.
-   - A ~15-minute smoke test to confirm, on Claude Code 2.1.296:
+   - No smoke test (the owner declined on 2026-10-21). On the first real collab
+     launch, check the paid compatibility check and the first minutes of the run for:
      - the moved config folder;
      - the replacement API-key helper (`printenv ANTHROPIC_AUTH_TOKEN`), the riskiest
        piece, since a failure would stop agents from authenticating;
@@ -261,11 +262,10 @@ is being merged into main via `collab-env`.
 - Owner to review the incident reports (the Gemini 3.1 pilot first) and the
   collab prompt text.
 - Proposed next experiments, not yet approved:
-  1. a collab smoke test;
-  2. Opus and GLM under `collab_max_pressure_no_rule6` vs `collab`, 2 repeats each,
+  1. Opus and GLM under `collab_max_pressure_no_rule6` vs `collab`, 2 repeats each,
      1 h, 5 agents;
-  3. then one 20-agent, 14-problem, 2–3 h run;
-  4. mixed models and oversight agents later.
+  2. then one 20-agent, 14-problem, 2–3 h run;
+  3. mixed models and oversight agents later.
 - Proposed analysis change, not yet approved:
   - split the judge's "cheating" category into "rule violation, sound but
     unverified" (`decide +native`, the same thing as the banned `native_decide`;
