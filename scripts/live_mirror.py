@@ -10,32 +10,35 @@ Every pass (default every 5 minutes), for each RUNNING VM (never started, stoppe
 
 1. lists the runs under ``REMOTE_ROOT/runs`` whose ``runtime.jsonl`` changed recently and has no
    ``run_stop`` yet (plus one final pass for a mirrored run that has just stopped);
-2. pulls a consistent, read-only snapshot of each run's transcript sources over IAP SSH: the complete
-   lines of ``runtime.jsonl``, ``settings.json``, an SQLite online backup of ``conference/state.sqlite``
-   and of Inspect's realtime sample buffer (``log_realtime=True``; the live behavior judge reads the
-   same buffer), the ``.eval`` logs when they changed, and the private-file snapshot blobs added since the
-   last pass (Claude Code's own session JSONL blobs are left out: they duplicate the transcript and are
-   never rendered). The VM side is a stdlib-only Python program sent inside the SSH command; it writes a
-   tar stream to stdout and leaves nothing behind. Nothing is sent to the VM except that program and its
-   arguments: no HF token, no provider key, no host environment;
-3. rebuilds the transcript pages (the unchanged ``history.build_agent`` and ``export_transcripts.render_agent``,
-   read through ``research.analysis.judge.live.LiveSource``) and the conference view
-   (``export_conference.export``, with ``conference/events.jsonl`` rebuilt from the snapshot's events table
-   and the timeline from conference and runtime records) into a local live bundle;
-4. screens the bundle exactly like a normal publication (``publish_hf_library.safe_path`` and ``screen``),
-   adds the private-Space navigation, and commits it with the operator's own HF login as ONE commit that
-   touches only ``live/``: changed files are added, files of the previous snapshot that no longer exist are
-   deleted, ``live/index.json`` (the catalogue's "Live now" list) is updated, and the live folder of any run
-   that is now in the published catalogue is removed.
+2. pulls a consistent, read-only snapshot of each run over IAP SSH: the complete lines of ``runtime.jsonl``,
+   ``settings.json``, an SQLite online backup of ``conference/state.sqlite`` and of Inspect's realtime
+   sample buffer (``log_realtime=True``), the ``.eval`` logs when they changed, and the private-file
+   snapshot blobs the conference view shows (Claude Code's own session JSONL blobs are left out). The VM
+   side is a stdlib-only Python program sent inside the SSH command; it writes a tar stream to stdout and
+   leaves nothing behind. Nothing is sent to the VM except that program and its arguments: no HF token,
+   no provider key, no host environment;
+3. rebuilds, locally, the run's Inspect log as it stands (the samples Inspect flushed to the ``.eval`` plus
+   the ones still in its realtime buffer, in Inspect's own in-progress format) and the native Inspect View
+   bundle over it (``inspect view bundle``), and the conference view (``export_conference.export``, with
+   ``conference/events.jsonl`` rebuilt from the snapshot's events table), plus a live summary page.
+   Transcripts are read in Inspect View; the custom transcript export is not published (owner, October 21,
+   2026: "there's no need for a transcript view on the website when we already have inspect view");
+4. screens the bundle exactly like a normal publication (``publish_hf_library.safe_path`` and ``screen``,
+   Inspect archives included), adds the private-Space navigation, and commits it with the operator's own HF
+   login as ONE commit that touches only ``live/``: changed files are added, files of the previous snapshot
+   that no longer exist are deleted, ``live/index.json`` (the catalogue's "Live now" list) is updated, and
+   the live folder of any run that is now in the published catalogue is removed;
+5. bounds storage growth: after a commit lands, the LFS objects of this mirror's own superseded live Inspect
+   logs (synthesized snapshots, never byte-equal to a published file) that no file of the new head
+   references are permanently deleted, without rewriting history (``--keep-live-history`` keeps them).
 
-History growth is bounded: a pass that changed nothing makes no commit, unchanged files are never
-re-uploaded, and transcript pages are stored gzip-compressed (decompressed in the browser), which also
-keeps every page far below HF's 9.5 MiB LFS limit (a page that would still exceed it is replaced by a
-notice). The Space history is never squashed or rewritten (published revisions are cited in the docs).
+A pass that changed nothing makes no commit and unchanged files (the Inspect View app, conference pages)
+are never re-uploaded. The Space history is never squashed or rewritten (published revisions are cited in
+the docs); only the live log objects of earlier live revisions become unavailable.
 
 Coordination with the publication tools: a pass is deferred while the Space's head is not one of this
-mirror's own commits and changed less than ``--quiet-seconds`` ago (default 600), so a publication or maintenance in progress is not
-interrupted; every live commit is pinned to the revision it was planned on.
+mirror's own commits and changed less than ``--quiet-seconds`` ago (default 600), so a publication or
+maintenance in progress is not interrupted; every live commit is pinned to the revision it was planned on.
 
 Researcher-only. Live pages are unfinished snapshots: conference (operational) outcomes only, no independent
 evaluation and no behavior judge. No model calls, no paid inference, never reads credentials.
@@ -43,13 +46,12 @@ evaluation and no behavior judge. No model calls, no paid inference, never reads
 import argparse
 import base64
 import datetime
-import gzip
 import hashlib
 import html
 import io
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import posixpath
 import re
 import shlex
@@ -365,47 +367,156 @@ def missing_blobs(source, records=None):
 # ---------------------------------------------------------------------------
 # Rendering the live bundle
 
-LOADER = r'''(async()=>{const s=document.getElementById('live-page');try{
-if(typeof DecompressionStream==='undefined')throw new Error('this page needs a current browser with gzip decompression support');
-const bytes=Uint8Array.from(atob(s.textContent),c=>c.charCodeAt(0));
-const text=await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
-document.open();document.write(text);document.close();
-if(location.hash){const t=document.getElementById(decodeURIComponent(location.hash.slice(1)));if(t)t.scrollIntoView();}
-}catch(e){document.getElementById('live-loading').textContent='Could not load this live page: '+e.message;}})();'''
+INSPECT_VERSION = '0.3.279'   # the live log writer uses Inspect internals of exactly this version
+RUNNING_NOTE = ('Still running at this live snapshot: not an error. This is the agent\'s transcript so far; '
+                'the published run replaces it when the run finishes.')
+# Runs in a separate interpreter (``python -I``, started in a temporary directory outside the repository so
+# no .env is loaded, with the same token-free environment as gcloud). For each .eval of the snapshot it
+# writes a live copy in Inspect's own in-progress format (``_journal/start.json`` and samples, no
+# ``header.json``, which Inspect View shows as a running eval): the samples Inspect already flushed to
+# the .eval, then the samples still in its realtime buffer rebuilt with Inspect's crash-recovery reader
+# (``reconstruct_eval_sample``), a running sample carrying RUNNING_NOTE in place of the recovery's
+# "cancelled" error. A finished log (with ``header.json``) is copied unchanged. Then
+# ``inspect view bundle`` (``bundle_log_dir``) builds the static Inspect View over those copies.
+INSPECT_PROGRAM = r'''
+import asyncio, json, os, shutil, sqlite3, sys
+from pathlib import Path
+A = json.loads(open(sys.argv[1]).read())
+import inspect_ai
+if inspect_ai.__version__ != A['version']:
+    sys.exit('inspect_ai %s (the live log writer is pinned to %s)' % (inspect_ai.__version__, A['version']))
+from inspect_ai._util.asyncfiles import AsyncFilesystem
+from inspect_ai._util.file import filesystem
+from inspect_ai.log import EvalError
+from inspect_ai.log._bundle import bundle_log_dir
+from inspect_ai.log._recorders.buffer.database import SampleBufferDatabase, location_dir_and_file
+from inspect_ai.log._recorders.eval import EvalRecorder, _sample_filename
+from inspect_ai.log._recover._read import AsyncZipReader, read_crashed_eval_log, read_flushed_sample
+from inspect_ai.log._recover._reconstruct import reconstruct_eval_sample
+
+async def live_copy(log, buffers, scratch, out):
+    try:
+        crashed = await read_crashed_eval_log(log)
+    except ValueError as error:
+        if 'has header.json' in str(error):      # finished: the final log as Inspect wrote it
+            shutil.copyfile(log, out)
+            return {'mode': 'final'}
+        return {'mode': 'skipped', 'reason': 'no journal start yet'}
+    recorder = EvalRecorder(os.path.dirname(out))
+    await recorder.log_init(crashed.eval, location=out, clean=True)
+    await recorder.log_start(crashed.eval, crashed.plan)
+    written, counts = set(), {'mode': 'live', 'flushed': 0, 'completed': 0, 'running': 0}
+    if crashed.sample_entries:
+        async with AsyncFilesystem() as fs:
+            reader = AsyncZipReader(fs, log)
+            for name in crashed.sample_entries:
+                await recorder.log_sample(crashed.eval, await read_flushed_sample(reader, name))
+                written.add(name)
+                counts['flushed'] += 1
+    hashed, file = location_dir_and_file(filesystem(log).path_as_uri(log))
+    for i, db in enumerate(sorted(buffers)):
+        folder = Path(scratch) / ('buffer-%d' % i) / hashed
+        folder.mkdir(parents=True)
+        target = folder / ('%s.%d.db' % (file, 999999900 + i))   # a process number no host uses
+        src = sqlite3.connect(Path(db).as_uri() + '?mode=ro', uri=True)
+        dst = sqlite3.connect(target)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close(); src.close()
+        buffer = SampleBufferDatabase(log, create=False, db_dir=folder.parent)
+        buffer.db_path = target
+        try:
+            listed = buffer.get_samples()
+            for summary in getattr(listed, 'samples', None) or []:
+                key = _sample_filename(summary.id, summary.epoch)
+                data = None if key in written else buffer.get_sample_data(summary.id, summary.epoch)
+                if data is None:
+                    continue
+                running = summary.completed_at is None
+                sample = reconstruct_eval_sample(summary, data, sample_metadata=buffer.get_sample_metadata(
+                    summary.id, summary.epoch), cancelled=running, incomplete_action='retry', include_events=True)
+                if running:
+                    note = A['note']
+                    sample = sample.model_copy(update={'error': EvalError(message=note, traceback=note + '\n',
+                                                                          traceback_ansi=note + '\n')})
+                await recorder.log_sample(crashed.eval, sample)
+                written.add(key)
+                counts['running' if running else 'completed'] += 1
+        finally:
+            buffer.close()
+    await recorder.flush(crashed.eval)
+    await recorder.log_discard(crashed.eval, keep_destination=True)   # close it, keeping the file
+    return counts
+
+async def main():
+    out = Path(A['live_logs'])
+    out.mkdir(parents=True, exist_ok=True)
+    results = {}
+    for item in A['logs']:
+        name = os.path.basename(item['log'])
+        scratch = Path(A['scratch']) / name
+        scratch.mkdir(parents=True)
+        results[name] = await live_copy(item['log'], item['buffers'], scratch, str(out / name))
+    return results
+
+results = asyncio.run(main())
+if any(r['mode'] != 'skipped' for r in results.values()):
+    bundle_log_dir(log_dir=A['live_logs'], output_dir=A['bundle'], overwrite=True)
+open(A['result'], 'w').write(json.dumps(results))
+'''
+
+
+def build_inspect_view(source, out, *, python=sys.executable, runner=subprocess.run):
+    """Write the live Inspect View of the snapshot ``source`` into ``out`` (replaced); returns
+    ``{log name: {'mode': 'live' | 'final' | 'skipped', ...counts}}``. ``out`` is left absent when
+    no log could be copied yet."""
+    live_logs = source / 'live-inspect'          # a stable path: the bundle's index.html names it
+    shutil.rmtree(live_logs, ignore_errors=True)
+    shutil.rmtree(out, ignore_errors=True)
+    logs = []
+    for log in sorted((source / 'inspect').glob('*.eval')):
+        buffers = sorted(str(db) for db in (source / 'samplebuffer').glob(f'*/{glob_escape(log.name)}.*.db'))
+        logs.append({'log': str(log), 'buffers': buffers})
+    if not logs:
+        return {}
+    with tempfile.TemporaryDirectory(prefix='gdm-live-inspect-') as tmp:   # outside the repository
+        tmp = Path(tmp)
+        args = {'version': INSPECT_VERSION, 'logs': logs, 'live_logs': str(live_logs), 'scratch': str(tmp / 'scratch'),
+                'bundle': str(out), 'result': str(tmp / 'result.json'), 'note': RUNNING_NOTE}
+        (tmp / 'args.json').write_text(json.dumps(args))
+        env = clean_env()
+        env.pop('PYTHONPATH', None)
+        env['INSPECT_DISPLAY'] = 'none'
+        done = runner([python, '-I', '-c', INSPECT_PROGRAM, str(tmp / 'args.json')], cwd=tmp, env=env,
+                      capture_output=True, text=True, timeout=1800)
+        if done.returncode:
+            raise RuntimeError('Inspect View build failed: ' + (done.stderr or '').strip()[-400:])
+        return json.loads((tmp / 'result.json').read_text())
+
+
+def glob_escape(name):
+    return re.sub(r'([*?\[])', r'[\1]', name)
+
+
+LIVE_BANNER = ('<p class="banner live-banner"><strong>Live snapshot, not final.</strong> Mirrored from the running '
+               'experiment; it may lag the run by several minutes and later turns are still missing. Conference '
+               '(operational) outcomes only: no independent evaluation or behavior judge has run. The published run '
+               'replaces this mirror when it finishes.</p>')
 STYLE = ('<style>:root{color-scheme:light dark;--bg:#fafbfc;--fg:#18212b;--muted:#596579;--line:#dde3ea;--card:#fff;'
          '--accent:#155eaa;--warn:#fff6e0;--warnline:#c98a00}@media (prefers-color-scheme:dark){:root{--bg:#0f141a;'
          '--fg:#e3e8ee;--muted:#9aa7b6;--line:#2a333d;--card:#161d25;--accent:#7fb2ec;--warn:#2b2412;--warnline:#c98a00}}'
          'body{max-width:1100px;margin:32px auto;padding:0 16px;font:16px/1.5 system-ui,sans-serif;color:var(--fg);'
          'background:var(--bg)}a{color:var(--accent)}small,.muted{color:var(--muted)}.banner{background:var(--warn);'
          'border-left:4px solid var(--warnline);padding:10px 16px;border-radius:4px}.card{background:var(--card);'
-         'border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:16px 0}table{border-collapse:collapse;'
-         'width:100%}td,th{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}'
-         '.scroll{overflow-x:auto}dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0}'
-         'dt{color:var(--muted)}dd{margin:0}</style>')
-LIVE_BANNER = ('<p class="banner live-banner"><strong>Live snapshot, not final.</strong> Mirrored from the running '
-               'experiment; it may lag the run by several minutes and later turns are still missing. Conference '
-               '(operational) outcomes only: no independent evaluation or behavior judge has run. The published run '
-               'replaces this mirror when it finishes.</p>')
+         'border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:16px 0}'
+         'dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;margin:0}dt{color:var(--muted)}dd{margin:0}'
+         '@media (max-width:560px){dl{grid-template-columns:1fr}dd{margin-bottom:8px}}</style>')
 
 
 def screen_bytes(name, data):
     if SECRET.search(data):
         raise ValueError(f'Credential-like content detected in {name}; upload refused')
-
-
-def compressed_page(document, title):
-    """A small page that holds ``document`` gzip-compressed and writes it in the browser."""
-    packed = base64.b64encode(gzip.compress(document.encode('utf-8'), mtime=0)).decode('ascii')
-    return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" '
-            'content="width=device-width,initial-scale=1"><title>' + html.escape(title) + '</title>'
-            '<p id="live-loading">Loading live snapshot…</p><script id="live-page" type="application/gzip+base64">'
-            + packed + '</script><script>' + LOADER + '</script></html>')
-
-
-def unpack_page(document):
-    """The inner document of ``compressed_page`` (tests and checks)."""
-    match = re.search(r'<script id="live-page" type="application/gzip\+base64">([A-Za-z0-9+/=]*)</script>', document)
-    return gzip.decompress(base64.b64decode(match[1])).decode('utf-8')
 
 
 def add_banner(document, banner=LIVE_BANNER):
@@ -436,44 +547,6 @@ def fix_links(document, page, available):
     return HREF.sub(replace, document)
 
 
-def render_transcripts(source, out):
-    """Write one transcript page per agent (``export_transcripts.render_agent``) from the snapshot's
-    Inspect samples (realtime buffer, or the ``.eval`` once flushed); returns a row per agent."""
-    from research.analysis.judge import history as hist, live
-    import export_transcripts
-    gate = live.inspect_gate()
-    if gate:
-        raise RuntimeError('Live transcripts unavailable: ' + gate)
-    out.mkdir(parents=True, exist_ok=True)
-    for old in out.glob('agent-*.html'):
-        old.unlink()
-    inspect = source / 'inspect'
-    for db in (source / 'samplebuffer').glob('*/*.db'):   # a buffer whose .eval header was not copied yet
-        name = db.name.rsplit('.', 2)[0]
-        if name.endswith('.eval') and not (inspect / name).exists():
-            (inspect / name).touch()
-    base = hist.load_run_base(source)
-    reader = live.LiveSource(source, db_dir=source / 'samplebuffer')
-    rows = []
-    try:
-        for agent, entry in reader.index().items():
-            try:
-                sample, complete = reader.read(entry)
-            except live.LiveSourceUnavailable as error:
-                rows.append({'agent': agent, 'error': str(error)})
-                continue
-            history = hist.build_agent(sample, base, log_name='inspect/' + Path(entry['log']).name)
-            page, _ = export_transcripts.render_agent(history, source.name)
-            (out / (agent + '.html')).write_text(page, encoding='utf-8')
-            times = [i.get('time') for i in history.items if i.get('time')]
-            rows.append({'agent': agent, 'turns': history.stats.get('turns'), 'items': history.stats.get('items'),
-                         'tokens': history.stats.get('tokens_total'), 'complete': complete,
-                         'exit': (history.exit or {}).get('status'), 'last_time': max(times) if times else None})
-    finally:
-        reader.close()
-    return rows
-
-
 def rebuild_event_log(source):
     """``conference/events.jsonl`` from the snapshot's events table (the conference's own rebuild)."""
     from research_swarm import conference
@@ -493,7 +566,7 @@ def write_timeline(source):
     timeline._write_jsonl(source / 'analysis' / 'timeline.jsonl', entries)
 
 
-def summarize(source, rows, *, vm, snapshot_utc, state):
+def summarize(source, logs, *, vm, snapshot_utc, state):
     """Live facts for the catalogue and the live summary page."""
     records = runtime_records(source)
     try:
@@ -504,17 +577,18 @@ def summarize(source, rows, *, vm, snapshot_utc, state):
     start = next((r.get('timestamp') for r in records if r.get('kind') == 'common_start'), None)
     stop = next((r.get('timestamp') for r in records if r.get('kind') == 'run_stop'), None)
     end = stop if stop is not None else snapshot_utc
+    samples = {k: sum(r.get(k, 0) for r in logs.values()) for k in ('flushed', 'completed', 'running')}
     summary = {'run': source.name, 'vm': vm, 'state': state, 'state_label': STATE_LABELS[state],
                'snapshot_utc': _iso(snapshot_utc), 'updated_utc': _iso(snapshot_utc),
                'started_utc': _iso(start) if start else None,
                'elapsed_seconds': round(end - start) if start else None,
                'max_run_seconds': config.get('max_run_seconds'), 'model': config.get('candidate_model_id'),
                'track': config.get('track'), 'system_prompt_mode': config.get('system_prompt_mode'),
-               'agents': config.get('agent_count') or len(rows) or None,
+               'agents': config.get('agent_count'),
                'agent_exits': sum(1 for r in records if r.get('kind') == 'agent_exit'),
                'agent_restarts': sum(1 for r in records if r.get('kind') == 'agent_restart'),
-               'transcripts': sum(1 for r in rows if 'error' not in r), 'solved': None, 'task_count': None,
-               'submissions': {}}
+               'inspect_logs': {name: r.get('mode') for name, r in sorted(logs.items())},
+               'inspect_samples': samples, 'solved': None, 'task_count': None, 'submissions': {}}
     path = source / 'conference' / 'state.sqlite'
     if path.exists():
         db = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)
@@ -537,57 +611,41 @@ def _minutes(seconds):
     return '?' if seconds is None else f'{int(seconds) // 60} min'
 
 
-def landing_page(summary, rows, problems, interval):
+def landing_page(summary, problems, interval, *, inspect_view, conference):
     esc = html.escape
-    subs = ', '.join(f'{esc(str(k))} {v}' for k, v in sorted(summary['submissions'].items())) or 'none yet'
+    subs = ', '.join(f'{k} {v}' for k, v in sorted(summary['submissions'].items())) or 'none yet'
+    samples = summary['inspect_samples']
     facts = [('State', summary['state_label']), ('Snapshot taken', summary['snapshot_utc'] + ' (UTC)'),
              ('Elapsed', f"{_minutes(summary['elapsed_seconds'])} of {_minutes(summary['max_run_seconds'])}"),
              ('Model', summary['model'] or 'unknown'), ('Condition', summary['track'] or 'unknown'),
              ('System prompt', summary['system_prompt_mode'] or 'default'),
              ('Agents', f"{summary['agents'] or '?'} ({summary['agent_exits']} exited, {summary['agent_restarts']} restarts)"),
+             ('Agent transcripts in Inspect View', f"{samples['running']} still running, "
+                                                   f"{samples['flushed'] + samples['completed']} finished"),
              ('Tasks solved (conference judge)', f"{summary['solved'] if summary['solved'] is not None else '?'} / "
                                                  f"{summary['task_count'] or '?'}"),
              ('Submissions by conference outcome', subs), ('VM', summary['vm'])]
-    card = '<dl>' + ''.join(f'<dt>{esc(k)}</dt><dd>{esc(str(v)) if k != "Submissions by conference outcome" else v}</dd>'
-                            for k, v in facts) + '</dl>'
+    card = '<dl>' + ''.join(f'<dt>{esc(k)}</dt><dd>{esc(str(v))}</dd>' for k, v in facts) + '</dl>'
+    links = [('inspect-view/index.html', 'Inspect View (agent transcripts)') if inspect_view else None,
+             ('conference-view/index.html', 'Conference') if conference else None]
+    nav = ' · '.join(f'<a href="{href}">{label}</a>' for href, label in filter(None, links)) or 'No views in this snapshot yet.'
     notes = ''.join(f'<li>{esc(p)}</li>' for p in problems)
     return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" '
             'content="width=device-width,initial-scale=1"><title>Live · ' + esc(summary['run']) + '</title>' + STYLE +
             '<p><a href="../../index.html">Experiment library</a></p><h1>' + esc(summary['run']) + ' <small>live</small></h1>'
-            + LIVE_BANNER + f'<div class="card">{card}</div>'
-            '<p><a href="transcripts/index.html">Agent transcripts</a> · <a href="conference-view/index.html">Conference</a></p>'
+            + LIVE_BANNER + f'<div class="card">{card}</div><p>{nav}</p>'
             f'<p class="muted">Refreshed about every {max(1, round(interval / 60))} minutes while the run is going. '
-            '"Solved" and submission outcomes are the conference\'s operational judge: acceptance there is not '
-            'independent mathematical validity. Exits and restarts are counted from the runtime log.</p>'
+            'Read the agents\' transcripts in Inspect View: one sample per agent, up to this snapshot. A sample that '
+            'is still running shows the note "Still running at this live snapshot: not an error" where Inspect '
+            'would show an error, and the eval itself shows as running. "Solved" and submission outcomes are the '
+            'conference\'s operational judge: acceptance there is not independent mathematical validity. Exits and '
+            'restarts are counted from the runtime log.</p>'
             + (f'<h2>Mirror notes</h2><ul>{notes}</ul>' if notes else '') + '</html>')
 
 
-def transcripts_index(summary, rows):
-    esc = html.escape
-    body = []
-    for row in rows:
-        if 'error' in row:
-            body.append(f'<tr><td>{esc(row["agent"])}</td><td colspan="5">not available in this snapshot: '
-                        f'{esc(row["error"])}</td></tr>')
-            continue
-        state = 'session ended' if row['complete'] else 'in progress'
-        body.append(f'<tr><td><a href="{esc(row["agent"])}.html">{esc(row["agent"])}</a></td><td>{state}</td>'
-                    f'<td>{row["turns"]}</td><td>{row["items"]}</td><td>{esc(str(row["exit"] or "—"))}</td>'
-                    f'<td>{esc(str(row["last_time"] or "—"))}</td></tr>')
-    return ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" '
-            'content="width=device-width,initial-scale=1"><title>Live transcripts · ' + esc(summary['run']) + '</title>'
-            + STYLE + '<p><a href="../index.html">Live summary</a> · <a href="../conference-view/index.html">Conference</a></p>'
-            '<h1>Agent transcripts <small>live</small></h1>' + LIVE_BANNER +
-            f'<p class="muted">Run {esc(summary["run"])} · snapshot {esc(summary["snapshot_utc"])} (UTC). Each page is the '
-            'same full reconstructed history as the published transcripts, up to this snapshot. Private researcher '
-            'export: never provide it to experimental agents.</p>'
-            '<div class="scroll"><table><thead><tr><th>Agent</th><th>Session</th><th>Model turns</th><th>Items</th>'
-            '<th>Exit</th><th>Last recorded activity (UTC)</th></tr></thead><tbody>' + ''.join(body) +
-            '</tbody></table></div></html>')
-
-
-def build_live_bundle(source, bundle, *, vm, snapshot_utc, state, interval, render=render_transcripts):
-    """Render the live views of the local source copy into ``bundle`` (replaced). Returns the summary."""
+def build_live_bundle(source, bundle, *, vm, snapshot_utc, state, interval, inspect_view=build_inspect_view):
+    """Render the live views of the local source copy into ``bundle`` (replaced). Returns the summary and
+    the bundle paths of live (synthesized) Inspect logs, whose superseded copies may later be pruned."""
     shutil.rmtree(bundle, ignore_errors=True)
     bundle.mkdir(parents=True)
     problems = []
@@ -599,11 +657,16 @@ def build_live_bundle(source, bundle, *, vm, snapshot_utc, state, interval, rend
             if step == 'timeline':
                 (source / 'analysis').mkdir(exist_ok=True)
                 (source / 'analysis' / 'timeline.jsonl').write_text('')
+    viewer = source / 'inspect-view-build'
     try:
-        rows = render(source, source / 'transcripts')
+        logs = inspect_view(source, viewer)
     except Exception as error:
-        problems.append(f'transcripts unavailable in this snapshot: {error}')
-        rows = []
+        problems.append(f'Inspect View unavailable in this snapshot: {error}')
+        logs = {}
+    for name, result in logs.items():
+        if result.get('mode') == 'skipped':
+            problems.append(f'{name}: not shown yet ({result.get("reason")})')
+    has_viewer = (viewer / 'index.html').is_file() and (viewer / 'logs' / 'listing.json').is_file()
     conference = False
     try:
         import export_conference
@@ -611,37 +674,45 @@ def build_live_bundle(source, bundle, *, vm, snapshot_utc, state, interval, rend
         conference = True
     except Exception as error:
         problems.append(f'conference view unavailable in this snapshot ({type(error).__name__}: {error})')
-    # The screening of a normal publication, applied to the records behind the views (which the
-    # conference view and the transcript pages hold compressed) and to every page before compression.
+    # The screening of a normal publication, applied to the records behind the conference view (which
+    # holds them compressed) and to every page before it is written.
     for name in ('runtime.jsonl', 'conference/state.sqlite', 'conference/events.jsonl', 'settings.json'):
         if (source / name).is_file():
             screen_bytes(name, (source / name).read_bytes())
-    summary = summarize(source, rows, vm=vm, snapshot_utc=snapshot_utc, state=state)
+    summary = summarize(source, logs, vm=vm, snapshot_utc=snapshot_utc, state=state)
     summary['problems'] = problems
-    pages = {'index.html': landing_page(summary, rows, problems, interval),
-             'transcripts/index.html': transcripts_index(summary, rows)}
-    available = set(pages) | {f'transcripts/{r["agent"]}.html' for r in rows if 'error' not in r}
+    files = {}                                             # bundle path -> source file
+    if has_viewer:
+        for path in sorted(viewer.rglob('*')):
+            if path.is_symlink():
+                raise ValueError('Linked file in the Inspect View bundle')
+            if path.is_file():
+                files['inspect-view/' + path.relative_to(viewer).as_posix()] = path
     if conference:
         for path in sorted((source / 'conference-view').iterdir()):
             if path.is_file() and not path.is_symlink():
-                available.add('conference-view/' + path.name)
-    for name in sorted(available - set(pages)):
-        document = (source / name).read_text(encoding='utf-8')
-        screen_bytes(name, document.encode('utf-8'))
-        if name.endswith('.html'):
-            document = fix_links(document, name, available)
-            if name.startswith('transcripts/'):
-                inner = private_space_navigation(add_banner(document))
-                document = compressed_page(inner, name.split('/')[-1][:-5] + ' · live')
-            elif name == 'conference-view/index.html':
-                document = add_banner(document)
-        pages[name] = document
+                files['conference-view/' + path.name] = path
+    pages = {'index.html': landing_page(summary, problems, interval, inspect_view=has_viewer, conference=conference)}
+    available = set(pages) | set(files)
     notices = []
+    for name, path in files.items():
+        target = bundle / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if name == 'inspect-view/index.html':             # as prepare_hf_library.py does for Inspect View
+            modules = ['./assets/' + p.name for p in sorted((viewer / 'assets').glob('*.js'))]
+            target.write_text(private_space_navigation(path.read_text(encoding='utf-8'), modules), encoding='utf-8')
+        elif name.startswith('conference-view/') and name.endswith('.html'):
+            document = path.read_text(encoding='utf-8')
+            screen_bytes(name, document.encode('utf-8'))
+            document = fix_links(document, name, available)
+            if name == 'conference-view/index.html':
+                document = add_banner(document)
+            pages[name] = document
+        else:
+            shutil.copyfile(path, target)
     for name, document in pages.items():
-        if name.endswith('.html'):
-            document = private_space_navigation(document)
-        data = document.encode('utf-8')
-        if len(data) >= LFS_SAFE_LIMIT:
+        data = private_space_navigation(document).encode('utf-8')
+        if len(data) >= LFS_SAFE_LIMIT:                    # an HTML page must not become an LFS download
             notices.append(name)
             data = private_space_navigation(
                 '<!doctype html><meta charset="utf-8"><title>Too large for the live mirror</title><p>This live page is '
@@ -652,11 +723,13 @@ def build_live_bundle(source, bundle, *, vm, snapshot_utc, state, interval, rend
     if notices:
         summary['problems'].append('too large to mirror: ' + ', '.join(notices))
     (bundle / 'status.json').write_text(json.dumps(summary, indent=2))
-    for path in sorted(bundle.rglob('*')):   # the screening of a normal publication
+    for path in sorted(bundle.rglob('*')):   # the screening of a normal publication (Inspect archives included)
         if path.is_file():
             safe_path(path.relative_to(bundle).as_posix())
             screen(path)
-    return summary
+    live_logs = sorted(f'inspect-view/logs/{name}' for name, r in logs.items()
+                       if r.get('mode') == 'live' and (bundle / 'inspect-view' / 'logs' / name).is_file())
+    return summary, live_logs
 
 
 # ---------------------------------------------------------------------------
@@ -689,12 +762,20 @@ def _read_remote_json(download, repo, revision, name, item, empty):
     return json.loads(data)
 
 
+def _may_exceed_lfs_limit(name):
+    """Only Inspect logs may be stored as LFS (Inspect View follows the redirect); pages must not."""
+    parts = name.split('/')
+    return len(parts) == 5 and parts[2:4] == ['inspect-view', 'logs'] and parts[4].endswith('.eval')
+
+
 def sync(api, download, *, updates, add, delete, repo=DEFAULT_REPO, now=None, quiet_seconds=600, commit=True,
          own_revisions=()):
-    """One live commit. ``updates``: {run: {'bundle': Path | None, 'entry': dict}} (bundle None: only the
-    catalogue entry changes, e.g. the VM stopped). Touches only live/; never another path. Deferred while
-    the Space's head is not one of this mirror's own commits (``own_revisions``) and changed less than
-    ``quiet_seconds`` ago: another publisher is probably still committing."""
+    """One live commit. ``updates``: {run: {'bundle': Path | None, 'entry': dict, 'live_logs': [bundle paths]}}
+    (bundle None: only the catalogue entry changes, e.g. the VM stopped). Touches only live/; never another
+    path. Deferred while the Space's head is not one of this mirror's own commits (``own_revisions``) and
+    changed less than ``quiet_seconds`` ago: another publisher is probably still committing. The result's
+    ``live_log_uploads`` lists the synthesized live Inspect logs this commit uploads (candidates for pruning
+    once superseded)."""
     now = time.time() if now is None else now
     info = api.repo_info(repo, repo_type='space')
     if not info.private:
@@ -716,7 +797,7 @@ def sync(api, download, *, updates, add, delete, repo=DEFAULT_REPO, now=None, qu
     if index.get('schema') != LIVE_SCHEMA or not isinstance(index.get('runs'), list):
         raise ValueError(f'{LIVE_INDEX} is not a {LIVE_SCHEMA} file')
     entries = {e['run']: e for e in index['runs'] if isinstance(e, dict) and RUN_ID.fullmatch(str(e.get('run', '')))}
-    adds, deletes, removed, changed = {}, set(), [], []
+    adds, deletes, removed, changed, live_logs = {}, set(), [], [], set()
     for run in sorted(set(entries) | set(updates)):
         prefix = f'{LIVE}/{run}/'
         if run in published:   # published normally: its live mirror is retired
@@ -735,6 +816,7 @@ def sync(api, download, *, updates, add, delete, repo=DEFAULT_REPO, now=None, qu
                 if name not in remote or not matches(path.read_bytes(), remote[name]):
                     adds[name] = path.read_bytes()
             deletes |= {name for name in remote if name.startswith(prefix) and name not in local}
+            live_logs |= {prefix + name for name in update.get('live_logs', ())}
         entries[run] = update['entry']
         changed.append(run)
     new_index = {'schema': LIVE_SCHEMA, 'runs': sorted(entries.values(), key=lambda e: e.get('started_utc') or '',
@@ -748,11 +830,13 @@ def sync(api, download, *, updates, add, delete, repo=DEFAULT_REPO, now=None, qu
             raise ValueError('The live mirror may only change live/: ' + name)
         safe_path(name)
     for name, data in adds.items():
-        if len(data) >= LFS_SAFE_LIMIT:
+        if len(data) >= LFS_SAFE_LIMIT and not _may_exceed_lfs_limit(name):
             raise ValueError('Live file at or above the LFS limit: ' + name)
     result = {'base_revision': info.sha, 'runs_updated': changed, 'runs_removed': removed,
               'uploads': len(adds), 'deletions': len(deletes), 'bytes': sum(len(d) for d in adds.values()),
-              'committed': False}
+              'committed': False,
+              'live_log_uploads': [{'path': n, 'sha256': hashlib.sha256(adds[n]).hexdigest()}
+                                   for n in sorted(live_logs & set(adds))]}
     if not commit or not (adds or deletes):
         return result
     message = COMMIT_PREFIX + ', '.join([*(f'update {r}' for r in changed), *(f'retire {r}' for r in removed)])
@@ -761,6 +845,30 @@ def sync(api, download, *, updates, add, delete, repo=DEFAULT_REPO, now=None, qu
                                              *(delete(path_in_repo=n) for n in sorted(deletes))])
     result.update(committed=True, revision=response.oid)
     return result
+
+
+def prune_superseded(api, repo, revision, candidates):
+    """Permanently delete the LFS objects of this mirror's superseded live Inspect logs, without rewriting
+    history. ``candidates``: [{'path', 'sha256'}] recorded when the mirror uploaded them (synthesized
+    snapshots only, never a log copied unchanged). An object is deleted only when no file of ``revision``
+    (the whole Space) references it and the Hub lists it under ``live/``; earlier live revisions then lack
+    that log, nothing else changes. Returns (pruned, kept)."""
+    referenced = set()
+    for item in api.list_repo_tree(repo, repo_type='space', revision=revision, recursive=True):
+        lfs = getattr(item, 'lfs', None)
+        if lfs is not None:
+            referenced.add(lfs.sha256 if hasattr(lfs, 'sha256') else lfs['sha256'])
+    kept = [c for c in candidates if c['sha256'] in referenced]
+    wanted = {c['sha256'] for c in candidates if c['sha256'] not in referenced and HEX64.fullmatch(c['sha256'])}
+    if not wanted:
+        return [], kept
+    objects = [f for f in api.list_lfs_files(repo, repo_type='space')
+               if (f.oid in wanted or f.file_oid in wanted) and str(f.filename).startswith(LIVE + '/')]
+    if objects:
+        api.permanently_delete_lfs_files(repo, objects, rewrite_history=False, repo_type='space')
+    found = {f.oid for f in objects} | {f.file_oid for f in objects}
+    # An object the Hub does not list (stored as a regular file, or already gone) is not retried.
+    return sorted(wanted & found), kept
 
 
 # ---------------------------------------------------------------------------
@@ -774,11 +882,12 @@ def load_state(path):
         state = {}
     state.setdefault('schema', 'gdm-live-mirror-state/1')
     state.setdefault('runs', {})
+    state.setdefault('live_log_blobs', [])
     return state
 
 
-def mirror_run(cloud, vm, root, run, record, *, work, buffer_dir, interval, render, now):
-    """Snapshot, apply and render one run; returns its summary and bundle directory."""
+def mirror_run(cloud, vm, root, run, record, *, work, buffer_dir, interval, inspect_view, now):
+    """Snapshot, apply and render one run; returns its summary, bundle directory and live log paths."""
     source, bundle = work / 'work' / run, work / 'bundle' / run
     source.mkdir(parents=True, exist_ok=True)
     for attempt in range(2):
@@ -793,15 +902,15 @@ def mirror_run(cloud, vm, root, run, record, *, work, buffer_dir, interval, rend
         record.update(since_line=0)   # a blob is missing locally: pull every referenced blob once
     records = runtime_records(source)
     state = 'finished' if any(r.get('kind') == 'run_stop' for r in records) else 'running'
-    summary = build_live_bundle(source, bundle, vm=vm, snapshot_utc=manifest['utc'], state=state,
-                                interval=interval, render=render)
+    summary, live_logs = build_live_bundle(source, bundle, vm=vm, snapshot_utc=manifest['utc'], state=state,
+                                           interval=interval, inspect_view=inspect_view)
     record.update(vm=vm, root=root, final=state == 'finished', entry=_entry(summary), last_pass_utc=_iso(now))
-    return summary, bundle
+    return summary, bundle, live_logs
 
 
 def run_pass(cloud, vms, *, state, work=WORK, api=None, download=None, add=None, delete=None, repo=DEFAULT_REPO,
              only=None, max_age=3600, buffer_dir=DEFAULT_BUFFER_DIR, interval=300, quiet_seconds=600,
-             render=render_transcripts, now=None):
+             inspect_view=build_inspect_view, prune=True, now=None):
     now = time.time() if now is None else now
     work.mkdir(parents=True, exist_ok=True)
     updates, report = {}, {'utc': _iso(now), 'vms': {}, 'runs': {}}
@@ -832,25 +941,36 @@ def run_pass(cloud, vms, *, state, work=WORK, api=None, download=None, add=None,
             if row.get('stopped') and (run not in state['runs'] or record.get('final')):
                 continue   # stopped before this mirror saw it, or already mirrored to the end
             try:
-                summary, bundle = mirror_run(cloud, vm, root, run, record, work=work, buffer_dir=buffer_dir,
-                                             interval=interval, render=render, now=now)
+                summary, bundle, live_logs = mirror_run(cloud, vm, root, run, record, work=work, buffer_dir=buffer_dir,
+                                                        interval=interval, inspect_view=inspect_view, now=now)
             except Exception as error:
                 report['runs'][run] = f'failed: {type(error).__name__}: {error}'
                 continue
             state['runs'][run] = record
-            updates[run] = {'bundle': bundle, 'entry': record['entry']}
-            report['runs'][run] = {'state': summary['state'], 'transcripts': summary['transcripts'],
+            updates[run] = {'bundle': bundle, 'entry': record['entry'], 'live_logs': live_logs}
+            report['runs'][run] = {'state': summary['state'], 'inspect_samples': summary['inspect_samples'],
                                    'problems': summary['problems']}
     if api is not None:
         try:
             report['upload'] = sync(api, download, updates=updates, add=add, delete=delete, repo=repo, now=now,
                                     quiet_seconds=quiet_seconds, own_revisions=state.get('own_revisions', ()))
-            if report['upload'].get('revision'):
-                state['own_revisions'] = [*state.get('own_revisions', []), report['upload']['revision']][-50:]
+            revision = report['upload'].get('revision')
+            if revision:
+                state['own_revisions'] = [*state.get('own_revisions', []), revision][-50:]
+                known = {c['sha256'] for c in state['live_log_blobs']}
+                state['live_log_blobs'] += [c for c in report['upload']['live_log_uploads'] if c['sha256'] not in known]
             for run in report['upload'].get('runs_removed', []):
                 state['runs'].get(run, {})['final'] = True
         except Exception as error:   # the next pass plans again from the latest revision
             report['upload'] = f'failed: {type(error).__name__}: {error}'
+        else:
+            if prune and report['upload'].get('revision') and state['live_log_blobs']:
+                try:
+                    pruned, kept = prune_superseded(api, repo, report['upload']['revision'], state['live_log_blobs'])
+                    state['live_log_blobs'] = kept
+                    report['pruned_live_logs'] = len(pruned)
+                except Exception as error:   # kept as candidates; retried after the next commit
+                    report['pruned_live_logs'] = f'failed: {type(error).__name__}: {error}'
     return report
 
 
@@ -869,6 +989,8 @@ def main(argv=None):
     parser.add_argument('--interval', type=float, default=300, help='seconds between pass starts (default 300)')
     parser.add_argument('--once', action='store_true', help='one pass, then exit')
     parser.add_argument('--no-upload', action='store_true', help='build the live bundle locally only')
+    parser.add_argument('--keep-live-history', action='store_true',
+                        help="keep the LFS objects of superseded live Inspect logs (default: delete them once superseded)")
     parser.add_argument('--repo-id', default=DEFAULT_REPO)
     parser.add_argument('--quiet-seconds', type=float, default=600,
                         help='defer while another commit changed the Space less than this many seconds ago (default 600)')
@@ -891,7 +1013,8 @@ def main(argv=None):
         state = load_state(state_path)
         report = run_pass(cloud, args.vm, state=state, work=args.work_dir, api=api, download=download, add=add,
                           delete=delete, repo=args.repo_id, only=set(args.run or ()), max_age=args.max_age,
-                          buffer_dir=args.remote_buffer_dir, interval=args.interval, quiet_seconds=args.quiet_seconds)
+                          buffer_dir=args.remote_buffer_dir, interval=args.interval, quiet_seconds=args.quiet_seconds,
+                          prune=not args.keep_live_history)
         args.work_dir.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps(state, indent=2))
         print(json.dumps(report), flush=True)

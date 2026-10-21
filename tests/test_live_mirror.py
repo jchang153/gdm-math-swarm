@@ -1,7 +1,9 @@
 """Offline tests of the near-live mirror: no VM, gcloud, HF login, network or model calls.
 
-The VM program runs locally against a fabricated run (a real Inspect realtime buffer and conference
-database), through a fake gcloud runner that executes the SSH command with the local shell.
+The VM program runs locally against a fabricated run (a real Inspect realtime buffer, an Inspect log in
+its in-progress format and a conference database), through a fake gcloud runner that executes the SSH
+command with the local shell. The live Inspect log and the Inspect View bundle are built with the
+pinned Inspect installation, as on the operator's computer.
 """
 import datetime
 import hashlib
@@ -61,6 +63,7 @@ class Hub:
         self.files, self.revision, self.private, self.commits = {}, 0, private, []
         self.last_modified = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
         self.cache = Path(tempfile.mkdtemp(prefix='hub-cache-'))
+        self.lfs_objects, self.pruned, self.rewrite_history = {}, [], []
 
     def repo_info(self, repo, repo_type):
         return SimpleNamespace(private=self.private, sha=str(self.revision), last_modified=self.last_modified)
@@ -71,7 +74,22 @@ class Hub:
                  and (recursive or '/' not in n)]
         if path_in_repo and not names:
             raise type('EntryNotFoundError', (Exception,), {})('404')
-        return [SimpleNamespace(path=n, blob_id=blob_id(self.files[n]), lfs=None) for n in names]
+        return [SimpleNamespace(path=n, blob_id=blob_id(self.files[n]), lfs=self._lfs(n)) for n in names]
+
+    def _lfs(self, name):   # Inspect logs are stored as LFS objects, as on the Hub
+        if not name.endswith('.eval'):
+            return None
+        return SimpleNamespace(sha256=hashlib.sha256(self.files[name]).hexdigest(), size=len(self.files[name]))
+
+    def list_lfs_files(self, repo, repo_type):
+        return [SimpleNamespace(file_oid=sha, oid=sha, filename=name, size=len(data))
+                for sha, (name, data) in self.lfs_objects.items()]
+
+    def permanently_delete_lfs_files(self, repo, lfs_files, rewrite_history, repo_type):
+        self.rewrite_history.append(rewrite_history)
+        for item in lfs_files:
+            self.pruned.append(item.oid)
+            del self.lfs_objects[item.oid]
 
     def download(self, repo, name, repo_type, revision):
         path = self.cache / name
@@ -84,6 +102,9 @@ class Hub:
         for op in operations:
             if op.kind == 'add':
                 self.files[op.path_in_repo] = op.path_or_fileobj
+                if op.path_in_repo.endswith('.eval'):
+                    self.lfs_objects.setdefault(hashlib.sha256(op.path_or_fileobj).hexdigest(),
+                                                (op.path_in_repo, op.path_or_fileobj))
             else:
                 del self.files[op.path_in_repo]
         self.commits.append((commit_message, operations))
@@ -120,6 +141,40 @@ def conference_db(path, *, closed=1):
     return db
 
 
+def write_running_eval(log):
+    """An Inspect log as it stands while the eval runs: ``_journal/start.json``, no ``header.json``."""
+    import asyncio
+    from inspect_ai.log import EvalConfig, EvalDataset, EvalPlan, EvalSpec
+    from inspect_ai.log._recorders.eval import EvalRecorder
+
+    async def write():
+        spec = EvalSpec(created='2099-01-01T00:00:00+00:00', task='gdm_math_swarm', dataset=EvalDataset(),
+                        model='mockllm/model', config=EvalConfig())
+        recorder = EvalRecorder(str(log.parent))
+        await recorder.log_init(spec, location=str(log), clean=True)
+        await recorder.log_start(spec, EvalPlan())
+        await recorder.flush(spec)
+        await recorder.log_discard(spec, keep_destination=True)
+    asyncio.run(write())
+
+
+def fake_inspect_view(source, out):
+    """A stand-in Inspect View build (fast): the app files and the snapshot's logs, unchanged."""
+    import shutil
+    shutil.rmtree(out, ignore_errors=True)
+    (out / 'assets').mkdir(parents=True)
+    (out / 'logs').mkdir()
+    (out / 'index.html').write_text('<!doctype html><html><head><title>Inspect View</title></head><body>'
+                                    '<script type="module" crossorigin src="./assets/index.js"></script></body></html>')
+    (out / 'assets' / 'index.js').write_text('console.log(1)')
+    logs = {}
+    for log in sorted((source / 'inspect').glob('*.eval')):
+        shutil.copyfile(log, out / 'logs' / log.name)
+        logs[log.name] = {'mode': 'live', 'flushed': 0, 'completed': 0, 'running': 1}
+    (out / 'logs' / 'listing.json').write_text(json.dumps({n: {'status': 'started'} for n in logs}))
+    return logs
+
+
 class FakeVM:
     """A fabricated VM home: ROOT/runs/RUN with a live Inspect buffer, conference and runtime log."""
 
@@ -135,7 +190,7 @@ class FakeVM:
         self.write_runtime(partial_tail=True)
         self.buffer_dir = base / 'vm-buffer'
         self.log = self.run_dir / 'inspect' / '2099-01-01T00-00-00_gdm-math-swarm_live.eval'
-        helpers.write_eval(self.log, [])
+        write_running_eval(self.log)
         self.buffer = helpers.write_buffer(self.log, self.buffer_dir, self.sample.events[:events])
         self.db = conference_db(self.run_dir / 'conference' / 'state.sqlite')
         session = self.run_dir / 'snapshots' / 'agent-001'
@@ -244,8 +299,79 @@ class RemoteProgramTests(unittest.TestCase):
             live_mirror.apply_snapshot(target, source, 'another-run')
 
 
+class InspectViewTests(unittest.TestCase):
+    """The live Inspect log and the native Inspect View bundle, built with the pinned Inspect."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name).resolve()
+        self.vm = FakeVM(self.base, events=6)
+        self.source = self.base / 'work' / RUN
+        self.source.mkdir(parents=True)
+        cloud = live_mirror.Cloud('gcloud', runner=FakeRunner())
+        target = self.base / 'snap.tar.gz'
+        cloud.snapshot('collab-vm-1', str(self.vm.home), RUN, since_line=0, evals={},
+                       buffer_dir=str(self.vm.buffer_dir), target=target)
+        live_mirror.apply_snapshot(target, self.source, RUN)
+
+    def test_running_samples_are_shown_in_progress_with_a_plain_note(self):
+        from inspect_ai.log import read_eval_log
+        out = self.base / 'viewer'
+        logs = live_mirror.build_inspect_view(self.source, out)
+        self.assertEqual(logs, {self.vm.log.name: {'mode': 'live', 'flushed': 0, 'completed': 0, 'running': 1}})
+        self.assertTrue((out / 'index.html').is_file())
+        self.assertTrue(list((out / 'assets').glob('*.js')))
+        listing = json.loads((out / 'logs' / 'listing.json').read_text())
+        self.assertEqual(listing[self.vm.log.name]['status'], 'started')    # Inspect View shows it as running
+        log = read_eval_log(str(out / 'logs' / self.vm.log.name))
+        self.assertEqual(log.status, 'started')
+        sample, = log.samples
+        self.assertEqual(sample.id, 'agent-001')
+        self.assertEqual(sample.error.message, live_mirror.RUNNING_NOTE)
+        self.assertEqual(len([e for e in sample.events if e.event == 'model']), 6)
+        with zipfile_zstd_open(out / 'logs' / self.vm.log.name) as archive:
+            self.assertNotIn('header.json', archive.namelist())
+        self.assertFalse((self.vm.run_dir / 'inspect' / 'live-inspect').exists())   # the VM copy is untouched
+
+    def test_a_finished_log_is_copied_unchanged(self):
+        sys.path.insert(0, str(ROOT))
+        from research.analysis.tests import test_judge_live as helpers
+        log = self.source / 'inspect' / self.vm.log.name
+        helpers.write_eval(log, [self.vm.sample])
+        out = self.base / 'viewer'
+        logs = live_mirror.build_inspect_view(self.source, out)
+        self.assertEqual(logs, {log.name: {'mode': 'final'}})
+        self.assertEqual((out / 'logs' / log.name).read_bytes(), log.read_bytes())
+
+    def test_the_build_runs_isolated_without_credentials(self):
+        calls = []
+
+        def runner(argv, **kwargs):
+            calls.append((argv, kwargs))
+            Path(json.loads(Path(argv[-1]).read_text())['result']).write_text('{}')
+            return SimpleNamespace(returncode=0, stdout='', stderr='')
+        with mock.patch.dict('os.environ', {'PATH': '/usr/bin', 'HF_TOKEN': 'hf_' + 'a' * 34,
+                                            'ANTHROPIC_API_KEY': 'x', 'PYTHONPATH': '/somewhere'}, clear=True):
+            live_mirror.build_inspect_view(self.source, self.base / 'viewer', runner=runner)
+        argv, kwargs = calls[0]
+        self.assertEqual(argv[1:3], ['-I', '-c'])
+        self.assertNotIn('HF_TOKEN', kwargs['env'])
+        self.assertNotIn('ANTHROPIC_API_KEY', kwargs['env'])
+        self.assertNotIn('PYTHONPATH', kwargs['env'])
+        self.assertFalse(Path(kwargs['cwd']).resolve().is_relative_to(ROOT))    # no repository .env
+
+
+def zipfile_zstd_open(path):
+    import zipfile
+    import zipfile_zstd  # noqa: F401
+    return zipfile.ZipFile(path)
+
+
 class PassTests(unittest.TestCase):
-    """End to end: fabricated VM -> snapshot -> real transcript and conference rendering -> fake Space."""
+    """End to end: fabricated VM -> snapshot -> Inspect View and conference rendering -> fake Space."""
+
+    inspect_view = staticmethod(fake_inspect_view)
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -264,40 +390,43 @@ class PassTests(unittest.TestCase):
         self.state = live_mirror.load_state(self.work / 'state.json')
 
     def run_pass(self, **kwargs):
+        kwargs.setdefault('quiet_seconds', 0)
+        kwargs.setdefault('inspect_view', self.inspect_view)
         return live_mirror.run_pass(self.cloud, [('collab-vm-1', str(self.vm.home))], state=self.state,
                                     work=self.work, api=self.hub, download=self.hub.download, add=add, delete=delete,
-                                    buffer_dir=str(self.vm.buffer_dir), quiet_seconds=0, **kwargs)
+                                    buffer_dir=str(self.vm.buffer_dir), **kwargs)
 
-    def test_pass_publishes_only_live_files_and_renders_the_real_views(self):
-        report = self.run_pass()
-        self.assertEqual(report['runs'][RUN]['transcripts'], 1, report)
+    def test_pass_publishes_only_live_files_with_inspect_view_and_conference(self):
+        report = self.run_pass(inspect_view=live_mirror.build_inspect_view)    # the real Inspect View build
+        self.assertEqual(report['runs'][RUN]['inspect_samples'], {'flushed': 0, 'completed': 0, 'running': 1}, report)
         self.assertEqual(report['upload']['committed'], True, report)
         changed = {op.path_in_repo for op in self.hub.commits[0][1]}
         self.assertTrue(all(name.startswith('live/') for name in changed))
         self.assertEqual(self.hub.files['index.html'], b'<html>catalogue</html>')
         prefix = f'live/{RUN}/'
-        for name in ('index.html', 'status.json', 'transcripts/index.html', 'transcripts/agent-001.html',
-                     'conference-view/index.html'):
+        for name in ('index.html', 'status.json', 'conference-view/index.html', 'inspect-view/index.html',
+                     'inspect-view/logs/listing.json', 'inspect-view/logs/' + self.vm.log.name):
             self.assertIn(prefix + name, self.hub.files)
-        page = self.hub.files[prefix + 'transcripts/agent-001.html'].decode()
-        self.assertIn('id="private-space-navigation"', page)
-        inner = live_mirror.unpack_page(page)
-        self.assertIn('A01.t0000', inner)                      # the judge's reconstruction, as published later
-        self.assertIn('Live snapshot, not final', inner)
-        self.assertIn('id="private-space-navigation"', inner)
+        self.assertFalse([n for n in self.hub.files if '/transcripts/' in n])   # transcripts: Inspect View only
+        viewer = self.hub.files[prefix + 'inspect-view/index.html'].decode()
+        self.assertIn('id="private-space-navigation"', viewer)
+        self.assertIn('<script type="module">import "./assets/', viewer)     # as prepare_hf_library.py does
+        summary = self.hub.files[prefix + 'index.html'].decode()
+        self.assertIn('href="inspect-view/index.html"', summary)
+        self.assertIn('Live snapshot, not final', summary)
         conference = self.hub.files[prefix + 'conference-view/index.html'].decode()
         self.assertIn('href="../../../index.html"', conference)   # the library catalogue
         self.assertNotIn('href="../results.html"', conference)    # not mirrored: plain text
+        self.assertNotIn('href="../transcripts/index.html"', conference)
         index = json.loads(self.hub.files['live/index.json'])
         self.assertEqual(index['schema'], 'gdm-live-mirror/1')
         entry = index['runs'][0]
         self.assertEqual((entry['run'], entry['state'], entry['solved'], entry['task_count']), (RUN, 'running', 1, 2))
         self.assertEqual(json.loads(self.hub.files[prefix + 'status.json'])['submissions'], {'accepted': 1})
+        self.assertEqual(report['upload']['live_log_uploads'][0]['path'], prefix + 'inspect-view/logs/' + self.vm.log.name)
 
     def test_own_recent_commit_does_not_defer_the_next_pass(self):
-        live_mirror.run_pass(self.cloud, [('collab-vm-1', str(self.vm.home))], state=self.state, work=self.work,
-                             api=self.hub, download=self.hub.download, add=add, delete=delete,
-                             buffer_dir=str(self.vm.buffer_dir), quiet_seconds=0)
+        self.run_pass()
         self.assertEqual(self.state['own_revisions'], ['1'])
         self.vm.db.execute("INSERT INTO posts (agent_id, intent_type, message, tags, posted_at) VALUES "
                            "('agent-001', 'note', 'later', '[]', 4102444812.0)")
@@ -305,23 +434,21 @@ class PassTests(unittest.TestCase):
                            "(4102444812.0, 'board_post', 'agent-001', 'post_intent', 'c3', ?)",
                            (json.dumps({'post_id': 'post-3'}),))
         self.vm.db.commit()
-        report = live_mirror.run_pass(self.cloud, [('collab-vm-1', str(self.vm.home))], state=self.state,
-                                      work=self.work, api=self.hub, download=self.hub.download, add=add,
-                                      delete=delete, buffer_dir=str(self.vm.buffer_dir), quiet_seconds=600)
+        report = self.run_pass(quiet_seconds=600)
         self.assertTrue(report['upload']['committed'], report)
 
     def test_unchanged_files_are_not_uploaded_again_and_stale_files_are_removed(self):
         self.run_pass()
         first = {op.path_in_repo for op in self.hub.commits[0][1]}
-        self.hub.files[f'live/{RUN}/transcripts/agent-099.html'] = b'left by an earlier snapshot'
+        self.hub.files[f'live/{RUN}/transcripts/agent-001.html'] = b'left by an earlier version of the mirror'
         self.hub.revision += 1
         self.run_pass()
         second = self.hub.commits[1][1]
         uploaded = {op.path_in_repo for op in second if op.kind == 'add'}
-        self.assertNotIn(f'live/{RUN}/transcripts/agent-001.html', uploaded)   # same events: same bytes
+        self.assertNotIn(f'live/{RUN}/inspect-view/assets/index.js', uploaded)   # the app is uploaded once
         self.assertLess(len(uploaded), len(first))
         self.assertEqual([op.path_in_repo for op in second if op.kind == 'delete'],
-                         [f'live/{RUN}/transcripts/agent-099.html'])
+                         [f'live/{RUN}/transcripts/agent-001.html'])
 
     def test_published_run_is_retired_from_the_live_area(self):
         self.run_pass()
@@ -354,9 +481,7 @@ class PassTests(unittest.TestCase):
     def test_pass_defers_to_a_recent_publication_and_refuses_a_public_space(self):
         self.hub.revision += 1   # another publisher just committed
         self.hub.last_modified = datetime.datetime.now(datetime.timezone.utc)
-        report = live_mirror.run_pass(self.cloud, [('collab-vm-1', str(self.vm.home))], state=self.state,
-                                      work=self.work, api=self.hub, download=self.hub.download, add=add,
-                                      delete=delete, buffer_dir=str(self.vm.buffer_dir), quiet_seconds=600)
+        report = self.run_pass(quiet_seconds=600)
         self.assertIn('deferred', report['upload'])
         self.assertEqual(self.hub.commits, [])
         self.hub.private = False
@@ -375,18 +500,62 @@ class PassTests(unittest.TestCase):
         self.assertIn('Credential-like content', report['runs'][RUN])
         self.assertFalse([n for n in self.hub.files if n.startswith(f'live/{RUN}/')])
 
+    def test_credentials_inside_the_inspect_archive_are_refused(self):
+        def leaky(source, out):
+            logs = fake_inspect_view(source, out)
+            import zipfile
+            with zipfile.ZipFile(next((out / 'logs').glob('*.eval')), 'a') as archive:
+                archive.writestr('samples/leak.json', json.dumps({'text': 'sk-' + 'q' * 40}),
+                                 compress_type=zipfile.ZIP_DEFLATED)   # only visible inside the archive
+            return logs
+        report = self.run_pass(inspect_view=leaky)
+        self.assertIn('Credential-like content in Inspect archive', report['runs'][RUN])
+        self.assertFalse([n for n in self.hub.files if n.startswith(f'live/{RUN}/')])
+
+    def test_superseded_live_logs_are_pruned_and_published_ones_never(self):
+        self.run_pass()
+        first = self.state['live_log_blobs'][0]['sha256']
+        self.assertEqual(self.hub.pruned, [])                       # still the head's live log
+        self.vm.buffer.log_events([__import__('inspect_ai.log._recorders.types', fromlist=['SampleEvent']).SampleEvent(
+            id='agent-001', epoch=1, event=self.vm.sample.events[8])])
+        write_running_eval(self.vm.log)                             # the .eval changed on the VM
+        report = self.run_pass()
+        self.assertTrue(report['upload']['committed'], report)
+        self.assertEqual(self.hub.pruned, [first], report)           # superseded: deleted without history rewrite
+        self.assertEqual(self.hub.rewrite_history, [False])
+        self.assertNotIn(first, {c['sha256'] for c in self.state['live_log_blobs']})
+        # A log another file of the head still references (e.g. published byte-identical) is kept.
+        current = self.state['live_log_blobs'][0]
+        self.hub.files['other-run/inspect/copy.eval'] = self.hub.files[current['path']]
+        self.hub.revision += 1
+        pruned, kept = live_mirror.prune_superseded(self.hub, 'repo', str(self.hub.revision), [current])
+        self.assertEqual((pruned, kept), ([], [current]))
+
+    def test_keep_live_history_never_deletes(self):
+        self.run_pass(prune=False)
+        write_running_eval(self.vm.log)
+        self.vm.buffer.log_events([__import__('inspect_ai.log._recorders.types', fromlist=['SampleEvent']).SampleEvent(
+            id='agent-001', epoch=1, event=self.vm.sample.events[8])])
+        self.run_pass(prune=False)
+        self.assertEqual(self.hub.pruned, [])
+
 
 class SyncGuardTests(unittest.TestCase):
     def test_only_live_paths_and_sizes_below_the_lfs_limit(self):
         hub = Hub()
         with tempfile.TemporaryDirectory() as tmp:
             bundle = Path(tmp) / 'b'
-            (bundle / 'transcripts').mkdir(parents=True)
-            (bundle / 'transcripts' / 'agent-001.html').write_bytes(b'x' * live_mirror.LFS_SAFE_LIMIT)
+            (bundle / 'conference-view').mkdir(parents=True)
+            (bundle / 'conference-view' / 'index.html').write_bytes(b'x' * live_mirror.LFS_SAFE_LIMIT)
             with self.assertRaises(ValueError):
                 live_mirror.sync(hub, hub.download, updates={RUN: {'bundle': bundle, 'entry': {'run': RUN}}},
                                  add=add, delete=delete, quiet_seconds=0)
-            (bundle / 'transcripts' / 'agent-001.html').write_bytes(b'ok')
+            (bundle / 'conference-view' / 'index.html').write_bytes(b'ok')
+            (bundle / 'inspect-view' / 'logs').mkdir(parents=True)          # an Inspect log may be LFS
+            (bundle / 'inspect-view' / 'logs' / 'a.eval').write_bytes(b'x' * live_mirror.LFS_SAFE_LIMIT)
+            result = live_mirror.sync(hub, hub.download, updates={RUN: {'bundle': bundle, 'entry': {'run': RUN}}},
+                                      add=add, delete=delete, quiet_seconds=0, commit=False)
+            self.assertEqual(result['uploads'], 3)
             (bundle / '.env').write_bytes(b'')
             with self.assertRaises(ValueError):
                 live_mirror.sync(hub, hub.download, updates={RUN: {'bundle': bundle, 'entry': {'run': RUN}}},
@@ -402,20 +571,13 @@ class SyncGuardTests(unittest.TestCase):
 
 
 class PageTests(unittest.TestCase):
-    def test_compressed_page_round_trip(self):
-        inner = '<!doctype html><title>x</title><p id="message-1">é &lt;tag&gt;</p>' * 1000
-        page = live_mirror.compressed_page(inner, 'agent-001 · live')
-        self.assertEqual(live_mirror.unpack_page(page), inner)
-        self.assertLess(len(page), len(inner) / 5)
-        self.assertNotIn('<p id="message-1">', page)
-
     def test_links_to_unmirrored_files_become_text(self):
-        available = {'conference-view/index.html', 'transcripts/index.html'}
-        out = live_mirror.fix_links('<a href="../results.html">Run report</a> <a href="../transcripts/index.html">T</a> '
+        available = {'conference-view/index.html', 'inspect-view/index.html'}
+        out = live_mirror.fix_links('<a href="../results.html">Run report</a> <a href="../inspect-view/index.html">T</a> '
                                     '<a href="../../index.html">Library</a> <a href="#x">here</a>',
                                     'conference-view/index.html', available)
         self.assertIn('<span class="unavailable" title="Available once the run is published">Run report</span>', out)
-        self.assertIn('<a href="../transcripts/index.html">T</a>', out)
+        self.assertIn('<a href="../inspect-view/index.html">T</a>', out)
         self.assertIn('<a href="../../../index.html">Library</a>', out)
         self.assertIn('<a href="#x">here</a>', out)
 
@@ -431,6 +593,8 @@ class PageTests(unittest.TestCase):
         self.assertIn("fetch('live/index.json'", hosted)
         self.assertIn('new Set(["a-run"])', hosted)
         self.assertIn('id="live" hidden', hosted)
+        self.assertIn("'inspect-view/index.html'", hosted)
+        self.assertNotIn('transcripts/index.html', hosted)
         self.assertNotIn('live/index.json', local)
 
 

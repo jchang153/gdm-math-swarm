@@ -113,14 +113,14 @@ def build(runs, hosted=False, unlisted=None):
 # (the maintenance tools reproduce it byte for byte) while the mirror updates only live/. A run that
 # is already in the catalogue is never listed as live. Entries are shown with textContent only and
 # every link is built here from a validated run ID, never taken from the file.
-LIVE_SCRIPT = r'''<section id="live" hidden><h2>Live now</h2><p>Runs still going, mirrored from their VM about every few minutes. These are unfinished snapshots: operational outcomes only, no independent evaluation or behavior judge yet. A run's live entry is removed once it is published here.</p><ul id="live-runs"></ul></section>
+LIVE_SCRIPT = r'''<section id="live" hidden><h2>Live now</h2><p>Runs still going, mirrored from their VM about every few minutes. These are unfinished snapshots: transcripts so far in Inspect View, conference (operational) outcomes only, no independent evaluation or behavior judge yet. A run's live entry is removed once it is published here.</p><ul id="live-runs"></ul></section>
 <script>(()=>{const published=new Set(PUBLISHED);const ok=/^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 fetch('live/index.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(d=>{if(!d||d.schema!=='gdm-live-mirror/1'||!Array.isArray(d.runs))return;
 const list=document.getElementById('live-runs');for(const e of d.runs){if(!e||!ok.test(e.run)||published.has(e.run))continue;
 const li=document.createElement('li'),base='live/'+encodeURIComponent(e.run)+'/',strong=document.createElement('strong');strong.textContent=e.run;li.append(strong);
 const facts=[e.state_label,e.model,e.agents!=null?e.agents+' agents':null,e.solved!=null?e.solved+' solved (conference judge)':null,e.updated_utc?'updated '+new Date(e.updated_utc).toLocaleString():null].filter(Boolean);
 li.append(document.createTextNode(' · '+facts.join(' · ')+' · '));
-for(const [label,path] of [['Live summary','index.html'],['Transcripts','transcripts/index.html'],['Conference','conference-view/index.html']]){const a=document.createElement('a');a.href=base+path;a.textContent=label;li.append(a,document.createTextNode(' '));}
+for(const [label,path] of [['Live summary','index.html'],['Inspect View','inspect-view/index.html'],['Conference','conference-view/index.html']]){const a=document.createElement('a');a.href=base+path;a.textContent=label;li.append(a,document.createTextNode(' '));}
 list.append(li);}document.getElementById('live').hidden=!list.children.length;}).catch(()=>{});})();</script>'''
 
 
