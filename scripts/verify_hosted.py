@@ -22,8 +22,9 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from publish_hf_library import DEFAULT_REPO  # noqa: E402
 
-PAGES = ("index.html", "{run}/results.html", "{run}/conference-view/index.html", "{run}/transcripts/index.html",
-         "{run}/inspect-view/index.html")
+# Runs published before October 21, 2026 also carry {run}/transcripts/index.html; pass it with --page
+# to check it. New runs have no custom transcript pages (read agent transcripts in Inspect View).
+PAGES = ("index.html", "{run}/results.html", "{run}/conference-view/index.html", "{run}/inspect-view/index.html")
 # HF injects this one script into served HTML; remove only it before comparing bytes.
 CREATOR_SCRIPT = re.compile(rb'<script>window\.huggingface=\{variables:\{"SPACE_CREATOR_USER_ID":"[0-9a-f]+"\}\};</script>')
 LFS_POINTER = b"version https://git-lfs.github.com/spec/"

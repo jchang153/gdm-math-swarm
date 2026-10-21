@@ -138,8 +138,10 @@ class MaintenanceTests(unittest.TestCase):
         self.replaced = [RUN + '/results.html', RUN + '/results.json']
 
     def prepare(self, name, *runs):
+        # These runs model publications from before October 21, 2026, which carried the transcript export.
         output = self.root / 'bundles' / name
-        argv = ['prepare_hf_library.py', '--runs-dir', str(self.runs), '--output-dir', str(output)]
+        argv = ['prepare_hf_library.py', '--runs-dir', str(self.runs), '--output-dir', str(output),
+                '--include-transcript-export']
         for run in runs:
             argv += ['--run', f'{run}={self.viewer}']
         with patch.object(sys, 'argv', argv), patch('builtins.print'):

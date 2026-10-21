@@ -19,7 +19,10 @@ from build_experiment_index import newest_first, unlisted_runs, write_index
 DEFAULT_REPO = 'gdm-math-swarm/gdm-math-swarm-experiments'
 ROOT_FILES = {'README.md', 'robots.txt', 'index.html', 'experiments.json'}
 CATALOGUE = {'index.html', 'experiments.json', 'archive-manifest.json'}
-SECRET = re.compile(rb'sk-[A-Za-z0-9_-]{24,}|hf_[A-Za-z0-9]{30,}|-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----')
+# A key starts at a token boundary: an sk-/hf_ run inside a longer base64/base64url token (for example
+# a provider's encrypted reasoning blob in an Inspect log or session snapshot) is not a key.
+SECRET = re.compile(rb'(?<![A-Za-z0-9+/_-])(?:sk-[A-Za-z0-9_-]{24,}|hf_[A-Za-z0-9]{30,})'
+                    rb'|-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----')
 RUN_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]*')
 
 
@@ -99,7 +102,7 @@ def load_bundle(bundle):
     if {x['run'] for x in entries} != set(runs) or len(entries) != len(runs):
         raise ValueError('Bundle catalogue does not match selected runs')
     for run in runs:
-        for required in ('results.json', 'results.html', 'transcripts/index.html',
+        for required in ('results.json', 'results.html',
                          'conference-view/index.html', 'inspect-view/index.html',
                          'inspect-view/logs/listing.json'):
             if run + '/' + required not in actual:

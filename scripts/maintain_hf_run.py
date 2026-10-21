@@ -71,7 +71,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 
-from build_experiment_index import INSPECT_LOGS, inspect_log_links, unlisted_runs, write_index
+from build_experiment_index import INSPECT_LOGS, inspect_log_links, newest_first, unlisted_runs, write_index
 from prepare_hf_library import judge_excluded
 from publish_hf_library import (DEFAULT_REPO, RUN_ID, batches, digest, load_bundle, matches,
                                 merge_entries, payload, remote_files, validate_lfs_additions)
@@ -144,6 +144,10 @@ def regenerate(entries):
     with tempfile.TemporaryDirectory() as tmp:
         write_index(Path(tmp), entries, hosted=True)
         return {name: (Path(tmp) / name).read_bytes() for name in REGENERATED}
+
+
+def without_summary(entry):
+    return {k: v for k, v in entry.items() if k != 'summary'}
 
 
 def others(index, run):
@@ -459,7 +463,9 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
             raise ValueError('Another catalogue entry would change')
     else:
         regenerated = {}  # index.html and experiments.json stay byte for byte as published
-        if incoming[0] != current_entry:
+        # An entry published before the catalogue summary existed (October 21, 2026) is compared
+        # without the bundle's derived summary: this scope leaves the catalogue unchanged either way.
+        if (incoming[0] if 'summary' in current_entry else without_summary(incoming[0])) != current_entry:
             raise ValueError(f"The bundle's catalogue entry for {run} differs from the published entry, but the "
                              'transcripts scope never changes the catalogue: '
                              + json.dumps(entry_diff(current_entry, incoming[0]), sort_keys=True))
@@ -846,13 +852,23 @@ CATALOGUE_FILES = (*REGENERATED, MANIFEST)
 
 
 def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=None, backup_dir=None,
-               operation=None, unlisted=None):
-    """Remove one published run's catalogue row; every run file stays published unchanged."""
-    if not isinstance(run, str) or not RUN_ID.fullmatch(run):
-        raise ValueError('Invalid run ID')
-    record = (unlisted_runs() if unlisted is None else unlisted).get(run)
-    if record is None:
-        raise ValueError('Record the run in data/library-unlisted.json (run, date, reason) before unlisting: ' + run)
+               operation=None, unlisted=None, rerender=False):
+    """Remove one published run's catalogue row; every run file stays published unchanged.
+
+    rerender=True (run=None; --rerender-catalogue): no row is removed; only index.html is rebuilt
+    by the current generator from the published experiments.json, which it must reproduce byte
+    for byte, after a change to the catalogue page itself.
+    """
+    if rerender:
+        if run is not None:
+            raise ValueError('Re-rendering the catalogue takes no run')
+        record = None
+    else:
+        if not isinstance(run, str) or not RUN_ID.fullmatch(run):
+            raise ValueError('Invalid run ID')
+        record = (unlisted_runs() if unlisted is None else unlisted).get(run)
+        if record is None:
+            raise ValueError('Record the run in data/library-unlisted.json (run, date, reason) before unlisting: ' + run)
     check_outputs(None, receipt, backup_dir, commit, operation)
     info = api.repo_info(repo, repo_type='space', files_metadata=True)
     if not info.private:
@@ -874,8 +890,8 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
     for name in CATALOGUE_FILES:
         if name not in remote:
             raise ValueError('Remote file required for maintenance is missing: ' + name)
-    folder = sorted(n for n in remote if n.startswith(run + '/'))
-    if not folder:
+    folder = [] if rerender else sorted(n for n in remote if n.startswith(run + '/'))
+    if not folder and not rerender:
         raise ValueError('Run is not published: ' + run)
     lfs = sorted(n for n in CATALOGUE_FILES if remote[n].lfs)
     ruled = lfs_rule_matches(fetch(ATTRIBUTES), list(CATALOGUE_FILES)) if ATTRIBUTES in remote else []
@@ -886,33 +902,43 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
     index, archive = json.loads(index_bytes), json.loads(fetch(MANIFEST))
     if index.get('warnings') or archive.get('warnings'):
         raise ValueError('Remote catalogue or manifest has warnings; review before maintenance')
-    if archive.get('schema') != 'gdm-private-space/1' or run not in archive.get('runs', []):
-        raise ValueError('Remote archive manifest does not list the run: ' + run)
+    if archive.get('schema') != 'gdm-private-space/1' or not (rerender or run in archive.get('runs', [])):
+        raise ValueError('Remote archive manifest does not list the run: ' + str(run))
     listed = [x.get('run') for x in index.get('experiments', [])]
     if len(set(listed)) != len(listed):
         raise ValueError('Remote catalogue has duplicate entries')
-    if regenerate(index['experiments']) != {'experiments.json': index_bytes, 'index.html': html}:
+    if rerender:  # the entries must survive regeneration byte for byte; only the page and their order may differ
+        ordered = newest_first(index['experiments'])  # catalogue order (newest first, October 21, 2026)
+        regenerated_index = regenerate(index['experiments'])['experiments.json']
+        reordered_only = (index_bytes == json.dumps(index, indent=2).encode()  # generator format, older order
+                          and regenerated_index == json.dumps({**index, 'experiments': ordered}, indent=2).encode())
+        if regenerated_index != index_bytes and not reordered_only:
+            raise ValueError('The current generator does not reproduce the remote experiments.json byte for byte; '
+                             're-rendering would change catalogue entries')
+    elif regenerate(index['experiments']) != {'experiments.json': index_bytes, 'index.html': html}:
         raise ValueError('The current generator does not reproduce the remote catalogue byte for byte; '
                          'regenerating it would change other catalogue entries')
-    keep = others(index, run)
+    keep = ordered if rerender else others(index, run)
     regenerated = regenerate(keep)
     if json.loads(regenerated['experiments.json'])['experiments'] != keep:
         raise ValueError('Another catalogue entry would change')
     files = dict(archive['files'])
     for name in REGENERATED:
         files[name] = digest(regenerated[name])
-    new_archive = {**archive, 'unlisted_runs': sorted({*archive.get('unlisted_runs', []), run}), 'files': files,
-                   'total_bytes': sum(x['bytes'] for x in files.values())}
+    new_archive = {**archive, **({} if rerender else {'unlisted_runs': sorted({*archive.get('unlisted_runs', []), run})}),
+                   'files': files, 'total_bytes': sum(x['bytes'] for x in files.values())}
     planned = {**regenerated, MANIFEST: json.dumps(new_archive, indent=2).encode()}
     if new_archive == archive:
         planned[MANIFEST] = fetch(MANIFEST)  # already recorded: keep the published bytes
     uploads = [(n, d) for n, d in planned.items() if not matches(d, remote[n])]
-    result = {'operation': 'maintain-run', 'scope': 'unlist', 'repo': repo, 'private': True, 'run': run,
+    scope = 'rerender-catalogue' if rerender else 'unlist'
+    result = {'operation': 'maintain-run', 'scope': scope, 'repo': repo, 'private': True, 'run': run,
               'record': record, 'base_revision': base, 'committed': False,
               'listed_before': run in listed, 'entries_before': len(listed), 'entries_after': len(keep),
               'other_entries_unchanged': len(keep), 'run_files_kept': len(folder),
               'catalogue_files': [n for n, _ in uploads], 'uploads': len(uploads),
-              'already_applied': not uploads}
+              'already_applied': not uploads,
+              'reordered': [x['run'] for x in keep] != [x for x in listed if x in {e['run'] for e in keep}]}
     if not commit or not uploads:
         return result
 
@@ -925,7 +951,7 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
     write_receipt('writing backups; nothing uploaded')
     try:
         backup_dir.mkdir(parents=True, exist_ok=True)
-        write_json(backup_dir / INVENTORY, {'operation': 'maintain-run', 'scope': 'unlist', 'repo': repo, 'run': run,
+        write_json(backup_dir / INVENTORY, {'operation': 'maintain-run', 'scope': scope, 'repo': repo, 'run': run,
                                             'revision': base, 'origin_revision': base, 'resume_from': None,
                                             'files': current})
         saved = [*CATALOGUE_FILES, *([ATTRIBUTES] if ATTRIBUTES in remote else [])]
@@ -942,7 +968,8 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
                              'against the latest revision')
         response = api.create_commit(
             repo_id=repo, repo_type='space', parent_commit=base,
-            commit_message='Unlist ' + run + ' from the catalogue (run files kept)',
+            commit_message=('Re-render the catalogue page (entries unchanged)' if rerender
+                            else 'Unlist ' + run + ' from the catalogue (run files kept)'),
             operations=[operation(path_in_repo=n, path_or_fileobj=d) for n, d in uploads])
         revision = response.oid
         write_receipt('committed; verifying')
@@ -961,8 +988,10 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
         for name, data in planned.items():
             if final_files[name].lfs or not matches(data, final_files[name]):
                 raise ValueError('Catalogue file mismatch or stored as LFS after maintenance: ' + name)
-        if run in [x['run'] for x in json.loads(fetch('experiments.json', revision, final_files))['experiments']]:
-            raise ValueError('The run is still listed after maintenance')
+        final_listed = [x['run'] for x in json.loads(fetch('experiments.json', revision, final_files))['experiments']]
+        if (final_listed != [x['run'] for x in keep]) if rerender else (run in final_listed):
+            raise ValueError('The catalogue entries changed during re-rendering' if rerender
+                             else 'The run is still listed after maintenance')
     except Exception as error:
         try:
             write_receipt('failed: ' + type(error).__name__ + (': ' + str(error) if isinstance(error, ValueError) else ''))
@@ -973,15 +1002,19 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
     result.update(committed=True, final_revision=revision, status='verified', verification={
         'final_files': len(state), 'changed_files': sorted(n for n in current if not same(current[n], state[n])),
         'verified_preserved_files': len(set(current) - set(planned)),
-        'run_files_present': sum(n.startswith(run + '/') for n in state)})
+        'run_files_present': 0 if rerender else sum(n.startswith(run + '/') for n in state)})
     write_receipt('verified')
     return result
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--maintain-run', required=True, metavar='RUN_ID',
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument('--maintain-run', metavar='RUN_ID',
                         help='The already-published run whose results and judge files (or transcripts) are updated')
+    target.add_argument('--rerender-catalogue', action='store_true',
+                        help='Rebuild only index.html from the published experiments.json with the current '
+                             'catalogue generator (after a catalogue page change); no entry or run file changes')
     parser.add_argument('--scope', choices=SCOPES, default='judge',
                         help='judge (default): results.html/results.json, judge files and the catalogue entry; '
                              'transcripts: only the existing RUN/transcripts/ files and their manifest digests; '
@@ -1005,6 +1038,16 @@ def main(argv=None):
                         help="After a failed attempt: the first attempt's backup directory, whose records of the "
                              'original state the result is verified against')
     args = parser.parse_args(argv)
+    if args.rerender_catalogue:
+        if args.bundle is not None or args.resume_from is not None or args.replace_judge or args.scope != 'judge':
+            parser.error('--rerender-catalogue takes no --bundle, --scope, --resume-from or --replace-judge')
+        if args.commit and (args.receipt is None or args.backup_dir is None):
+            parser.error('--commit requires --receipt and --backup-dir')
+        from huggingface_hub import HfApi, CommitOperationAdd, hf_hub_download
+        print(json.dumps(unlist_run(HfApi(), hf_hub_download, run=None, rerender=True, commit=args.commit,
+                                    repo=args.repo_id, receipt=args.receipt, backup_dir=args.backup_dir,
+                                    operation=CommitOperationAdd), indent=2))
+        return
     if (args.scope == 'unlist') == (args.bundle is not None):
         parser.error('--bundle is required, except for --scope unlist, which takes none')
     if args.resume_from is not None and args.scope == 'unlist':
