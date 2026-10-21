@@ -1773,6 +1773,8 @@ class SiteMaintenanceTests(unittest.TestCase):
         self.viewer = make_viewer(self.root)
         make_run(self.runs, OTHER)
         run = make_run(self.runs, RUN, judge={})
+        (run / 'evaluations').mkdir()
+        (run / 'evaluations/evaluations.jsonl').write_text('{"validity": "genuine"}\n')
         (run / 'conference-view/file-1.html').write_text('<!doctype html><html><head></head><body>f</body></html>')
         self.hub = Hub(self.root)
         publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
@@ -1809,6 +1811,7 @@ class SiteMaintenanceTests(unittest.TestCase):
         self.assertEqual(sorted(plan['replaced']), sorted(self.replaced))
         self.assertIn(RUN + '/results.json', plan['replacement_identical'])
         self.assertIn(RUN + '/conference-view/file-1.html', plan['replacement_identical'])
+        self.assertNotIn(RUN + '/evaluations/evaluations.jsonl', plan['replacement_identical'])  # not a target
         self.assertEqual(plan['catalogue']['entry_diff'], {})
         self.assertEqual(plan['catalogue']['files'], [MANIFEST])  # index.html and experiments.json unchanged
         self.assertEqual(plan['evaluator']['judge_pages']['replaced'], 1)

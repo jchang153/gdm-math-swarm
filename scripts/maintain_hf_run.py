@@ -416,7 +416,8 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
                 raise ValueError(f'Site scope: the behavior judge build of the bundle and revision {base} differ; this '
                                  f'scope only restyles published judge pages: page sets differ {pages_differ[:EXAMPLES]}, '
                                  f'data files differ or missing {data_differ[:EXAMPLES]}')
-        stale = sorted(n for n in remote if n.startswith(prefix + EVALUATIONS_PREFIX) and n not in targets)
+        stale = [] if site_scope else sorted(  # site scope: evaluator records are not targets
+            n for n in remote if n.startswith(prefix + EVALUATIONS_PREFIX) and n not in targets)
         if stale:
             raise ValueError(f'{len(stale)} published evaluator record(s) are not in the bundle; review them, '
                              'nothing is deleted automatically: ' + ', '.join(stale[:EXAMPLES]))
