@@ -29,7 +29,7 @@
   "candidate_model_id": "anthropic/claude-opus-5.5",
   "provider_route": "anthropic",
   "provider_settings": {
-    "prompt_usd_per_token": "0.000008",
+    "prompt_usd_per_token": "0.000005",
     "output_usd_per_token": "0.00002",
     "model_id": "anthropic/claude-opus-5.5",
     "context_length": 1000000,

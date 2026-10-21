@@ -17,7 +17,9 @@ GEMINI_MODEL_ID = "google/gemini-3.1-pro-preview"
 # Gemini 4 Argon: OpenRouter lists it flat at $2/$10 per million prompt/completion tokens on
 # google-vertex/global (no >200K tier).
 GEMINI4_MODEL_ID = "google/gemini-4-argon"
-OWNER_MULTIMODEL_IDS = (GEMINI4_MODEL_ID, "anthropic/claude-opus-5.5", "openai/gpt-5.6-sol", GLM_MODEL_ID)
+# Claude Opus 5.5: route "anthropic" (first party), docs/prompt-caching.md.
+CLAUDE_MODEL_ID = "anthropic/claude-opus-5.5"
+OWNER_MULTIMODEL_IDS = (GEMINI4_MODEL_ID, CLAUDE_MODEL_ID, "openai/gpt-5.6-sol", GLM_MODEL_ID)
 GEMINI_MODEL_IDS = (GEMINI_MODEL_ID, *OWNER_MULTIMODEL_IDS)
 # Models each budget track (budget.BUDGET_TRACKS) may run; the launch gates check this table.
 # Budget track "gemini" is the owner's track (its name predates the multi-model runs).
@@ -29,6 +31,14 @@ KNOWN_MODEL_IDS = tuple(dict.fromkeys(m for ids in ((MODEL_ID,), *TRACK_MODEL_ID
 # tool calls. Their live compatibility check must show such a replay accepted
 # (``signed_reasoning_tool_call_replay``, scripts/compat_check.py).
 SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID, GEMINI4_MODEL_ID)
+# Anthropic thinking blocks are signed too (reasoning_details format anthropic-claude-v1).
+SIGNED_REASONING_MODEL_IDS += (CLAUDE_MODEL_ID,)
+# Anthropic models get OpenRouter's top-level automatic prompt caching (request_options). Inspect
+# 0.3.279 adds explicit cache_control only on the last system block, the last tool and a message
+# breakpoint that does not land on Claude Code's usual history (string assistant/tool content),
+# so without it the conversation history would be billed as fresh input on every turn. The 5-minute
+# TTL is required: Anthropic rejects longer-TTL breakpoints after shorter ones (Inspect's are 5m).
+ANTHROPIC_AUTOMATIC_CACHE_CONTROL = {"type": "ephemeral"}
 
 # Chat-template and provider framing allowance added to the byte bound below.
 FRAMING_TOKEN_ALLOWANCE = 8192
@@ -49,9 +59,12 @@ class ProviderSettings:
     def request_options(self):
         if self.model_id not in KNOWN_MODEL_IDS or not self.provider_route:
             raise ValueError("The approved model and explicit provider route are required")
-        return {"provider":{"only":[self.provider_route],"allow_fallbacks":False,"require_parameters":True},
-                "reasoning":{"effort":self.reasoning_effort,"exclude":False},
-                "usage":{"include":True}}
+        options = {"provider":{"only":[self.provider_route],"allow_fallbacks":False,"require_parameters":True},
+                   "reasoning":{"effort":self.reasoning_effort,"exclude":False},
+                   "usage":{"include":True}}
+        if self.model_id.startswith("anthropic/"):
+            options["cache_control"] = dict(ANTHROPIC_AUTOMATIC_CACHE_CONTROL)
+        return options
 
     def prompt_token_bound(self, serialized_request: str) -> int:
         """Upper bound on billed prompt tokens without trusting a tokenizer estimate.

@@ -101,6 +101,25 @@ ended their sessions normally, and two reached the time limit. Technical failure
 and incomplete behavioral review limit interpretation. Raw records, evaluator
 bindings and consistent ledger backups remain under the ignored run/phase folders.
 
+## Claude Opus 5.5 on OpenRouter (October 21, 2026, unpaid)
+
+`anthropic/claude-opus-5.5` on the pinned first-party `anthropic` route needs
+explicit caching; it is not implicit (`supports_implicit_caching: false`).
+Inspect 0.3.279 marks only the last system block and the last tool with
+`cache_control`. Its message breakpoint expects list content in the final
+messages. Claude Code's history has string assistant, tool and counter content,
+so that marker never lands, and the history would be billed as fresh input every
+turn. `ProviderSettings.request_options` therefore adds OpenRouter's top-level
+automatic caching, `"cache_control": {"type": "ephemeral"}`, for `anthropic/*`
+models only. Its breakpoint moves forward to the last cacheable block. That makes
+three breakpoints, within Anthropic's limit of four. All use the 5-minute TTL
+because Anthropic rejects a 1-hour breakpoint after a 5-minute one. Listed prices
+per million tokens: $4 prompt, $20 completion, $0.20 cache read, $5 cache write
+(5 minutes). The reservation prompt price is $5 because settlement upper bounds
+price cache writes at the prompt bound. Still unverified until the live
+compatibility check: whether `require_parameters` accepts the top-level field,
+whether cache reads appear, and whether signed thinking replay is accepted.
+
 ## References
 
 - [Fireworks prompt caching](https://docs.fireworks.ai/guides/prompt-caching)
