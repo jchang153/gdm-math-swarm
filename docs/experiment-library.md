@@ -983,3 +983,16 @@ of the four runs (private, regular file, bundle bytes, HTTP 200 inline HTML with
 catalogue and one owner run's default pages. These are SDK/HTTP checks, not interactive browser tests. Plans,
 receipts, backups of the replaced files, hosted checks and the local copies of the previous derived views are in
 the ignored `runs/phase-b/site-publication-20261021/` directory.
+
+The incremental update of October 21, 2026 (Incident report tab and raw-log link removal) started from
+`ca19ca0a320dc096ca296af202dc0143fe472715` (7,117 files): `--rerender-catalogue` (`081b817a7ed7973da6190eea5bae2594b7e20b7e`;
+the catalogue hides raw log links and links the incident reports), then `--scope incident` for gemini10 and
+the four `owner-*-20261021` runs (3 files each plus their `results.html` tab and catalogue link; receipts in
+`runs/phase-b/incident-publication-<run>/attempt-1/`), then `--scope site` for all 8 listed runs to replace
+`results.html` with the page re-rendered by `build_results.py --rerender-html` (no raw log links; Incident
+report tab where a report exists). Every receipt reads `verified`; the final revision is
+`03aaab1d9084afd462e11434c8fa225d3218d1fb` with 7,132 files. `scripts/verify_hosted.py` passed for all 8 runs
+(catalogue, run page, conference view, Inspect View, incident report where present, a 206 range on one `.eval`,
+and `no_log_download_link`). A local copy of one run's hosted pages was also checked in a browser (catalogue,
+each tab, incident report, Inspect View loading its log). `baseline100` stays unlisted. Records are in the
+ignored `runs/phase-b/site-incident-nologs-publication-20261021/` directory.

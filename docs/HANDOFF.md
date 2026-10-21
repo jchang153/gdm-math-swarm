@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-21 by Claude (Opus 5.5) session.
+Last updated: 2026-10-21 by Claude (Opus 5.5) session (site publish).
 
 ## What the project is
 
@@ -67,8 +67,18 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
     `GIT_SSH_COMMAND="ssh -o HostKeyAlias=github.com" git push ssh://git@ssh.github.com:443/jchang153/gdm-math-swarm.git main`
   - Git binary: `/Library/Developer/CommandLineTools/usr/bin/git`.
 - **Shared results site:** the private HF Space (URL under "Hosts and access"); keep it private.
-  - A static site with the run list, per-run pages, Inspect View, behavior judge,
-    conference browser and proof-checker results.
+  - A static site with the run list (filters, sort, compare), per-run pages with
+    tabs (Report / Conference / Behavior judge / Incident report / Inspect), light/dark
+    theme and phone layout. Agent transcripts are read in Inspect View (no custom
+    transcript view); raw `.eval` files stay published for Inspect View but are not
+    linked as downloads.
+  - Live as of 2026-10-21 at Space revision `03aaab1d9084afd462e11434c8fa225d3218d1fb`
+    (7,132 files, private, 8 listed runs). Incident reports (only `report.html`,
+    `report.md`, `evidence.json`) are published for gemini10 and the four owner-* runs.
+    Records of that update: `runs/phase-b/site-incident-nologs-publication-20261021/`
+    and `runs/phase-b/incident-publication-<run>/`.
+  - Verify the hosted pages with `scripts/verify_hosted.py` (read-only; it fails a
+    page that still links a raw `.eval` download).
   - Run list is newest first. baseline100 is deliberately unlisted.
   - The 20,000-file limit is handled by packing each run's `snapshots/` into
     `snapshots.tar.gz` plus `snapshots.manifest.json`.
@@ -187,7 +197,9 @@ The full reference is `docs/gcp-vm.md` and `docs/validation.md`.
    - Preview with `scripts/prepare_hf_library.py`, then
      `scripts/publish_hf_library.py --bundle DIR [--commit]`.
    - Update a single run with `scripts/maintain_hf_run.py`. Scopes: judge,
-     evaluator, results, unlist, inspect, snapshots, catalogue.
+     transcripts, evaluator, results, inspect, site, incident, unlist, snapshots;
+     `--rerender-catalogue` re-renders only the catalogue page.
+   - A new run's incident report is included automatically by `prepare_hf_library.py`.
 
 ## Runs so far (newest first)
 
@@ -201,7 +213,8 @@ The full reference is `docs/gcp-vm.md` and `docs/validation.md`.
 | cache100, baseline8g100, baseline100 (unlisted), pilot | earlier baselines | see their `results.html` |
 
 All 5 recent runs have incident reports at `runs/<id>/analysis/incident/report.html`.
-The four owner-* runs, gemini10 and the earlier runs are published on the HF Space.
+The four owner-* runs, gemini10 and the earlier runs are published on the HF Space,
+including the 5 incident reports.
 
 `max_pressure_no_rule6` is collaborator Amelie's "max pressure" framing: a skills
 evaluation, with agents that score zero not used. The stop sentence is removed. The
@@ -232,22 +245,10 @@ is being merged into main via `collab-env`.
    both variants before any run. Whether the folder-moving environment variables
    work needs confirming at runtime on the first launch. If the branch isn't merged
    to main, finish it, run the tests, merge and push.
-2. **Website quality-of-life plus near-live mirror** (worktrees `site-*`,
-   `site-rollout`). It adds:
-   - run-list filters, sort and compare;
-   - run-page tabs;
-   - mobile and dark mode;
-   - a near-live mirror of in-progress runs, based on Inspect View. No separate
-     transcript view is wanted.
-
-   Once it lands:
-   - "Incident report" tab and catalogue link: implemented on main (2026-10-21,
-     branch `site-incident`; `scripts/incident_site.py`). Only `report.html`,
-     `report.md` and `evidence.json` are published, never `raw/` or `units/`;
-   - publish the 5 incident reports with `maintain_hf_run.py --scope incident`
-     (commands in `docs/experiment-library.md`, "Incident report outputs");
-   - remove the "Inspect logs" link or tab, which is only a download. Keep the
-     `.eval` files, since Inspect View needs them.
+2. **Website**: done and live (2026-10-21). Site QoL, the Incident report tab and
+   the removal of raw Inspect log download links are on main and published (see
+   "Where things live"). The near-live mirror (`scripts/live_mirror.py`) is
+   available for the next launch; it has not yet been used on a live run.
 
 ## Next steps / open items
 
