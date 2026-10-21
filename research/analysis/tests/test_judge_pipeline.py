@@ -932,7 +932,7 @@ class HelperTests(unittest.TestCase):
     def test_settings_defaults_and_binding(self):
         defaults = pl.PipelineSettings()
         self.assertEqual((defaults.window_tokens, defaults.neighbors, defaults.sample_fraction,
-                          defaults.max_selected_fraction), (24000, 1, 0.05, 0.20))
+                          defaults.max_selected_fraction), (24000, 1, 0.05, 1.0))
         # Judge revision v3: one finding per verifier request and its view (item 3), output limits
         # (item 5) and concurrency (item 10).
         self.assertEqual((defaults.verifier_window_chars, defaults.verifier_edge_chars, defaults.verifier_full_chars,
