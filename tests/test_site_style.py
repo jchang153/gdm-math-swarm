@@ -58,7 +58,7 @@ class ThemeHelperTest(unittest.TestCase):
                 for text in ('fg', 'muted', 'accent'):
                     self.assertGreaterEqual(ratio(tokens[text], tokens[surface]), 4.5, (text, surface, tokens[text]))
             self.assertGreaterEqual(ratio(tokens['sel-fg'], tokens['sel-bg']), 4.5)
-            for text in ('warn', 'ok', 'amber'):
+            for text in ('warn', 'ok', 'amber', 'good', 'caution', 'bad', 'info'):
                 self.assertGreaterEqual(ratio(tokens[text], tokens['card']), 4.5, text)
 
     def test_toggle_storage_is_guarded_and_local(self):
@@ -76,8 +76,9 @@ class GeneratedPagesTest(unittest.TestCase):
         import export_transcripts
         assert_themed(self, export_conference.page('Conference', '<p>x</p>'))
         assert_themed(self, '<!doctype html><meta charset="utf-8"><title>a</title>' + export_transcripts.STYLE)
-        for module in (build_results, export_conference, export_transcripts):
-            source = Path(module.__file__).read_text()
+        import site_theme  # the run page's layout CSS (build_results imports it as STYLE)
+        for module in (site_theme, export_conference, export_transcripts):
+            source = Path(module.__file__).read_text().replace('BASE = (', 'STYLE = (', 1)
             style = re.findall(r"STYLE = .*?(?:\n\n|''')", source, re.S)[0]
             self.assertNotRegex(style, r'#[0-9a-fA-F]{3,6}\b|:white\b', module.__name__)
         self.assertIn('themed(', Path(build_results.__file__).read_text())

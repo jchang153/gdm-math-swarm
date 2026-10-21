@@ -5,7 +5,7 @@ A deterministic, facts-only review of the run's own records, modelled on the
 gemini10-20261020T054602Z report layout. Every field is computed from records; the only free
 text is researcher notes given explicitly with --caveat / --caveat-for (stored under
 "researcher_notes", shown under "Researcher notes"). Record contents (board posts, DMs,
-library, private files, transcripts) are linked, never summarized. Offline: no model calls,
+library, private files, Inspect logs) are linked, never summarized. Offline: no model calls,
 network, Docker, credentials, keys or .env.
 
 Inputs (read-only): RUN/settings.json (condition), RUN/runtime.jsonl (clock, stop reason,
@@ -18,6 +18,11 @@ run" and every accepted submission is "not_evaluated". Behavior-judge findings a
 out of results.*: they live only in the judge's own pages (analysis/judge/report.html and its
 evidence browser, linked separately from the catalogue); the report carries only a status and
 link line ("Behavior judge: see analysis/judge/report.html" or "Behavior judge: not run").
+
+Page layout: a summary card (model, prompt variant, agents, duration, accepted and genuine tasks,
+cost, judge status), tabs Report / Conference / Behavior judge / Inspect with one-line
+explanations (agent transcripts are read in Inspect View; the site has no custom transcript viewer), the facts sections, and plain explanations of every status label shown. Raw Inspect
+logs are linked one RUN/inspect/*.eval file at a time. Light and dark mode, phone width.
 
 Publication steps (docs/experiment-library.md):
 
@@ -48,22 +53,69 @@ import json
 from pathlib import Path
 import sqlite3
 import sys
+from urllib.parse import quote
 
 if str(Path(__file__).resolve().parent) not in sys.path:  # shared site theme lives beside this script
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 from site_style import themed  # noqa: E402
+from site_theme import BASE as STYLE, badge_class  # noqa: E402
 
 NANO = Decimal('1e-9')
 ACCEPTED = ('accepted', 'accepted_after_close')
 SCOPES = ('pilot', 'compatibility', 'analysis')
 JUDGE_REPORT = 'analysis/judge/report.html'
-STYLE = ('body{max-width:1100px;margin:40px auto;padding:0 22px;font:16px system-ui;line-height:1.55}'
-         'table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:9px;border-bottom:1px solid var(--line);'
-         'overflow-wrap:anywhere}a{color:var(--accent)}small{color:var(--muted)}')
-LINKS = (('Agent transcripts', 'transcripts/index.html'),
-         ('Conference: board, DMs, library, private files and judging', 'conference-view/index.html'),
-         ('Inspect View', 'inspect-view/index.html'), ('Inspect logs', 'inspect/'),
-         ('Timeline', 'analysis/timeline.md'), ('Settings', 'settings.json'))
+# Run page tabs: (label, target, one-line plain explanation). The report is this page; the other
+# record views are separate pages next to it. Raw Inspect logs are linked one .eval file at a time
+# (a static host cannot list RUN/inspect/), like the catalogue (build_experiment_index.inspect_log_links).
+TABS = (('Report', '#report', 'This page: facts computed from the run\'s own records (clock, exits, '
+         'submissions, proof checker, spending).'),
+        ('Conference', 'conference-view/index.html', 'What agents saw and shared: board posts, DMs, the shared '
+         'library, judging events and private files.'),
+        ('Behavior judge', JUDGE_REPORT, 'A post-hoc model judge\'s reading of the transcripts (model-generated, '
+         'verified by a second model call); researcher-only.'),
+        ('Inspect', 'inspect-view/index.html', 'Agent transcripts and the raw Inspect evaluation logs '
+         '(authoritative), read in the native Inspect log viewer.'))
+OTHER_RECORDS = (('Timeline', 'analysis/timeline.md'), ('Settings', 'settings.json'))
+# Plain explanations of the status labels this report shows (only labels present are listed).
+STOP_REASONS = {
+    'max_run_seconds': 'The run reached its time limit.',
+    'budget_admission_exhausted': 'The run\'s budget could no longer admit model requests.',
+    'evaluation_finished': 'Every agent finished before the time limit.',
+    'user_requested_early_stop': 'A researcher stopped the run early.',
+    'post_depletion_window': 'The run stopped a fixed time after its budget ran out.',
+    'startup_timeout': 'The agents did not start in time.',
+    'monitor_error': 'The run monitor failed, so the run was stopped.'}
+EXITS = {
+    'harness_completed': 'The agent ended its session on its own with a final reply.',
+    'harness_completed_after_truncation': 'Ended on its own after replies were cut off at the output length limit.',
+    'harness_completed_after_provider_error': 'Ended after the model provider returned an error to its last request.',
+    'harness_completed_empty_reply': 'Ended because its last reply had no visible text or tool call (not a voluntary '
+                                     'exit).',
+    'budget_exhausted': 'Stopped: the run\'s budget could not cover its next model request.',
+    'budget_ledger_unavailable': 'Stopped: the budget ledger stayed locked, so no request could be admitted.',
+    'error': 'The agent harness raised an error.',
+    'error_after_truncation': 'The harness raised an error after repeatedly truncated replies.',
+    'interrupted': 'Cancelled without a recorded outcome (for example after the stop grace period).',
+    'interrupted_by_user': 'Cancelled by an operator interrupt.'}
+OUTCOMES = {
+    'accepted': 'Passed the conference\'s automatic operational checks while the problem was '
+                'open; the problem closed and was credited. Not a check of mathematical validity.',
+    'accepted_after_close': 'Passed the automatic checks, but another agent had already closed the problem: no '
+                            'credit.',
+    'problem_closed': 'Handed in after the problem had closed, so it was never checked.',
+    'rejected': 'Failed the automatic checks (stage and reason are in the conference view).',
+    'judge_error': 'The conference\'s checker itself failed on this submission.',
+    'pending': 'Still being checked when the records were saved.'}
+VALIDITY = {
+    'genuine': 'The independent proof checker confirmed the proof establishes the intended statement.',
+    'fraudulent': 'The independent proof checker found the proof does not establish the intended statement.',
+    'unresolved': 'The independent proof checker could not establish validity either way (reason shown).',
+    'not_evaluated': 'No proof-checker record exists for this submission.'}
+CHECKER = {'completed': 'Every accepted submission has a proof-checker record.',
+           'partial': 'Some accepted submissions have no proof-checker record yet.',
+           'not_run': 'The independent proof checker has not been run on this run.'}
+JUDGE = {'completed': 'The behavior judge has run; its findings are on its own page (Behavior judge tab).',
+         'not_run': 'The behavior judge has not been run on this run.'}
 esc = html.escape
 
 
@@ -373,13 +425,23 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
                                            if tokens['prompt_tokens'] else None),
                   'source': 'provider_usage of inference_finished runtime events'},
         'researcher_notes': [dict(n) for n in notes]})
-    return json.dumps(results, indent=1) + '\n', render(results, title)
+    return json.dumps(results, indent=1) + '\n', render(results, title, inspect_logs(run))
+
+
+def inspect_logs(run):
+    """Names of the run's raw Inspect logs (RUN/inspect/*.eval regular files), in name order."""
+    folder = run / 'inspect'
+    if not folder.is_dir():
+        return []
+    return sorted(p.name for p in folder.glob('*.eval') if p.is_file() and not p.is_symlink())
 
 
 def table(rows, header=None):
+    """Rows of pre-escaped cells; a table with a header row scrolls sideways on narrow screens."""
     head = '<tr>' + ''.join(f'<th>{esc(h)}</th>' for h in header) + '</tr>' if header else ''
-    return '<table>' + head + ''.join('<tr>' + ''.join(f'<td>{c}</td>' for c in row) + '</tr>'
+    body = '<table>' + head + ''.join('<tr>' + ''.join(f'<td>{c}</td>' for c in row) + '</tr>'
                                       for row in rows) + '</table>'
+    return f'<div class="scroll">{body}</div>' if header else body
 
 
 def value(v):
@@ -400,14 +462,129 @@ def money(v):
     return 'not recorded' if v is None else f'${v}'
 
 
-def render(results, title):
+def duration(seconds):
+    seconds = int(float(seconds))
+    return f'{seconds // 3600}h {seconds % 3600 // 60}m {seconds % 60}s'
+
+
+def badge(label):
+    return f'<span class="badge {badge_class(label)}">{esc(str(label))}</span>'
+
+
+def explanation(mapping, label):
+    if label in mapping:
+        return mapping[label]
+    if mapping is EXITS and str(label).startswith('stopped:'):
+        return f'Stopped by the run clock ({str(label).split(":", 1)[1].replace("_", " ")}).'
+    return 'No plain explanation is recorded for this label.'
+
+
+def inspect_links(names):
+    """Links (relative to the run directory) to each raw Inspect log: one 'Inspect logs' link, or numbered."""
+    targets = ['inspect/' + quote(n, safe='') for n in names]
+    if len(targets) == 1:
+        return [('Inspect logs', targets[0])]
+    return [(f'Inspect log {i}', t) for i, t in enumerate(targets, 1)]
+
+
+def cents(v):
+    """Rounded dollars for the summary card (exact amounts stay in the Accounting table)."""
+    return 'not recorded' if v is None else f'${Decimal(str(v)):,.2f}'
+
+
+def link(label, href):
+    return f'<a href="{esc(href, quote=True)}">{esc(label)}</a>'
+
+
+def breakable(text):
+    """Escaped text with line-break opportunities after '_', '/' and '-' (long IDs in narrow tiles)."""
+    return text.replace('_', '_<wbr>').replace('/', '/<wbr>').replace('-', '-<wbr>')
+
+
+def summary_card(results):
+    """Headline facts for the top of the run page (records only; no judge findings)."""
     c, ev, judge = results['condition'], results['independent_evaluation'], results['behavior_judge']
     pilot = results['budget']['pilot']
-    elapsed = int(float(results['elapsed_seconds']))
-    body = [f'<h1>{esc(title or results["run"])}</h1>', f'<p><code>{esc(results["run"])}</code></p>',
+    tasks = c['task_count'] if c['task_count'] is not None else '?'
+    exits = results['agent_exits']
+    voluntary = sum(n for k, n in exits.items() if k.startswith('harness_completed'))
+    errors = sum(n for k, n in exits.items() if k.startswith('error'))
+    accepted = len(results['accepted_submissions'])
+    if ev['status'] == 'not_run':
+        genuine, genuine_note = 'not checked', 'proof checker not run'
+    else:
+        genuine = f'{ev["distinct_verified_tasks"]} of {tasks}'
+        genuine_note = f'proof checker {ev["status"].replace("_", " ")}; distinct tasks'
+    spend = cents(pilot['settled_usd'])
+    spend_note = (f'of {cents(pilot["cap_usd"])} cap' if pilot.get('cap_usd') not in (None, '0') else
+                  'settled model spend')
+    if pilot.get('held_usd') not in (None, '0'):
+        spend_note += f'; {cents(pilot["held_usd"])} still held'
+    tiles = [('Model', c['model'], c['provider_route'] or c['provider']),
+             ('Prompt variant', c['prompt_variant'] or 'default', 'as recorded in settings.json'
+              if c['prompt_variant'] else 'none recorded'),
+             ('Agents', c['agents'], f'{voluntary} ended on their own · {errors} errors'),
+             ('Duration', duration(results['elapsed_seconds']), f'stop: {results["stop_reason"]}'),
+             ('Accepted tasks', f'{results["operationally_accepted_tasks"]} of {tasks}',
+              f'{accepted} accepted submission(s); operational only'),
+             ('Genuine tasks', genuine, genuine_note),
+             ('Model cost', spend, spend_note),
+             ('Behavior judge', judge['status'].replace('_', ' '),
+              'findings on the Behavior judge tab' if judge['status'] != 'not_run' else 'no judge outputs')]
+    return '<section class="card" aria-label="Run summary">' + ''.join(
+        f'<div class="tile"><div class="k">{esc(k)}</div><div class="v">{breakable(esc(value(v)))}</div>'
+        f'<div class="s">{esc(str(note or ""))}</div></div>' for k, v, note in tiles) + '</section>'
+
+
+def tab_bar(results, logs):
+    judge = results['behavior_judge']
+    tabs, help_lines = [], []
+    for label, href, text in TABS:
+        if label == 'Report':
+            tabs.append(f'<a class="current" aria-current="page" href="{href}">{esc(label)}</a>')
+        elif label == 'Behavior judge' and judge['status'] == 'not_run':
+            tabs.append(f'<span class="off">{esc(label)} · not run</span>')
+            text += ' Not run for this run.'
+        else:
+            tabs.append(link(label, judge.get('report', href) if label == 'Behavior judge' else href))
+        extra = ''
+        if label == 'Inspect':
+            extra = (' Raw logs: ' + ' · '.join(link(n, h) for n, h in inspect_links(logs)) if logs else
+                     ' No .eval files were found when this report was built.')
+        help_lines.append(f'<li><strong>{esc(label)}</strong>: {esc(text)}{extra}</li>')
+    return ('<nav class="tabs" aria-label="Run records">' + ''.join(tabs) + '</nav>'
+            '<ul class="tabhelp">' + ''.join(help_lines) + '</ul>')
+
+
+def glossary(results):
+    """Plain explanations of the status labels that appear in this report."""
+    ev, judge = results['independent_evaluation'], results['behavior_judge']
+    groups = [('Stop reason', STOP_REASONS, [results['stop_reason']]),
+              ('Agent exits', EXITS, list(results['agent_exits'])),
+              ('Submission outcomes (conference, automatic)', OUTCOMES, list(results['submission_outcomes'])),
+              ('Independent validity (proof checker)', VALIDITY,
+               sorted({r['independent_validity'] for r in results['accepted_submissions']})),
+              ('Proof checker', CHECKER, [ev['status']]), ('Behavior judge', JUDGE, [judge['status']])]
+    out = ['<h2 id="statuses">What the statuses mean</h2>']
+    for heading, mapping, labels in groups:
+        labels = [x for x in dict.fromkeys(labels) if x is not None]
+        if labels:
+            out.append(f'<h3>{esc(heading)}</h3><dl class="gloss">' + ''.join(
+                f'<dt>{esc(str(x))}</dt><dd>{esc(explanation(mapping, x))}</dd>' for x in labels) + '</dl>')
+    return ''.join(out)
+
+
+def render(results, title, inspect_logs=()):
+    c, ev, judge = results['condition'], results['independent_evaluation'], results['behavior_judge']
+    pilot = results['budget']['pilot']
+    logs = list(inspect_logs)
+    body = ['<p class="crumbs"><a href="../index.html">All experiments</a></p>',
+            f'<h1>{esc(title or results["run"])}</h1>',
+            f'<p><code>{esc(results["run"])}</code> · {esc(results["start_utc"])} to {esc(results["stop_utc"])}</p>',
+            summary_card(results), tab_bar(results, logs), '<main id="report">',
             '<h2>Run</h2>', facts([
                 ('Start (UTC)', results['start_utc']), ('Stop (UTC)', results['stop_utc']),
-                ('Elapsed', f'{elapsed // 3600}h {elapsed % 3600 // 60}m {elapsed % 60}s'),
+                ('Elapsed', duration(results['elapsed_seconds'])),
                 ('Stop reason', results['stop_reason']), ('Runtime stop reason', results['runtime_stop_reason']),
                 ('Agent exits', results['agent_exits']), ('Auto-restarts', results['auto_restarts']),
                 ('Budget-exhausted agents', ', '.join(f'{a["agent"]} ({a["at"]})'
@@ -424,10 +601,13 @@ def render(results, title):
                 ('Prompt variant', c['prompt_variant']), ('Auto-restart', c['auto_restart']),
                 ('Max run seconds', c['max_run_seconds']), ('Budget track', c['budget_track']),
                 ('Seeded contagion', c['seeded_contagion_enabled']), ('Mitigations', c['mitigations_enabled'])]),
-            '<h2>Agents</h2>', table([(esc(a['agent']), *(esc(value(a.get(k))) for k in (
-                'requests', 'finished', 'unbilled', 'restarts', 'exit', 'exit_at', 'submissions')))
-                for a in results['agents']], ('Agent', 'Requests', 'Finished', 'Unbilled', 'Restarts', 'Exit',
-                                              'Exit time', 'Submissions')),
+            '<h2>Agents</h2>', table([(esc(a['agent']),
+                                       *(esc(value(a.get(k))) for k in ('requests', 'finished', 'unbilled', 'restarts')),
+                                       badge(a['exit']) if a.get('exit') else esc(value(None)),
+                                       *(esc(value(a.get(k))) for k in ('exit_at', 'submissions')))
+                                      for a in results['agents']],
+                                     ('Agent', 'Requests', 'Finished', 'Unbilled', 'Restarts', 'Exit', 'Exit time',
+                                      'Submissions')),
             '<h2>Submissions by task</h2>', table([(esc(t['task']), esc(value(t['submissions'])), esc(
                 f'{t["first_accepted"]["agent"]} at {t["first_accepted"]["submitted_utc"]}'
                 if t['first_accepted'] else 'none')) for t in results['tasks']],
@@ -435,12 +615,12 @@ def render(results, title):
             '<h2>Accepted submissions</h2>']
 
     def validity(row):
-        cell = esc(row['independent_validity'])
+        cell = badge(row['independent_validity'])
         if row['independent_validity'] != 'genuine' and row.get('evaluator_reason'):
             cell += '<br><small>' + esc(row['evaluator_reason'] + (': ' + row['evaluator_details']
                                                                     if row.get('evaluator_details') else '')) + '</small>'
         return cell
-    body.append(table([(esc(r['submission']), esc(r['agent']), esc(r['task']), esc(r['operational_outcome']),
+    body.append(table([(esc(r['submission']), esc(r['agent']), esc(r['task']), badge(r['operational_outcome']),
                         esc(r['submitted_utc']), validity(r)) for r in results['accepted_submissions']],
                       ('Submission', 'Agent', 'Task', 'Conference', 'Submitted (UTC)', 'Independent validity')))
     if ev['status'] == 'not_run':
@@ -480,10 +660,16 @@ def render(results, title):
         body.append('<h2>Researcher notes</h2><ul>' + ''.join(
             '<li>' + (f'<strong>{esc(n["subject"])}</strong>: ' if n.get('subject') else '') + esc(n['text']) + '</li>'
             for n in results['researcher_notes']) + '</ul>')
-    body.append('<h2>Records</h2><p>' + ' · '.join(f'<a href="{href}">{label}</a>' for label, href in LINKS) + '</p>')
-    return themed('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" '
+    body.append(glossary(results))
+    records = [('Inspect View' if label == 'Inspect' else label, href) for label, href, _ in TABS[1:]
+               if label != 'Behavior judge'] + inspect_links(logs) \
+        + list(OTHER_RECORDS)
+    if judge['status'] != 'not_run':
+        records.insert(1, ('Behavior judge', judge['report']))
+    body.append('<h2>Records</h2><p>' + ' · '.join(link(label, href) for label, href in records) + '</p></main>')
+    return themed('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
                   f'content="width=device-width,initial-scale=1"><title>{esc(title or results["run"] + " results")}</title>'
-                  f'<style>{STYLE}</style>' + ''.join(body) + '</html>\n')
+                  f'<style>{STYLE}</style></head><body>' + ''.join(body) + '</body></html>\n')
 
 
 def main(argv=None):

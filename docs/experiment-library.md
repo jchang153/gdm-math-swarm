@@ -90,8 +90,8 @@ report with `scripts/build_results.py`, which `prepare_hf_library.py` and `publi
 The report is a deterministic, facts-only review of the run's own records, with no model calls,
 network or credentials: run timing and stop reason, the condition from `settings.json`, per-agent
 requests, exits and restarts, spending and tokens, submissions per task and agent with times and
-outcomes, and links to the existing record views (transcripts, conference view with board, DMs, library
-and private files, timeline, Inspect View and logs). It never summarizes those contents. The proof
+outcomes, and links to the existing record views (conference view with board, DMs, library
+and private files, timeline, Inspect View with agent transcripts, and logs). It never summarizes those contents. The proof
 checker section is filled only from `evaluations/` (verdicts and reasons as recorded, bound by
 submission, task and source hash); otherwise the page states "Proof checker: not run" and accepted
 submissions are `not_evaluated`. By user decision (October 20, 2026) behavior-judge findings and fields
@@ -105,7 +105,19 @@ IDs, otherwise derived from `runtime.jsonl` with uncertain holds still counted a
 `--key-usage-log LOG.jsonl`, `--caveat TEXT` and `--caveat-for SUBJECT TEXT` (the only free text, stored
 under `researcher_notes` and shown under "Researcher notes"), `--title`, `--stop-utc`/`--stop-reason` for a
 run stopped without a `run_stop` event, and `--submission-ids serial` for older serial IDs. It refuses to
-replace existing reports without `--overwrite`; use `--output-dir` for a scratch copy. Create a native Inspect
+replace existing reports without `--overwrite`; use `--output-dir` for a scratch copy.
+
+Run page layout (owner request, October 21, 2026): `results.html` opens with a summary card (model,
+prompt variant, agents, duration, accepted and genuine tasks, cost, behavior-judge status only), then
+tabs Report / Conference / Behavior judge / Inspect, each with a one-line explanation, and ends with
+plain explanations of every status label it shows. Raw Inspect logs are linked one
+`RUN/inspect/*.eval` file at a time (a static host cannot list `inspect/`). Pages are static, support
+light and dark mode and fit phone width. Owner update (October 21, 2026): the site has no custom
+transcript viewer, since agent transcripts are read in Inspect View; the run page has no Transcripts
+tab or transcript links. `scripts/export_transcripts.py` stays for local, offline use only and its
+pages are not published.
+
+Create a native Inspect
 bundle with the pinned Inspect installation, running outside the repository to
 avoid automatic dotenv loading:
 

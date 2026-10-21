@@ -2,6 +2,7 @@
 import contextlib
 import io
 import json
+import re
 from pathlib import Path
 import sqlite3
 import sys
@@ -104,7 +105,8 @@ class BuildResultsTest(unittest.TestCase):
         self.assertEqual(data['behavior_judge'], {'status': 'not_run'})
         self.assertIn('Behavior judge: not run', page)
         self.assertNotIn('Researcher notes', page)
-        self.assertIn('small{color:var(--muted)}', page)
+        self.assertIn('prefers-color-scheme:dark', page)
+        self.assertIn('name="viewport"', page)
         self.assertIn('id="site-theme"', page)
         entry = build_index(Path(self.tmp.name))
         self.assertEqual(entry['warnings'], [])
@@ -134,6 +136,54 @@ class BuildResultsTest(unittest.TestCase):
         self.assertEqual(data['behavior_judge'], {'status': 'completed', 'report': 'analysis/judge/report.html'})
         self.assertIn('Behavior judge: see <a href="analysis/judge/report.html">analysis/judge/report.html</a>', page)
         self.assertNotIn('behavior-judge:start', page)
+        self.assertNotIn('no_misbehavior', page)
+
+    def test_run_page_summary_tabs_and_statuses(self):
+        run = make_run(self.tmp.name)
+        (run / 'inspect').mkdir()
+        (run / 'inspect' / 'b log.eval').write_bytes(b'x')
+        (run / 'inspect' / 'a.eval').write_bytes(b'x')
+        (run / 'inspect' / 'notes.txt').write_text('x')
+        data, page = generate(run)
+        # Summary card facts come from the records.
+        card = page.split('<section class="card"', 1)[1].split('</section>', 1)[0].replace('<wbr>', '')
+        for text in ('vendor/model', 'of $10.00 cap', '0h 10m 0s', '2 of 14', '1 of 14', '$0.25', 'not run'):
+            self.assertIn(text, card)
+        # Tabs, with the judge tab marked not run, and their explanations.
+        tabs = page.split('<nav class="tabs"', 1)[1].split('</nav>', 1)[0]
+        self.assertIn('href="#report"', tabs)
+        self.assertNotIn('Transcripts', tabs)
+        self.assertNotIn('transcripts/', page)
+        self.assertIn('href="conference-view/index.html"', tabs)
+        self.assertIn('href="inspect-view/index.html"', tabs)
+        self.assertIn('Behavior judge · not run', tabs)
+        self.assertNotIn('href="analysis/judge/report.html"', page)
+        # Raw Inspect logs: each .eval file, never the unlistable directory.
+        self.assertNotIn('href="inspect/"', page)
+        self.assertIn('href="inspect/a.eval">Inspect log 1</a>', page)
+        self.assertIn('href="inspect/b%20log.eval">Inspect log 2</a>', page)
+        self.assertNotIn('notes.txt', page)
+        # Plain explanations only for labels present in this run.
+        gloss = page.split('id="statuses"', 1)[1]
+        for label in ('budget_exhausted', 'stopped:max_run_seconds', 'problem_closed', 'unresolved', 'max_run_seconds'):
+            self.assertIn(f'<dt>{label}</dt>', gloss)
+        self.assertNotIn('<dt>rejected</dt>', gloss)
+        self.assertIn('Stopped by the run clock (max run seconds).', gloss)
+        self.assertIn('<span class="badge b-good">genuine</span>', page)
+        # The only script is the shared theme toggle.
+        self.assertNotIn('<script', re.sub(r'<script id="site-theme-toggle">.*?</script>', '', page))
+        self.assertLess(page.index('<meta charset="utf-8">'), 1024)
+        # results.json keeps its schema: no layout-only fields.
+        self.assertNotIn('inspect_logs', data)
+
+    def test_single_inspect_log_and_judge_tab(self):
+        run = make_run(self.tmp.name, judge=True)
+        (run / 'inspect').mkdir()
+        (run / 'inspect' / 'only.eval').write_bytes(b'x')
+        _, page = generate(run)
+        self.assertIn('href="inspect/only.eval">Inspect logs</a>', page)
+        tabs = page.split('<nav class="tabs"', 1)[1].split('</nav>', 1)[0]
+        self.assertIn('<a href="analysis/judge/report.html">Behavior judge</a>', tabs)
         self.assertNotIn('no_misbehavior', page)
 
     def test_money_never_uses_exponent_notation(self):

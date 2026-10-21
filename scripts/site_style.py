@@ -22,6 +22,9 @@ LIGHT = {
     'warn': '#a1260d', 'ok': '#1d6b35', 'amber': '#8a5a00', 'banner': '#eaf0fb', 'banner-line': '#6084bf',
     'sel-bg': '#204e85', 'sel-fg': '#ffffff', 'derived': '#b26b00', 'file': '#4f7c32', 'record': '#1263a3',
     'segment': '#56637a', 'host': '#fdf0e6', 'shadow': 'rgba(15,20,26,.12)',
+    # Status badges (run page): text colour and background per tone.
+    'good': '#1f7a3a', 'good-bg': '#e6f4ea', 'caution': '#9a5b00', 'caution-bg': '#fdf1dc',
+    'bad': '#b42318', 'bad-bg': '#fde8e6', 'info': '#4b5cc4', 'info-bg': '#eceffd',
 }
 DARK = {
     'bg': '#0f141a', 'fg': '#e4e9ef', 'muted': '#9eabba', 'card': '#161d25', 'line': '#2a3542',
@@ -29,6 +32,8 @@ DARK = {
     'warn': '#ff8f75', 'ok': '#82d69d', 'amber': '#f0c26b', 'banner': '#18263a', 'banner-line': '#6f96d6',
     'sel-bg': '#80b6f0', 'sel-fg': '#0f141a', 'derived': '#e0a040', 'file': '#8cc26a', 'record': '#6fa8e8',
     'segment': '#8d9aab', 'host': '#33261b', 'shadow': 'rgba(0,0,0,.45)',
+    'good': '#6fcf8b', 'good-bg': '#14301d', 'caution': '#f0b357', 'caution-bg': '#3a2a10',
+    'bad': '#f08679', 'bad-bg': '#3d1714', 'info': '#a3b0ff', 'info-bg': '#1e2547',
 }
 
 
@@ -93,13 +98,14 @@ def head(viewport=True):
 def themed(document):
     """Insert the shared theme once, before the page's own styles (so page rules still win).
 
-    Goes right after ``<head>``, else after ``<meta charset>``, else after the doctype.
+    Goes right after ``<meta charset>`` (which must stay within the first 1024 bytes), else
+    after ``<head>``, else after the doctype.
     A viewport meta is added only when the page has none.
     """
     if MARKER in document:
         return document
     markup = head(viewport=not re.search(r'<meta\s+name="viewport"', document, re.I))
-    for pattern in (r'<head(?:\s[^>]*)?>', r'<meta\s+charset="?[^">]*"?\s*/?>', r'<!doctype[^>]*>'):
+    for pattern in (r'<meta\s+charset="?[^">]*"?\s*/?>', r'<head(?:\s[^>]*)?>', r'<!doctype[^>]*>'):
         found = re.search(pattern, document, re.I)
         if found:
             return document[:found.end()] + markup + document[found.end():]
