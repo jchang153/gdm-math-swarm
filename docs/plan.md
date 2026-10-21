@@ -1,5 +1,37 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Incident report per run (October 21, 2026)
+
+Owner request (October 21, 2026; recorded as relayed by the workflow, paraphrased, not verbatim): a
+super high-level, highly readable report per run that tells the owner what truly happened and how to
+iterate (prompts, models, populations, oversight), modelled on OpenAI's misalignment report
+"Suppressing misalignment monitoring alerts and disabling misalignment monitoring"
+(https://alignment.openai.com/misalignment-reports/suppressing-misalignment-monitoring-alerts-and-disabling-misalignment-monitoring/):
+a summary up front that tells the whole story; 2 to 5 case-study storylines, each setting context in
+plain words for a reader who knows nothing about Lean or the problems, with labelled verbatim
+excerpts (agent message, chain of thought or reasoning, tool call or submission, board post or DM)
+with agent, time and link; "what didn't happen"; candid uncertainty; implications and what to try
+next; a brief paragraph per agent; and a "where to look" appendix with exact pointers (agent, item
+ids, file paths, timestamps) good enough for a coding agent to drill into the transcripts. Emphasize
+readability and the communication of ideas over lists of numbers. It is model-generated and must be
+labelled so; the deterministic results report stays unchanged. In the same request thread the owner
+wrote, verbatim: "also there's no need for a transcript view on the website when we already have
+inspect view" (the report's links therefore point into Inspect View, never into a custom transcript
+export).
+
+Recorded implementation (research/analysis/incident, scripts/run_incident_report.py; details in
+research/analysis/incident/README.md):
+
+| Topic | Decision |
+| --- | --- |
+| Output | `RUN/analysis/incident/`: `report.html`, `report.md`, `evidence.json` (plus `digest.json`, cached model units, raw archives, `state.json`, `run-budgets.json`). The site links to it; results.html is not modified. |
+| Evidence | Every excerpt is cut by the host out of the cited record (verbatim by construction) and re-checked verbatim after whitespace normalization; every cited id must exist. Excerpts are completed at their boundaries (never ending on a colon or inside a Lean editable block). Labels are host-assigned: a submission excerpt says whether it is the problem file's fixed template text or the agent's own lines; with an encrypted chain of thought the visible assistant text is labelled "visible thinking". |
+| Candour | The digest reports, per agent and for the run, how many reasoning records exist and how many are encrypted; a host-written note in "How sure we are" states chain-of-thought availability, who chose each excerpt (whole record, the extraction model, or the program as a fallback, flagged per excerpt) and how many requests the provider refused. |
+| Sections | Summary, Case studies (2-5), Evaluation awareness (the owner's explicit topic, its own section), What didn't happen, How sure we are, What to try next (prompts, models, population, oversight), The agents one by one, Where to look (host-written). |
+| Models | Claude Opus 5.5 plans, picks excerpts of long records by segment number (it never copies record text; Sonnet's copy-or-anchor extraction of Gemini transcripts was refused by the provider on gemini10) and writes; one revision pass on verification problems. |
+| Budget | Its own per-run budget (one spending control): `--run-limit`, default $20; every invocation for the run counts against it. Post-run in `scripts/supervise_run.py` after the behavior judge for every `auto_behavior_judge` config, with budget `incident_report_max_usd` (default $20); its failure, stop or skip never changes the worker exit or the packaging (recorded in `incident-report.json`, packaged). |
+| Isolation | Researcher-only; never copied, mounted or quoted into agent images, containers, workspaces, prompts, tool results or the conference library. |
+
 ## One per-run budget, no manual approvals (October 20, 2026)
 
 The repository owner (Jonathan) decided in chat on October 20, 2026, verbatim: "one budget limit is

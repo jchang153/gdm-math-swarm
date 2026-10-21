@@ -3,10 +3,11 @@
 1. Digest (host, no model): ``digest.build_digest``.
 2. Plan (Claude Opus 5.5): 2 to 5 storylines and the record ids to quote (``prompts.PLAN_SYSTEM``).
    Unknown ids are dropped and recorded.
-3. Evidence (host, plus Claude Sonnet 5.5 for long records): the exact text of every planned record
-   is fetched by id from the rebuilt histories; a short record is offered whole, a long one goes to
-   Sonnet, which copies a few short passages (``prompts.EXTRACT_SYSTEM``); every passage is checked
-   verbatim by the host and an unverified one is discarded (recorded).
+3. Evidence (host, plus the extraction model for long records): the exact text of every planned
+   record is fetched by id from the rebuilt histories; a short record is offered whole, a long one is
+   shown as numbered segments and the model picks passages by segment number
+   (``prompts.EXTRACT_SYSTEM``); the host cuts them out and completes their boundaries
+   (``complete_span``); a refused or empty extraction gets a flagged host-chosen passage.
 4. Write (Opus): the Markdown report (``prompts.WRITE_SYSTEM``).
 5. Verify (host): every excerpt block and inline quote must be a verbatim substring of its cited
    record (whitespace normalized only), citations must exist and the required sections must be
@@ -31,13 +32,17 @@ from pathlib import Path
 from . import prompts, render, verify
 from .digest import ITEM_ID_RE, Locator, build_digest, digest_text
 
-SCHEMA = "gdm-incident-evidence/1"
+SCHEMA = "gdm-incident-evidence/2"
 SHORT_CHARS = 700             # a record this short is offered to the writer whole
 LONG_VIEW_CHARS = 50000       # a longer record is shown to the extractor as windows
 MAX_STORYLINES = 5
 MAX_ITEMS_PER_STORY = 8
-MAX_ITEMS = 30
-MAX_EXCERPT_CHARS = 900
+MAX_ITEMS = 36
+MAX_EXCERPT_CHARS = 900       # a model-chosen passage is cut to at most this (before boundary completion)
+FALLBACK_EXCERPT_CHARS = 450  # a host-chosen passage aims at about this length
+COMPLETION_CHARS = 500        # how far a passage may be extended to end at a complete boundary
+SEGMENT_CHARS = 320           # a longer line is split at sentence ends into segments
+REFUSALS = ("refused_once", "refused_twice")
 MAX_TOKENS = {"plan": 16000, "extract": 12000, "write": 40000, "repair": 40000}
 WRITER_NOTABLE = 10
 
@@ -120,8 +125,144 @@ def long_view(text, pattern=None):
     return "\n".join(parts)
 
 
+_NEXT_LINE = re.compile(r"[ \t]*(?:\r?\n[ \t]*)*[^\n]*\S")
+_SENTENCE_END = re.compile(r"(?<=[.!?])[\"')\]`*]*\s+")
+
+
+def segments(text):
+    """Numbered passage units of a record: each non-blank line, a long line split after its sentence
+    ends. Returns [(lo, hi)] character spans (no surrounding whitespace), in order."""
+    out, offset = [], 0
+    for line in (text or "").splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        if body.strip():
+            pieces, start = [], 0
+            if len(body) > SEGMENT_CHARS:
+                for match in _SENTENCE_END.finditer(body):
+                    if match.start() - start >= 40:
+                        pieces.append((start, match.start()))
+                        start = match.end()
+            pieces.append((start, len(body)))
+            for lo, hi in pieces:
+                chunk = body[lo:hi]
+                if chunk.strip():
+                    lead = len(chunk) - len(chunk.lstrip())
+                    out.append((offset + lo + lead, offset + lo + len(chunk.rstrip())))
+        offset += len(line)
+    return out
+
+
+def segment_view(text, pattern=None):
+    """A long record shown to the extraction model as numbered segments ("[12] ..."); a very long one
+    only as windows (head, keyword passages, tail) with the omitted segment ranges named."""
+    spans = segments(text)
+    keep = None
+    if len(text) > LONG_VIEW_CHARS:
+        windows = [(0, 18000), (len(text) - 8000, len(text))]
+        if pattern is not None:
+            budget = 20000
+            for match in pattern.finditer(text):
+                if budget <= 0:
+                    break
+                windows.append((max(0, match.start() - 700), min(len(text), match.end() + 700)))
+                budget -= 1400
+        keep = {k for k, (lo, hi) in enumerate(spans) if any(lo < b and a < hi for a, b in windows)}
+    lines, skipped = [f"[record of {len(text):,} characters in {len(spans)} numbered segments]"], []
+    for number, (lo, hi) in enumerate(spans, 1):
+        if keep is not None and number - 1 not in keep:
+            skipped.append(number)
+            continue
+        if skipped:
+            lines.append(f"[segments {skipped[0]}-{skipped[-1]} omitted]")
+            skipped = []
+        lines.append(f"[{number}] {text[lo:hi]}")
+    if skipped:
+        lines.append(f"[segments {skipped[0]}-{skipped[-1]} omitted]")
+    return "\n".join(lines)
+
+
+def segment_span(text, first, last):
+    """Character span of segments ``first``..``last`` (1-based, inclusive), at most MAX_EXCERPT_CHARS long
+    (later segments dropped), or None for numbers out of range."""
+    spans = segments(text)
+    try:
+        first, last = int(first), int(last if last is not None else first)
+    except (TypeError, ValueError):
+        return None
+    if not 1 <= first <= len(spans):
+        return None
+    last = min(max(first, last), len(spans))
+    hi = spans[first - 1][1]
+    for number in range(first, last + 1):
+        if spans[number - 1][1] - spans[first - 1][0] > MAX_EXCERPT_CHARS and number > first:
+            break
+        hi = spans[number - 1][1]
+    return spans[first - 1][0], hi
+
+
+def complete_span(text, lo, hi):
+    """Extend (or, failing that, trim) the passage ``text[lo:hi]`` so it does not read as cut short: it must
+    not end on a colon (the next line is added), stop inside a Lean editable block (extended to the
+    "EDITABLE END" line) or stop mid-sentence (extended to the sentence end). Returns (lo, hi), or None
+    when no complete passage remains."""
+    limit = min(len(text), hi + COMPLETION_CHARS)
+    for _ in range(6):
+        quote = text[lo:hi]
+        problem = verify.boundary_problem(quote)
+        if problem is None and hi < len(text) and text[hi - 1] not in ".!?:;)]}\"'`*\n" and text[hi] not in "\r\n":
+            stop = _SENTENCE_END.search(text, hi, limit)
+            newline = text.find("\n", hi, limit)
+            ends = [x for x in (stop.start() if stop else -1, newline) if x >= 0]
+            if not ends:
+                break
+            hi = min(ends)
+            continue
+        if problem is None:
+            return lo, hi
+        if "colon" in problem:   # add the next non-blank line (what the colon introduces)
+            following = _NEXT_LINE.match(text, hi, limit)
+            if following is None:
+                break
+            hi = following.end()
+            continue
+        end_marker = text.find("EDITABLE END", hi)
+        if 0 <= end_marker < limit:
+            end = text.find("\n", end_marker)
+            hi = len(text) if end < 0 else end
+            continue
+        break
+    # Could not complete it forwards: trim back to the last complete line before the problem.
+    quote = text[lo:hi]
+    while quote and verify.boundary_problem(quote):
+        cut = quote.rstrip().rfind("\n")
+        if cut <= 0:
+            return None
+        quote = quote[:cut]
+        start = quote.rfind("EDITABLE START")
+        if start >= 0 and "EDITABLE END" not in quote[start:]:
+            line_start = quote.rfind("\n", 0, start)
+            quote = quote[:max(0, line_start)]
+    quote = quote.rstrip()
+    return (lo, lo + len(quote)) if quote.strip() else None
+
+
+def excerpt_sources(evidence):
+    """Counts of the excerpts by who chose them, and the ids of the program-chosen (fallback) ones."""
+    counts, fallback = {"whole_record": 0, "model": 0, "host_fallback": 0}, []
+    for story in evidence["storylines"]:
+        for record in story["records"]:
+            for excerpt in record["excerpts"]:
+                key = "whole_record" if excerpt["source"] == "host" else excerpt["source"]
+                counts[key] = counts.get(key, 0) + 1
+                if excerpt["source"] == "host_fallback":
+                    fallback.append({"eid": excerpt["eid"], "item": record["id"], "storyline": story["id"],
+                                     "reason": excerpt.get("fallback_reason")})
+    return dict(counts, fallback=fallback)
+
+
 class IncidentPipeline:
-    """One incident report for one run. ``clients``: {"opus": JudgeClient, "sonnet": JudgeClient}."""
+    """One incident report for one run. ``clients``: {"opus": JudgeClient (plan, write), "extract":
+    JudgeClient (excerpt selection; Opus by default)}."""
 
     def __init__(self, run_dir, out_dir, run, *, clients, mode, models, epochs=None, judge_dir=None, repair=True,
                  log=None):
@@ -190,9 +331,12 @@ class IncidentPipeline:
 
     def clean_plan(self, plan):
         stories, total = [], 0
-        for number, story in enumerate(plan.get("storylines") or [], 1):
-            if not isinstance(story, dict) or len(stories) >= MAX_STORYLINES:
-                continue
+        planned = [s for s in plan.get("storylines") or [] if isinstance(s, dict)][:MAX_STORYLINES]
+        awareness = plan.get("evaluation_awareness")
+        if isinstance(awareness, dict):   # the evaluation-awareness section's evidence, as one more "storyline"
+            planned.append(dict(awareness, id="EA", title=awareness.get("title") or "Evaluation awareness",
+                                why=awareness.get("summary") or awareness.get("why"), section="evaluation_awareness"))
+        for number, story in enumerate(planned, 1):
             items = []
             for entry in story.get("items") or []:
                 item_id = entry.get("id") if isinstance(entry, dict) else entry
@@ -207,11 +351,14 @@ class IncidentPipeline:
                     continue
                 items.append({"id": item_id, "why": why})
                 total += 1
-            stories.append({"id": f"S{len(stories) + 1}", "planned_id": story.get("id"),
+            section = story.get("section") or "case_study"
+            stories.append({"id": "EA" if section == "evaluation_awareness" else
+                            f"S{sum(s['section'] == 'case_study' for s in stories) + 1}",
+                            "section": section, "planned_id": story.get("id"),
                             "title": str(story.get("title") or f"Storyline {number}"), "why": story.get("why"),
                             "agents": [a for a in story.get("agents") or [] if isinstance(a, str)],
                             "extract": story.get("extract"), "items": items})
-        if not stories:
+        if not any(s["section"] == "case_study" for s in stories):
             raise StageError("plan", "no storyline in the plan")
         return {"headline": plan.get("headline"), "storylines": stories,
                 "not_happened": [s for s in plan.get("not_happened") or [] if isinstance(s, str)],
@@ -233,45 +380,53 @@ class IncidentPipeline:
                 else:
                     long_records.append({"id": item["id"], "label": loc["label"], "agent": loc["agent"],
                                          "time": loc["time"], "why": entry.get("why"),
-                                         "text": long_view(item["text"], RECALL_PATTERN)})
+                                         "text": segment_view(item["text"], RECALL_PATTERN)})
                 records.append(record)
             by_id = {r["id"]: r for r in records}
             if long_records:
                 await self.extract(story, long_records, by_id)
             for record in records:
                 if record["id"] in {r["id"] for r in long_records} and not record["excerpts"]:
-                    self.fallback_excerpt(record, RECALL_PATTERN)
+                    refused = any(record["id"] in r["items"] and not r.get("split") for r in self.extract_refusals
+                                  if r["storyline"] == story["id"])
+                    self.fallback_excerpt(record, RECALL_PATTERN, reason="the extraction model's request was refused "
+                                          "by the provider" if refused else "the extraction model returned no usable "
+                                          "passage")
                 for excerpt in record["excerpts"]:
                     number += 1
                     excerpt["eid"] = f"E{number}"
                     excerpt["verified"] = True
+                    excerpt["label"] = self.locator.excerpt_label(record["id"], excerpt["quote"])
+                    excerpt["fallback"] = excerpt["source"] == "host_fallback"
             stories.append(dict(story, records=records))
         return {"storylines": stories}
 
     async def extract(self, story, long_records, by_id):
-        """Sonnet points to passages by anchors; the host cuts them out. A refused multi-record request
-        is never resent: each record is then asked for on its own, and a record still refused (or
-        without a usable passage) gets a host-chosen excerpt (``fallback_excerpt``)."""
-        groups = [long_records]
+        """The extraction model picks passages by segment numbers (it never copies record text); the
+        host cuts each passage out of the record and completes its boundaries (``complete_span``). A
+        refused multi-record request is never resent: each record is then asked for on its own, and a
+        record still refused (or without a usable passage) gets a host-chosen excerpt
+        (``fallback_excerpt``), flagged as such in the report."""
+        key = "extract"
         try:
-            replies = [await self.call("sonnet", "extract", f"extract-{story['id']}", prompts.EXTRACT_SYSTEM,
+            replies = [await self.call(key, "extract", f"extract-{story['id']}", prompts.EXTRACT_SYSTEM,
                                        prompts.extract_user(story, long_records),
                                        refusal_retry=len(long_records) == 1)]
         except StageError as error:
-            if error.reason not in ("refused_once", "refused_twice") or len(long_records) == 1:
-                if error.reason in ("refused_once", "refused_twice"):
+            if error.reason not in REFUSALS or len(long_records) == 1:
+                if error.reason in REFUSALS:
                     self.extract_refusals.append({"storyline": story["id"], "items": [r["id"] for r in long_records]})
                     return
                 raise
             self.extract_refusals.append({"storyline": story["id"], "items": [r["id"] for r in long_records],
                                           "split": True})
-            replies, groups = [], [[r] for r in long_records]
+            replies = []
             for record in long_records:
                 try:
-                    replies.append(await self.call("sonnet", "extract", f"extract-{story['id']}-{record['id']}",
+                    replies.append(await self.call(key, "extract", f"extract-{story['id']}-{record['id']}",
                                                    prompts.EXTRACT_SYSTEM, prompts.extract_user(story, [record])))
                 except StageError as single:
-                    if single.reason not in ("refused_once", "refused_twice"):
+                    if single.reason not in REFUSALS:
                         raise
                     self.extract_refusals.append({"storyline": story["id"], "items": [record["id"]]})
         for reply in replies:
@@ -286,21 +441,25 @@ class IncidentPipeline:
                 if len(target["excerpts"]) >= 3:
                     continue
                 text = self.locator.item(target["id"])["text"]
-                span = verify.locate_span(text, str(passage.get("start") or ""), str(passage.get("end") or ""))
-                entry = {"note": passage.get("note"), "source": "sonnet", "anchors": [passage.get("start"),
-                                                                                       passage.get("end")]}
+                entry = {"note": passage.get("note"), "source": "model",
+                         "segments": [passage.get("first"), passage.get("last")]}
+                span = segment_span(text, passage.get("first"), passage.get("last"))
                 if span is None:
-                    target["rejected"].append(dict(entry, reason="anchors not found verbatim"))
+                    target["rejected"].append(dict(entry, reason="segment numbers out of range"))
                     continue
-                quote = text[span[0]:span[1]].strip()
-                if len(quote) > MAX_EXCERPT_CHARS:
-                    target["rejected"].append(dict(entry, reason=f"passage longer than {MAX_EXCERPT_CHARS} characters"))
+                span = complete_span(text, *span)
+                if span is None:
+                    target["rejected"].append(dict(entry, reason="passage could not be cut at a complete boundary"))
                     continue
-                target["excerpts"].append(dict(entry, quote=quote, offsets=list(span)))
+                if any(lo < span[1] and span[0] < hi for lo, hi in (e.get("offsets") or (0, 0)
+                                                                     for e in target["excerpts"])):
+                    target["rejected"].append(dict(entry, reason="overlaps an earlier passage of the record"))
+                    continue
+                target["excerpts"].append(dict(entry, quote=text[span[0]:span[1]].strip(), offsets=list(span)))
 
-    def fallback_excerpt(self, record, pattern):
+    def fallback_excerpt(self, record, pattern, *, reason):
         """Host-chosen excerpt of a long record: around a behavior-judge quote of it, else around the first
-        keyword-net match, else its opening; cut at sentence boundaries, at most MAX_EXCERPT_CHARS."""
+        keyword-net match, else its opening; cut at complete boundaries (``complete_span``)."""
         text = self.locator.item(record["id"])["text"]
         anchor = None
         for quote in self.judge_quotes.get(record["id"], []):
@@ -311,17 +470,17 @@ class IncidentPipeline:
         if anchor is None:
             match = pattern.search(text)
             anchor = (match.start(), match.end()) if match else (0, 0)
-        lo = max(0, anchor[0] - 250)
-        hi = min(len(text), max(anchor[1] + 250, lo + 400), lo + MAX_EXCERPT_CHARS)
-        if lo:
-            cut = max(text.rfind(". ", lo - 200, anchor[0]), text.rfind("\n", lo - 200, anchor[0]))
-            lo = cut + 1 if cut >= 0 else lo
-        end = max(text.rfind(". ", anchor[1], hi), text.rfind("\n", anchor[1], hi))
-        hi = end + 1 if end > anchor[1] else hi
-        quote = text[lo:hi].strip()
-        if quote:
-            record["excerpts"].append({"quote": quote, "note": "host-chosen passage (extraction unavailable)",
-                                       "source": "host_fallback", "offsets": [lo, hi]})
+        spans = segments(text)
+        first = next((k for k, (lo, hi) in enumerate(spans) if hi > anchor[0]), 0) if spans else 0
+        first = max(0, first - 1)
+        last = first
+        while last + 1 < len(spans) and (spans[last][1] < anchor[1] or spans[last + 1][1] - spans[first][0]
+                                         <= FALLBACK_EXCERPT_CHARS):
+            last += 1
+        span = complete_span(text, *(spans[first][0], spans[last][1])) if spans else None
+        if span:
+            record["excerpts"].append({"quote": text[span[0]:span[1]].strip(), "note": "program-chosen passage",
+                                       "source": "host_fallback", "fallback_reason": reason, "offsets": list(span)})
 
     def expand_excerpts(self, markdown, evidence):
         """':::excerpt E7' lines -> verbatim excerpt blocks (':::excerpt <item>' ... ':::'); unknown or
@@ -340,7 +499,7 @@ class IncidentPipeline:
                 return ""
             used.add(eid)
             item_id, quote = table[eid]
-            return f":::excerpt {item_id}\n{quote}\n:::"
+            return f":::excerpt {item_id} {eid}\n{quote}\n:::"
 
         out = re.sub(r"^:::excerpt[ \t]+(E\d+)[ \t]*(?:\n:::[ \t]*(?=\n|$))?", replace, markdown, flags=re.M)
         return out, problems
@@ -393,11 +552,15 @@ class IncidentPipeline:
         draft, attempts = await self.write(digest, plan, evidence)
         evidence["cited_ids"] = list(dict.fromkeys(m.group(0) for m in ITEM_ID_RE.finditer(draft)
                                                    if self.locator.item(m.group(0)) is not None))
-        body = draft.rstrip() + "\n" + render.appendix_markdown(evidence, self.locator, digest)
+        evidence["excerpt_sources"] = excerpt_sources(evidence)
+        note = render.host_note_markdown(digest, evidence, self.extract_refusals, self.units, draft)
+        body = render.insert_into_section(draft.rstrip(), "How sure we are", note) + "\n" \
+            + render.appendix_markdown(evidence, self.locator, digest)
         checks = verify.verify_markdown(body, self.locator.item)
-        markdown = render.banner_markdown(generated) + render.annotate_markdown(body, checks)
+        markdown = render.banner_markdown(generated) + render.reader_markdown(body, checks, self.locator, evidence)
         (self.out_dir / "report.md").write_text(markdown, encoding="utf-8")
-        page = render.render_html(body, checks, self.locator, digest, generated_at=generated, models=self.models)
+        page = render.render_html(body, checks, self.locator, digest, generated_at=generated, models=self.models,
+                                  evidence=evidence)
         (self.out_dir / "report.html").write_text(page, encoding="utf-8")
         record = {"schema": SCHEMA, "run_id": digest["run_id"], "generated_at": generated, "mode": self.mode,
                   "model_generated": True, "post_hoc": True, "models": self.models, "prompts": prompts.VERSION,
@@ -407,11 +570,14 @@ class IncidentPipeline:
                                                                             for q in checks["quotes"]],
                                    "citations": checks["citations"],
                                    "structure_problems": verify.structure_problems(draft), "attempts": attempts},
+                  "chain_of_thought": {k: v for k, v in digest["reasoning"].items()},
                   "plan": plan, "plan_dropped_items": self.dropped,
                   "extract_refusals": self.extract_refusals, "evidence": evidence,
                   "locators": {item_id: self.locator.locate(item_id) for item_id in evidence["cited_ids"]},
                   "inspect_view_present": self.locator.inspect_view_present, "units": self.units}
         write_json(self.out_dir / "evidence.json", record)
         return {"status": "complete", "report": str(self.out_dir / "report.html"),
-                "verification": checks["summary"], "storylines": len(plan["storylines"]),
+                "verification": checks["summary"],
+                "storylines": sum(s["section"] == "case_study" for s in plan["storylines"]),
+                "excerpt_sources": evidence["excerpt_sources"], "chain_of_thought": digest["reasoning"]["status"],
                 "units": self.units}

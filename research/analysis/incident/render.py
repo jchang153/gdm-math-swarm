@@ -20,7 +20,9 @@ BANNER = ("Post-hoc account written by Claude Opus 5.5 from the run's records af
           "the sources before relying on them. The deterministic results report (results.html) is the record of "
           "outcomes.")
 
-KIND_CLASS = {"Reasoning (chain of thought)": "reasoning", "Agent message": "message",
+KIND_CLASS = {"Reasoning (chain of thought)": "reasoning", "Agent message (assistant text)": "message",
+              "Visible thinking (assistant text)": "thinking",
+              "Reasoning (encrypted by the provider; unreadable)": "reasoning",
               "Agent's own summary (written at a context compaction)": "summary",
               "Tool result (what the agent was shown)": "result", "Private file version": "file"}
 
@@ -29,7 +31,8 @@ def kind_class(label):
     if label in KIND_CLASS:
         return KIND_CLASS[label]
     low = label.lower()
-    for key, value in (("submission", "submission"), ("submitted", "submission"), ("board", "board"),
+    for key, value in (("template text", "template"), ("submission", "submission"), ("submitted", "submission"),
+                       ("board", "board"),
                        ("direct message", "dm"), ("feedback", "feedback"), ("library", "library"),
                        ("tool call", "tool")):
         if key in low:
@@ -147,10 +150,25 @@ def _anchor(item_id):
     return re.sub(r"[^A-Za-z0-9_-]+", "_", item_id)
 
 
+def excerpt_meta(record, ctx):
+    """(label, evidence excerpt or None) of an excerpt block: the evidence pack's host-assigned label
+    (a submission excerpt says whether it is template text or the agent's own lines)."""
+    excerpt = (ctx.get("excerpts") or {}).get(record.get("eid"))
+    if excerpt and excerpt.get("label"):
+        return excerpt["label"], excerpt
+    label = ctx["excerpt_label"](record["item"], record["quote"]) if ctx.get("excerpt_label") else None
+    return label, excerpt
+
+
+FALLBACK_NOTE = "Program-chosen passage"
+
+
 def _excerpt_html(record, ctx):
     loc = ctx["locate"](record["item"]) or {"label": "Unknown record", "agent": "?", "time": None,
                                             "inspect_url": None, "raw": None}
-    css = kind_class(loc["label"])
+    label, excerpt = excerpt_meta(record, ctx)
+    label = label or loc["label"]
+    css = kind_class(label)
     body = html.escape(record["quote"].strip("\n")).replace("[...]", '<span class="elide">[…]</span>') \
         .replace("[…]", '<span class="elide">[…]</span>')
     links = []
@@ -160,10 +178,19 @@ def _excerpt_html(record, ctx):
     status = "" if record["verified"] else (
         f'<div class="unverified">Not verified: {html.escape(record.get("reason") or "not found verbatim")}. Treat '
         "this excerpt as unreliable.</div>")
+    if record.get("incomplete"):
+        status += f'<div class="unverified">Incomplete excerpt: {html.escape(record["incomplete"])}.</div>'
+    badge = ""
+    if excerpt and excerpt.get("fallback"):
+        why = excerpt.get("fallback_reason") or "the extraction model gave no passage"
+        badge = (f'<span class="fallback" title="Chosen by the program, not the extraction model, because '
+                 f'{html.escape(why, quote=True)}">{FALLBACK_NOTE}</span>')
     return (f'<figure class="excerpt k-{css}{"" if record["verified"] else " bad"}">'
-            f'<figcaption><span class="kind">{html.escape(loc["label"])}</span>'
+            f'<figcaption><span class="kind">{html.escape(label)}</span>'
             f'<span class="meta">{html.escape(str(loc["agent"]))} · {html.escape(_time(loc["time"]))} · '
-            f'<code>{html.escape(record["item"])}</code></span></figcaption>{status}'
+            f'<code>{html.escape(record["item"])}</code>'
+            + (f' · <code>{html.escape(record["eid"])}</code>' if record.get("eid") else "")
+            + f'</span>{badge}</figcaption>{status}'
             f'<blockquote>{body}</blockquote><div class="links">{" · ".join(links)}</div></figure>')
 
 
@@ -175,7 +202,9 @@ def markdown_to_html(markdown, ctx):
 
     def flush_para():
         if para:
-            out.append("<p>" + _inline(" ".join(para), ctx) + "</p>")
+            joined = " ".join(para)
+            css = ' class="hostnote"' if joined.startswith(HOST_NOTE_LEAD) else ""
+            out.append(f"<p{css}>" + _inline(joined, ctx) + "</p>")
             para.clear()
 
     def flush_list():
@@ -276,13 +305,16 @@ STYLE = """
 :root{--bg:#fbfaf7;--fg:#1d1d1f;--muted:#5f6368;--rule:#e3e0d8;--card:#ffffff;--accent:#2f5d8a;
 --warn-bg:#fff4e5;--warn-fg:#7a4b00;--bad:#b3261e;--k-reasoning:#6b4fa3;--k-message:#2f5d8a;--k-tool:#3b6e4f;
 --k-submission:#9a5b13;--k-board:#7a3e6e;--k-dm:#1f6f78;--k-feedback:#a33b3b;--k-library:#4d5f2a;
---k-summary:#555;--k-result:#666;--k-file:#555;--k-other:#555}
+--k-summary:#555;--k-result:#666;--k-file:#555;--k-other:#555;--k-thinking:#2f5d8a;--k-template:#7a6a55}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#17181a;--fg:#e8e6e1;--muted:#a2a6ab;
 --rule:#34363a;--card:#202225;--accent:#8db7e3;--warn-bg:#3a2c12;--warn-fg:#f3cf8c;--bad:#f2867d;
 --k-reasoning:#b59ce6;--k-message:#8db7e3;--k-tool:#8fcaa3;--k-submission:#e2ad6a;--k-board:#d79bc9;
---k-dm:#7fcbd3;--k-feedback:#ef9a9a;--k-library:#b8c98a;--k-summary:#bbb;--k-result:#aaa;--k-file:#bbb;--k-other:#bbb}}
+--k-dm:#7fcbd3;--k-feedback:#ef9a9a;--k-library:#b8c98a;--k-summary:#bbb;--k-result:#aaa;--k-file:#bbb;--k-other:#bbb;
+--k-thinking:#8db7e3;--k-template:#c9b79a}}
 :root[data-theme="dark"]{--bg:#17181a;--fg:#e8e6e1;--muted:#a2a6ab;--rule:#34363a;--card:#202225;--accent:#8db7e3;
---warn-bg:#3a2c12;--warn-fg:#f3cf8c;--bad:#f2867d}
+--warn-bg:#3a2c12;--warn-fg:#f3cf8c;--bad:#f2867d;--k-reasoning:#b59ce6;--k-message:#8db7e3;--k-tool:#8fcaa3;
+--k-submission:#e2ad6a;--k-board:#d79bc9;--k-dm:#7fcbd3;--k-feedback:#ef9a9a;--k-library:#b8c98a;--k-summary:#bbb;
+--k-result:#aaa;--k-file:#bbb;--k-other:#bbb;--k-thinking:#8db7e3;--k-template:#c9b79a}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.65 Georgia,"Iowan Old Style","Times New Roman",serif;
 font-variant-numeric:lining-nums}
@@ -319,6 +351,10 @@ a.cite{font:0.8em ui-monospace,SFMono-Regular,Menlo,monospace;text-decoration:no
 .k-submission{--kc:var(--k-submission)}.k-board{--kc:var(--k-board)}.k-dm{--kc:var(--k-dm)}
 .k-feedback{--kc:var(--k-feedback)}.k-library{--kc:var(--k-library)}.k-summary{--kc:var(--k-summary)}
 .k-result{--kc:var(--k-result)}.k-file{--kc:var(--k-file)}.k-other{--kc:var(--k-other)}
+.k-thinking{--kc:var(--k-thinking)}.k-template{--kc:var(--k-template)}
+.fallback{font-size:11.5px;border:1px solid var(--muted);color:var(--muted);border-radius:3px;padding:0 .35em}
+.hostnote{background:rgba(127,127,127,.08);border-left:3px solid var(--muted);padding:8px 12px;border-radius:4px;
+font-size:.95em}
 .table{overflow-x:auto;margin:1em 0}
 table{border-collapse:collapse;font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
 th,td{border-bottom:1px solid var(--rule);padding:6px 8px;text-align:left;vertical-align:top}
@@ -336,12 +372,18 @@ KATEX = ('<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.1
          'throwOnError:false})"></script>')
 
 
-def render_html(markdown, checks, locator, digest, *, generated_at, models):
+def excerpt_table(evidence):
+    return {e["eid"]: e for s in (evidence or {}).get("storylines") or [] for r in s["records"]
+            for e in r["excerpts"] if e.get("eid")}
+
+
+def render_html(markdown, checks, locator, digest, *, generated_at, models, evidence=None):
     """report.html: banner, the writer's report, the appendix (already appended to ``markdown``)."""
     blocks = {q["span"][0]: q for q in checks["quotes"] if q["form"] == "block"}
     inline_ok = {(verify.normalize(q["quote"]), q["item"]): q["verified"] for q in checks["quotes"]
                  if q["form"] == "inline"}
-    ctx = {"locate": locator.locate, "blocks": blocks, "inline_ok": inline_ok}
+    ctx = {"locate": locator.locate, "blocks": blocks, "inline_ok": inline_ok, "excerpts": excerpt_table(evidence),
+           "excerpt_label": getattr(locator, "excerpt_label", None)}
     title_match = re.search(r"^#\s+(.+)$", markdown, re.M)
     title = title_match.group(1).strip() if title_match else f"Incident report: {digest['run_id']}"
     summary = checks["summary"]
@@ -375,19 +417,89 @@ def _plain_title(title):
 
 
 def annotate_markdown(markdown, checks):
-    """report.md: unverified excerpt blocks and inline quotes get a visible note."""
+    """The Markdown with unverified excerpt blocks and inline quotes given a visible note."""
+    return reader_markdown(markdown, checks, None, None)
+
+
+def reader_markdown(markdown, checks, locator, evidence):
+    """report.md: each excerpt block becomes a labelled quotation (label, agent, time, record and
+    excerpt ids, Inspect View link, program-chosen flag) around a verbatim code block; unverified or
+    incomplete excerpts and unverified inline quotes get a visible note."""
+    excerpts = excerpt_table(evidence)
     out, last = [], 0
     for record in sorted(checks["quotes"], key=lambda q: q["span"][0]):
-        if record["verified"]:
-            continue
         start, end = record["span"]
-        out.append(markdown[last:end])
-        note = (f"\n> **Unverified excerpt** ({record.get('reason') or 'not found verbatim'})."
-                if record["form"] == "block" else " *(unverified quote)*")
-        out.append(note)
+        if record["form"] == "inline":
+            if not record["verified"]:
+                out.append(markdown[last:end] + " *(unverified quote)*")
+                last = end
+            continue
+        out.append(markdown[last:start])
+        loc = locator.locate(record["item"]) if locator is not None else None
+        label, excerpt = excerpt_meta(record, {"excerpts": excerpts, "excerpt_label": getattr(locator, "excerpt_label",
+                                                                                              None)})
+        label = label or (loc or {}).get("label") or "Excerpt"
+        head = [f"**{label}**"]
+        if loc:
+            head += [str(loc["agent"]), _time(loc["time"])]
+        head.append(f"`{record['item']}`" + (f" ({record['eid']})" if record.get("eid") else ""))
+        if loc and loc.get("inspect_url"):
+            head.append(f"[Inspect View]({loc['inspect_url']})")
+        if excerpt and excerpt.get("fallback"):
+            head.append(f"*{FALLBACK_NOTE.lower()}: {excerpt.get('fallback_reason') or 'no model passage'}*")
+        fence = "~~~~" if "```" in record["quote"] else "```"
+        lines = ["> " + " · ".join(head), ">", "> " + fence + "text"]
+        lines += [("> " + line).rstrip() for line in record["quote"].split("\n")]
+        lines.append("> " + fence)
+        if not record["verified"]:
+            lines.append(f"> **Unverified excerpt** ({record.get('reason') or 'not found verbatim'}).")
+        if record.get("incomplete"):
+            lines.append(f"> **Incomplete excerpt** ({record['incomplete']}).")
+        out.append("\n".join(lines))
         last = end
     out.append(markdown[last:])
     return "".join(out)
+
+
+HOST_NOTE_LEAD = "**Note from the program (not the model).**"
+
+
+def host_note_markdown(digest, evidence, refusals, units, draft=""):
+    """The host-written note added to "How sure we are": whether the chain of thought was readable, who
+    chose each excerpt shown, and how many extraction requests the model provider refused."""
+    shown = set(re.findall(r"^:::excerpt[ \t]+\S+[ \t]+(E\d+)", draft or "", re.M))
+    table = excerpt_table(evidence)
+    rows = [table[e] for e in sorted(shown, key=lambda x: int(x[1:])) if e in table] if shown else list(table.values())
+    whole = sum(e["source"] == "host" for e in rows)
+    model = sum(e["source"] == "model" for e in rows)
+    fallback = [e for e in rows if e["source"] == "host_fallback"]
+    refused_units = [u for u in units or [] if u.get("status") == "ungraded"]
+    parts = [HOST_NOTE_LEAD, (digest.get("reasoning") or {}).get("statement") or ""]
+    parts.append(f"This report shows {len(rows)} excerpts: {whole} are whole short records, {model} are passages the "
+                 f"extraction model picked out of longer records, and {len(fallback)} "
+                 + ("were" if len(fallback) != 1 else "was") + " chosen by the program itself"
+                 + (" (" + ", ".join(e["eid"] for e in fallback) + ")" if fallback else "") + ".")
+    if fallback:
+        reasons = sorted({e.get("fallback_reason") or "no model passage" for e in fallback})
+        parts.append("The program chose those because " + "; or ".join(reasons) + ". They are marked "
+                     f"\"{FALLBACK_NOTE}\"; they are verbatim but may not be the most telling part of their record.")
+    if refused_units:
+        parts.append(f"{len(refused_units)} extraction request" + ("s were" if len(refused_units) != 1 else " was")
+                     + " refused by the model provider (see `extract_refusals` in evidence.json).")
+    else:
+        parts.append("No extraction request was refused.")
+    return " ".join(p for p in parts if p)
+
+
+def insert_into_section(markdown, heading, text):
+    """``text`` as a paragraph at the end of the "## <heading>" section (appended at the end when the
+    section is missing)."""
+    match = re.search(r"^##[ \t]+" + re.escape(heading).replace("\\'", "['’]") + r"[ \t]*$", markdown, re.M | re.I)
+    if not match:
+        return markdown.rstrip() + "\n\n" + text + "\n"
+    following = re.search(r"^##[ \t]", markdown[match.end():], re.M)
+    at = match.end() + following.start() if following else len(markdown)
+    return markdown[:at].rstrip() + "\n\n" + text + "\n\n" + markdown[at:].lstrip("\n")
 
 
 def banner_markdown(generated_at):

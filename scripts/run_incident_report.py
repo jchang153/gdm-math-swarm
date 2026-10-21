@@ -2,7 +2,7 @@
 """Researcher-only incident report for one run: a readable, model-written account (owner request,
 October 21, 2026), written to RUN/analysis/incident/ (report.html, report.md, evidence.json).
 
-  # Paid (the default): Claude Opus 5.5 plans and writes, Claude Sonnet 5.5 extracts excerpts.
+  # Paid (the default): Claude Opus 5.5 plans, picks the excerpts of long records and writes.
   PYTHONPATH=src:. .venv/bin/python scripts/run_incident_report.py --run-dir runs/<run> [--run-limit 20]
   # Offline rehearsal with the deterministic mock model; output OUTSIDE the run directory.
   PYTHONPATH=src:. .venv/bin/python scripts/run_incident_report.py --run-dir runs/<run> --mock \
@@ -40,7 +40,6 @@ from research_swarm.inspect_adapter import disable_inspect_dotenv  # noqa: E402
 disable_inspect_dotenv()
 
 DEFAULT_RUN_LIMIT_USD = Decimal("20")
-MODEL_KEYS = ("opus", "sonnet")
 CONCURRENCY = {"opus": 4, "sonnet": 8}
 
 
@@ -58,6 +57,9 @@ def parse_args(argv=None):
     parser.add_argument("--pricing-record", type=Path, help="judge route pricing record (default: newest)")
     parser.add_argument("--history-workers", type=int, default=None)
     parser.add_argument("--no-repair", action="store_true", help="skip the writer's one revision pass")
+    parser.add_argument("--extract-model", choices=("opus", "sonnet"), default="opus",
+                        help="model that picks excerpts of long records by segment number (default opus; "
+                             "Sonnet refused Gemini transcripts on gemini10)")
     return parser.parse_args(argv)
 
 
@@ -151,24 +153,26 @@ def _run(args, run_dir, out_dir, log):
         f"run {run_limit.run_id} (room ${run_limit.room})")
     log("rebuilding agent histories (offline)...")
     run, epochs = load_histories(run_dir, workers=args.history_workers, log=log)
-    models = {key: routes.route(key).model_id for key in MODEL_KEYS}
+    roles = {"opus": "opus", "extract": args.extract_model}   # role -> judge route key
+    models = {"plan_write": routes.route("opus").model_id, "extract": routes.route(args.extract_model).model_id}
     if args.mock:
         transport = FakeTransport(responder=MockModel())
-        clients = {key: JudgeClient(key, ledger, scope=scope, archive_dir=out_dir / "raw", settings=routes,
-                                    http=transport, max_concurrency=CONCURRENCY[key], run_limit=run_limit,
-                                    run_id=label) for key in MODEL_KEYS}
+        made = {key: JudgeClient(key, ledger, scope=scope, archive_dir=out_dir / "raw", settings=routes,
+                                 http=transport, max_concurrency=CONCURRENCY[key], run_limit=run_limit,
+                                 run_id=label) for key in set(roles.values())}
     else:
-        clients = {key: JudgeClient(key, ledger, scope=scope, archive_dir=out_dir / "raw", settings=routes, http=None,
-                                    max_concurrency=CONCURRENCY[key], paid_authorized=True,
-                                    credentials_root=credentials_root, run_limit=run_limit, run_id=label)
-                   for key in MODEL_KEYS}
+        made = {key: JudgeClient(key, ledger, scope=scope, archive_dir=out_dir / "raw", settings=routes, http=None,
+                                 max_concurrency=CONCURRENCY[key], paid_authorized=True,
+                                 credentials_root=credentials_root, run_limit=run_limit, run_id=label)
+                for key in set(roles.values())}
         kept = rtj.keep_pricing_record(out_dir, routes)
         rtj.record_run_budget(out_dir, {"limit_usd": str(budget), "source": run_limit.source,
                                         "prior_usd": prior["committed_usd"], "ledger_run_id": run_limit.run_id,
                                         "label_run_id": label, "pricing_record": None if kept is None else str(kept)},
                               run_dir=run_dir, ledger=ledger)
-        for client in clients.values():
+        for client in made.values():
             client.prepare()   # loads the key in memory only; unpaid provider-limit record
+    clients = {role: made[key] for role, key in roles.items()}
     pipeline = IncidentPipeline(run_dir, out_dir, run, clients=clients, mode="mock" if args.mock else "paid",
                                 models=models, epochs=epochs, judge_dir=args.judge_dir, repair=not args.no_repair,
                                 log=log)

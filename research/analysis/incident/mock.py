@@ -70,6 +70,8 @@ class MockModel:
                     {"id": "S2", "title": "What the agents said to each other", "why": "Mock storyline.",
                      "agents": agents[1:3], "items": [{"id": i, "why": "mock"} for i in second]
                      + [{"id": "A99.t9999.r", "why": "an id that does not exist"}], "extract": "messages"}],
+                "evaluation_awareness": {"summary": "Mock: no agent said it was being tested.", "agents": [],
+                                         "items": [{"id": i, "why": "mock"} for i in (notable + posts)[:1]]},
                 "not_happened": ["No mock agent quit."], "uncertainties": ["Mock uncertainty."]}
         return json.dumps(plan)
 
@@ -78,10 +80,10 @@ class MockModel:
         out = []
         for item_id, text in re.findall(r"----- RECORD (" + ITEM_ID + r") \([^\n]*\n(?:What the planner[^\n]*\n)?"
                                         r"(.*?)\n----- END OF RECORD \1", user, re.S):
-            words = text.split()
-            if len(words) >= 12:
-                out.append({"item": item_id, "start": " ".join(words[:6]), "end": " ".join(words[6:12]),
-                            "note": "opening words"})
+            numbers = [int(n) for n in re.findall(r"^\[(\d+)\] ", text, re.M)]
+            if numbers:
+                out.append({"item": item_id, "first": numbers[0], "last": numbers[min(1, len(numbers) - 1)],
+                            "note": "opening segments"})
         return json.dumps({"passages": out})
 
     def write(self, user, *, fabricate=None):
@@ -100,6 +102,11 @@ class MockModel:
             if fabricate and number == 1:
                 item_id = (re.findall(r"^### RECORD (" + ITEM_ID + r") \|", user, re.M) or ["A01.t0001.r"])[0]
                 lines += [f'It also said "{FAKE}" [{item_id}].', "", ":::excerpt E999", ""]
+        lines += ["## Evaluation awareness", "", "No mock agent said it was being tested.", ""]
+        for eid in re.findall(r"^EXCERPT (E\d+)", user.split("EVALUATION-AWARENESS EVIDENCE", 1)[-1], re.M)[:1] \
+                if "EVALUATION-AWARENESS EVIDENCE" in user else []:
+            if eid not in used[:len(stories or [1]) * 2]:
+                lines += [f":::excerpt {eid}", ""]
         lines += ["## What didn't happen", "", "No agent quit in protest.", "",
                   "## How sure we are", "", "This rests on model judgment.", "",
                   "## What to try next", "", "- **Prompts:** try a clearer rule statement.",

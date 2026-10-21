@@ -2,9 +2,10 @@
 
 The writer may quote records in two ways only:
 
-* an excerpt block::
+* an excerpt block (the host writes these from the writer's ``:::excerpt E7`` lines; ``E7`` is the
+  excerpt's id in the evidence pack)::
 
-      :::excerpt A07.t0123.r
+      :::excerpt A07.t0123.r E7
       verbatim text of that item, optionally in pieces separated by [...]
       :::
 
@@ -14,7 +15,10 @@ Every piece of every quote must be a verbatim substring of the cited item's full
 normalizing whitespace only (each run of whitespace becomes one space; leading and trailing
 whitespace is dropped). A quote whose item does not exist or that is not found is marked
 unverified (the renderer shows it so and evidence.json records why); nothing is silently
-dropped. Bare citations ``[A07.t0123.r]`` are checked for existence.
+dropped. Bare citations ``[A07.t0123.r]`` are checked for existence. An excerpt block that is
+verbatim but visibly cut short (it ends on a colon, or stops inside a Lean file's editable block)
+is flagged ``incomplete`` (``boundary_problem``); the pipeline extends such excerpts before the
+writer sees them, so a flag here means the extension failed.
 """
 from __future__ import annotations
 
@@ -22,7 +26,7 @@ import re
 
 from .digest import ITEM_ID
 
-BLOCK_RE = re.compile(r"^:::excerpt[ \t]+(" + ITEM_ID + r")[ \t]*\n(.*?)\n:::[ \t]*$", re.M | re.S)
+BLOCK_RE = re.compile(r"^:::excerpt[ \t]+(" + ITEM_ID + r")(?:[ \t]+(E\d+))?[ \t]*\n(.*?)\n:::[ \t]*$", re.M | re.S)
 INLINE_RE = re.compile(r"[\"“]([^\"“”\n]{8,600})[\"”]\s*\[(" + ITEM_ID + r")\]")
 CITE_RE = re.compile(r"\[(" + ITEM_ID + r"(?:\s*[,;]\s*" + ITEM_ID + r")*)\]")
 ONE_ID_RE = re.compile(ITEM_ID)
@@ -38,6 +42,18 @@ def normalize(text):
 
 def pieces(quote):
     return [p for p in (normalize(x) for x in ELISION_RE.split(quote or "")) if p]
+
+
+def boundary_problem(quote):
+    """Why a verbatim excerpt reads as cut short, or None: it ends on a colon (what it introduces is
+    missing) or it opens a Lean editable block ("-- EDITABLE START") without its end marker."""
+    text = (quote or "").rstrip()
+    if text.endswith(":"):
+        return "ends on a colon (the text it introduces is cut off)"
+    start = text.rfind("EDITABLE START")
+    if start >= 0 and text.find("EDITABLE END", start) < 0:
+        return "stops inside an editable block (no EDITABLE END marker)"
+    return None
 
 
 def check_quote(quote, item):
@@ -70,10 +86,12 @@ def verify_markdown(markdown, lookup):
     character offsets of the block in ``markdown``)."""
     quotes = []
     for match in BLOCK_RE.finditer(markdown):
-        item_id, body = match.group(1), match.group(2)
+        item_id, eid, body = match.group(1), match.group(2), match.group(3)
         ok, reason = check_quote(body, lookup(item_id))
-        record = {"form": "block", "item": item_id, "quote": body.strip("\n"), "verified": ok, "reason": reason,
-                  "span": [match.start(), match.end()]}
+        record = {"form": "block", "item": item_id, "eid": eid, "quote": body.strip("\n"), "verified": ok,
+                  "reason": reason, "span": [match.start(), match.end()]}
+        if ok and boundary_problem(body):
+            record["incomplete"] = boundary_problem(body)
         if ok and len(normalize(body)) > MAX_EXCERPT_CHARS:
             record["warning"] = f"excerpt longer than {MAX_EXCERPT_CHARS} characters"
         quotes.append(record)
@@ -103,13 +121,14 @@ def verify_markdown(markdown, lookup):
     summary = {"quotes": len(quotes), "verified": sum(q["verified"] for q in quotes),
                "unverified": sum(not q["verified"] for q in quotes),
                "blocks": sum(q["form"] == "block" for q in quotes),
+               "incomplete": sum(bool(q.get("incomplete")) for q in quotes),
                "inline": sum(q["form"] == "inline" for q in quotes),
                "citations": len(citations), "unknown_citations": sum(not c["exists"] for c in citations)}
     return {"quotes": quotes, "citations": citations, "summary": summary}
 
 
-REQUIRED_SECTIONS = ("Summary", "Case studies", "What didn't happen", "How sure we are", "What to try next",
-                     "The agents, one by one")
+REQUIRED_SECTIONS = ("Summary", "Case studies", "Evaluation awareness", "What didn't happen", "How sure we are",
+                     "What to try next", "The agents, one by one")
 
 
 def structure_problems(markdown):
