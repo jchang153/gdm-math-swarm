@@ -51,7 +51,8 @@ candidates (never a negative); a refused window of several items is forced at on
 id (seeded, recorded, stable under resumption).
 
 **Selection guard.** Before an agent is judged, the share of its item tokens selected or forced is
-compared with `--max-selected-fraction` (0.20). Above it the agent is held: nothing is sent for its
+compared with `--max-selected-fraction` (default 1, i.e. off since October 21, 2026; the per-run
+judge budget is the only spending control). When set below 1 and exceeded, the agent is held: nothing is sent for its
 judgment, its outcome is `selection_over_limit`, the run ends with an error (exit code 2) and no
 run-level stage runs. The cached prefilter units stay; inspect them, then rerun with a higher
 limit if the selection is right (the partial paid run under the 12-dimension rubric selected
@@ -765,7 +766,7 @@ forced window, and the run limit recorded and compared with the spend.
 (4,000), `--verifier-edge-chars` (1,000), `--verifier-full-chars` (10,000),
 `--verifier-neighbor-chars` (1,500); `--window-tokens` (24,000), `--neighbors {k|turn}` (1, package
 mode), `--package-token-cap` (350,000, package mode); `--sample-fraction` (0.05) and
-`--sample-seed`; `--max-selected-fraction` (0.20; 1 disables); `--haiku-concurrency` (48),
+`--sample-seed`; `--max-selected-fraction` (default 1, off; an optional guard); `--haiku-concurrency` (48),
 `--sonnet-concurrency` (32), `--opus-concurrency` (16), `--agent-concurrency` (20); `--history-workers`
 (processes rebuilding histories; default one per agent, at most the CPUs, 16 and one per 6 GB);
 `--no-prompt-cache`; `--credentials-root` (paid only); `--retry-failed`, `--recompute-stale`;
