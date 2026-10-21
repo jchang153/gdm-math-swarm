@@ -5,7 +5,7 @@ A deterministic, facts-only review of the run's own records, modelled on the
 gemini10-20261020T054602Z report layout. Every field is computed from records; the only free
 text is researcher notes given explicitly with --caveat / --caveat-for (stored under
 "researcher_notes", shown under "Researcher notes"). Record contents (board posts, DMs,
-library, private files, transcripts) are linked, never summarized. Offline: no model calls,
+library, private files, Inspect logs) are linked, never summarized. Offline: no model calls,
 network, Docker, credentials, keys or .env.
 
 Inputs (read-only): RUN/settings.json (condition), RUN/runtime.jsonl (clock, stop reason,
@@ -20,8 +20,8 @@ evidence browser, linked separately from the catalogue); the report carries only
 link line ("Behavior judge: see analysis/judge/report.html" or "Behavior judge: not run").
 
 Page layout: a summary card (model, prompt variant, agents, duration, accepted and genuine tasks,
-cost, judge status), tabs Report / Transcripts / Conference / Behavior judge / Inspect with one-line
-explanations, the facts sections, and plain explanations of every status label shown. Raw Inspect
+cost, judge status), tabs Report / Conference / Behavior judge / Inspect with one-line
+explanations (agent transcripts are read in Inspect View; the site has no custom transcript viewer), the facts sections, and plain explanations of every status label shown. Raw Inspect
 logs are linked one RUN/inspect/*.eval file at a time. Light and dark mode, phone width.
 
 Publication steps (docs/experiment-library.md):
@@ -66,14 +66,12 @@ JUDGE_REPORT = 'analysis/judge/report.html'
 # (a static host cannot list RUN/inspect/), like the catalogue (build_experiment_index.inspect_log_links).
 TABS = (('Report', '#report', 'This page: facts computed from the run\'s own records (clock, exits, '
          'submissions, proof checker, spending).'),
-        ('Transcripts', 'transcripts/index.html', 'Every agent\'s full reconstructed history: reasoning, tool calls '
-         'and results, submissions; searchable across agents.'),
         ('Conference', 'conference-view/index.html', 'What agents saw and shared: board posts, DMs, the shared '
          'library, judging events and private files.'),
         ('Behavior judge', JUDGE_REPORT, 'A post-hoc model judge\'s reading of the transcripts (model-generated, '
          'verified by a second model call); researcher-only.'),
-        ('Inspect', 'inspect-view/index.html', 'The raw Inspect evaluation logs (authoritative) and the native '
-         'Inspect log viewer.'))
+        ('Inspect', 'inspect-view/index.html', 'Agent transcripts and the raw Inspect evaluation logs '
+         '(authoritative), read in the native Inspect log viewer.'))
 OTHER_RECORDS = (('Timeline', 'analysis/timeline.md'), ('Settings', 'settings.json'))
 # Plain explanations of the status labels this report shows (only labels present are listed).
 STOP_REASONS = {
@@ -595,7 +593,7 @@ def render(results, title, inspect_logs=()):
                 ('Prompt variant', c['prompt_variant']), ('Auto-restart', c['auto_restart']),
                 ('Max run seconds', c['max_run_seconds']), ('Budget track', c['budget_track']),
                 ('Seeded contagion', c['seeded_contagion_enabled']), ('Mitigations', c['mitigations_enabled'])]),
-            '<h2>Agents</h2>', table([(link(a['agent'], f'transcripts/{quote(a["agent"], safe="")}.html'),
+            '<h2>Agents</h2>', table([(esc(a['agent']),
                                        *(esc(value(a.get(k))) for k in ('requests', 'finished', 'unbilled', 'restarts')),
                                        badge(a['exit']) if a.get('exit') else esc(value(None)),
                                        *(esc(value(a.get(k))) for k in ('exit_at', 'submissions')))
@@ -659,7 +657,7 @@ def render(results, title, inspect_logs=()):
                if label != 'Behavior judge'] + inspect_links(logs) \
         + list(OTHER_RECORDS)
     if judge['status'] != 'not_run':
-        records.insert(2, ('Behavior judge', judge['report']))
+        records.insert(1, ('Behavior judge', judge['report']))
     body.append('<h2>Records</h2><p>' + ' · '.join(link(label, href) for label, href in records) + '</p></main>')
     return ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
             f'content="width=device-width,initial-scale=1"><title>{esc(title or results["run"] + " results")}</title>'

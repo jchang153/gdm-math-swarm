@@ -150,7 +150,8 @@ class BuildResultsTest(unittest.TestCase):
         # Tabs, with the judge tab marked not run, and their explanations.
         tabs = page.split('<nav class="tabs"', 1)[1].split('</nav>', 1)[0]
         self.assertIn('href="#report"', tabs)
-        self.assertIn('href="transcripts/index.html"', tabs)
+        self.assertNotIn('Transcripts', tabs)
+        self.assertNotIn('transcripts/', page)
         self.assertIn('href="conference-view/index.html"', tabs)
         self.assertIn('href="inspect-view/index.html"', tabs)
         self.assertIn('Behavior judge · not run', tabs)
