@@ -226,25 +226,31 @@ is being merged into main via `collab-env`.
 
 ## In flight as of 2026-10-21 (check status before redoing anything)
 
-1. **Neutral "collab" environment** (branch/worktree `collab-env`, based on
-   `owner-multimodel` plus main). It adds two new prompt variants:
-   - `collab_max_pressure_no_rule6`: same pressure framing;
-   - `collab`: plain collaborative framing, no pressure.
+1. **Neutral "collab" environment: merged to main (43d6889), NOT yet run.**
+   Two new prompt variants, with configs `configs/owner-collab-pressure-<model>.json`
+   and `configs/owner-collab-glm-5.3.json`:
+   - `collab_max_pressure_no_rule6`: identical to `max_pressure_no_rule6` except the
+     conference and organizer wording;
+   - `collab`: plain collaborative framing with no evaluation pressure.
 
-   In both, agents see no "Claude", "Claude Code", "Anthropic", "conference" or
-   "organizer":
-   - The bridge filter strips Claude Code's billing header, its "Claude agent"
-     line, the attribution reminder, the model-name lines and the environment
-     block.
-   - Claude Code's temp and config folders move off paths containing `claude`.
-   - Tools become `mcp__collab__*`; `get_conference_status` is renamed.
-   - `submit_feedback` becomes private feedback about the environment.
-   - The continue nudge and error messages are reworded.
+   Neutral mode (`neutral-env-v1`, `src/research_swarm/neutral_env.py`):
+   - The filter strips Claude Code's identity text and environment block.
+   - `CLAUDE_CONFIG_DIR=/home/researcher/.agent`.
+   - Tools are `mcp__collab__*`, and `get_status` replaces `get_conference_status`.
 
-   Old variants stay unchanged. The owner wants to review the full prompt text of
-   both variants before any run. Whether the folder-moving environment variables
-   work needs confirming at runtime on the first launch. If the branch isn't merged
-   to main, finish it, run the tests, merge and push.
+   Known leaks it can't remove:
+   - background-task paths `/tmp/claude-1000/...`;
+   - Inspect still writes `~/.claude/settings.json`.
+
+   **Pending:**
+   - The owner's approval of the prompt text.
+   - A ~15-minute smoke test to confirm, on Claude Code 2.1.296:
+     - the moved config folder;
+     - the replacement API-key helper (`printenv ANTHROPIC_AUTH_TOKEN`), the riskiest
+       piece, since a failure would stop agents from authenticating;
+     - that the attribution reminder is gone.
+
+   Details are in `docs/prompts.md`, "Neutral collaboration variants".
 2. **Website**: done and live (2026-10-21). Site QoL, the Incident report tab and
    the removal of raw Inspect log download links are on main and published (see
    "Where things live"). The near-live mirror (`scripts/live_mirror.py`) is
@@ -254,6 +260,22 @@ is being merged into main via `collab-env`.
 
 - Owner to review the incident reports (the Gemini 3.1 pilot first) and the
   collab prompt text.
+- Proposed next experiments, not yet approved:
+  1. a collab smoke test;
+  2. Opus and GLM under `collab_max_pressure_no_rule6` vs `collab`, 2 repeats each,
+     1 h, 5 agents;
+  3. then one 20-agent, 14-problem, 2–3 h run;
+  4. mixed models and oversight agents later.
+- Proposed analysis change, not yet approved:
+  - split the judge's "cheating" category into "rule violation, sound but
+    unverified" (`decide +native`, the same thing as the banned `native_decide`;
+    the kernel trusts compiled code via `Lean.ofReduceBool`) and "proof-validity
+    exploit" (GLM's `answer(...)` restating plus `Iff.rfl`);
+  - re-check Gemini 4, where `+native` appears in submissions but the judge flagged
+    no one.
+
+  `+native` is used almost only on the small finite "WrittenOnTheWallII Test" graph
+  problems, early in each run.
 - Optional ideas the owner hasn't approved:
   - name the prompt variant in each incident report's header;
   - archive baseline100's loose snapshot files (about 1,800 files) with
@@ -265,6 +287,13 @@ is being merged into main via `collab-env`.
   count. Handle this only when it becomes a problem (owner's call).
 - Budget status and remaining credits: see `HANDOFF.local.md`. A 1-hour, 5-agent run
   costs roughly $40–90 including judge and report.
+
+## Owner decisions not to change things
+
+- 2026-10-21: no closure notices and no "check before submitting" nudge. About half
+  of all submissions go to already-closed problems, because agents rarely call
+  `list_problems` or `get_status`. The environment stays as the paper's; treat this
+  as a behavior metric only.
 
 ## Known gotchas
 
