@@ -29,6 +29,14 @@ windows, verification and the run-level summary remain after the clock stops. Th
   deterministic mock model into the phase folder, beside the unchanged paid post-run judge);
 - ``behavior_judge_live_interval_seconds``: seconds between live passes (default 300, 60 to 3600).
 
+Incident report (docs/plan.md, "Incident report per run (October 21, 2026)"): after the post-run
+judge, the supervisor writes the run's model-written incident report (scripts/run_incident_report.py
+into RUN/analysis/incident/) for every ``auto_behavior_judge`` config. Its budget is its own:
+
+- ``incident_report_max_usd``: the incident report's budget for the run in USD (any positive amount;
+  $20 when absent). Every incident-report invocation for the run counts against it. A failure or
+  a stop never changes the worker exit or the packaging.
+
 ``behavior_judge_live_max_usd`` (a separate live share in earlier versions) is no longer read: the
 live passes use the judging run's one budget (owner decision "one spending control only",
 docs/plan.md "One per-run budget, no manual approvals (October 20, 2026)").
@@ -43,7 +51,9 @@ AUTO_JUDGE_KEY = "auto_behavior_judge"
 MAX_USD_KEY = "behavior_judge_max_usd"
 LIVE_KEY = "live_behavior_judge"
 LIVE_INTERVAL_KEY = "behavior_judge_live_interval_seconds"
-KEYS = (AUTO_JUDGE_KEY, MAX_USD_KEY)
+INCIDENT_MAX_USD_KEY = "incident_report_max_usd"
+DEFAULT_INCIDENT_RUN_BUDGET_USD = "20"
+KEYS = (AUTO_JUDGE_KEY, MAX_USD_KEY, INCIDENT_MAX_USD_KEY)
 LIVE_KEYS = (LIVE_KEY, LIVE_INTERVAL_KEY)
 # Superseded (a separate live share of the judge's budget); not read, reported by the run_budget gate.
 OBSOLETE_LIVE_MAX_USD_KEY = "behavior_judge_live_max_usd"
@@ -68,11 +78,12 @@ def judge_config_problems(config):
     problems = []
     if AUTO_JUDGE_KEY in config and type(config[AUTO_JUDGE_KEY]) is not bool:
         problems.append(f"{AUTO_JUDGE_KEY} must be a boolean")
-    if config.get(MAX_USD_KEY) is not None:
-        try:
-            budget_amount(config[MAX_USD_KEY], MAX_USD_KEY)
-        except ValueError as ex:
-            problems.append(str(ex))
+    for key in (MAX_USD_KEY, INCIDENT_MAX_USD_KEY):
+        if config.get(key) is not None:
+            try:
+                budget_amount(config[key], key)
+            except ValueError as ex:
+                problems.append(str(ex))
     return problems + live_problems(config)
 
 
@@ -86,6 +97,14 @@ def judge_budget(config):
     if value is None:
         return Decimal(DEFAULT_JUDGE_RUN_BUDGET_USD), "default"
     return budget_amount(value, MAX_USD_KEY), f"config {MAX_USD_KEY}"
+
+
+def incident_budget(config):
+    """``(budget, source)`` of the post-run incident report: ``incident_report_max_usd``, else $20."""
+    value = (config or {}).get(INCIDENT_MAX_USD_KEY)
+    if value is None:
+        return Decimal(DEFAULT_INCIDENT_RUN_BUDGET_USD), "default"
+    return budget_amount(value, INCIDENT_MAX_USD_KEY), f"config {INCIDENT_MAX_USD_KEY}"
 
 
 def live_problems(config):

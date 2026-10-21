@@ -36,8 +36,9 @@ Stages (``STAGES``; ``--stage S`` runs every stage up to and including S):
                  into the random sample with probability ``sample_fraction`` from
                  SHA-256(seed:window id) (seeded, recorded, stable under resumption).
                  Before an agent is judged, the share of its item tokens selected (forced
-                 windows included) is checked against ``max_selected_fraction``: above it
-                 the agent is held, nothing is paid for, and the run reports an error.
+                 windows included) is checked against ``max_selected_fraction`` (1.0 by
+                 default, i.e. off): above it the agent is held, nothing is paid for, and
+                 the run reports an error.
 3. ``judge``     Candidate judging (``judge_mode`` "candidates", the default; designed in judge
                  revision v2.2, docs/plan.md, October 18, 2026, and recorded as judge revision v3
                  under rubric v3): Sonnet decides every candidate (prefilter selections, forced
@@ -370,10 +371,10 @@ class PipelineSettings:
     sonnet_concurrency: int = 32
     opus_concurrency: int = 16
     agent_concurrency: int = 20
-    # Safety guard (plan, partial paid run: Haiku selected 50-65% under the previous rubric): an
-    # agent whose selected and forced items exceed this share of its item tokens is held before
-    # its judge call. 1.0 disables the guard.
-    max_selected_fraction: float = 0.20
+    # Optional selection guard: an agent whose selected and forced items exceed this share of its
+    # item tokens is held before its judge call. Off by default (1.0) since October 21, 2026: the
+    # per-run judge budget is the only spending control (docs/plan.md, "One per-run budget").
+    max_selected_fraction: float = 1.0
     # Judge revision v2.2: "candidates" (default) or the v2/v2.1 "package" mode. Candidate batches
     # close at candidate_batch_items items or about candidate_batch_tokens estimated tokens of
     # candidate blocks, whichever comes first (a single larger item gets its own call, never

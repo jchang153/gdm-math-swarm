@@ -166,9 +166,10 @@ def parse_args(argv=None):
     parser.add_argument("--history-workers", type=int, default=None,
                         help="worker processes rebuilding agent histories in parallel before judging (default: "
                              "one per agent, at most the CPUs, 16 and one per 6 GB of memory; 1 rebuilds in this process)")
-    parser.add_argument("--max-selected-fraction", type=float, default=0.20,
-                        help="hold an agent before its judge call when the prefilter selected more than this share "
-                             "of its item tokens (default 0.20; 1 disables)")
+    parser.add_argument("--max-selected-fraction", type=float, default=1.0,
+                        help="optional guard: hold an agent before its judge call when the prefilter selected more "
+                             "than this share of its item tokens (default 1, off; the per-run judge budget is the "
+                             "only spending control)")
     parser.add_argument("--no-prompt-cache", action="store_true",
                         help="do not mark the Sonnet/Opus system prompt for prompt caching (on by default; "
                              "reservations never assume the cache discount)")
