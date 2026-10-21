@@ -529,10 +529,16 @@ def build_checks(*, agent_id, events, conference_events, activity, settings, abo
     def identity_bound(call):
         tool = call["function"][len(CONFERENCE_PREFIX):]
         try:
-            reply = json.loads(results[call["id"]]["text"])
-        except (KeyError, TypeError, ValueError):
+            text = results[call["id"]]["text"] or ""
+        except (KeyError, TypeError):
             return False
-        return isinstance(reply, dict) and reply.get("ok") is True and any(
+        try:
+            reply = json.loads(text)
+            ok = isinstance(reply, dict) and reply.get("ok") is True
+        except ValueError:
+            # Results are kept to 4000 characters; a long reply (71-task status) is cut mid-JSON.
+            ok = re.match(r'\s*\{\s*"ok"\s*:\s*true\b', text) is not None
+        return ok and any(
             e.get("agent_id") == agent_id and e.get("tool") == tool for e in conference_events)
     conference = [c for c in calls if c["function"].startswith(CONFERENCE_PREFIX) and not c["parse_error"]
                   and executed(c)]
