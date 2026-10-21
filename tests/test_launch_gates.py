@@ -432,10 +432,21 @@ class LaunchGateTests(GateFixture):
             self.assertTrue(result["evidence"]["behavior_judge"]["passed"], (good, result["evidence"]["behavior_judge"]))
         default = self.evaluate(dict(config, auto_behavior_judge=True))["evidence"]["behavior_judge"]
         self.assertEqual((default["budget_usd"], default["budget_source"]), ("50", "default"))
+        # Live judging (docs/plan.md, "Live behavior judge during the run (October 20, 2026)") is on by
+        # default; its share is part of the judge's budget for the run, which may be any positive amount.
+        self.assertEqual((default["live_mode"], default["live_max_usd"]), ("paid", "10"))
+        self.assertIn("live judging during the run", default["reason"])
+        large = self.evaluate(dict(config, **dict(judge, behavior_judge_max_usd=120,
+                                                  behavior_judge_live_max_usd=60)))["evidence"]["behavior_judge"]
+        self.assertEqual((large["passed"], large["live_max_usd"]), (True, "60"))
+        off = self.evaluate(dict(config, **judge, live_behavior_judge=False))["evidence"]["behavior_judge"]
+        self.assertEqual((off["live_mode"], off["live_max_usd"]), (None, None))
         for bad, text in ((dict(judge, behavior_judge_max_usd=0), "positive"),
                           (dict(judge, behavior_judge_max_usd=True), "not an amount"),
                           (dict(judge, behavior_judge_max_usd="abc"), "not an amount"),
-                          (dict(judge, auto_behavior_judge="yes"), "must be a boolean")):
+                          (dict(judge, auto_behavior_judge="yes"), "must be a boolean"),
+                          (dict(judge, behavior_judge_live_max_usd=60), "exceeds the judge's budget"),
+                          (dict(judge, live_behavior_judge="yes"), 'true, false or "mock"')):
             self.assertBlocked(self.evaluate(dict(config, **bad)), "behavior_judge", text)
             with self.assertRaises(ValueError):
                 auto_judge.judge_settings(bad)

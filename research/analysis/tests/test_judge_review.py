@@ -511,6 +511,10 @@ class RealVerifiedShapeTests(unittest.TestCase):
     def write(self, agent, items, raw, verdicts):
         raw = dict({"cheating": {"level": "none"}, "whistleblowing": {"level": "none"},
                     "evaluation_awareness": {"level": "none"}, "findings": [], "note": ""}, **raw)
+        # Rubric v3.1: the judge's findings and the verifier's verdicts carry plain-language explanations.
+        raw["findings"] = [dict({"plain_explanation": f"Plain words for {f['id']}."}, **f) for f in raw["findings"]]
+        verdicts = [dict({"plain_explanation": f"Verifier's plain words for {v['finding_id']}."}, **v)
+                    for v in verdicts]
         verdict, problems, _ = self.schema.normalize_judge_v2(dict(raw, agent_id=agent, rubric="gdm-judge-rubric/3"),
                                                               agent_id=agent)
         self.assertEqual(problems, [])
@@ -891,7 +895,7 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(built["visible_words"], words)
         self.assertLess(words, 1500)
         self.assertEqual(data["reading"], {"visible_words": words, "target_words": 1500, "within_target": True,
-                                           "compact_cards": False})
+                                           "compact_cards": False, "collapsed_words": 0, "card_layout": "full"})
         self.assertEqual(page.count("<article class=\"card\">"), 4)
         cards = {r["agent_id"]: r["evidence"] for r in data["agents"] if r["evidence"]}
         self.assertEqual(sorted(cards), ["agent-001", "agent-002", "agent-006", "agent-008"])

@@ -256,7 +256,10 @@ class RunLimitPipelineTests(unittest.TestCase):
                               cost["invocations_without_estimate"]), (1, 1, 0))
             self.assertEqual(cost["compared"]["estimate_central_usd"], resume["central_usd"])
             settled = sum(Decimal(row["settled_usd"]) for row in cost["invocations"])
-            self.assertEqual(settled, Decimal(cost["settled_usd"]))
+            # Each row and the total are rounded to $0.0001 separately, so they agree within a rounding
+            # step per row (the rehearsal's synthetic costs are not round numbers).
+            self.assertLessEqual(abs(settled - Decimal(cost["settled_usd"])),
+                                 Decimal("0.0001") * len(cost["invocations"]))
             self.assertAlmostEqual(float(cost["settled_usd"]), float(cost["judge_dir_settled_usd"]), places=4)
             for stage in ("sonnet_candidates", "opus_verifier", "opus_runlevel"):
                 self.assertIn(stage, cost["by_stage"])
@@ -466,10 +469,14 @@ class CommandLineTests(unittest.TestCase):
             self.cli.parse_args(["--run-dir", str(self.run_dir), "--i-have-user-approval"])
 
     def test_default_limit_is_fifty_and_never_clamped(self):
-        self.assertEqual(self.cli.fixed_run_limit(None), {"limit_usd": "50", "source": "default", "basis": "default"})
+        keys = ("limit_usd", "source", "basis")
+        pick = lambda limit: {k: limit[k] for k in keys}  # noqa: E731 (also prior_usd, room_usd, per_run)
+        self.assertEqual(pick(self.cli.fixed_run_limit(None)), {"limit_usd": "50", "source": "default", "basis": "default"})
         config = {"max_usd": "120", "budget_source": "config behavior_judge_max_usd"}
-        self.assertEqual(self.cli.fixed_run_limit(None, config),
+        self.assertEqual(pick(self.cli.fixed_run_limit(None, config)),
                          {"limit_usd": "120", "source": "run_config", "basis": "config behavior_judge_max_usd"})
+        self.assertEqual({k: self.cli.fixed_run_limit(None, config)[k] for k in ("prior_usd", "room_usd", "per_run")},
+                         {"prior_usd": "0", "room_usd": "120", "per_run": True})
         self.assertEqual(self.cli.fixed_run_limit(Decimal("300"), config)["limit_usd"], "300")  # --run-limit wins
         default = {"max_usd": "50", "budget_source": "default"}
         self.assertEqual(self.cli.fixed_run_limit(None, default)["source"], "default")

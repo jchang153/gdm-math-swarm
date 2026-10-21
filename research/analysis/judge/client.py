@@ -387,6 +387,91 @@ def rate_limit_delay(rate_limited, retry_after=None, jitter=0.0):
 
 RUN_LIMIT_REASON = "run_limit"
 RUN_LIMIT_SCHEMA = "gdm-judge-run-limit/1"
+LABEL_PREFIX = "judge-"
+LABEL_LENGTH = 200
+
+
+def request_label(model_key, purpose, unit_id, run_id=None):
+    """The ledger label of one judge request (the ``calls.agent`` column):
+    ``judge-<model>:<run id>:<purpose>:<unit id>``, or ``judge-<model>:<purpose>:<unit id>``
+    without a run id (requests made before the per-run cap existed). The run id comes before
+    anything long, so truncation to ``LABEL_LENGTH`` characters never cuts it."""
+    parts = [f"{LABEL_PREFIX}{model_key}"] + ([str(run_id)] if run_id else []) + [str(purpose), str(unit_id)]
+    return ":".join(parts)[:LABEL_LENGTH]
+
+
+_ARCHIVE_ID = re.compile(rb'"ledger_request_id":\s*"([^"]+)"')
+_ARCHIVE_SCOPE = re.compile(rb'"scope":\s*"([^"]+)"')
+ARCHIVE_HEAD_BYTES = 4096
+
+
+def archived_request_ids(folders, scope=None):
+    """The ledger request ids named by the request archives (``*.request.json``, the first file a
+    request writes after its ledger row) under ``folders``, optionally of one ``scope``. Only the
+    head of each archive is read (the id and scope come before the request body)."""
+    found = set()
+    for folder in folders or ():
+        folder = Path(folder)
+        if not folder.is_dir():
+            continue
+        for path in folder.rglob("*.request.json"):
+            try:
+                with path.open("rb") as handle:
+                    head = handle.read(ARCHIVE_HEAD_BYTES)
+            except OSError:
+                continue
+            match = _ARCHIVE_ID.search(head)
+            if match is None:
+                continue
+            named = _ARCHIVE_SCOPE.search(head)
+            if scope is not None and named is not None and named.group(1).decode("utf-8", "replace") != scope:
+                continue
+            found.add(match.group(1).decode("utf-8", "replace"))
+    return found
+
+
+def committed_for_run(ledger_path, run_id, scope=ANALYSIS_SCOPE, *, archives=()):
+    """What the ledger holds against one run's judging, read only (docs/plan.md, "Live behavior
+    judge during the run (October 20, 2026)"): the sum over every ``scope`` row whose label names
+    ``run_id`` (``request_label``) of its billed amount, or its full reservation while it is
+    reserved or uncertain (``COALESCE(actual, reserved)``, exactly what the ledger counts). The
+    ledger row is the first durable record of a request (written before its request archive),
+    so a hold orphaned by a killed process is counted too.
+
+    Requests made before the run id was put into the labels (``judge-<model>:<purpose>:<unit>``)
+    cannot be found by label: ``archives`` (judge directories) adds every judge row of ``scope``
+    that their request archives name (``archived_request_ids``) and whose label carries no run id
+    (``legacy_usd``, ``legacy_rows``), so a run judged before the per-run cap still has that spend
+    counted. Returns ``{"run_id", "committed_usd", "rows", "unresolved_rows", "legacy_usd",
+    "legacy_rows"}``; a missing ledger counts 0."""
+    from research_swarm.budget import usd
+    path = Path(ledger_path)
+    empty = {"run_id": run_id, "committed_usd": "0", "rows": 0, "unresolved_rows": 0, "legacy_usd": "0",
+             "legacy_rows": 0}
+    if not run_id or not path.exists():
+        return empty
+    marker = f":{run_id}:"
+    legacy_ids = sorted(archived_request_ids(archives, scope)) if archives else []
+    with closing(sqlite3.connect("file:" + str(path.resolve()) + "?mode=ro", uri=True, timeout=30)) as db:
+        db.execute("PRAGMA busy_timeout=30000")
+        row = db.execute("SELECT COALESCE(SUM(COALESCE(actual, reserved)), 0), COUNT(*), "
+                         "COALESCE(SUM(CASE WHEN state IN ('reserved', 'uncertain') THEN 1 ELSE 0 END), 0) "
+                         "FROM calls WHERE scope=? AND substr(agent, 1, ?)=? AND instr(agent, ?) > 0",
+                         (scope, len(LABEL_PREFIX), LABEL_PREFIX, marker)).fetchone()
+        legacy, legacy_rows, legacy_unresolved = 0, 0, 0
+        for start in range(0, len(legacy_ids), 500):
+            chunk = legacy_ids[start:start + 500]
+            for amount, state, agent in db.execute(
+                    f"SELECT COALESCE(actual, reserved), state, agent FROM calls WHERE scope=? AND id IN "
+                    f"({','.join('?' * len(chunk))})", (scope, *chunk)):
+                if not str(agent).startswith(LABEL_PREFIX) or marker in str(agent):
+                    continue   # not a judge row, or already counted by its label
+                legacy += int(amount or 0)
+                legacy_rows += 1
+                legacy_unresolved += state in ("reserved", "uncertain")
+    return {"run_id": run_id, "committed_usd": str(usd(int(row[0]) + legacy)), "rows": int(row[1]) + legacy_rows,
+            "unresolved_rows": int(row[2]) + legacy_unresolved, "legacy_usd": str(usd(legacy)),
+            "legacy_rows": legacy_rows}
 
 
 class RunLimit:
@@ -400,18 +485,29 @@ class RunLimit:
     committed spend past ``limit_usd``; the client then answers ``grading_failed`` with reason
     ``run_limit`` without touching the ledger or the network, and the pipeline treats it like a
     ledger denial (waits while other requests are in flight, else stops cleanly). The ledger
-    enforces the same budget for the invocation's run (``run_id``). ``estimate`` (the invocation estimate that
+    enforces the same budget for the invocation's own ledger run (``run_id``, registered with the
+    ``room`` this limit leaves: ``limit_usd`` minus ``prior_usd``, what earlier invocations of the
+    same judged run already committed). ``estimate`` (the invocation estimate that
     set the limit), ``source`` (``estimate``: 2x the central estimate, or ``override``:
     ``--run-limit``) and ``basis`` (what set an estimated limit: ``factor``, ``largest_reservation``
     when the largest single reservation needed more room, or ``floor``) are recorded with the
     totals (``record()``)."""
 
     def __init__(self, limit_usd, *, source="estimate", estimate=None, factor=None, floor_usd=None, basis=None,
-                 run_config=None):
+                 run_config=None, prior_usd=None, prior=None):
         limit = _decimal_or_none(limit_usd)
         if limit is None or limit <= 0:
             raise ValueError("run limit must be a positive amount in USD")
         self.limit = limit
+        # The judge's budget for the whole run (docs/plan.md, "Live behavior judge during the run (October
+        # 20, 2026)", merged into "One per-run budget, no manual approvals (October 20, 2026)"): what
+        # earlier invocations already committed against the same run (``committed_for_run``) counts
+        # against ``limit`` from the start, so a resume or a later stage never gets a fresh budget.
+        prior_amount = _decimal_or_none(prior_usd)
+        if prior_amount is not None and prior_amount < 0:
+            raise ValueError("prior_usd must not be negative")
+        self.prior = prior_amount or Decimal(0)
+        self.prior_record = prior
         self.source = source
         self.estimate = estimate
         self.factor = factor
@@ -420,8 +516,11 @@ class RunLimit:
         # Source ``run_config`` (docs/plan.md, "One per-run budget, no manual approvals (October 20,
         # 2026)"): the judged run's config path, track and budget (``auto_judge.judge_settings``), as given.
         self.run_config = run_config
+        if self.prior >= self.limit:
+            raise ValueError(f"no room under the run limit ${self.limit}: ${self.prior} is already committed for "
+                             "this run's judging")
         self.created_at = _now()
-        # The ledger run this invocation's clients register (budget = ``limit``).
+        # The ledger run this invocation's clients register (budget = ``room``: the limit minus prior).
         self.run_id = f"judge-{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:8]}"
         self._lock = threading.Lock()
         self._held = {}                  # token -> (reserved USD, purpose, model key)
@@ -433,13 +532,29 @@ class RunLimit:
         self.first_denial = None
         self.peak_committed = Decimal(0)
         self.by_purpose = {}
+        self.closed = None               # {"reason", "at"} once ``close`` was called
+
+    def close(self, reason):
+        """Admit nothing more (the invocation was asked to stop, e.g. SIGTERM): every later
+        ``admit`` is denied like a request past the limit, so the pipeline waits for its in-flight
+        requests to settle (their ledger rows are settled as usual, never left ``reserved``) and
+        then stops cleanly (stop reason ``run_limit``; a resume pays nothing twice). Takes no lock:
+        safe from a signal handler."""
+        if self.closed is None:
+            self.closed = {"reason": str(reason), "at": _now()}
+
+    @property
+    def room(self):
+        """What this invocation may still commit: the limit minus ``prior`` (the budget of its ledger run)."""
+        return self.limit - self.prior
 
     def committed(self):
         with self._lock:
             return self._committed()
 
     def _committed(self):
-        return sum((held for held, _, _ in self._held.values()), Decimal(0)) + self._uncertain + self._settled
+        return (sum((held for held, _, _ in self._held.values()), Decimal(0)) + self._uncertain + self._settled
+                + self.prior)
 
     def _row(self, purpose, model):
         return self.by_purpose.setdefault(purpose or "?", {"model_key": model, "requests": 0, "settled_usd": Decimal(0),
@@ -451,11 +566,12 @@ class RunLimit:
         amount = _decimal_or_none(amount) or Decimal(0)
         with self._lock:
             committed = self._committed()
-            if committed + amount > self.limit:
+            if self.closed is not None or committed + amount > self.limit:
                 self.denied += 1
                 if self.first_denial is None:
                     self.first_denial = {"at": _now(), "label": label, "reserved_usd": str(amount),
-                                         "committed_usd": str(committed), "limit_usd": str(self.limit)}
+                                         "committed_usd": str(committed), "limit_usd": str(self.limit),
+                                         "closed": self.closed}
                 return None
             self._next += 1
             token = self._next
@@ -490,7 +606,7 @@ class RunLimit:
     def denial_detail(self, amount):
         with self._lock:
             return {"run_limit_usd": str(self.limit), "committed_usd": str(self._committed()),
-                    "reserved_usd": str(_decimal_or_none(amount) or Decimal(0))}
+                    "reserved_usd": str(_decimal_or_none(amount) or Decimal(0)), "closed": self.closed}
 
     def record(self):
         """The limit, how it was set and this invocation's own totals (JSON-ready)."""
@@ -501,10 +617,11 @@ class RunLimit:
                     "basis": self.basis, "factor": None if self.factor is None else str(self.factor),
                     "floor_usd": None if self.floor is None else str(self.floor), "created_at": self.created_at,
                     "estimate": self.estimate, "run_config": self.run_config,
+                    "prior_usd": str(self.prior), "room_usd": str(self.room), "prior": self.prior_record,
                     "committed_usd": str(self._committed()),
                     "peak_committed_usd": str(self.peak_committed), "settled_usd": str(self._settled),
                     "uncertain_usd": str(self._uncertain), "in_flight_usd": str(held), "requests": self.requests,
-                    "denied": self.denied, "first_denial": self.first_denial,
+                    "denied": self.denied, "first_denial": self.first_denial, "closed": self.closed,
                     "by_purpose": {k: dict(v, settled_usd=str(v["settled_usd"]), uncertain_usd=str(v["uncertain_usd"]))
                                    for k, v in sorted(self.by_purpose.items())}}
 
@@ -556,7 +673,7 @@ class JudgeClient:
     """
     def __init__(self, model_key, ledger_path, scope=ANALYSIS_SCOPE, archive_dir=None, settings=None, http=None,
                  max_concurrency=None, *, paid_authorized=False, ledger_caps=None, key_loader=None, verify_limit=None,
-                 credentials_root=None, repo_root=None, run_limit=None):
+                 credentials_root=None, repo_root=None, run_limit=None, run_id=None):
         if model_key not in MODEL_KEYS:
             raise ValueError(f"Unknown judge model {model_key!r}; expected one of {MODEL_KEYS}")
         if run_limit is not None and not isinstance(run_limit, RunLimit):
@@ -602,14 +719,16 @@ class JudgeClient:
             if run_limit is None and (not isinstance(ledger_caps, dict) or scope not in ledger_caps):
                 raise ValueError(f"Scope {scope!r} (offline rehearsal) needs a run_limit or explicit ledger_caps")
         # The judging run's budget (docs/plan.md "One per-run budget, no manual approvals (October 20,
-        # 2026)"): the invocation's run limit, else ledger_caps[scope], else $50.
+        # 2026)"): the room the invocation's run limit leaves, else ledger_caps[scope], else $50.
         if run_limit is not None:
-            run_id, run_budget, source = run_limit.run_id, run_limit.limit, f"judge run limit ({run_limit.source})"
+            ledger_run, run_budget, source = (run_limit.run_id, run_limit.room,
+                                              f"judge run limit ({run_limit.source})")
         elif isinstance(ledger_caps, dict) and ledger_caps.get(scope) is not None:
-            run_id, run_budget, source = f"judge-{model_key}-{uuid.uuid4().hex[:12]}", ledger_caps[scope], "ledger_caps"
+            ledger_run, run_budget, source = (f"judge-{model_key}-{uuid.uuid4().hex[:12]}", ledger_caps[scope],
+                                              "ledger_caps")
         else:
-            run_id, run_budget, source = (f"judge-{model_key}-{uuid.uuid4().hex[:12]}", DEFAULT_JUDGE_RUN_BUDGET_USD,
-                                          "default")
+            ledger_run, run_budget, source = (f"judge-{model_key}-{uuid.uuid4().hex[:12]}",
+                                              DEFAULT_JUDGE_RUN_BUDGET_USD, "default")
         self.credentials_root = None
         if self._paid and key_loader is None:
             # Only the directory is checked here; its .env is read at prepare().
@@ -623,7 +742,10 @@ class JudgeClient:
                 from research_swarm.secrets import load_openrouter_key
                 return load_openrouter_key(root)
         self.ledger = BudgetLedger(self.ledger_path)
-        self.ledger.start_run(run_id, scope, run_budget, source=source, note=f"behavior judge ({scope})")
+        self.ledger.start_run(ledger_run, scope, run_budget, source=source, note=self._run_note(scope, run_id))
+        # The judged run's id goes into every ledger label (``request_label``), so the judge's budget
+        # for the whole run can be computed from the ledger alone (``committed_for_run``).
+        self.run_id = run_id
         self.run_limit = run_limit
         self._limit_tokens = {}             # ledger request id -> RunLimit token
         self.http = UrllibTransport(max_workers=max_concurrency) if self._paid else http
@@ -650,8 +772,12 @@ class JudgeClient:
         self._run_limit = limit
         ledger = getattr(self, "ledger", None)
         if limit is not None and ledger is not None and ledger.run_id != limit.run_id:
-            ledger.start_run(limit.run_id, self.scope, limit.limit, source=f"judge run limit ({limit.source})",
-                             note=f"behavior judge ({self.scope})")
+            ledger.start_run(limit.run_id, self.scope, limit.room, source=f"judge run limit ({limit.source})",
+                             note=self._run_note(self.scope, getattr(self, "run_id", None)))
+
+    @staticmethod
+    def _run_note(scope, judged_run=None):
+        return f"behavior judge ({scope})" + (f" of run {judged_run}" if judged_run else "")
 
     # -- paid-path preparation ----------------------------------------------
     def prepare(self):
@@ -930,14 +1056,16 @@ class JudgeClient:
             body = self.body(system, user, max_tokens, effort, response_format, cache_system=cache_system)
             data = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             reservation = self.settings.reservation(self.model_key, data, max_tokens, cache_system=cache_system)
-            label = f"judge-{self.model_key}:{purpose}:{unit_id}"[:200]
+            label = request_label(self.model_key, purpose, unit_id, self.run_id)
             token = None
             if self.run_limit is not None:
                 # This invocation's own limit (judge revision v3, item 7), checked before the ledger.
                 token = self.run_limit.admit(reservation, purpose=purpose, model=self.model_key, label=label)
                 if token is None:
                     detail = self.run_limit.denial_detail(reservation)
-                    message = (f"run limit: reserving ${reservation} would take this invocation's committed spend "
+                    message = (f"run limit closed ({detail['closed']['reason']}): nothing more is admitted"
+                               if detail.get("closed") else
+                               f"run limit: reserving ${reservation} would take this invocation's committed spend "
                                f"(${detail['committed_usd']}) past its run limit ${detail['run_limit_usd']}")
                     path = self._denial_record(unit_id, purpose, attempt, reservation, message, kind="run_limit_denied")
                     return _Outcome("budget_denied", RUN_LIMIT_REASON, paths=[path], dispatched=False,

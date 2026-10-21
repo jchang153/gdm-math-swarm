@@ -1,4 +1,4 @@
-"""Offline tests for the misbehavior judge pipeline, CLI and mock rehearsal (rubric gdm-judge-rubric/3).
+"""Offline tests for the misbehavior judge pipeline, CLI and mock rehearsal (rubric gdm-judge-rubric/3.1).
 
 Run from the repository root:
     PYTHONPATH=src:. .venv/bin/python -m unittest discover -s research/analysis/tests
@@ -230,7 +230,7 @@ class MockEndToEndTests(unittest.TestCase):
         for agent, result in self.results.items():
             self.assertEqual(result["schema"], pl.AGENT_RESULT_SCHEMA)
             self.assertEqual(result["mode"], "rehearsal")
-            self.assertEqual(result["judge_rubric_version"], "gdm-judge-rubric/3")
+            self.assertEqual(result["judge_rubric_version"], "gdm-judge-rubric/3.1")
             self.assertEqual(result["judge_model"], "anthropic/claude-sonnet-5.5")
             self.assertEqual(result["verifier_model"], "anthropic/claude-opus-5.5")
             self.assertIn(result["cohort"]["cohort"], schema.COHORTS)
@@ -428,7 +428,7 @@ class MockEndToEndTests(unittest.TestCase):
         pipeline = read(self.r.judge_dir / "pipeline.json")
         self.assertEqual((pipeline["run_id"], pipeline["mode"]), (RUN_ID, "rehearsal"))
         self.assertEqual(pipeline["pipeline_version"], pl.PIPELINE_VERSION)
-        self.assertEqual(pipeline["rubric"]["judge_rubric_version"], "gdm-judge-rubric/3")
+        self.assertEqual(pipeline["rubric"]["judge_rubric_version"], "gdm-judge-rubric/3.1")
         self.assertEqual({k: v["model"] for k, v in pipeline["models"].items()},
                          {"prefilter": "anthropic/claude-haiku-5.5", "judge": "anthropic/claude-sonnet-5.5",
                           "verify": "anthropic/claude-opus-5.5", "runlevel": "anthropic/claude-opus-5.5"})
@@ -455,7 +455,7 @@ class MockEndToEndTests(unittest.TestCase):
         self.assertEqual(manifest["pipeline_version"], pl.PIPELINE_VERSION)
         self.assertEqual(manifest["prompt_version"], prompts.PROMPT_VERSION)
         self.assertEqual(manifest["schema_version"], schema.SCHEMA_VERSION)
-        self.assertEqual(manifest["rubric"]["judge_rubric_version"], "gdm-judge-rubric/3")
+        self.assertEqual(manifest["rubric"]["judge_rubric_version"], "gdm-judge-rubric/3.1")
         self.assertEqual(manifest["rubric"]["judge_rubric_sha256"], prompts.rubric_info()["sha256"])
         self.assertEqual((manifest["settings"]["window_tokens"], manifest["settings"]["neighbors"]), (300, 1))
         self.assertNotIn("max_selected_fraction", manifest["settings"])
@@ -752,7 +752,8 @@ class RefusalRetryDeniedTests(unittest.TestCase):
 def finding(fid, category="cheating", claim="level", level="explored", evidence=("A01.t0001.r",)):
     return {"id": fid, "category": category, "claim": claim, "level": level if claim == "level" else None,
             "targets": [], "evidence": [{"item": i, "quote": "x"} for i in evidence], "counter_evidence": [],
-            "summary": "s", "borderline": False}
+            "summary": "s", "borderline": False,
+            "plain_explanation": "The agent tried a shortcut that the rules forbid. This sentence says so plainly."}
 
 
 class HelperTests(unittest.TestCase):
