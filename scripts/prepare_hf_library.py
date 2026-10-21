@@ -13,6 +13,7 @@ import shutil
 
 from build_experiment_index import build
 from space_navigation import private_space_navigation
+from site_style import themed
 
 ROOT = Path(__file__).resolve().parents[1]
 # Behavior judge outputs under RUN/analysis/judge/ (docs/experiment-library.md, "Behavior
@@ -124,6 +125,21 @@ def judge_publication(source):
             'excluded': [p.as_posix() for p in files if judge_excluded(p) and p not in hidden]}
 
 
+# The custom transcript export (scripts/export_transcripts.py, RUN/transcripts/) is local-only:
+# agent transcripts are read in Inspect View (owner, October 21, 2026), so it is not published.
+LOCAL_ONLY_DIRS = frozenset({'transcripts'})
+# A page that links the unpublished transcript export was made by an older generator.
+TRANSCRIPT_LINK = re.compile(r'href="(?:\.\./)*transcripts/', re.I)
+
+
+def run_excluded(relative, transcript_export=False):
+    """True for run paths that stay local: the transcript export (unless ``transcript_export``, only
+    for ``maintain_hf_run.py --scope transcripts`` of runs published with one) and judge files off the
+    allowlist."""
+    parts = Path(relative).parts
+    return (not transcript_export and bool(parts) and parts[0] in LOCAL_ONLY_DIRS) or judge_excluded(relative)
+
+
 def copy_records(source, destination, skip=None):
     """Exclude hidden files and refuse symlinks without following them. Paths for which
     skip(relative) is true are neither copied nor followed."""
@@ -151,6 +167,9 @@ def main():
     parser.add_argument('--run', action='append', required=True,
                         help='RUN_ID=INSPECT_BUNDLE_DIRECTORY; repeat for multiple runs')
     parser.add_argument('--output-dir', type=Path, required=True)
+    parser.add_argument('--include-transcript-export', action='store_true',
+                        help='keep RUN/transcripts/ (only to maintain the transcript pages of a run published '
+                             'before October 21, 2026 with maintain_hf_run.py --scope transcripts)')
     args = parser.parse_args()
     selected, judge_plans = [], {}
     for specification in args.run:
@@ -176,7 +195,16 @@ def main():
             raise ValueError('Output must be outside the sources')
     output.mkdir(parents=True, exist_ok=False)
     for run_id, source, viewer in selected:
-        copy_records(source, output / run_id, skip=judge_excluded)
+        copy_records(source, output / run_id,
+                     skip=lambda relative: run_excluded(relative, args.include_transcript_export))
+        # The generated views only; archived pages (e.g. results.legacy.html) stay as recorded.
+        views = [output / run_id / 'results.html', *sorted((output / run_id / 'conference-view').glob('*.html'))]
+        for page in views:
+            if not args.include_transcript_export and page.is_file() \
+                    and TRANSCRIPT_LINK.search(page.read_text(errors='replace')):
+                raise ValueError(f'{run_id}/{page.relative_to(output / run_id).as_posix()} links the unpublished '
+                                 'transcript export; regenerate it with the current build_results.py / '
+                                 'export_conference.py')
         copy_records(viewer, output / run_id / 'inspect-view')
     result = build(output, hosted=True)
     if result['warnings'] or result['experiments'] != len(selected):
@@ -192,8 +220,8 @@ pinned: false
 ---
 
 Private researcher archive of completed GDM Math Swarm experiments.
-Open the app for experiment reports, HTML transcripts, native Inspect View,
-and original run records. Operational acceptance and independent proof validity
+Open the app for experiment reports, the conference view, native Inspect View
+(agent transcripts) and original run records. Operational acceptance and independent proof validity
 are distinct; see each report for limitations. No model or experiment runs here.
 
 This archive must be hosted in a **private** Space. Do not upload credentials.
@@ -201,7 +229,8 @@ This archive must be hosted in a **private** Space. Do not upload credentials.
     (output / 'robots.txt').write_text('User-agent: *\nDisallow: /\n')
     for page in output.rglob('*.html'):
         modules = ['./assets/' + p.name for p in sorted((page.parent / 'assets').glob('*.js'))] if page.parent.name == 'inspect-view' else []
-        page.write_text(private_space_navigation(page.read_text(), modules))
+        text = page.read_text() if 'inspect-view' in page.relative_to(output).parts else themed(page.read_text())
+        page.write_text(private_space_navigation(text, modules))
     files = {str(p.relative_to(output)): {'bytes': p.stat().st_size,
              'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
              for p in sorted(output.rglob('*')) if p.is_file()}

@@ -102,7 +102,7 @@ def load_bundle(bundle):
     if {x['run'] for x in entries} != set(runs) or len(entries) != len(runs):
         raise ValueError('Bundle catalogue does not match selected runs')
     for run in runs:
-        for required in ('results.json', 'results.html', 'transcripts/index.html',
+        for required in ('results.json', 'results.html',
                          'conference-view/index.html', 'inspect-view/index.html',
                          'inspect-view/logs/listing.json'):
             if run + '/' + required not in actual:
