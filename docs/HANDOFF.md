@@ -21,9 +21,10 @@ current enough for a new agent to continue without asking.
   run ids. Say what a half-finished job still needs and how to resume it.
 - **Keep it short and factual.** Replace stale text; don't append a diary. Use
   absolute dates (for example 2026-10-21), never "today" or "yesterday".
-- **The repo is PUBLIC.** Never put credential values, the cloud provider, project or
-  host names, account emails, private URLs or budget figures here. Those go in the
-  git-ignored `HANDOFF.local.md` at the repo root, which must be kept current too.
+- **The repo is private.** If it is ever made public, the owner wants the cloud
+  provider, project and host names removed first; warn them. Never put credential
+  values, account emails or budget figures here: those go in the git-ignored
+  `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
 Last updated: 2026-10-21 by Claude (Opus 5.5) session.
@@ -50,7 +51,8 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
 |---|---|
 | `AGENTS.md` | Hard rules: credentials, budgets, VM shutdown, never expose researcher material to agents |
 | `docs/plan.md` | All owner decisions, with dates |
-| `HANDOFF.local.md` (git-ignored, owner's machine only) | Hosts, accounts, step-by-step VM operation, budget status |
+| `HANDOFF.local.md` (git-ignored, owner's machine only) | Account email, budget status |
+| "Hosts and access" and "Operating a VM" below, plus `docs/gcp-vm.md` | VM access and step-by-step operation |
 | `docs/validation.md` | The run procedure; read before touching a VM |
 | `docs/experiment-library.md` | HF Space publishing rules and the guarded update scopes |
 | `docs/prompts.md`, `src/research_swarm/prompts.py` | Prompt variants |
@@ -64,7 +66,7 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
   - Port 22 times out. Push over 443 with:
     `GIT_SSH_COMMAND="ssh -o HostKeyAlias=github.com" git push ssh://git@ssh.github.com:443/jchang153/gdm-math-swarm.git main`
   - Git binary: `/Library/Developer/CommandLineTools/usr/bin/git`.
-- **Shared results site:** a private HF Space (URL in `HANDOFF.local.md`); keep it private.
+- **Shared results site:** the private HF Space (URL under "Hosts and access"); keep it private.
   - A static site with the run list, per-run pages, Inspect View, behavior judge,
     conference browser and proof-checker results.
   - Run list is newest first. baseline100 is deliberately unlisted.
@@ -74,14 +76,77 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
 - **Local experiment library:** `runs/index.html`, rebuilt with
   `scripts/build_experiment_index.py`.
 - **Raw runs:** `runs/<run-id>/`. Git-ignored; back them up separately.
-- **VMs:** owner-only cloud VMs; names, access and the operating procedure are in
-  `HANDOFF.local.md`. Always stop VMs after work and verify they're stopped. Do not
+- **VMs:** see "Hosts and access" and "Operating a VM" below. Always stop VMs after work and verify they're stopped. Do not
   touch collaborator Amelie's VM, files or branches.
 - **Credentials:** host-only `.env`, Git-ignored. It holds the owner's OpenRouter
   key and HF login. Never read or print the values; containers never get them.
 - **Python:** `.venv/bin/python`. Run tests with
   `PYTHONPATH=src:. .venv/bin/python -m unittest discover -s tests -q`
   (pytest is not installed). Analysis tests are in `research/analysis/tests`.
+
+## Hosts and access
+
+- **Compute:** Google Cloud, project `GCP-PROJECT`, zone `us-central1-a`.
+  - Owner's VMs: `owner-vm`, `owner-vm-2`, `-3`, `-4`.
+  - Don't touch `collab-vm-1` or any other collaborator VM.
+  - Repo on each VM: `~/gdm-math-swarm`, with its own `.venv` and the host-only `.env`
+    holding the owner's OpenRouter key. Never read or print it.
+- **gcloud on the owner's Mac:** `/Users/owner/.local/share/gdm-vm-tools/google-cloud-sdk/bin/gcloud`.
+  - Set `CLOUDSDK_PYTHON=/Users/owner/Documents/GitHub/gdm-math-swarm/.venv/bin/python`.
+  - Always pass `--project GCP-PROJECT --zone us-central1-a --tunnel-through-iap`.
+    There is no public IP; SSH goes through IAP.
+- **HF Space (private):** https://huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments
+
+## Operating a VM
+
+Steps 2–8 are what the launch agents did for the 2026-10-21 runs. If the gcloud login has expired, the owner must re-run `gcloud auth login` (it opens a browser; the account is in `HANDOFF.local.md`).
+
+```bash
+G=/Users/owner/.local/share/gdm-vm-tools/google-cloud-sdk/bin/gcloud
+F="--project GCP-PROJECT --zone us-central1-a --tunnel-through-iap"
+VM=owner-vm-2
+```
+
+1. **Status:**
+   `$G compute instances describe $VM --project GCP-PROJECT --zone us-central1-a --format='value(status)'`
+2. **Start:**
+   `$G compute instances start $VM --project GCP-PROJECT --zone us-central1-a`.
+   If it fails with "not enough resources", retry.
+3. **Ship code:** the VM has no GitHub credentials, so use a git bundle.
+   - Locally: `git bundle create /tmp/x.bundle <branch>`.
+   - Copy it: `$G compute scp /tmp/x.bundle $VM:~/x.bundle $F`. Retry; IAP is flaky.
+   - On the VM:
+     `cd ~/gdm-math-swarm && git fetch ~/x.bundle <branch>:refs/heads/<branch> && git checkout <branch>`.
+     First move aside any untracked files that would be overwritten, after checking
+     they're identical.
+4. **Run commands:** `$G compute ssh $VM $F --command '...'`. Use tmux for anything long.
+5. **Before launch, in `~/gdm-math-swarm` on the VM:**
+   - `.venv/bin/python scripts/freeze_route.py --config configs/<cfg>.json`
+   - `PYTHONPATH=src .venv/bin/python scripts/compat_check.py --config configs/<cfg>.json --max-requests 6`.
+     This is paid and bills the run's own budget.
+   - `.venv/bin/python scripts/preflight.py --config configs/<cfg>.json`.
+     Runtime-evidence gates are informational only.
+6. **Launch:**
+   - Create `runs/phase-b/<RUN_ID>/launch-config.json`: the config plus
+     `run_dir: runs/<RUN_ID>`, `verified_integration: true` and `paid_launch_enabled: true`.
+   - Run in tmux:
+     ```bash
+     tmux new -d -s gdm-<RUN_ID> ".venv/bin/python scripts/supervise_run.py --config runs/phase-b/<RUN_ID>/launch-config.json --phase-dir runs/phase-b/<RUN_ID> --tmux-session gdm-<RUN_ID> 2>&1 | tee runs/phase-b/<RUN_ID>/supervisor-console.log"
+     ```
+   - Omit `--no-shutdown` so the supervisor stops the VM when idle.
+   - Confirm it started: `runs/<RUN_ID>/runtime.jsonl` has `common_start` and
+     `inference_finished` events.
+7. **Afterwards:** the supervisor runs reconciliation, evaluation, the behavior
+   judge and packaging, then waits for `retrieved.marker`.
+   - Copy `runs/<RUN_ID>` back to the local `runs/` with `$G compute scp --recurse`
+     (or tar it first).
+   - Then touch the marker.
+8. **Stop:**
+   - `$G compute instances stop $VM --project GCP-PROJECT --zone us-central1-a`.
+   - Verify `TERMINATED`. Closing SSH or tmux does NOT stop the VM.
+   - If the supervisor refuses because of "other work", stop it manually.
+
+The full reference is `docs/gcp-vm.md` and `docs/validation.md`.
 
 ## Owner preferences (also in AGENTS.md and agent memory)
 
