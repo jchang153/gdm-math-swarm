@@ -251,6 +251,23 @@ if '--stage' in sys.argv:          # the early model stages: slow, and they spen
     open(os.path.join(root, 'early-finished'), 'w').write('done')
 """
 JUDGE_CONFIG = {"auto_behavior_judge": True, "behavior_judge_max_usd": 50}
+# The post-run incident report (docs/plan.md, "Incident report per run (October 21, 2026)"): a fake
+# that logs to incident.log (not order.log, so the judge's step order checks stay unchanged).
+STUB_INCIDENT = """import json, os, sys
+root = os.getcwd()
+assert 'OPENROUTER_API_KEY' not in os.environ, 'provider key leaked to the incident child'
+open(os.path.join(root, 'incident.log'), 'a').write(' '.join(sys.argv[1:]) + '\\n')
+mode = open(os.path.join(root, 'incident-mode')).read().strip() if os.path.exists(os.path.join(root, 'incident-mode')) else 'ok'
+if mode == 'crash':
+    raise RuntimeError('incident report crashed')
+run = sys.argv[sys.argv.index('--run-dir') + 1]
+os.makedirs(os.path.join(run, 'analysis', 'incident'), exist_ok=True)
+open(os.path.join(run, 'analysis', 'incident', 'report.html'), 'w').write('<p>report</p>')
+status = 'stopped' if mode == 'stop' else 'complete'
+open(os.path.join(run, 'analysis', 'incident', 'state.json'), 'w').write(json.dumps(
+    {'status': status, 'budget': {'settled_usd': '1.50'}}))
+raise SystemExit(3 if mode == 'stop' else 0)
+"""
 STUB_LIVE_PILOT = """import datetime, json, os, sys, time
 config = json.load(open(sys.argv[sys.argv.index('--config') + 1]))
 run = config['run_dir']
@@ -276,6 +293,7 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         for name in ("scripts/reconcile_ledger.py", "scripts/evaluate_run.py", "research/analysis/timeline.py"):
             (self.tmp / name).write_text(STUB_ORDER)
         (self.tmp / "scripts" / "run_transcript_judge.py").write_text(STUB_JUDGE)
+        (self.tmp / "scripts" / "run_incident_report.py").write_text(STUB_INCIDENT)
         self.write_config()
 
     def write_config(self, **changes):
@@ -436,6 +454,65 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
         self.assertFalse((self.phase / "behavior-judge.json").exists())
         self.assertNotIn("run_transcript_judge.py", self.order())
+        self.assertFalse((self.phase / "incident-report.json").exists())
+        self.assertFalse((self.tmp / "incident.log").exists())
+
+    # -- the post-run incident report ------------------------------------------------------------
+    def incident_record(self):
+        return json.loads((self.phase / "incident-report.json").read_text())
+
+    def test_incident_report_runs_after_the_judge_with_its_own_budget_and_is_packaged(self):
+        import contextlib
+        import io
+        console = io.StringIO()
+        with contextlib.redirect_stdout(console):
+            self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        self.assertIn("Incident report budget: $20 (default", console.getvalue())
+        line = (self.tmp / "incident.log").read_text().splitlines()
+        self.assertEqual(len(line), 1)
+        root = self.tmp.resolve()
+        for text in ("--run-dir " + str(root / "runs" / "run-x"), "--run-limit 20",
+                     "--ledger " + str(root / "state" / "budget.sqlite"), "--credentials-root " + str(root)):
+            self.assertIn(text, line[0])
+        record = self.incident_record()
+        self.assertEqual((record["outcome"], record["exit"], record["budget_usd"]), ("complete", 0, "20"))
+        self.assertEqual(record["spent_usd"], "1.50")
+        judged = json.loads((self.phase / "behavior-judge.json").read_text())["finished_utc"]
+        self.assertLessEqual(judged, record["utc"])          # after the behavior judge
+        phase, run = self.packaged()
+        self.assertTrue({"incident-report.json", "incident-report.log", "incident-report.exit"} <= phase)
+        self.assertIn("runs/run-x/analysis/incident/report.html", run)
+
+    def test_incident_report_budget_from_the_config(self):
+        self.write_config(incident_report_max_usd=7.5)
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        self.assertIn("--run-limit 7.5", (self.tmp / "incident.log").read_text())
+        self.assertEqual(self.incident_record()["budget_source"], "config incident_report_max_usd")
+
+    def test_incident_report_failure_or_stop_never_fails_the_run(self):
+        for n, mode in enumerate(("crash", "stop")):
+            self.phase = self.tmp / "runs" / "phase-b" / f"run-{n}"
+            self.phase.mkdir(parents=True)
+            self.config = self.phase / "launch-config.json"
+            self.write_config()
+            (self.tmp / "incident-mode").write_text(mode)
+            self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0, mode)
+            record = self.incident_record()
+            self.assertEqual(record["outcome"], {"crash": "failed", "stop": "stopped"}[mode])
+            self.assertTrue((self.phase / "completed-checksums.json").exists())
+            self.assertEqual(json.loads((self.phase / "worker.exit").read_text()), 0)
+
+    def test_incident_report_is_skipped_when_the_run_did_not_complete(self):
+        (self.tmp / "research" / "analysis" / "timeline.py").write_text("raise SystemExit(7)\n")
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 7)
+        record = self.incident_record()
+        self.assertEqual(record["outcome"], "skipped")
+        self.assertFalse((self.tmp / "incident.log").exists())
+
+    def test_invalid_incident_budget_is_an_invalid_judge_setting(self):
+        from research_swarm.auto_judge import judge_config_problems
+        self.assertTrue(judge_config_problems({"auto_behavior_judge": True, "incident_report_max_usd": 0}))
+        self.assertEqual(judge_config_problems({"auto_behavior_judge": True, "incident_report_max_usd": 3}), [])
 
     def test_gemini_track_run_is_judged_on_the_baseline_ledger(self):
         """budget_track gemini: the run reserves against state/gemini-budget.sqlite (its own per-run

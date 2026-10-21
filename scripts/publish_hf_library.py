@@ -14,12 +14,15 @@ import re
 import tempfile
 import zipfile
 
-from build_experiment_index import unlisted_runs, write_index
+from build_experiment_index import newest_first, unlisted_runs, write_index
 
 DEFAULT_REPO = 'gdm-math-swarm/gdm-math-swarm-experiments'
 ROOT_FILES = {'README.md', 'robots.txt', 'index.html', 'experiments.json'}
 CATALOGUE = {'index.html', 'experiments.json', 'archive-manifest.json'}
-SECRET = re.compile(rb'sk-[A-Za-z0-9_-]{24,}|hf_[A-Za-z0-9]{30,}|-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----')
+# A key starts at a token boundary: an sk-/hf_ run inside a longer base64/base64url token (for example
+# a provider's encrypted reasoning blob in an Inspect log or session snapshot) is not a key.
+SECRET = re.compile(rb'(?<![A-Za-z0-9+/_-])(?:sk-[A-Za-z0-9_-]{24,}|hf_[A-Za-z0-9]{30,})'
+                    rb'|-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----')
 RUN_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]*')
 
 
@@ -53,6 +56,12 @@ def screen(path):
     safe_path(path.name)
     if SECRET.search(path.read_bytes()):
         raise ValueError('Credential-like content detected; upload refused')
+    if path.name.endswith('.tar.gz'):  # a run's snapshot archive (prepare_hf_library.py): screen every member
+        from prepare_hf_library import snapshot_archive_members
+        for name, data in snapshot_archive_members(path.read_bytes()).items():
+            safe_path(name)
+            if SECRET.search(data):
+                raise ValueError('Credential-like content in snapshot archive; upload refused')
     if path.suffix == '.eval':
         try:
             import zipfile_zstd  # noqa: F401; registers Inspect's ZIP method
@@ -92,6 +101,18 @@ def load_bundle(bundle):
         if digest(path.read_bytes()) != info:
             raise ValueError('Bundle checksum mismatch: ' + name)
         screen(path)
+    from prepare_hf_library import SNAPSHOT_ARCHIVE, SNAPSHOT_MANIFEST, SNAPSHOTS_DIR, check_snapshot_archive
+    loose = sorted(n for n in actual if n.split('/')[1:2] == [SNAPSHOTS_DIR])
+    if loose:
+        raise ValueError(f'Bundle has {len(loose)} loose snapshot file(s) (for example {loose[0]}); prepare it again '
+                         'with the current prepare_hf_library.py, which archives them per run')
+    for run in runs:
+        archived = [run + '/' + name in actual for name in (SNAPSHOT_ARCHIVE, SNAPSHOT_MANIFEST)]
+        if any(archived) and not all(archived):
+            raise ValueError(f'{run} needs both {SNAPSHOT_ARCHIVE} and {SNAPSHOT_MANIFEST}')
+        if all(archived):
+            check_snapshot_archive((bundle / run / SNAPSHOT_ARCHIVE).read_bytes(),
+                                   (bundle / run / SNAPSHOT_MANIFEST).read_bytes(), run)
     catalogue = json.loads((bundle / 'experiments.json').read_text())
     if catalogue.get('warnings'):
         raise ValueError('Bundle catalogue has warnings')
@@ -99,7 +120,7 @@ def load_bundle(bundle):
     if {x['run'] for x in entries} != set(runs) or len(entries) != len(runs):
         raise ValueError('Bundle catalogue does not match selected runs')
     for run in runs:
-        for required in ('results.json', 'results.html', 'transcripts/index.html',
+        for required in ('results.json', 'results.html',
                          'conference-view/index.html', 'inspect-view/index.html',
                          'inspect-view/logs/listing.json'):
             if run + '/' + required not in actual:
@@ -124,8 +145,7 @@ def merge_entries(existing, incoming):
             if run in combined and entry != combined[run]:
                 raise ValueError('Existing catalogue entry differs: ' + run)
             combined[run] = entry
-    return sorted(combined.values(), key=lambda x: (
-        datetime.datetime.fromisoformat(x['start_utc'].replace('Z', '+00:00')).timestamp(), x['run']))
+    return newest_first(combined.values())
 
 
 def payload(data):

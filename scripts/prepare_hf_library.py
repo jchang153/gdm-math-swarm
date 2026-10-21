@@ -5,14 +5,18 @@ Does not authenticate, upload, read host credentials, or change original records
 Pass a locally generated Inspect View bundle for each selected run.
 """
 import argparse
+import gzip
 import hashlib
+import io
 import json
 from pathlib import Path
 import re
 import shutil
+import tarfile
 
 from build_experiment_index import build
 from space_navigation import private_space_navigation
+from site_style import themed
 
 ROOT = Path(__file__).resolve().parents[1]
 # Behavior judge outputs under RUN/analysis/judge/ (docs/experiment-library.md, "Behavior
@@ -124,6 +128,119 @@ def judge_publication(source):
             'excluded': [p.as_posix() for p in files if judge_excluded(p) and p not in hidden]}
 
 
+# The custom transcript export (scripts/export_transcripts.py, RUN/transcripts/) is local-only:
+# agent transcripts are read in Inspect View (owner, October 21, 2026), so it is not published.
+LOCAL_ONLY_DIRS = frozenset({'transcripts'})
+# A page that links the unpublished transcript export was made by an older generator.
+TRANSCRIPT_LINK = re.compile(r'href="(?:\.\./)*transcripts/', re.I)
+
+
+def run_excluded(relative, transcript_export=False):
+    """True for run paths that stay local: the transcript export (unless ``transcript_export``, only
+    for ``maintain_hf_run.py --scope transcripts`` of runs published with one) and judge files off the
+    allowlist."""
+    parts = Path(relative).parts
+    return (not transcript_export and bool(parts) and parts[0] in LOCAL_ONLY_DIRS) or judge_excluded(relative)
+
+
+# Runtime file snapshots (RUN/snapshots/AGENT/SHA256: thousands of small content-addressed blobs) are
+# published as one deterministic archive per run, not as loose files: HF limits a repository to 20,000
+# files (owner, October 21, 2026, "just go ahead and merge files"). No page loads them at runtime; the
+# conference view embeds every captured file in its own pages when it is exported.
+SNAPSHOTS_DIR = 'snapshots'
+SNAPSHOT_ARCHIVE = 'snapshots.tar.gz'
+SNAPSHOT_MANIFEST = 'snapshots.manifest.json'
+SNAPSHOT_SCHEMA = 'gdm-snapshot-archive/1'
+# A page that links (href/src) or fetches a loose snapshot file would break once they are archived.
+SNAPSHOT_LINK = re.compile(r'''(?:href|src)\s*=\s*["'](?:\.\.?/)*snapshots/|fetch\(\s*["'`](?:\.\.?/)*snapshots/''',
+                           re.I)
+
+
+def snapshot_files(source):
+    """The run's snapshot files as sorted (path relative to the run, file path), under the record rules
+    of copy_records: hidden files and __pycache__ are left out, symlinks and credential names refused."""
+    source = Path(source)
+    root = source / SNAPSHOTS_DIR
+    if root.is_symlink():
+        raise ValueError(f'Refusing symlink: {SNAPSHOTS_DIR}')
+    rows = []
+    for path in sorted(root.rglob('*')) if root.is_dir() else []:
+        relative = path.relative_to(source)
+        if any(part.startswith('.') or part == '__pycache__' for part in relative.parts):
+            continue
+        if path.is_symlink():
+            raise ValueError(f'Refusing symlink: {relative}')
+        if path.name.lower() in {'credentials', 'credentials.json', 'token', 'token.json'} \
+                or path.suffix.lower() in {'.pem', '.key'}:
+            raise ValueError(f'Refusing possible credential file: {relative}')
+        if path.is_file():
+            rows.append((relative.as_posix(), path))
+    return rows
+
+
+def snapshot_archive(source, run_id):
+    """None without snapshot files; else (archive bytes, manifest bytes). The tar.gz is deterministic
+    (sorted members, zero times and owners, fixed modes, no gzip name or time), so preparing it again
+    from the same records gives the same bytes; the manifest lists every member's bytes and SHA-256."""
+    rows = snapshot_files(source)
+    if not rows:
+        return None
+    entries, raw = {}, io.BytesIO()
+    with tarfile.open(fileobj=raw, mode='w', format=tarfile.GNU_FORMAT) as tar:
+        for name, path in rows:
+            data = path.read_bytes()
+            entries[name] = {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+            info = tarfile.TarInfo(name)
+            info.size, info.mtime, info.mode, info.type = len(data), 0, 0o644, tarfile.REGTYPE
+            info.uid = info.gid = 0
+            info.uname = info.gname = ''
+            tar.addfile(info, io.BytesIO(data))
+    packed = io.BytesIO()
+    with gzip.GzipFile(filename='', mode='wb', fileobj=packed, mtime=0, compresslevel=9) as stream:
+        stream.write(raw.getvalue())
+    archive = packed.getvalue()
+    manifest = {'schema': SNAPSHOT_SCHEMA, 'run': run_id, 'archive': SNAPSHOT_ARCHIVE,
+                'archive_bytes': len(archive), 'archive_sha256': hashlib.sha256(archive).hexdigest(),
+                'file_count': len(entries), 'total_bytes': sum(x['bytes'] for x in entries.values()),
+                'note': 'Runtime file snapshots of this run, archived instead of published as loose files '
+                        '(HF 20,000-file repository limit). The conference view shows the captured files.',
+                'files': entries}
+    return archive, (json.dumps(manifest, indent=2) + '\n').encode()
+
+
+def snapshot_archive_members(archive):
+    """name -> bytes of a snapshot archive's members; any member that is not a regular file is refused."""
+    members = {}
+    with tarfile.open(fileobj=io.BytesIO(archive), mode='r:gz') as tar:
+        for info in tar:
+            if not info.isreg() or info.name in members:
+                raise ValueError('Unexpected snapshot archive member: ' + info.name)
+            members[info.name] = tar.extractfile(info).read()
+    return members
+
+
+def check_snapshot_archive(archive, manifest_bytes, run_id):
+    """The manifest's member records ({path: {bytes, sha256}}) after checking that the manifest
+    describes exactly this archive and its members."""
+    manifest = json.loads(manifest_bytes)
+    files = manifest.get('files') if isinstance(manifest, dict) else None
+    if (not isinstance(files, dict) or manifest.get('schema') != SNAPSHOT_SCHEMA or manifest.get('run') != run_id
+            or manifest.get('archive') != SNAPSHOT_ARCHIVE or manifest.get('archive_bytes') != len(archive)
+            or manifest.get('archive_sha256') != hashlib.sha256(archive).hexdigest()
+            or manifest.get('file_count') != len(files)
+            or manifest.get('total_bytes') != sum(x.get('bytes', 0) for x in files.values())):
+        raise ValueError(f'{run_id}/{SNAPSHOT_MANIFEST} does not describe {SNAPSHOT_ARCHIVE}')
+    members = snapshot_archive_members(archive)
+    if {name: {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+            for name, data in members.items()} != files:
+        raise ValueError(f'{run_id}/{SNAPSHOT_ARCHIVE} members differ from {SNAPSHOT_MANIFEST}')
+    for name in files:
+        parts = name.split('/')
+        if len(parts) < 2 or parts[0] != SNAPSHOTS_DIR or any(p in ('', '.', '..') or p.startswith('.') for p in parts):
+            raise ValueError('Unsafe snapshot archive member: ' + name)
+    return files
+
+
 def copy_records(source, destination, skip=None):
     """Exclude hidden files and refuse symlinks without following them. Paths for which
     skip(relative) is true are neither copied nor followed."""
@@ -151,6 +268,9 @@ def main():
     parser.add_argument('--run', action='append', required=True,
                         help='RUN_ID=INSPECT_BUNDLE_DIRECTORY; repeat for multiple runs')
     parser.add_argument('--output-dir', type=Path, required=True)
+    parser.add_argument('--include-transcript-export', action='store_true',
+                        help='keep RUN/transcripts/ (only to maintain the transcript pages of a run published '
+                             'before October 21, 2026 with maintain_hf_run.py --scope transcripts)')
     args = parser.parse_args()
     selected, judge_plans = [], {}
     for specification in args.run:
@@ -176,7 +296,26 @@ def main():
             raise ValueError('Output must be outside the sources')
     output.mkdir(parents=True, exist_ok=False)
     for run_id, source, viewer in selected:
-        copy_records(source, output / run_id, skip=judge_excluded)
+        copy_records(source, output / run_id,
+                     skip=lambda relative: run_excluded(relative, args.include_transcript_export)
+                     or relative.parts[:1] == (SNAPSHOTS_DIR,))
+        packed = snapshot_archive(source, run_id)
+        if packed is not None:
+            for name, data in zip((SNAPSHOT_ARCHIVE, SNAPSHOT_MANIFEST), packed):
+                (output / run_id / name).write_bytes(data)
+        for page in sorted((output / run_id).rglob('*.html')):
+            if SNAPSHOT_LINK.search(page.read_text(errors='replace')):
+                raise ValueError(f'{run_id}/{page.relative_to(output / run_id).as_posix()} links loose snapshot '
+                                 'files, which are published only inside snapshots.tar.gz; link the conference '
+                                 "view's captured-file pages instead")
+        # The generated views only; archived pages (e.g. results.legacy.html) stay as recorded.
+        views = [output / run_id / 'results.html', *sorted((output / run_id / 'conference-view').glob('*.html'))]
+        for page in views:
+            if not args.include_transcript_export and page.is_file() \
+                    and TRANSCRIPT_LINK.search(page.read_text(errors='replace')):
+                raise ValueError(f'{run_id}/{page.relative_to(output / run_id).as_posix()} links the unpublished '
+                                 'transcript export; regenerate it with the current build_results.py / '
+                                 'export_conference.py')
         copy_records(viewer, output / run_id / 'inspect-view')
     result = build(output, hosted=True)
     if result['warnings'] or result['experiments'] != len(selected):
@@ -192,8 +331,8 @@ pinned: false
 ---
 
 Private researcher archive of completed GDM Math Swarm experiments.
-Open the app for experiment reports, HTML transcripts, native Inspect View,
-and original run records. Operational acceptance and independent proof validity
+Open the app for experiment reports, the conference view, native Inspect View
+(agent transcripts) and original run records. Operational acceptance and independent proof validity
 are distinct; see each report for limitations. No model or experiment runs here.
 
 This archive must be hosted in a **private** Space. Do not upload credentials.
@@ -201,7 +340,8 @@ This archive must be hosted in a **private** Space. Do not upload credentials.
     (output / 'robots.txt').write_text('User-agent: *\nDisallow: /\n')
     for page in output.rglob('*.html'):
         modules = ['./assets/' + p.name for p in sorted((page.parent / 'assets').glob('*.js'))] if page.parent.name == 'inspect-view' else []
-        page.write_text(private_space_navigation(page.read_text(), modules))
+        text = page.read_text() if 'inspect-view' in page.relative_to(output).parts else themed(page.read_text())
+        page.write_text(private_space_navigation(text, modules))
     files = {str(p.relative_to(output)): {'bytes': p.stat().st_size,
              'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
              for p in sorted(output.rglob('*')) if p.is_file()}

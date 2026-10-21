@@ -27,8 +27,10 @@ and analyses and uses their own provider key, never the user's (docs/plan.md,
 "Collaborator budgets and keys"); they record that decision in docs/plan.md before
 any paid call, and the ledger enforces the cap they set.
 
-The static app contains the experiment catalogue, per-run reports, HTML transcripts,
-native Inspect View, and original run records. Inspect View renders the saved
+The static app contains the experiment catalogue, per-run reports, the conference
+view, native Inspect View (where agent transcripts are read), and original run records.
+Runs published before October 21, 2026 also carry their custom HTML transcript pages;
+the site no longer links them. Inspect View renders the saved
 Inspect logs; it does not run or judge agents. The independent evaluator records
 remain separate from conference acceptance. No VM, Docker, model key or inference
 is required to browse. Local originals and host ledger backups are retained.
@@ -46,10 +48,24 @@ All in `scripts/`; each is documented in its own `--help` and below.
   after the run is recorded in the tracked `data/library-unlisted.json`
   (run, date, reason). `build_experiment_index.py` and `publish_hf_library.py` leave recorded runs out
   of the local and hosted lists; `baseline100-20261015T191545Z` is unlisted (October 20, 2026).
+  `--rerender-catalogue` (no `--maintain-run`, `--bundle` or `--scope`) rebuilds only `index.html`
+  from the published `experiments.json` after a change to the catalogue page itself; the current
+  generator must reproduce `experiments.json` byte for byte, apart from listing the same entries newest
+  first (it reorders an older oldest-first catalogue), and no entry or run file changes.
 - `monitor_run.py`: read-only live progress of a run on its VM (elapsed time, spending against the
   launch baseline, requests, cache, restarts, submissions and solved tasks).
+- `live_mirror.py`: near-live mirror of running runs (Inspect View, conference view, live summary) to the
+  Space's `live/` area and the catalogue's "Live now" list (owner choice "option 1", October 21, 2026);
+  see "Near-live mirror" below.
 - `verify_hosted.py`: read-only check, at a given Space revision, that a published run's pages are
   stored as regular files and served as HTML (not LFS downloads) with their exact stored bytes.
+- `site_style.py`: the shared look of every generated page (catalogue, report, conference, live
+  summary; also the local-only transcript export). Generators write colours as its `var(--...)` tokens and pass finished pages through
+  `themed()`, which adds light/dark tokens following `prefers-color-scheme`, a corner Theme toggle
+  (auto/light/dark, remembered per browser in `localStorage` only) and a phone layout (16px gutters,
+  no page-wide horizontal scroll; wide tables scroll inside themselves). It loads nothing external
+  and sends nothing. The behavior judge's script-free pages use the same token names and follow the
+  system setting. Pages already published change look only when they are regenerated.
 
 Any tool used to produce, publish or verify a run goes into `scripts/` (with a test), never into the
 Git-ignored `runs/phase-b/` directories, which hold only that run's records and receipts.
@@ -71,7 +87,11 @@ not create experiments, run proof evaluation, or invent a results report: first
 complete the run and save its checked `results.json` and `results.html`, preserving
 run-specific spending separately from the cumulative ledger and any uncertain holds.
 
-Export the completed run with `python scripts/export_transcripts.py --run-dir runs/RUN_ID`. Then write the
+Agent transcripts are read in Inspect View (owner, October 21, 2026). `scripts/export_transcripts.py`
+still writes an offline `RUN/transcripts/` view for local use, but `prepare_hf_library.py` leaves that
+folder out of every bundle and refuses a generated view that still links it (an older `results.html`
+or conference view: regenerate it; archived pages such as `results.legacy.html` are copied as recorded). `--include-transcript-export` keeps the folder only to maintain the
+transcript pages of a run published before then (`maintain_hf_run.py --scope transcripts`). Write the
 report with `scripts/build_results.py`, which `prepare_hf_library.py` and `publish_hf_library.py` require
 (they refuse a run without `results.json` and `results.html`). The publication steps are:
 
@@ -83,8 +103,8 @@ report with `scripts/build_results.py`, which `prepare_hf_library.py` and `publi
 The report is a deterministic, facts-only review of the run's own records, with no model calls,
 network or credentials: run timing and stop reason, the condition from `settings.json`, per-agent
 requests, exits and restarts, spending and tokens, submissions per task and agent with times and
-outcomes, and links to the existing record views (transcripts, conference view with board, DMs, library
-and private files, timeline, Inspect View and logs). It never summarizes those contents. The proof
+outcomes, and links to the existing record views (conference view with board, DMs, library
+and private files, timeline, Inspect View with agent transcripts, and logs). It never summarizes those contents. The proof
 checker section is filled only from `evaluations/` (verdicts and reasons as recorded, bound by
 submission, task and source hash); otherwise the page states "Proof checker: not run" and accepted
 submissions are `not_evaluated`. By user decision (October 20, 2026) behavior-judge findings and fields
@@ -98,7 +118,19 @@ IDs, otherwise derived from `runtime.jsonl` with uncertain holds still counted a
 `--key-usage-log LOG.jsonl`, `--caveat TEXT` and `--caveat-for SUBJECT TEXT` (the only free text, stored
 under `researcher_notes` and shown under "Researcher notes"), `--title`, `--stop-utc`/`--stop-reason` for a
 run stopped without a `run_stop` event, and `--submission-ids serial` for older serial IDs. It refuses to
-replace existing reports without `--overwrite`; use `--output-dir` for a scratch copy. Create a native Inspect
+replace existing reports without `--overwrite`; use `--output-dir` for a scratch copy.
+
+Run page layout (owner request, October 21, 2026): `results.html` opens with a summary card (model,
+prompt variant, agents, duration, accepted and genuine tasks, cost, behavior-judge status only), then
+tabs Report / Conference / Behavior judge / Inspect, each with a one-line explanation, and ends with
+plain explanations of every status label it shows. Raw Inspect logs are linked one
+`RUN/inspect/*.eval` file at a time (a static host cannot list `inspect/`). Pages are static, support
+light and dark mode and fit phone width. Owner update (October 21, 2026): the site has no custom
+transcript viewer, since agent transcripts are read in Inspect View; the run page has no Transcripts
+tab or transcript links. `scripts/export_transcripts.py` stays for local, offline use only and its
+pages are not published.
+
+Create a native Inspect
 bundle with the pinned Inspect installation, running outside the repository to
 avoid automatic dotenv loading:
 
@@ -117,9 +149,9 @@ Also run `python3 scripts/export_conference.py --run-dir runs/RUN_ID` to generat
 `conference-view/index.html` and per-file captured-version pages before preparing
 the upload bundle. This offline exporter reads the saved conference database,
 cross-checks its events against JSONL, binds independent evaluations to exact
-submission identity/source hashes, verifies library/snapshot hashes, and links
-timeline messages to existing transcript anchors where available. It uses no
-model calls or running containers.
+submission identity/source hashes and verifies library/snapshot hashes. Its header
+links the run's Inspect View for agent transcripts; records carry no links to the
+custom transcript pages. It uses no model calls or running containers.
 
 The conference tabs show board posts, participant-grouped private DMs, shared
 library revisions, submissions with conference and independent judgments,
@@ -128,7 +160,7 @@ timeline. Search, agent/task/type filters and pagination operate locally in the
 page. Empty sections are explicit. Board posts have no recorded reply relationship;
 the viewer does not invent threads. Untimed events remain unknown. File captures
 are observations rather than a complete edit history, and were not automatically
-available to peers. SDK session JSONL is covered by the agent transcript viewer;
+available to peers. SDK sessions are read in Inspect View;
 task templates and build manifests are omitted from the private working-file list.
 
 Conference exports compress their embedded JSON records with gzip/base64 and
@@ -439,6 +471,140 @@ resume and verification). Prepare each run's bundle with the viewer of its origi
 it per run, plan first, as for the other scopes. Published `results.html` pages still link `inspect/`
 until their reports are regenerated and republished.
 
+## Snapshot archives (HF file limit)
+
+HF limits a repository to 20,000 files, and the Space reached it (19,937 files at revision
+`8c79494`), mostly runtime file snapshots (`RUN/snapshots/AGENT/SHA256`, thousands of small
+content-addressed blobs per run). The owner decided on October 21, 2026: "just go ahead and merge
+files". `prepare_hf_library.py` therefore publishes each run's `snapshots/` folder as one
+deterministic `RUN/snapshots.tar.gz` (sorted members, zero times and owners, fixed modes, no gzip
+name or time: preparing it again gives the same bytes) plus `RUN/snapshots.manifest.json`
+(schema `gdm-snapshot-archive/1`: the archive's size and SHA-256 and every member's path, size and
+SHA-256). No page loads snapshot files at runtime: the conference view embeds each captured file in
+its own pages when it is exported, and Inspect View reads only its logs. Preparation refuses a page
+that links or fetches a loose `snapshots/` path (link the conference view's captured-file pages
+instead), and publication refuses a bundle with loose snapshot files, checks that each manifest
+describes its archive exactly and screens every archive member for credential patterns. The archive
+matches the Space's existing `*.tar.*` LFS rule, so it is stored as LFS (a download) with
+`.gitattributes` unchanged.
+
+`maintain_hf_run.py --maintain-run RUN_ID --scope snapshots` (no `--bundle`; `--runs-dir`, default
+`runs/`) converts an already-published run. It builds the same archive from the local records and,
+before any write, requires every published loose snapshot file to be an archive member with identical
+bytes (Git blob or LFS hash) and, for a run recorded in `archive-manifest.json`, the recorded snapshot
+digests to equal the archive manifest exactly; a partly published run (not yet recorded) may hold a
+subset. With `--commit --receipt FILE --backup-dir DIR` it writes the before-inventory, the original
+`archive-manifest.json` and `.gitattributes`, the archive and its manifest (which hold every deleted
+file's bytes), `deleted.json` and the plan, then commits, each pinned to the expected parent revision:
+the two archive files (verified before anything is deleted), the deletions in batches of 1,000, and
+last, for a recorded run, `archive-manifest.json` with the loose records replaced by the two archive
+files. The catalogue and every other file stay unchanged; the final state is verified against the base
+inventory. An interrupted update continues by running the scope again (the remaining loose files are
+verified the same way); a completed one reports `already_applied`.
+
+```bash
+OUT=runs/phase-b/hf-library-preparation/snapshot-archives-YYYYMMDD
+python scripts/maintain_hf_run.py --maintain-run RUN_ID --scope snapshots          # plan only
+python scripts/maintain_hf_run.py --maintain-run RUN_ID --scope snapshots --commit \
+  --receipt "$OUT/RUN_ID.receipt.json" --backup-dir "$OUT/RUN_ID"
+```
+
+## Near-live mirror
+
+The owner chose a near-live view of runs on the website while they are going ("option 1 (near-live)",
+October 21, 2026), then: "there's no need for a transcript view on the website when we already have
+inspect view". The mirror therefore publishes the run's Inspect log with the native Inspect View, the
+conference view and a short live summary; it does not publish the custom transcript export
+(`export_transcripts.py` stays in the repository for local use). `scripts/live_mirror.py` runs on the
+operator's own computer, never on a VM, with the operator's own gcloud login and HF login
+(`pip install -e '.[publication]'`, `hf auth login`):
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/live_mirror.py --vm collab-vm-1 --vm owner-vm
+# one pass without uploading (the bundle is written under runs/phase-b/live-mirror/bundle/RUN/):
+PYTHONPATH=src .venv/bin/python scripts/live_mirror.py --vm collab-vm-1 --once --no-upload
+```
+
+Every `--interval` seconds (default 300) it checks each VM's status and skips a VM that is not RUNNING
+(it never starts, stops or provisions one). On a running VM it lists the runs under
+`REMOTE_ROOT/runs` (`--vm NAME=REMOTE_ROOT`, default `~/gdm-math-swarm`) whose `runtime.jsonl` changed
+within `--max-age` (default 1 hour) and has no `run_stop`; `--run RUN` restricts it to named runs. A
+mirrored run that has just stopped gets one final pass and is then left alone. For each run it pulls a
+read-only snapshot over IAP SSH: a small stdlib-only program is sent inside the SSH command (nothing is
+installed or left on the VM) and streams back a tar archive with its own SHA-256 manifest. The archive
+holds the complete lines of `runtime.jsonl`, `settings.json`, SQLite online backups of
+`conference/state.sqlite` and of Inspect's realtime sample buffer (`~/.local/share/inspect_ai/samplebuffer`,
+`--remote-buffer-dir`), the `.eval` logs when their size or modification time changed, and the private-file
+snapshot blobs referenced since the previous pass (the conference view shows them). Claude Code's own
+session JSONL snapshots are not transferred. No HF token, provider key or host environment reaches the
+VM: the SSH command contains only that program and its arguments, and gcloud is started without any
+token, key or `HF_*` variable. The VM program runs under `nice`.
+
+Locally (Git-ignored `runs/phase-b/live-mirror/`: `work/RUN/` source copies, `bundle/RUN/` the upload,
+`state.json`) it builds:
+
+- **Inspect View.** While a run is going, Inspect's `.eval` holds only the samples it has flushed; each
+  agent's sample stays in the realtime buffer until the agent finishes. The mirror writes a live copy of
+  each log in Inspect's own in-progress format (`_journal/start.json` and samples, no `header.json`; Inspect
+  View shows such a log as running): the flushed samples unchanged, then the buffered samples rebuilt with
+  Inspect's crash-recovery reader. A sample still running carries the note "Still running at this live
+  snapshot: not an error" where Inspect would show an error. A finished log is copied unchanged. Then
+  `inspect view bundle` builds the static viewer over those copies, which gets the private-Space navigation
+  exactly as `prepare_hf_library.py` gives a published Inspect View. Both steps run in a separate
+  interpreter (`python -I`) started in a temporary directory outside the repository, so no `.env` is
+  loaded, with the token-free environment; they use Inspect internals and refuse any Inspect version other
+  than the pinned 0.3.279.
+- **Conference view** with `export_conference.export`, after rebuilding `conference/events.jsonl` from the
+  snapshot's events table (the conference's own rebuild) and the timeline from conference and runtime
+  records (Inspect events are left out of the live timeline).
+- **Live summary page** (state, snapshot time, elapsed time, model, condition, agents, exits and restarts,
+  running and finished agent transcripts, tasks solved and submissions by conference outcome, with plain
+  explanations) linking the two views.
+
+Every page carries a "Live snapshot, not final" banner: conference (operational) outcomes only, no
+independent evaluation, no behavior judge. Links to files the mirror does not carry (the report, raw
+records, transcript pages) become plain text; the library link still works. A view that cannot be built
+from a snapshot is listed under "Mirror notes" on the summary page.
+
+Privacy screening is that of a normal publication: `publish_hf_library.safe_path` and `screen` for every
+uploaded file, including every member of the Inspect archives, plus the same credential pattern over the
+records behind the conference view (`runtime.jsonl`, the conference database and event log) and over each
+page before it is written, since the conference view stores its records compressed. A match refuses that
+run's update. The mirror refuses a public Space.
+
+Upload: one commit per pass that touches only `live/` (enforced: any other path is refused). Changed files
+are added, files of the previous snapshot that no longer exist are deleted (including the transcript pages
+an earlier version of the mirror published), `live/index.json` (schema `gdm-live-mirror/1`) is updated, and
+the whole `live/RUN/` folder and the entry of a run that now appears in the published `experiments.json` are
+removed (its live entry is retired once it is published normally). A pass with nothing new makes no commit,
+and unchanged files (the Inspect View app, unchanged conference pages) are never uploaded again. HTML pages
+must stay below the 9.5 MiB LFS limit (a page that would reach it is replaced by a notice); Inspect logs may
+be LFS objects, which Inspect View already follows. The mirror's commits start with `Live mirror: ` and are
+pinned to the revision they were planned on. A pass is deferred while the Space's head is not one of the
+mirror's own commits (recorded in `state.json`) and changed less than `--quiet-seconds` ago (default 600),
+so a publication or maintenance in progress is not interrupted. If a live commit still lands between a
+publisher's planning and its first batch, the publisher refuses with its usual concurrent-change message;
+rerun it. A failed maintenance attempt resumed with `--resume-from` compares the whole Space with its
+original state, so let it finish before the next live pass changes `live/` (the quiet period normally
+covers this).
+
+Bounded history: the live Inspect log is re-uploaded on every pass in which it changed (tens of MB for a
+long run). The Space history is never squashed or rewritten, since its revisions are cited in this document.
+Instead, after each live commit lands, the mirror permanently deletes the LFS objects of its own superseded
+live logs (`permanently_delete_lfs_files` with `rewrite_history=False`), so storage holds about one live
+log per running run. A candidate is only a log the mirror synthesized and uploaded itself (recorded in
+`state.json`; a finished log copied unchanged is never a candidate, because the published run will hold the
+same bytes), and it is deleted only when no file of the new head anywhere in the Space references it and the
+Hub lists it under `live/`. Earlier live revisions then lack that log; nothing else changes. A small log the
+Hub stored as a regular file cannot be deleted this way and stays in history. `--keep-live-history` turns
+the deletion off.
+
+The hosted catalogue (`write_index(..., hosted=True)`) has a hidden "Live now" section that reads
+`live/index.json` in the browser and lists each run that is not already in the catalogue, with its state,
+model, agents, solved count and update time and links to its live summary, Inspect View and conference view.
+The catalogue page itself does not change when the mirror runs, so the maintenance tools still reproduce it
+byte for byte. The local `runs/index.html` has no live section.
+
 ## Uploading and preserving other collaborators' experiments
 
 Authenticate with the official HF CLI, entering credentials privately. If login
@@ -465,11 +631,36 @@ python scripts/publish_hf_library.py \
 ```
 
 You only need to prepare **your new runs**. The publisher merges their catalogue
-entries with all existing remote entries and sorts by actual start time. It
+entries with all existing remote entries and lists them newest first by actual start time
+(owner request, October 21, 2026; the local `runs/index.html` uses the same order). It
 preserves existing Space configuration and run files, refuses conflicting run IDs,
 requires a private Space, verifies bundle hashes, and screens obvious credential
-filenames and token patterns (including compressed Inspect logs). Pattern scanning
+filenames and token patterns (including compressed Inspect logs). A token pattern counts only at a
+token boundary: GPT runs' encrypted reasoning blobs contain `sk-`/`hf_` runs mid-token, which are not keys. Pattern scanning
 is not a universal secret-detection guarantee; review new data sources before upload.
+
+### Catalogue page
+
+`build_experiment_index.py` renders the run list and compare view (owner request, October 21,
+2026; vanilla CSS/JS, no external resources, light and dark mode, cards below 760 px). Columns:
+start (newest first), model with condition and route, prompt variant, agents, duration, accepted /
+genuine tasks (weak operational acceptance vs. distinct independently genuine statements), settled
+pilot cost and the behavior judge's cohort counts or "not run". Rows filter by text, model, prompt
+variant and judge outcome and sort by any column; ticking 2-4 runs opens a side-by-side comparison
+(solves, cost, cost per genuine task, agent exits, judge cohorts), shareable as `#compare=RUN,RUN`.
+The catalogue links no custom transcript pages (owner, October 21, 2026: agent transcripts are
+read in Inspect View); new entries carry no `Transcripts` link, and the page hides that link in
+entries published earlier (the entries themselves are unchanged). `export_transcripts.py` remains
+for local use.
+Each new entry carries a derived `summary` (`prompt_variant`, `accepted_tasks` from
+`operationally_accepted_tasks`, and `judge`: only the cohort counts of a published
+`analysis/judge/report.json`, no finding text). Entries published earlier have none: the hosted page
+reads the same fields from that run's published `results.json` and judge `report.json` in the
+browser (same-origin; nothing changes in the entry), and transcripts maintenance compares such an
+entry without the bundle's summary. The page is a deterministic function of the entries. After a
+page change, the published `index.html` no longer matches the generator, so maintenance scopes that
+regenerate the catalogue refuse until `maintain_hf_run.py --rerender-catalogue --commit` (or the
+next publication) rebuilds it.
 
 Uploads use guarded `HfApi.create_commit` batches of at most 120 files and roughly
 4 MB, with larger files alone. The catalogue and manifest are committed last.
@@ -666,3 +857,22 @@ SDK/HTTP checks, not interactive browser tests. Locally the first (v3) build is 
 `runs/gemini10-20261020T054602Z/analysis/judge-v3-first-run/`. Before-inventory, original copies of
 the replaced files, plan, receipt and checks are in the ignored
 `runs/phase-b/judge-plain-publication-gemini10-20261020T054602Z/attempt-1/` directory.
+
+The snapshot archive update of October 21, 2026 (owner: "just go ahead and merge files") took the Space
+from 19,937 files at revision `8c79494d17e2019581825dbef5cded93f9a17d58` to 6,444 at
+`fb4537604e86e83eb2d8b17a309749a06954722c` with `--scope snapshots` for `pilot` (772 loose files),
+`baseline8g100` (2,058), `cache100` (3,191), `gemini10` (6,308) and the partly published
+`owner-gemini4-20261021T183937Z` (862) and `owner-glm53-20261021T184313Z` (314 of 993); every receipt
+reads `verified` and `.gitattributes` was unchanged. The unlisted `baseline100-20261015T191545Z` keeps its
+1,827 loose files (outside the requested scope; the same command converts it). The four owner runs were
+then published with archived snapshots from `owner-multimodel-20261021-archived` (prepared from the
+same staged records and Inspect bundles as the interrupted `owner-multimodel-20261021`, identical apart
+from the archives) at `5dfa2d10f0969a187415b5b8f1a695472c0c4482` (654 uploads, 6,441 files preserved),
+and the GLM behavior judge re-run, which had landed (paid, 5 of 5 agents graded), was added with the
+judge scope at `3b1420e8004a85d2f35a3e4d24e033f1e9c8b88d` (22 judge files added, both reports replaced,
+7,089 files preserved). The catalogue lists 8 runs newest first (GLM, Gemini 4, GPT 5.6, Opus 5.5,
+gemini10, cache100, baseline8g100, pilot), every catalogue link resolves, the archive manifest records
+exactly the 7,114 run and catalogue files, and `scripts/verify_hosted.py` passed for the four new runs,
+GLM's judge report and evidence browser and `gemini10`. The Space then held 7,117 files. Receipts and
+backups are in the ignored `runs/phase-b/hf-library-preparation/snapshot-archives-20261021/` directory and
+next to the two bundles.

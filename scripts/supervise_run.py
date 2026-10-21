@@ -30,7 +30,12 @@ ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
    route pricing record when needed and keeps a copy in RUN/analysis/judge/route-pricing/, also
    packaged as judge-route-pricing/ in completed-phase.tgz). Its outputs land in
    RUN/analysis/judge/ (packaged with the run); its outcome is recorded in behavior-judge.json and
-   never changes the worker exit or stops the packaging;
+   never changes the worker exit or stops the packaging; then, for the same configs, the PAID
+   incident report (scripts/run_incident_report.py, docs/plan.md "Incident report per run (October
+   21, 2026)": a model-written, verified account of the run into RUN/analysis/incident/, packaged
+   with the run; its own budget, CONFIG's ``incident_report_max_usd``, else $20; this checkout's
+   state/budget.sqlite and .env). Its outcome is recorded in incident-report.json; a failure, stop
+   or skip never changes the worker exit or the packaging;
    With ``auto_behavior_judge`` true the judge also runs DURING the run (docs/plan.md, "Live behavior
    judge during the run (October 20, 2026)"; ``live_behavior_judge``, default true): while the pilot
    runs, one live screening pass (``run_transcript_judge.py --live``) every
@@ -94,7 +99,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FOLLOW_UPS = ("reconcile", "evaluate-dry", "evaluate", "timeline")
 NONBLOCKING_FOLLOW_UPS = ("reconcile",)  # bookkeeping: a failure is recorded, the others still run
-JUDGE_STEPS = ("behavior-judge",)  # after FOLLOW_UPS, only with auto_behavior_judge true
+JUDGE_STEPS = ("behavior-judge", "incident-report")  # after FOLLOW_UPS, only with auto_behavior_judge true
+INCIDENT_OUTCOMES = {0: "complete", 2: "failed_or_refused", 3: "stopped"}
 JUDGE_OUTCOMES = {0: "complete", 2: "errors_or_held_agents", 3: "stopped", 4: "refused"}
 EVALUATOR_LABEL = "gdm-evaluator=1"  # evaluator.CONTAINER_LABEL (comparator containers)
 # Login users have UIDs from 1000 on (65534 is "nobody"); a process of another such user means
@@ -173,6 +179,7 @@ class Supervisor:
         # self.ledger (--pilot-ledger) for its key-headroom deferral.
         self.judge_ledger = self.root / "state" / "budget.sqlite"
         self.judge_record = None
+        self.incident_record = None
         self.live = None          # live behavior judge state (live_setup)
         self.early = None         # the judge's model stages started when the pilot exits
         self.last_events = []
@@ -626,6 +633,48 @@ class Supervisor:
         self.status("behavior-judge-" + record["outcome"], worker_exit=worker_code, behavior_judge=record)
         return record
 
+    def incident_report(self, worker_code):
+        """The paid incident report (scripts/run_incident_report.py) after the behavior judge, with its own
+        budget (CONFIG's ``incident_report_max_usd``, else $20), or a recorded skip. Never raises and never
+        changes the worker exit; returns the record (also incident-report.json), or None when the config
+        does not enable the automatic judge."""
+        record = {"utc": now(), "config": str(self.config_path), "run_dir": str(self.run)}
+        try:
+            config = json.loads(self.config_path.read_text())
+            sys.path.insert(0, str(ROOT / "src"))
+            from research_swarm.auto_judge import enabled, incident_budget
+            if not enabled(config):
+                return None
+            amount, source = incident_budget(config)
+            record.update(budget_usd=str(amount), budget_source=source)
+            if self.args.no_postrun:
+                record.update(outcome="skipped", reason="--no-postrun")
+            elif worker_code != 0:
+                record.update(outcome="skipped", reason=f"the run or its follow-ups did not complete (exit {worker_code})")
+            else:
+                code = self.step("incident-report", ["scripts/run_incident_report.py", "--run-dir", str(self.run),
+                                                     "--run-limit", str(amount), "--ledger", str(self.ledger),
+                                                     "--credentials-root", str(self.root)])
+                record.update(exit=code, outcome=INCIDENT_OUTCOMES.get(code, "failed"))
+                state = self.run / "analysis" / "incident" / "state.json"
+                if state.is_file():
+                    try:
+                        data = json.loads(state.read_text())
+                        record["state"] = {k: data.get(k) for k in ("status", "stage", "reason", "verification")}
+                        record["spent_usd"] = (data.get("budget") or {}).get("settled_usd")
+                    except ValueError:
+                        pass
+        except Exception as error:  # an incident-report failure never fails the run's packaging
+            record.update(outcome="supervisor_error", error_type=type(error).__name__, detail=str(error))
+        record["finished_utc"] = now()
+        try:
+            (self.phase / "incident-report.json").write_text(json.dumps(record, indent=2, default=str))
+            self.status("incident-report-" + record.get("outcome", "unknown"), worker_exit=worker_code,
+                        incident_report={k: record.get(k) for k in ("outcome", "exit", "reason")})
+        except Exception:
+            pass
+        return record
+
     def announce_budget(self):
         """Print the run's budget (and the behavior judge's, when enabled) on the supervisor's own
         console before the launch: run_pilot.py prints it too, but only into pilot.log. Recorded in
@@ -633,7 +682,7 @@ class Supervisor:
         lines, record = [], {"utc": now(), "config": str(self.config_path)}
         try:
             sys.path.insert(0, str(self.root / "src"))
-            from research_swarm.auto_judge import enabled, judge_budget
+            from research_swarm.auto_judge import enabled, incident_budget, judge_budget
             from research_swarm.budget import describe_budget, run_budget
             config = json.loads(self.config_path.read_text())
             try:
@@ -651,6 +700,13 @@ class Supervisor:
                     record.update(judge_budget_usd=str(amount), judge_budget_source=source)
                 except ValueError as error:
                     lines.append(f"Behavior judge budget: invalid ({error})")
+                try:
+                    amount, source = incident_budget(config)
+                    lines.append(describe_budget(amount, source, key="incident_report_max_usd")
+                                 .replace("Run budget", "Incident report budget"))
+                    record.update(incident_budget_usd=str(amount), incident_budget_source=source)
+                except ValueError as error:
+                    lines.append(f"Incident report budget: invalid ({error})")
         except Exception as error:   # never stops the launch
             lines.append(f"Run budget: could not be read ({type(error).__name__}: {error})")
             record["error"] = f"{type(error).__name__}: {error}"
@@ -682,6 +738,7 @@ class Supervisor:
                 self.early_judge_stop(f"the run or its follow-ups did not complete (exit {code})")
             self.early_judge_wait()
             self.judge_record = self.behavior_judge(code)
+            self.incident_record = self.incident_report(code)
         except Exception as error:
             self.status("worker_error", error_type=type(error).__name__, detail=str(error))
             code = 2
@@ -705,7 +762,7 @@ class Supervisor:
                     else self.run.name)
         selected = ["budget-final.sqlite", "budget-before-launch.sqlite", "budget-after-pilot.sqlite", "pilot.exit",
                     "pilot.log", "supervisor-console.log", "worker.exit", "live-checkpoint.json", "launch-budget.json",
-                    self.config_path.name, "behavior-judge.json", *LIVE_FILES] + [
+                    self.config_path.name, "behavior-judge.json", "incident-report.json", *LIVE_FILES] + [
                         a + b for a in FOLLOW_UPS + JUDGE_STEPS for b in (".log", ".exit")]
         with tarfile.open(self.phase / "completed-phase.tgz", "w:gz") as tar:
             for name in selected:
@@ -723,7 +780,9 @@ class Supervisor:
         (self.phase / "completed-checksums.json").write_text(json.dumps(hashes, indent=2))
         self.status("ready_for_retrieval", worker_exit=code, hashes=hashes,
                     behavior_judge=None if self.judge_record is None else
-                    {k: self.judge_record.get(k) for k in ("outcome", "exit", "reason")})
+                    {k: self.judge_record.get(k) for k in ("outcome", "exit", "reason")},
+                    incident_report=None if self.incident_record is None else
+                    {k: self.incident_record.get(k) for k in ("outcome", "exit", "reason")})
         deadline = time.monotonic() + self.args.retrieval_wait
         while time.monotonic() < deadline and not (self.phase / "retrieved.marker").exists():
             time.sleep(30)

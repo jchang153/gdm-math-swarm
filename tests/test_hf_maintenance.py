@@ -98,6 +98,9 @@ class Hub:
             raise RuntimeError('simulated upload interruption')
         files = dict(self.files)
         for op in operations:
+            if getattr(op, 'delete', False):
+                del files[op.path_in_repo]
+                continue
             data = op.path_or_fileobj
             files[op.path_in_repo] = Path(data).read_bytes() if isinstance(data, str) else data
             if self.lfs_upload(op.path_in_repo, files[op.path_in_repo]) and not self.tracked(files, op.path_in_repo):
@@ -138,8 +141,10 @@ class MaintenanceTests(unittest.TestCase):
         self.replaced = [RUN + '/results.html', RUN + '/results.json']
 
     def prepare(self, name, *runs):
+        # These runs model publications from before October 21, 2026, which carried the transcript export.
         output = self.root / 'bundles' / name
-        argv = ['prepare_hf_library.py', '--runs-dir', str(self.runs), '--output-dir', str(output)]
+        argv = ['prepare_hf_library.py', '--runs-dir', str(self.runs), '--output-dir', str(output),
+                '--include-transcript-export']
         for run in runs:
             argv += ['--run', f'{run}={self.viewer}']
         with patch.object(sys, 'argv', argv), patch('builtins.print'):
@@ -1683,7 +1688,7 @@ class InspectMaintenanceTests(unittest.TestCase):
     def test_published_state_reproduces_the_broken_links(self):
         self.assertNotIn(b"redirect:'follow'", self.published[self.page])
         self.assertIn(b"redirect:'follow'", (self.bundle / self.page).read_bytes())
-        entry = json.loads(self.published['experiments.json'])['experiments'][-1]
+        entry = next(x for x in json.loads(self.published['experiments.json'])['experiments'] if x['run'] == RUN)
         self.assertEqual(entry['links']['Inspect logs'], RUN + '/inspect/')
 
     def test_dry_run_and_commit_replace_only_the_viewer_page_and_log_links(self):

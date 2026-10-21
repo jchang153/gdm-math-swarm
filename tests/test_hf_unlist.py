@@ -92,7 +92,7 @@ class UnlistTests(unittest.TestCase):
         make_run(self.runs, LATER)
         bundle = self.prepare('later', LATER)
         publish(bundle, self.hub, self.hub.download, commit=True, operation=operation, unlisted=set(RECORD))
-        self.assertEqual(self.listed(), [OTHER, LATER])
+        self.assertEqual(self.listed(), [LATER, OTHER])  # newest first
         manifest = json.loads(self.hub.files['archive-manifest.json'])
         self.assertEqual((sorted(manifest['runs']), manifest['unlisted_runs']), ([OTHER, RUN, LATER], [RUN]))
         with self.assertRaisesRegex(ValueError, 'unlisted'):
@@ -116,7 +116,7 @@ class UnlistTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'concurrently'):
             self.unlist(commit=True, attempt='attempt-3')
         self.assertEqual(len(self.hub.commits), self.commits)
-        self.assertEqual(self.listed(), [OTHER, RUN])
+        self.assertEqual(self.listed(), [RUN, OTHER])  # newest first
 
     def test_maintenance_of_an_unlisted_run_is_refused(self):
         with patch.object(maintain_hf_run, 'unlisted_runs', return_value=RECORD):

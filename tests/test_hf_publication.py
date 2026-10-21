@@ -10,7 +10,7 @@ from unittest.mock import patch
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from publish_hf_library import publish, digest, load_bundle, merge_entries, validate_lfs_additions
+from publish_hf_library import SECRET, publish, digest, load_bundle, merge_entries, validate_lfs_additions
 from build_experiment_index import write_index
 
 
@@ -74,7 +74,7 @@ class PublicationTests(unittest.TestCase):
         self.bundle = self.root / 'bundle'
         self.bundle.mkdir()
         self.new = entry('a-new', 20)
-        for name in ('results.json', 'results.html', 'transcripts/index.html',
+        for name in ('results.json', 'results.html',
                      'conference-view/index.html', 'inspect-view/index.html',
                      'inspect-view/logs/listing.json'):
             f = self.bundle / 'a-new' / name
@@ -103,18 +103,32 @@ class PublicationTests(unittest.TestCase):
         return publish(self.bundle, self.hub, self.hub.download,
                        operation=lambda **kw: SimpleNamespace(**kw), **kwargs)
 
-    def test_merge_preserves_old_run_and_config_and_is_chronological(self):
+    def test_merge_preserves_old_run_and_config_and_lists_newest_first(self):
         old = self.hub.files['z-old/results.html']
         result = self.run_publish(commit=True)
         self.assertTrue(result['committed'])
         self.assertEqual(self.hub.files['z-old/results.html'], old)
         self.assertEqual(self.hub.files['README.md'], b'original Space settings')
-        self.assertEqual(result['runs'], ['z-old', 'a-new'])
+        self.assertEqual(result['runs'], ['a-new', 'z-old'])  # newest start time first
+        listed = [x['run'] for x in json.loads(self.hub.files['experiments.json'])['experiments']]
+        self.assertEqual(listed, ['a-new', 'z-old'])
+        page = self.hub.files['index.html'].decode()
+        self.assertLess(page.index('a-new'), page.index('z-old'))
         final_ops = {o.path_in_repo for o in self.hub.commits[-1]['operations']}
         self.assertEqual(final_ops, {'index.html', 'experiments.json', 'archive-manifest.json'})
         manifest = json.loads(self.hub.files['archive-manifest.json'])
         for name, expected in manifest['files'].items():
             self.assertEqual(digest(self.hub.files[name]), expected)
+
+    def test_catalogue_lists_newest_first_with_run_id_tiebreak(self):
+        entries = [entry('b-mid', 5), entry('a-old', 1), entry('c-new', 9), entry('a-tie', 9)]
+        self.assertEqual([x['run'] for x in merge_entries(entries, [])], ['c-new', 'a-tie', 'b-mid', 'a-old'])
+        with tempfile.TemporaryDirectory() as tmp:
+            write_index(tmp, entries)
+            listed = json.loads((Path(tmp) / 'experiments.json').read_text())['experiments']
+            page = (Path(tmp) / 'index.html').read_text()
+        self.assertEqual([x['run'] for x in listed], ['c-new', 'a-tie', 'b-mid', 'a-old'])
+        self.assertLess(page.index('c-new'), page.index('a-old'))
 
     def test_repeated_identical_publication_is_idempotent(self):
         self.run_publish(commit=True)
@@ -135,7 +149,7 @@ class PublicationTests(unittest.TestCase):
             return info
         self.hub.repo_info = truncated
         result = self.run_publish(commit=True)
-        self.assertEqual(result['runs'], ['z-old', 'a-new'])
+        self.assertEqual(result['runs'], ['a-new', 'z-old'])
         self.assertEqual(self.hub.files['z-old/results.html'], b'old run untouched')
 
     def test_only_exact_new_file_lfs_attribute_additions_allowed(self):
@@ -175,7 +189,7 @@ class PublicationTests(unittest.TestCase):
         self.hub.fail_after = None
         result = self.run_publish(commit=True)
         self.assertTrue(result['committed'])
-        self.assertEqual(result['runs'], ['z-old', 'a-new'])
+        self.assertEqual(result['runs'], ['a-new', 'z-old'])
 
     def test_tampered_bundle_refused(self):
         (self.bundle / 'a-new/results.html').write_text('changed after preparation')
@@ -196,6 +210,15 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Inspect archive'):
                 self.run_publish(commit=True)
         self.assertEqual(self.hub.commits, [])
+
+    def test_credential_screen_needs_a_token_boundary(self):
+        # Fabricated values: a key-shaped run inside a longer base64url blob is not a key; one at a
+        # boundary (after a space, quote, '=' or line start) still is.
+        blob = b'Zm9v' + b'x' * 40 + b'sk-' + b'B' * 40 + b'_hf_' + b'C' * 40
+        self.assertIsNone(SECRET.search(b'"encrypted_content": "' + blob + b'"'))
+        for text in (b'key sk-' + b'A' * 30, b'"sk-' + b'A' * 30, b'KEY=hf_' + b'A' * 32, b'hf_' + b'A' * 32,
+                     b'-----BEGIN PRIVATE KEY-----'):
+            self.assertIsNotNone(SECRET.search(text), text[:12])
 
     def test_malicious_existing_catalogue_link_refused(self):
         bad = entry('evil', 1)
