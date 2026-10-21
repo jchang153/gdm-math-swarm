@@ -127,7 +127,7 @@ class GeminiModelTests(unittest.TestCase):
         self.assertEqual(options["provider"], {"only": ["google-vertex/global"], "allow_fallbacks": False,
                                                "require_parameters": True})
         self.assertEqual(options["reasoning"], {"effort": "high", "exclude": False})
-        self.assertEqual(TRACK_MODEL_IDS["gemini"], (GEMINI_MODEL_ID,))
+        self.assertIn(GEMINI_MODEL_ID, TRACK_MODEL_IDS["gemini"])
         self.assertNotIn(GEMINI_MODEL_ID, TRACK_MODEL_IDS["ablation"])
         self.assertIn(GEMINI_MODEL_ID, KNOWN_MODEL_IDS)
         # Lower-tier reservation prices do not cover the >200K tier.
@@ -138,3 +138,45 @@ class GeminiModelTests(unittest.TestCase):
         # A response bound above the route's 65,536 maximum completion is refused.
         with self.assertRaises(ValueError):
             validate_catalog(self.catalog(), ProviderSettings(**{**frozen_fields(settings), "max_tokens": 70000}))
+
+
+class Gemini4ArgonModelTests(unittest.TestCase):
+    """Gemini 4 Argon on the Gemini budget track (owner request, October 21, 2026)."""
+    CONFIG = Path(__file__).resolve().parents[1] / "configs" / "gemini4-argon.json"
+
+    def catalog(self, **pricing):
+        # OpenRouter catalog, October 21, 2026: $2/$10 per million prompt/completion tokens on
+        # google-vertex/global, no >200K override; flex/us/priority routes are priced differently.
+        base = {"prompt": "0.000002", "completion": "0.00001", "internal_reasoning": "0.00001",
+                "input_cache_read": "0.0000001", "input_cache_write": "0.0000001875", "discount": 0.5, **pricing}
+        endpoint = {"status": 0, "context_length": 1048576, "max_completion_tokens": 943718,
+                    "supported_parameters": ["tools", "tool_choice", "reasoning", "include_reasoning",
+                                             "reasoning_effort", "max_tokens", "stop"], "pricing": base}
+        return {"data": {"id": "google/gemini-4-argon", "endpoints": [
+            dict(copy.deepcopy(endpoint), tag="google-vertex/global", provider_name="Google"),
+            dict(copy.deepcopy(endpoint), tag="google-vertex/global/priority", provider_name="Google",
+                 pricing=dict(base, prompt="0.0000036", completion="0.000018")),
+            dict(copy.deepcopy(endpoint), tag="google-vertex/us", provider_name="Google",
+                 max_completion_tokens=65536, pricing=dict(base, prompt="0.0000022", completion="0.000011"))]}}
+
+    def test_config_pins_the_global_vertex_route_with_signed_reasoning(self):
+        import json
+        from research_swarm.provider import (GEMINI4_MODEL_ID, KNOWN_MODEL_IDS, SIGNED_REASONING_MODEL_IDS,
+                                             TRACK_MODEL_IDS)
+        config = json.loads(self.CONFIG.read_text())
+        settings = settings_from_config(config)
+        self.assertEqual(config["candidate_model_id"], GEMINI4_MODEL_ID)
+        self.assertEqual((settings.model_id, settings.provider_route), (GEMINI4_MODEL_ID, "google-vertex/global"))
+        self.assertEqual((settings.max_tokens, settings.reasoning_effort), (16384, "high"))
+        self.assertEqual((settings.prompt_usd_per_token, settings.output_usd_per_token), ("0.000002", "0.00001"))
+        self.assertEqual(validate_catalog(self.catalog(), settings)["tag"], "google-vertex/global")
+        self.assertEqual(settings.request_options()["provider"],
+                         {"only": ["google-vertex/global"], "allow_fallbacks": False, "require_parameters": True})
+        self.assertIn(GEMINI4_MODEL_ID, TRACK_MODEL_IDS["gemini"])
+        self.assertNotIn(GEMINI4_MODEL_ID, TRACK_MODEL_IDS["ablation"])
+        self.assertIn(GEMINI4_MODEL_ID, KNOWN_MODEL_IDS)
+        self.assertIn(GEMINI4_MODEL_ID, SIGNED_REASONING_MODEL_IDS)
+        # A future >200K tier (as on 3.1 Pro) above the frozen prices is refused at the freeze.
+        tiered = self.catalog(overrides=[{"min_prompt_tokens": 200000, "prompt": "0.000004", "completion": "0.000015"}])
+        with self.assertRaisesRegex(ValueError, "time-dependent"):
+            validate_catalog(tiered, settings)

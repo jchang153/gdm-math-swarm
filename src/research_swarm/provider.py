@@ -11,7 +11,10 @@ ABLATION_MODEL_IDS = (MODEL_ID, GLM_MODEL_ID)
 # The owner's Gemini track (docs/plan.md, "Gemini 3.1 Pro collaboration run authorized, October
 # 19, 2026"): the paper's model, allowed on budget track "gemini" and nowhere else.
 GEMINI_MODEL_ID = "google/gemini-3.1-pro-preview"
-GEMINI_MODEL_IDS = (GEMINI_MODEL_ID,)
+# Gemini 4 Argon (owner request, October 21, 2026), on the same budget track. OpenRouter lists it
+# flat at $2/$10 per million prompt/completion tokens on google-vertex/global (no >200K tier).
+GEMINI4_MODEL_ID = "google/gemini-4-argon"
+GEMINI_MODEL_IDS = (GEMINI_MODEL_ID, GEMINI4_MODEL_ID)
 # Models each budget track (budget.BUDGET_TRACKS) may run; the launch gates check this table.
 TRACK_MODEL_IDS = {"ablation": ABLATION_MODEL_IDS, "gemini": GEMINI_MODEL_IDS}
 # Every model any track may call (request_options refuses all others).
@@ -20,7 +23,7 @@ KNOWN_MODEL_IDS = tuple(dict.fromkeys(m for ids in ((MODEL_ID,), *TRACK_MODEL_ID
 # encrypted payload, e.g. Gemini thought signatures) and must be passed back on later turns with
 # tool calls. Their live compatibility check must show such a replay accepted
 # (``signed_reasoning_tool_call_replay``, scripts/compat_check.py).
-SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID,)
+SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID, GEMINI4_MODEL_ID)
 
 # Chat-template and provider framing allowance added to the byte bound below.
 FRAMING_TOKEN_ALLOWANCE = 8192

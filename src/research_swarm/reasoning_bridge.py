@@ -61,6 +61,10 @@ def _bridge_scope(bridge):
 
 
 def _readable(content):
+    # Inspect falls back to the raw details JSON as reasoning text when it cannot parse them
+    # (an unrecognized reasoning_details type); that is an opaque payload, never shown as thinking.
+    if not content.redacted and content.signature == "reasoning-details://" + (content.reasoning or ""):
+        return ""
     return (content.summary or "") if content.redacted else content.reasoning
 
 

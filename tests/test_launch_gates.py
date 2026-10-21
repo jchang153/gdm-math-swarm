@@ -737,10 +737,10 @@ class LaunchGateTests(GateFixture):
         """Review finding: an approved generation lookup on state/gemini-budget.sqlite, run as documented
         (no --expect-model), accepts the Gemini model; the baseline ledger keeps the pilot model."""
         from research_swarm import budget
-        from research_swarm.provider import ABLATION_MODEL_IDS, GEMINI_MODEL_ID
+        from research_swarm.provider import ABLATION_MODEL_IDS, GEMINI4_MODEL_ID, GEMINI_MODEL_ID
         reconcile = load_script("reconcile_ledger")
         path = self.tmp / "state" / "gemini-budget.sqlite"
-        self.assertEqual(reconcile.expected_models(path), (GEMINI_MODEL_ID,))
+        self.assertEqual(reconcile.expected_models(path), (GEMINI_MODEL_ID, GEMINI4_MODEL_ID))
         self.assertEqual(reconcile.expected_models(self.tmp / "state" / "ablation-budget.sqlite"), ABLATION_MODEL_IDS)
         self.assertEqual(reconcile.expected_models(self.tmp / "state" / "budget.sqlite"), (MODEL_ID,))
         self.assertEqual(reconcile.expected_models(path, ["x/y"]), ("x/y",))
@@ -763,7 +763,7 @@ class LaunchGateTests(GateFixture):
         snapshot = read_snapshot(path)["pilot"]
         self.assertEqual((snapshot["unresolved_requests"], snapshot["settled_usd"]), (0, "0.042"))
         audit = json.loads(sorted((path.parent / "reconciliations").glob("reconcile-*.json"))[-1].read_text())
-        self.assertEqual(audit["expected_models"], [GEMINI_MODEL_ID])
+        self.assertEqual(audit["expected_models"], [GEMINI_MODEL_ID, GEMINI4_MODEL_ID])
 
     def test_seeded_configuration_blocks_the_pilot(self):
         """S3: any seeded configuration, enabled or not, blocks the approved spontaneous pilot."""
