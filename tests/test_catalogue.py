@@ -88,7 +88,8 @@ class CataloguePageTests(unittest.TestCase):
             self.assertIn(control, page)
         self.assertEqual(page_data(page), json.loads(index)['experiments'])
         self.assertEqual([e['run'] for e in page_data(page)], ['c-new', 'a-old'])  # newest first
-        self.assertLess(page.index('c-new'), page.index('a-old'))
+        rows = page.split('<tbody>', 1)[1]
+        self.assertLess(rows.index('c-new'), rows.index('a-old'))
         self.assertIn('1h 02m', page)
         self.assertIn('$12.34', page)  # Decimal rounding, as before
         self.assertIn('1 error exit', page)
