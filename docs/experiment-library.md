@@ -41,7 +41,7 @@ All in `scripts/`; each is documented in its own `--help` and below.
 - `prepare_hf_library.py` and `publish_hf_library.py`: prepare a bundle, then preview and `--commit` a
   first publication.
 - `maintain_hf_run.py`: guarded updates of an already published run, `--scope judge` (default),
-  `transcripts`, `evaluator` or `results` (`--replace-judge` replaces an already published judge
+  `transcripts`, `evaluator`, `results` or `inspect` (`--replace-judge` replaces an already published judge
   build). `--scope unlist` (no `--bundle`) removes a run's catalogue row without deleting files,
   after the run is recorded in the tracked `data/library-unlisted.json`
   (run, date, reason). `build_experiment_index.py` and `publish_hf_library.py` leave recorded runs out
@@ -422,6 +422,22 @@ previous reports locally (for example as `results.legacy.json`/`results.legacy.h
 published) and prepare a single-run bundle as for the other scopes, then run
 `python scripts/maintain_hf_run.py --scope results --maintain-run "$RUN_ID" --bundle "$BUNDLE"` (plan)
 and the same with `--commit --backup-dir "$OUT/attempt-1" --receipt "$OUT/attempt-1/maintenance-receipt.json"`.
+
+Hosted Inspect links (October 20, 2026). HF stores each run's `.eval` logs (25 to 60 MB) as LFS/Xet
+and serves them through a same-origin redirect to its CDN (which allows CORS and byte ranges). Inspect
+View fetches logs with `redirect: "error"`, so the hosted viewer showed "Failed to fetch". The Space
+navigation added to Inspect View pages now follows redirects of same-origin GET/HEAD requests only;
+credentials stay same-origin, no referrer is sent and the session is never added to the CDN URL.
+Static hosting also cannot list a directory (`RUN/inspect/` redirected off-site), so the catalogue's
+"Inspect logs" link names the `.eval` file directly (numbered links for several logs). A 206 range
+check with a redirect-following HTTP client does not detect this; open the hosted Inspect View.
+`--scope inspect` repairs a published run: it replaces only `RUN/inspect-view/index.html` (the bundle's
+page must contain the redirect fix and every other Inspect View file must equal the published one) and
+changes only the Inspect log link(s) of the published catalogue entry, never the bundle's own entry;
+otherwise it follows the results scope (no LFS, `.gitattributes` unchanged, catalogue and manifest last,
+resume and verification). Prepare each run's bundle with the viewer of its original publication and run
+it per run, plan first, as for the other scopes. Published `results.html` pages still link `inspect/`
+until their reports are regenerated and republished.
 
 ## Uploading and preserving other collaborators' experiments
 

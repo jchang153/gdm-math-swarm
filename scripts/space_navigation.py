@@ -43,6 +43,19 @@ new MutationObserver(resources).observe(document.documentElement,{subtree:true,c
 document.addEventListener('DOMContentLoaded',resources);resources();
 })();
 </script>'''
+GATE = "if(!location.hostname.endsWith('.static.hf.space'))return;\n"
+# Inspect View pages only. Inspect fetches its logs with redirect:"error", but the hosted Space
+# serves large logs (stored in HF LFS/Xet) through a redirect to the HF CDN, so the log never
+# loads. Follow redirects of GET/HEAD requests to this exact origin; credentials stay
+# same-origin, no referrer is sent and the session is never added to the redirect target.
+FOLLOW_LOG_REDIRECTS = r'''{const direct=window.fetch.bind(window);
+window.fetch=(input,options)=>{
+ const request=new Request(input,options);
+ if(request.redirect==='error'&&(request.method==='GET'||request.method==='HEAD')&&new URL(request.url).origin===location.origin)
+  return input instanceof Request?direct(new Request(input,{...options,redirect:'follow'})):direct(input,{...options,redirect:'follow'});
+ return direct(input,options);
+};}
+'''
 
 
 def private_space_navigation(document, module_paths=()):
@@ -57,6 +70,8 @@ def private_space_navigation(document, module_paths=()):
     if any(not re.fullmatch(r'\./assets/[A-Za-z0-9_.-]+\.js', p) for p in paths):
         raise ValueError('Expected local Inspect module assets')
     script = SCRIPT.replace('MODULE_PATHS', json.dumps(paths))
+    if paths:  # Inspect View: also follow same-origin redirects of log fetches (see above)
+        script = script.replace(GATE, GATE + FOLLOW_LOG_REDIRECTS, 1)
     # Module imports must pass through the import map rather than a parser src.
     if paths:
         document = re.sub(r'<script\s+type="module"\s+crossorigin\s+src="(\./assets/[A-Za-z0-9_.-]+\.js)"></script>',

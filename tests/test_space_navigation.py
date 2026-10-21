@@ -6,7 +6,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from space_navigation import private_space_navigation, SCRIPT
+from space_navigation import private_space_navigation, SCRIPT, GATE
 
 
 class NavigationTests(unittest.TestCase):
@@ -47,6 +47,41 @@ assert.equal(calls[0][0].headers.get('Range'),'bytes=10-20');
 assert.equal(new URL(calls[0][0].url).searchParams.get('__sign'),'FAKE_SESSION');
 context.window.fetch('https://outside.example/file');assert.equal(calls[1][0],'https://outside.example/file');
 '''.replace('SOURCE', json.dumps(js))
+        subprocess.run(['node', '-e', harness], check=True, capture_output=True, text=True)
+
+    def test_inspect_log_fetches_follow_same_origin_redirects(self):
+        # HF serves LFS-stored .eval logs through a redirect to its CDN; Inspect View fetches logs with
+        # redirect:"error", so without this the log never loads in the hosted Space.
+        self.assertIn(GATE, SCRIPT)
+        plain = private_space_navigation('<html><head></head></html>')
+        self.assertNotIn("redirect:'follow'", plain)
+        page = private_space_navigation('<html><head></head></html>', ['./assets/index.js'])
+        js = page.split('<script id="private-space-navigation">', 1)[1].rsplit('</script>', 1)[0]
+        harness = r"""
+const vm=require('node:vm'),assert=require('node:assert/strict');
+const calls=[];
+const context={URL,URLSearchParams,Request,MutationObserver:class{observe(){}},
+ location:{hostname:'example.static.hf.space',origin:'https://example.static.hf.space',search:'?__sign=FAKE_SESSION'},
+ document:{baseURI:'https://example.static.hf.space/run/inspect-view/index.html',documentElement:{},
+ head:{append(){}},createElement:()=>({}),querySelectorAll:()=>[],addEventListener(){}},
+ XMLHttpRequest:class{open(){}},window:{fetch:(...args)=>{calls.push(args);return Promise.resolve({})}}};
+vm.runInNewContext(SOURCE,context);
+const init={credentials:'same-origin',referrerPolicy:'no-referrer',redirect:'error'};
+context.window.fetch('logs/x.eval',{...init,method:'HEAD'});
+assert.equal(new URL(calls[0][0]).searchParams.get('__sign'),'FAKE_SESSION');
+assert.deepEqual({...calls[0][1]},{...init,method:'HEAD',redirect:'follow'});
+context.window.fetch('logs/x.eval',{...init,headers:{Range:'bytes=0-9'}});
+assert.deepEqual({...calls[1][1]},{...init,headers:{Range:'bytes=0-9'},redirect:'follow'});
+context.window.fetch(new Request('https://example.static.hf.space/run/inspect-view/logs/x.eval',init));
+assert.equal(calls[2][0].redirect,'follow');
+assert.equal(new URL(calls[2][0].url).searchParams.get('__sign'),'FAKE_SESSION');
+context.window.fetch('logs/x.eval',{...init,method:'POST'});assert.equal(calls[3][1].redirect,'error');
+calls.splice(2,2);
+context.window.fetch('https://outside.example/x.eval',init);
+assert.equal(calls[2][0],'https://outside.example/x.eval');assert.equal(calls[2][1].redirect,'error');
+context.window.fetch('logs/listing.json');
+assert.equal(calls[3][1],undefined);
+""".replace('SOURCE', json.dumps(js))
         subprocess.run(['node', '-e', harness], check=True, capture_output=True, text=True)
 
 
