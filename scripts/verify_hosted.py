@@ -28,6 +28,7 @@ PAGES = ("index.html", "{run}/results.html", "{run}/conference-view/index.html",
 # HF injects this one script into served HTML; remove only it before comparing bytes.
 CREATOR_SCRIPT = re.compile(rb'<script>window\.huggingface=\{variables:\{"SPACE_CREATOR_USER_ID":"[0-9a-f]+"\}\};</script>')
 LFS_POINTER = b"version https://git-lfs.github.com/spec/"
+PATHS_INFO_BATCH = 200
 
 
 def sha256(data):
@@ -48,8 +49,11 @@ def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, 
     if not check("current_revision", bool(revision) and str(info.sha).startswith(revision), current=info.sha):
         record["note"] = "The hosted app serves the current revision; pages were not compared."
         return record
-    lfs = {entry.path: getattr(entry, "lfs", None) for entry in
-           api.get_paths_info(repo, pages + ([range_path] if range_path else []), repo_type="space", revision=info.sha)}
+    names = pages + ([range_path] if range_path else [])
+    lfs = {}
+    for start in range(0, len(names), PATHS_INFO_BATCH):  # the Hub refuses very long path lists (HTTP 413)
+        lfs.update({entry.path: getattr(entry, "lfs", None) for entry in api.get_paths_info(
+            repo, names[start:start + PATHS_INFO_BATCH], repo_type="space", revision=info.sha)})
     for page in pages:
         if not check("stored", page in lfs, path=page):
             continue

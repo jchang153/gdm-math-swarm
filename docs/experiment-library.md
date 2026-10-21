@@ -864,3 +864,21 @@ SDK/HTTP checks, not interactive browser tests. Locally the first (v3) build is 
 `runs/gemini10-20261020T054602Z/analysis/judge-v3-first-run/`. Before-inventory, original copies of
 the replaced files, plan, receipt and checks are in the ignored
 `runs/phase-b/judge-plain-publication-gemini10-20261020T054602Z/attempt-1/` directory.
+
+The new site (owner request, October 21, 2026: run list and compare view, run page summary card and tabs,
+light/dark theme, phone layout, no custom transcript viewer) was rolled out with the site scope after the
+other workflow published the four `owner-*-20261021` runs and archived older runs' loose snapshot files into
+`snapshots.tar.gz`. The published catalogue page was already the current generator's output (no re-render
+needed), and the four owner runs were published with the current generators (site plans: 0 uploads). The four
+older listed runs were updated in sequence from base revision `3b1420e8004a85d2f35a3e4d24e033f1e9c8b88d`:
+pilot (`2a136c91720589c3851dc52dd560c20fae3cd7a9`, 163 uploads), baseline8g100
+(`8837561b30f689b59df49523b9ca3ee2a3c201c2`, 555), cache100 (`5d00cbeb7aa8cd4f4b66a0a872e126b45c353c8e`, 588,
+including 16 judge pages) and gemini10 (`ca19ca0a320dc096ca296af202dc0143fe472715`, 1,677, including 11 judge
+pages). Each replaced `results.html` (re-rendered from the unchanged `results.json`), the conference-view pages
+and the judge HTML pages, with the archive manifest last; every receipt is `verified` against its base with the
+7,117-file inventory unchanged, `.gitattributes` unchanged and catalogue entries unchanged. `baseline100` stays
+unlisted and was not touched. At the final revision `scripts/verify_hosted.py` checked every replaced HTML page
+of the four runs (private, regular file, bundle bytes, HTTP 200 inline HTML with exact stored bytes) and the
+catalogue and one owner run's default pages. These are SDK/HTTP checks, not interactive browser tests. Plans,
+receipts, backups of the replaced files, hosted checks and the local copies of the previous derived views are in
+the ignored `runs/phase-b/site-publication-20261021/` directory.
