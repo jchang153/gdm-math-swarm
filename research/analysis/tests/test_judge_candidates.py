@@ -1175,7 +1175,7 @@ class PassageFirstEndToEndTests(unittest.TestCase):
         self.assertIn(f"--- CITED RECORD A04.t0005.r: {len(self.text):,} characters, shown as windows", verify[0])
         middle = self.text[8000:8100]  # far from the edges and from the cue
         self.assertNotIn(middle, verify[0])
-        self.assertLess(len(verify[0]), 16700)  # rubric v3.1: the judge's finding JSON carries its plain explanation
+        self.assertLess(len(verify[0]), 16000)  # rubric v3.1: the judge's plain wording is never sent to the verifier
         page = (self.r.judge_dir / "review" / "agents" / "agent-004.html").read_text()
         self.assertIn("decided on keyword passages", page)
         self.assertIn(f"keyword passages only (characters {start:,}-{end:,})", page)

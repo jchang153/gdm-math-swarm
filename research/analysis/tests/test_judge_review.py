@@ -895,7 +895,7 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(built["visible_words"], words)
         self.assertLess(words, 1500)
         self.assertEqual(data["reading"], {"visible_words": words, "target_words": 1500, "within_target": True,
-                                           "compact_cards": False, "collapsed_words": 0})
+                                           "compact_cards": False, "collapsed_words": 0, "card_layout": "full"})
         self.assertEqual(page.count("<article class=\"card\">"), 4)
         cards = {r["agent_id"]: r["evidence"] for r in data["agents"] if r["evidence"]}
         self.assertEqual(sorted(cards), ["agent-001", "agent-002", "agent-006", "agent-008"])

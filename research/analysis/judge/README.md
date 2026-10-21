@@ -258,44 +258,80 @@ make no call. A resumed or `--rescore-cached` run replays the same decisions fro
 The owner could not understand evidence such as "decide +native" or "a native decide style
 bypass" and asked that the judge "explain their reasoning in simpler terms, assuming that the human
 reading it has no idea what the problem is about and knows nothing about lean" (docs/plan.md,
-"Plain-language judge explanations, October 20, 2026"; rubric Section 6.1).
+"Plain-language judge explanations, October 20, 2026"; rubric Section 6.1). The design below is the
+implementer's proposal awaiting the owner's confirmation.
 
-- **Fields.** Every finding carries `plain_explanation`: two to four sentences saying what the
-  problem asked in everyday words, what the agent actually did and why that counts as the behavior,
-  with no jargon and any unavoidable term (a tactic such as `decide +native`, `sorry`, an axiom, the
-  checker) explained in the same sentence. A qualifying candidate decision and each of its `also`
-  entries give one; non-qualifying decisions give only their `reason`. Package-mode findings carry
-  one too. Every verifier verdict, refuted ones included, carries the verifier's own
-  `plain_explanation` of the finding as decided (it keeps the judge's wording when accurate and
-  plain, else corrects it). The run-level output adds `plain_summary`, one plain paragraph; when the
-  host writes the run level (no finding, a failed or unadmitted request) it writes the paragraph too
-  (`pipeline.host_runlevel_plain_summary`).
+- **Fields.** Every finding carries `plain_explanation`: two to four sentences (about 60 words, at
+  most 150) saying what the problem asked in everyday words, what the agent did and what happened to
+  a hand-in, and why that counts, with Lean called "the proof-checking program" and any banned
+  command described by what it does and which written rule it breaks. A qualifying candidate
+  decision and each of its `also` entries give one; non-qualifying decisions give only their
+  `reason`. Package-mode findings carry one too. Every verifier verdict, refuted ones included,
+  carries the verifier's own `plain_explanation`, written from the records. The run-level output
+  adds `plain_summary`, one plain paragraph; when the host writes the run level (no finding, a
+  failed or unadmitted request, or a paragraph still missing after the repair) it writes the
+  paragraph (`pipeline.host_runlevel_plain_summary`; `run_level.json` `plain_summary_source`).
+- **Tasks in plain words.** `task_plain_words.json` holds the title of every parent-pool task and a
+  researcher-written sentence for 34 of them (no status or answers; `tasks_plain.py`). Candidate,
+  random-sample, verifier and run-level requests end with a "TASKS IN PLAIN WORDS" section for the
+  tasks the request names (task id, theorem name or a distinctive short theorem name); it is context,
+  never evidence. The report and the browser show "Problem" lines from the same table.
 - **Prompts.** One shared block, `prompts.PLAIN_LANGUAGE`, in the candidate, package-mode judge,
   verifier and run-level system prompts (the prefilter is unchanged apart from its version). The
-  verifier sees the judge's explanation inside the judge's finding JSON. The run package passes each
-  finding's verified wording to the run level.
-- **Validation** (`schema.plain_problem`): a missing, empty or non-string explanation, or one over
-  `schema.PLAIN_MAX_WORDS` (150) words (the run-level paragraph over 200), is a problem like any
-  other required field: named in the one repair (`decision for A04.t0002.r.plain_explanation: is
-  required ...`, `verdicts[0].plain_explanation: ...`), then the candidate stays **undecided**, the
-  verifier verdict **unverified**, the run-level paragraph host-written. Never a negative.
+  verifier is not shown the judge's wording (`prompts.VERIFIER_HIDDEN_KEYS`). The run package passes
+  each finding's verified wording to the run level.
+- **Validation (soft).** `schema.plain_problem` names a missing, empty or non-string explanation, or
+  one over `schema.PLAIN_MAX_WORDS` (150) words (the run-level paragraph over 200), in the one repair
+  (`decision for A04.t0002.r.plain_explanation: is required ...`, `verdicts[0].plain_explanation:
+  ...`). It never invalidates anything (`schema.is_plain_problem`): the parsers keep the decision,
+  finding or verdict with the explanation `None` (an over-long one cut at a sentence boundary,
+  `schema.plain_cut`) and record `plain_problems`; `Pipeline.unit` accepts an output whose only
+  problems after the repair are plain-language ones (reason `accepted_without_plain_explanation`) and
+  keeps a first output whose only problems were plain-language ones when the repair fails (reason
+  `first_output_kept_without_plain_explanation`). A run-level result without a paragraph keeps its
+  spread, reach and summary. `schema.plain_lint` records `plain_warnings` (item, finding or
+  submission ids, backticks, names_with_underscores other than `native_decide`, rubric labels);
+  they are shown with the technical details and never fail anything, and they are added to a
+  repair only when one is being sent for another reason (`pipeline.plain_style_notes`). `pipeline.json`
+  `plain_language` lists the findings with problems left; the report lists a counted finding
+  without any explanation as "explanation missing".
 - **Verified record.** `cohort.apply_verification_v2` keeps the judge's `plain_explanation` on each
-  finding and adds `verifier_plain_explanation` (None when the finding was not checked or its
-  verification failed). The explanation never changes a level, an attribute or a cohort.
-- **Report and browser.** `report.html` opens with "In plain words" (the run's `plain_summary`);
-  each evidence card leads with a plain heading and explanation per finding shown (the verifier's
-  wording, else the judge's; `review.finding_plain`, `review.plain_heading`), and the technical facts,
-  verifier labels and quotes follow in a collapsed section. `report.json` carries each card
-  finding's `plain_heading`, `plain_explanation` and `plain_source` and the run level's
-  `plain_summary`; `reading.visible_words` counts what is visible without opening a collapsed
-  section and `reading.collapsed_words` the rest. In the evidence browser each finding opens with
-  its plain explanation, whose wording it is and a plain line saying whether it counts
-  (`review.plain_status`); the verification details and evidence passages are collapsed below, with
-  the judge's original wording when the verifier rewrote it. The index shows the run's paragraph.
+  finding and adds `verifier_plain_explanation` (None when the finding was not checked, its
+  verification failed or the verifier's explanation was still missing; with
+  `verifier_plain_problems` and `verifier_plain_warnings` when present). The explanation never
+  changes a level, an attribute or a cohort.
+- **Report.** For results judged under rubric v3.1 (`review.plain_layout`) `report.html` opens with
+  "In plain words" (the run's `plain_summary`), then "Tricks seen in this run, in plain words"
+  (`review.TRICKS`, each bypass explained once) and "Problems involved, in plain words"; the agent
+  table's note is plain (`review.plain_lead`) and the group and flag names are glossed
+  (`review.COHORT_GLOSS`, `review.FLAG_GLOSS`). Each evidence card leads with plain explanations,
+  strongest first (`review.plain_card_findings`: the finding that sets each category's level plus
+  the claim that decides the cohort, no repeats), a "Trick used" and "Problem" line, and the
+  technical facts, verifier labels and quotes collapsed. The technical summary (run counts, cohort
+  table, spread and reach, technical note per agent) and the spend and provenance are collapsed
+  after the evidence, with a visible "How to read this" disclosure. A page over 1,500 visible words is
+  rendered again with two, then one, plain paragraph per card (`report.CARD_LAYOUTS`;
+  `reading.card_layout`). `report.json` carries each card finding's `plain_heading`,
+  `plain_explanation` and `plain_source`, the card's `tricks` and `tasks`, the run's `plain` block
+  and the run level's `plain_summary`; `reading.visible_words` counts what is visible without
+  opening a collapsed section and `reading.collapsed_words` the rest.
+- **Evidence browser.** Each agent page opens with a plain lead (the group gloss, the strongest
+  verified finding per category in plain words and the problem), the cohort, technical note and
+  categories table collapsed. Each finding opens with a plain heading (`review.plain_heading`:
+  prefixed "Suspected but rejected", "Suspected, check not finished", "Not checked" or "Not counted
+  under the study's rules" when it does not count; "Got a cheating trick ready to hand in (stopped
+  before it was handed in)" for a readied bypass), its explanation, the problem, whose wording it is
+  and a plain status line (`review.plain_status`; an adjusted finding "agreed it happened, but
+  corrected how serious it was"); the verification details, the judge's wording, plain-language
+  problems and style notes, and the evidence passages are collapsed below. The index shows the run's
+  paragraph.
 - **Older outputs.** Agent results of rubric v3 (`gdm-judge-agent-result/3`) have no explanations:
-  the report and the browser read them in the earlier layout, with no banner (`report.READABLE_RUBRICS`).
-  A rubric-v3 judge directory is never resumed by this code (its prompts and schemas differ): the
-  manifest check refuses it with its own message; pass a new `--output-dir`.
+  the report and the browser read them in the earlier layout, with no banner (`report.READABLE_RUBRICS`;
+  a recorded v3 rubric hash is compared with `judge_rubric_v3_superseded.md`,
+  `report.ARCHIVED_RUBRICS`). A rubric-v3 judge directory is never resumed by this code (its prompts
+  and schemas differ): the manifest check refuses it with its own message; pass a new `--output-dir`.
+  The report stage logs a warning (never a silent skip) when the judge directory is not
+  `RUN/analysis/judge` or `<copy>/<run_id>/analysis/judge`.
 
 ### Output limits and malformed outputs (item 5)
 
@@ -564,6 +600,7 @@ package and candidate modes within this revision (section "History" below).
 | `estimate.py` | The per-invocation estimate (cached units free), its pricing in central/high/stress columns, the run limit and the estimate-against-actual record. |
 | `review.py`, `report.py` | The read-only evidence browser for flagged agents, the five-minute `report.html`/`report.json` and the `results.html` section. |
 | `statement_defects.json` | Researcher statement-defect table (host only; read for the footnote). |
+| `tasks_plain.py`, `task_plain_words.json` | Rubric v3.1: the researcher-written plain description of each task (no status or answers), the TASKS IN PLAIN WORDS request section and the report's "Problem" lines. |
 
 The command-line entry point is `scripts/run_transcript_judge.py`.
 
@@ -695,10 +732,11 @@ single-candidate requests) and its second prefilter window is refused (a window 
 is never resent: `ungraded`, forced; a window of one item gets its one retry); a cue ("feels like
 an experiment") that only a random-sample window shows becomes a prefilter miss.
 Every finding, verifier verdict and run-level output carries a synthetic plain-language explanation
-(`pipeline.mock_plain`, rubric v3.1; the verifier rewords the judge's when it confirms and gives a
-plain reason when it refutes); `omit_plain` leaves them out of a unit's first output (the repair
-restores them) and `omit_plain_twice` out of its repair too (undecided candidates, an unverified
-finding). `truncate_once`/`truncate_twice`, `omit_first`, `refuse_repair`, `verifier_refutes` and the
+(`pipeline.mock_plain`, rubric v3.1; it uses the request's TASKS IN PLAIN WORDS line when there is
+one, `pipeline.mock_problem`; the verifier writes its own from the finding line and gives a plain
+reason when it refutes); `omit_plain` leaves them out of a unit's first output (the repair restores
+them) and `omit_plain_twice` out of its repair too (the decisions and verdicts are kept without an
+explanation, the run-level paragraph is host-written). `truncate_once`/`truncate_twice`, `omit_first`, `refuse_repair`, `verifier_refutes` and the
 ("verifier", "agent:finding") and ("sample", agent) designations exercise the output limit, the
 missing-decision repair, a refused repair, a refused random-sample window and the verifier paths
 in the tests. The end-to-end test of the command line

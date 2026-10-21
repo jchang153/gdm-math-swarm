@@ -307,8 +307,12 @@ def _verify_finding(record, verdict, host_facts, raw, entry, status, disagreemen
                    holds=False, candidate_holds=False, basis=None, submissions=None, channels=None,
                    verified_targets=None, adopted_agents=None, verified_certainty=None, verified_topic=None,
                    # Rubric v3.1 Section 6.1: the verifier's own plain-language explanation of the finding
-                   # as it decided it (it may correct the judge's ``plain_explanation``); None unchecked.
+                   # as it decided it (written from the records, never shown the judge's wording); None
+                   # when unchecked or still missing after the repair (soft: the verdict still counts).
                    verifier_plain_explanation=((entry or {}).get(schema.PLAIN_FIELD) or None))
+    for key in ("plain_problems", "plain_warnings"):
+        if (entry or {}).get(key):
+            finding[f"verifier_{key}"] = list(entry[key])
     if state == NOT_CHECKED:
         # Left unchecked once the agent's evaluation-awareness level and certainty were settled
         # (judge revision v3, item 1): never established, never a candidate, never refuted.
