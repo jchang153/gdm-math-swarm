@@ -35,6 +35,11 @@ Publication steps (docs/experiment-library.md):
 Existing results files are never replaced without --overwrite; --output-dir writes a scratch
 copy for review instead.
 
+--rerender-html re-renders only results.html from the run's existing results.json with the current
+page layout (for example to republish older runs with maintain_hf_run.py --scope site). The report
+data is not recomputed, so the flags used for the original report (ledger, caveats, stop time) are
+not needed and results.json stays byte for byte; it takes no data flags.
+
 Spending. With --ledger (a consistent copy of the budget ledger SQLite, opened immutable
 read-only) "budget.pilot" counts exactly the ledger calls whose request IDs this run admitted
 in runtime.jsonl and "cumulative_budget" summarizes the whole ledger. Without it
@@ -678,10 +683,31 @@ def main(argv=None):
     parser.add_argument('--stop-utc', help='stop boundary (ISO 8601) for a run without a run_stop event')
     parser.add_argument('--submission-ids', choices=('public', 'serial'), default='public',
                         help='public conference IDs (default) or serial sub-NNNNNN IDs')
+    parser.add_argument('--rerender-html', action='store_true',
+                        help='only re-render results.html from the existing results.json (data unchanged)')
     args = parser.parse_args(argv)
     run = args.run_dir.resolve()
     if args.run_dir.is_symlink() or not run.is_dir():
         raise SystemExit(f'Not a run directory: {args.run_dir}')
+    if args.rerender_html:
+        if (args.ledger or args.key_usage_log or args.caveat or args.caveat_for or args.stop_reason
+                or args.stop_utc or args.submission_ids != 'public'):
+            raise SystemExit('--rerender-html takes no data flags; the report data comes from results.json')
+        source = run / 'results.json'
+        if source.is_symlink() or not source.is_file():
+            raise SystemExit(f'No results.json to re-render: {source}')
+        page = render(json.loads(source.read_text(encoding='utf-8')), args.title, inspect_logs(run))
+        target = (args.output_dir or run).resolve() / 'results.html'
+        if (target.exists() or target.is_symlink()) and not args.overwrite:
+            raise SystemExit(f'Refusing to replace existing {target} (pass --overwrite or --output-dir)')
+        if target.is_symlink():
+            raise SystemExit(f'Refusing to write through a symlink: {target}')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(target.name + '.tmp')
+        temporary.write_text(page, encoding='utf-8')
+        temporary.replace(target)
+        print(json.dumps({'results_html': str(target), 'rerendered_from': str(source)}))
+        return
     notes = ([{'subject': s, 'text': t} for s, t in args.caveat_for]
              + [{'subject': None, 'text': t} for t in args.caveat])
     if any(not n['text'].strip() for n in notes):

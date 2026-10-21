@@ -190,6 +190,24 @@ class VerifyHostedTest(unittest.TestCase):
         self.assertFalse(moved["ok"])
         self.assertEqual([c["check"] for c in moved["checks"]], ["private", "current_revision"])
 
+    def test_long_page_lists_are_queried_in_batches(self):
+        api, sizes = FakeApi(self.root), []
+        original = api.get_paths_info
+
+        def limited(repo, paths, repo_type, revision):
+            sizes.append(len(paths))
+            if len(paths) > verify_hosted.PATHS_INFO_BATCH:
+                raise RuntimeError("413 Payload Too Large")
+            return original(repo, paths, repo_type, revision)
+        api.get_paths_info = limited
+        pages = [f"demo-run/conference-view/file-{i}.html" for i in range(2 * verify_hosted.PATHS_INFO_BATCH + 1)]
+        for page in pages:
+            (self.root / page).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / page).write_bytes(b"<!doctype html>")
+        record = verify_hosted.verify(api, FakeSession(self.root), {}, "org/space", "demo-run", "abc", pages=pages)
+        self.assertTrue(record["ok"])
+        self.assertEqual(sizes, [verify_hosted.PATHS_INFO_BATCH, verify_hosted.PATHS_INFO_BATCH, 1])
+
     def test_detects_public_space(self):
         record = self.run_verify(FakeApi(self.root, private=False))
         self.assertEqual([c["check"] for c in record["checks"] if not c["ok"]], ["private"])

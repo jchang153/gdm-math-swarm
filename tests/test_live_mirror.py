@@ -52,6 +52,7 @@ class FakeRunner:
         # The VM's python3 is the interpreter running these tests (stdlib only on the VM side).
         path = str(Path(sys.executable).parent) + ':/usr/bin:/bin'
         done = subprocess.run(['/bin/sh', '-c', command], capture_output=True, timeout=300, env={'PATH': path})
+        kwargs['stdout'].fileno()  # like subprocess.run: stdout must be a real file (io.BytesIO raises)
         kwargs['stdout'].write(done.stdout)
         return SimpleNamespace(returncode=done.returncode, stdout=None, stderr=done.stderr)
 
