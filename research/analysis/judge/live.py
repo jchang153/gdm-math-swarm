@@ -51,6 +51,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -68,6 +69,7 @@ DISCARD_LOOKAHEAD = 3
 MAX_FAILED_ATTEMPTS = 2        # a window whose live unit failed this often is left to the post-run judge
 TURN_KINDS = ("reasoning", "text", "summary", "tool_call", "tool_result")
 LOCK_NAME = ".judge.lock"
+RUN_LOCKS_DIRNAME = ".judge-run-locks"   # beside the ledger: one lock per (ledger, run id)
 STATE_PASSES_KEPT = 200
 
 
@@ -87,16 +89,43 @@ def _read(path, default=None):
 
 
 class JudgeBusy(RuntimeError):
-    """Another paid judging process holds the run's judge lock."""
+    """Another judging process holds the run's lock or the judge directory's lock."""
+
+
+def run_lock_path(ledger, run_id):
+    """The run's judging lock: ``<ledger folder>/.judge-run-locks/<ledger name>-<run id>.lock``. The
+    per-run cap is read from that ledger's rows for that run id (``client.committed_for_run``), so
+    the lock that keeps the read and the spending of two invocations apart is keyed the same way,
+    whatever their ``--output-dir`` (and whichever copy of the run directory they judge)."""
+    ledger = Path(ledger).resolve()
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", f"{ledger.stem}-{run_id}")
+    return ledger.parent / RUN_LOCKS_DIRNAME / f"{name}.lock"
+
+
+@contextmanager
+def judging_locks(judge_dir, *, ledger, run_id, wait_seconds=0.0):
+    """Every spending judging invocation of a run (each live pass, the early stages, the post-run
+    judge, a manual re-judge into another ``--output-dir``) holds the run's lock (``run_lock_path``)
+    for its whole life, then its judge directory's (``judge_lock``), so the per-run spend read from
+    the ledger before the first request is never raced. Raises ``JudgeBusy`` when either is not
+    free within ``wait_seconds`` (0: at once)."""
+    deadline = time.monotonic() + max(0.0, float(wait_seconds))
+    with _flock(run_lock_path(ledger, run_id), wait_seconds):
+        with judge_lock(judge_dir, wait_seconds=max(0.0, deadline - time.monotonic())):
+            yield
 
 
 @contextmanager
 def judge_lock(judge_root, *, wait_seconds=0.0):
-    """Exclusive lock of one run's judging (``<judge root>/.judge.lock``, ``fcntl.flock``), held by
-    every live pass and every post-run invocation for its whole life, so per-run spend read from
-    the ledger before the first request is never raced. ``wait_seconds`` 0 fails at once
-    (``JudgeBusy``)."""
-    path = Path(judge_root) / LOCK_NAME
+    """Exclusive lock of one judge directory (``<judge root>/.judge.lock``, ``fcntl.flock``): no two
+    processes write one judge directory. ``wait_seconds`` 0 fails at once (``JudgeBusy``)."""
+    with _flock(Path(judge_root) / LOCK_NAME, wait_seconds) as path:
+        yield path
+
+
+@contextmanager
+def _flock(path, wait_seconds=0.0):
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = path.open("a+")
     deadline = time.monotonic() + max(0.0, float(wait_seconds))
@@ -580,13 +609,16 @@ def window_requests(agent_id, code, windows, items_by_id, settings, live_dir):
 async def send_requests(pipeline, requests, *, code_hash=None, model_key="haiku"):
     """Screen planned windows through the post-run judge's unit flow (``Pipeline.unit``: repair,
     refusal rule, salvage, ledger, run limit) into their content-addressed live unit files. Returns
-    ``(per agent {"sent", "ok", "ungraded", "failed", "pending", "skipped_after_failures"}, stop
-    reason or None)``. A ``grading_failed`` live unit (never adopted) is set aside as
+    ``(per agent {"sent", "ok", "ungraded", "failed", "pending", "skipped_after_failures",
+    "refused_left"}, stop reason or None)``. A ``grading_failed`` live unit (never adopted) is set aside as
     ``.failed-<time>`` and tried again, at most ``MAX_FAILED_ATTEMPTS`` times in all; a pending unit
-    left by other judge code is set aside as ``.code-changed-<time>``."""
+    left by other judge code is set aside as ``.code-changed-<time>``. A unit whose request met a
+    refusal is never set aside (a refused request is never resent identically, judge revision v3
+    item 6): a pending one is continued (only its one retry is sent) and a failed one is left to
+    the post-run judge."""
     import asyncio
     from .pipeline import BudgetStop, _safe, prefilter_unit_options, read_json, write_json
-    from .warm import adoption_code_hash
+    from .warm import adoption_code_hash, refused_attempts
     code_hash = code_hash or adoption_code_hash()
     outcomes = {}
     if pipeline.run_limit is not None:
@@ -595,12 +627,19 @@ async def send_requests(pipeline, requests, *, code_hash=None, model_key="haiku"
     async def one(request):
         path, agent = Path(request["path"]), request["agent"]
         row = outcomes.setdefault(agent, {"sent": 0, "ok": 0, "ungraded": 0, "failed": 0, "pending": 0,
-                                          "skipped_after_failures": 0})
+                                          "skipped_after_failures": 0, "refused_left": 0})
         existing = read_json(path) if path.exists() else None
         if isinstance(existing, dict) and existing.get("status") in ("ok", "ungraded"):
             return
-        if isinstance(existing, dict) and (existing.get("status") == "grading_failed"
-                                           or (existing.get("live") or {}).get("code_sha256") != code_hash):
+        if isinstance(existing, dict) and refused_attempts(existing):
+            if existing.get("status") != "pending":
+                row["refused_left"] += 1   # never resent; the post-run judge decides from its record
+                return
+            if (existing.get("live") or {}).get("code_sha256") != code_hash:
+                existing.setdefault("live", {})["continued_by_code_sha256"] = code_hash
+                write_json(path, existing)
+        elif isinstance(existing, dict) and (existing.get("status") == "grading_failed"
+                                             or (existing.get("live") or {}).get("code_sha256") != code_hash):
             failures = len(list(path.parent.glob(path.name + ".failed-*")))
             if existing.get("status") == "grading_failed" and failures + 1 >= MAX_FAILED_ATTEMPTS:
                 row["skipped_after_failures"] += 1
@@ -648,13 +687,13 @@ def open_live_store(pipeline, route):
     return path
 
 
-def record_unavailable(live_dir, reason, *, run_id=None):
-    """Note in live/state.json that a pass did nothing because the live source is unavailable."""
+def record_unavailable(live_dir, reason, *, run_id=None, kind="live_source_unavailable"):
+    """Note in live/state.json that a pass did nothing: the live source is unavailable, or (``kind``
+    ``"deferred"``) the provider-key check failed or left no headroom for the pilot just now."""
     from .pipeline import write_json
     live_dir = Path(live_dir)
     state = _read(live_dir / "state.json") or {"schema": LIVE_STATE_SCHEMA, "agents": {}, "passes": []}
-    state.setdefault("passes", []).append({"started_at": _now(), "finished_at": _now(),
-                                           "live_source_unavailable": reason})
+    state.setdefault("passes", []).append({"started_at": _now(), "finished_at": _now(), kind: reason})
     state["passes"] = state["passes"][-STATE_PASSES_KEPT:]
     state.update(schema=LIVE_STATE_SCHEMA, run_id=run_id, updated_at=_now())
     write_json(live_dir / "state.json", state)

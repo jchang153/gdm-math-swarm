@@ -52,7 +52,12 @@ cap; an explicit --run-limit without a standing approval stays per invocation. A
 in addition, to behavior_judge_live_max_usd. It never sends a request that would push its
 committed spend (in-flight holds, settled and uncertain costs) past that limit, and stops cleanly
 instead (stop reason run_limit; a resume pays nothing twice); the ledger's cap applies as well.
-Every judging invocation of one run holds the run's judge lock (RUN/analysis/judge/.judge.lock).
+For a run judged before ledger labels carried the run id, the rows its judge directories' request
+archives name count as well. Every spending judging invocation of one run holds the run's lock
+(keyed by the ledger and the run id: <ledger folder>/.judge-run-locks/, whatever --output-dir) and
+its judge directory's lock (<judge dir>/.judge.lock). SIGTERM stops a judging invocation cleanly:
+nothing more is admitted, the requests in flight settle, the state is recorded and it exits 3 (a
+resume pays nothing twice); a second SIGTERM (or SIGINT) interrupts at once.
 --mock, --dry-run-estimate (optional, never required) and --rescore-cached never load credentials,
 never call a real model and never write the authoritative ledger. A paid run needs
 --i-have-user-approval (or the standing approval), the applied audited analysis raises
@@ -63,7 +68,10 @@ never call a real model and never write the authoritative ledger. A paid run nee
 import argparse
 import asyncio
 import json
+import os
+import signal
 import sys
+import threading
 from decimal import Decimal
 from pathlib import Path
 
@@ -210,7 +218,8 @@ def parse_args(argv=None):
     parser.add_argument("--prefilter-window-count", choices=("on", "off"),
                         help="show the agent's window count in each Haiku screening request (on: the v3 bytes) or not "
                              "(off: what live screening needs). Default: the judge directory's recorded setting, else "
-                             "its live store's, else on; --live always uses off")
+                             "the one RUN/analysis/judge recorded, else off when the run's own launch config "
+                             "(RUN/settings.json) enabled paid live judging, else on; --live always uses off")
     parser.add_argument("--warm-from", type=Path,
                         help="adopt units screened during the run from this live store (default <judge dir>/live when "
                              "it exists)")
@@ -222,26 +231,46 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+def run_live_mode(run_dir):
+    """The live judging mode the run's own launch config recorded (``RUN/settings.json`` "config",
+    written when the run started, before any live pass): "paid", "mock" or None."""
+    from research_swarm.auto_judge import live_mode
+    try:
+        config = json.loads((Path(run_dir) / "settings.json").read_text(encoding="utf-8")).get("config")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return live_mode(config) if isinstance(config, dict) else None
+
+
 def window_count_setting(args, judge_dir=None, recorded=None):
-    """``prefilter_window_count`` for this invocation (the one rule every invocation of a run uses, so
-    live passes and the post-run judge build identical screening requests): --live always False;
-    else --prefilter-window-count; else the judge directory's recorded setting (a resume); else its
-    live store's (a post-run judge after live passes); else True (the v3 bytes)."""
+    """``prefilter_window_count`` for this invocation: one rule every invocation of a run uses, so
+    live passes and the post-run judge build identical screening requests, decided by recorded
+    settings and the run's configuration, never by what the live passes happened to do. --live
+    always False; else --prefilter-window-count; else the judge directory's recorded setting (a
+    resume); else the setting the run's own judge directory (RUN/analysis/judge) recorded, so a
+    re-judge of the saved run into another --output-dir reproduces the original judgment; else
+    False when the run's own launch config enabled paid live judging (``run_live_mode``: recorded at
+    the run's start, so the early stages and the post-run judge agree whether or not a live pass
+    ever got far); else True (the v3 bytes). The free shadow of ``live_behavior_judge: "mock"``
+    passes ``off`` explicitly."""
     if getattr(args, "live", False):
         return False
     if getattr(args, "prefilter_window_count", None):
         return args.prefilter_window_count == "on"
-    from research.analysis.judge.pipeline import WARM_DIRNAME, read_json
-    store = getattr(args, "warm_from", None) or (Path(judge_dir) / WARM_DIRNAME if judge_dir else None)
-    for settings in ((recorded or {}),
-                     ((read_json(Path(judge_dir) / "manifest.json") or {}).get("settings") or {}) if judge_dir else {},
-                     ((read_json(Path(store) / "manifest.json") or {}).get("settings") or {})
-                     if store and not getattr(args, "no_warm", False) else {}):
+    from research.analysis.judge.pipeline import read_json
+    run_dir = getattr(args, "run_dir", None)
+    folders = [Path(judge_dir)] if judge_dir else []
+    if run_dir is not None:
+        own = Path(run_dir) / "analysis" / "judge"
+        if not folders or own.resolve() != folders[0].resolve():
+            folders.append(own)
+    for settings in [recorded or {}] + [(read_json(folder / "manifest.json") or {}).get("settings") or {}
+                                        for folder in folders]:
         if "prefilter_window_count" in settings:
             return bool(settings["prefilter_window_count"])
         if settings:
             return True   # a recorded binding without the key is the v3 default
-    return True
+    return not (run_dir is not None and run_live_mode(run_dir) == "paid")
 
 
 def settings_from(args, recorded=None, judge_dir=None):
@@ -646,14 +675,73 @@ def refuse(message):
     return 4
 
 
+DEFERRED = 5   # a live pass sent nothing and the next pass tries again (key check or headroom)
+
+
+class Termination:
+    """SIGTERM while judging (the supervisor stopping a live pass after the pilot exits, or the early
+    stages after a failed follow-up or a timeout): close every registered run limit, so nothing more
+    is admitted while the requests in flight finish and settle their ledger rows (never left
+    ``reserved``); the pipeline then stops cleanly (exit 3) and records its state. Before a run
+    limit exists nothing can be in flight, and a second signal means stop now: both raise
+    KeyboardInterrupt (``finally`` blocks still release the locks)."""
+
+    def __init__(self):
+        self.limits = []
+        self.received = None
+        self.notify = self._write_stderr
+
+    @staticmethod
+    def _write_stderr(text):
+        """Unbuffered (``os.write``): a print from a signal handler could interrupt a buffered write
+        to the same stream and raise inside the judge."""
+        try:
+            os.write(2, text.encode("utf-8", "replace"))
+        except OSError:
+            pass
+
+    def register(self, run_limit):
+        if run_limit is not None:
+            self.limits.append(run_limit)
+            if self.received is not None:
+                run_limit.close(self.reason())
+        return run_limit
+
+    def reason(self):
+        return f"{signal.Signals(self.received).name} received: the judging process was asked to stop"
+
+    def handle(self, signum, frame):  # noqa: ARG002
+        if self.received is not None or not self.limits:
+            raise KeyboardInterrupt(f"signal {signum}")
+        self.received = signum
+        for limit in self.limits:
+            limit.close(self.reason())
+        self.notify(f"STOPPING: {self.reason()}; finishing the requests in flight\n")
+
+    def install(self):
+        if threading.current_thread() is not threading.main_thread():
+            return None
+        return signal.signal(signal.SIGTERM, self.handle)
+
+    @staticmethod
+    def restore(previous):
+        if previous is not None and threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGTERM, previous)
+
+
 def main(argv=None):
+    termination = Termination()
+    previous = termination.install()
     try:
-        return _main(argv)
+        return _main(argv, termination)
     except RouteRefused as error:
         return refuse(str(error))
+    finally:
+        Termination.restore(previous)
 
 
-def _main(argv=None):
+def _main(argv=None, termination=None):
+    termination = termination or Termination()
     args = parse_args(argv)
     run_dir = args.run_dir.resolve()
     if not (run_dir / "inspect").is_dir():
@@ -780,14 +868,18 @@ def _main(argv=None):
     if args.live:
         return _live(args, run_dir=run_dir, judge_dir=judge_dir, settings=settings, standing=standing, mode=mode,
                      scope=scope, ledger=ledger, routes=routes, models=models, credentials_root=credentials_root,
-                     agents=agents, log=log)
-    from research.analysis.judge.live import JudgeBusy, judge_lock
+                     agents=agents, log=log, termination=termination)
+    from research.analysis.judge.live import JudgeBusy, judge_lock, judging_locks
+    # A spending invocation holds the run's lock (keyed by the ledger and the run id, whatever its
+    # --output-dir) and its judge directory's; --rescore-cached spends nothing and only needs the latter.
+    locks = (judge_lock(judge_dir, wait_seconds=args.lock_wait_seconds) if rescore else
+             judging_locks(judge_dir, ledger=ledger, run_id=run_dir.name, wait_seconds=args.lock_wait_seconds))
     try:
-        with judge_lock(judge_dir, wait_seconds=args.lock_wait_seconds):
+        with locks:
             return _judge(args, run_dir=run_dir, judge_dir=judge_dir, settings=settings, standing=standing, mode=mode,
                           scope=scope, ledger=ledger, routes=routes, models=models,
                           credentials_root=credentials_root, all_agents=all_agents, agents=agents, rescore=rescore,
-                          log=log)
+                          log=log, termination=termination)
     except JudgeBusy as error:
         return refuse(f"{error}; nothing was sent")
 
@@ -797,10 +889,13 @@ def _sample_index(run_dir):
     return sample_index(run_dir)
 
 
-def _run_prior(ledger, run_id, scope, *, tag=None):
-    """What the ledger already holds for this run's judging (``client.committed_for_run``)."""
+def _run_prior(ledger, run_id, scope, *, tag=None, archives=()):
+    """What the ledger already holds for this run's judging (``client.committed_for_run``): the rows
+    labelled with the run id and, for requests made before labels carried it, the judge rows the
+    request archives under ``archives`` name (the judge directory and RUN/analysis/judge)."""
     from research.analysis.judge.client import committed_for_run
-    return committed_for_run(ledger, run_id if tag is None else f"{run_id}:{tag}", scope=scope)
+    return committed_for_run(ledger, run_id if tag is None else f"{run_id}:{tag}", scope=scope,
+                             archives=sorted({Path(a).resolve() for a in archives}) if tag is None else ())
 
 
 def _clients(keys, *, ledger, scope, archive_dir, routes, settings, run_limit, run_id, mock=None, mock_cap=None,
@@ -830,7 +925,7 @@ def _mock_model(pl, routes, chosen):
 
 
 def _judge(args, *, run_dir, judge_dir, settings, standing, mode, scope, ledger, routes, models, credentials_root,
-           all_agents, agents, rescore, log):
+           all_agents, agents, rescore, log, termination=None):
     """A post-run judging invocation (paid, --mock or --rescore-cached), under the run's judge lock."""
     from research.analysis.judge import pipeline as pl
     from research.analysis.judge.client import RunLimit
@@ -856,7 +951,7 @@ def _judge(args, *, run_dir, judge_dir, settings, standing, mode, scope, ledger,
         # allowance; the standing cap and the default are per run (what this run's judging already
         # holds in the ledger counts against them). The ledger cap and the run limit still stop the
         # run cleanly.
-        prior = _run_prior(ledger, run_dir.name, scope)
+        prior = _run_prior(ledger, run_dir.name, scope, archives=(judge_dir, run_dir / "analysis" / "judge"))
         try:
             limit = fixed_run_limit(args.run_limit, standing, read_snapshot(ledger) if mode == "paid" else None,
                                     prior_usd=prior["committed_usd"])
@@ -869,6 +964,8 @@ def _judge(args, *, run_dir, judge_dir, settings, standing, mode, scope, ledger,
                              floor_usd=None, basis=limit["basis"], standing_approval=standing,
                              prior_usd=limit["prior_usd"], prior=prior if limit["per_run"] else None)
         pipeline.run_limit = run_limit
+        if termination is not None:
+            termination.register(run_limit)
     # Every agent's history is rebuilt once, in parallel worker processes, before any request and before
     # the event loop starts (never in a thread beside the HTTP threads); the pipeline reads it from memory.
     from research.analysis.judge.history import HistoryCache
@@ -925,31 +1022,39 @@ def _judge(args, *, run_dir, judge_dir, settings, standing, mode, scope, ledger,
 
 
 def _key_headroom(report, pilot_ledger, pilot_scope, room):
-    """None when the shared provider key leaves the running pilot its whole remaining allowance after
-    this live pass's room, else why not. An unlimited key (limit_remaining null) always passes; the
-    ledgers enforce the caps either way."""
+    """None when the shared provider key leaves the running pilot everything it may still be billed
+    after this live pass's room, else why not. What the pilot may still be billed is its ledger's
+    remaining allowance plus the reservations of its requests in flight or uncertain (``held_usd``):
+    the ledger's remaining allowance already has those holds taken off, but the key's
+    ``limit_remaining`` has not been charged for them yet. An unlimited key (limit_remaining null)
+    always passes; the ledgers enforce the caps either way."""
     remaining = (report or {}).get("limit_remaining")
     if remaining is None:
         return None
     from research_swarm.budget import read_snapshot
     try:
-        pilot = ((read_snapshot(pilot_ledger) or {}).get(pilot_scope) or {}).get("remaining_usd")
+        pilot = (read_snapshot(pilot_ledger) or {}).get(pilot_scope) or {}
     except Exception as error:
         return f"the pilot ledger {pilot_ledger} could not be read ({type(error).__name__})"
-    if pilot is None:
+    if pilot.get("remaining_usd") is None:
         return f"the pilot ledger {pilot_ledger} has no {pilot_scope!r} scope"
-    need = Decimal(str(pilot)) + Decimal(str(room))
+    held = Decimal(str(pilot.get("held_usd") or 0))
+    need = Decimal(str(pilot["remaining_usd"])) + held + Decimal(str(room))
     if Decimal(str(remaining)) < need:
-        return (f"the provider key's limit_remaining ${remaining} is below the pilot's remaining allowance ${pilot} "
-                f"plus this live pass's room ${room}: judging now could starve the running pilot")
+        return (f"the provider key's limit_remaining ${remaining} is below the pilot's remaining allowance "
+                f"${pilot['remaining_usd']} plus its unbilled holds ${held} plus this live pass's room ${room}: "
+                "judging now could starve the running pilot")
     return None
 
 
 def _live(args, *, run_dir, judge_dir, settings, standing, mode, scope, ledger, routes, models, credentials_root,
-          agents, log):
+          agents, log, termination=None):
     """One live screening pass (docs/plan.md, "Live behavior judge during the run (October 20, 2026)";
     research/analysis/judge/live.py). Exit 0: done, skipped (live source unavailable, or another
-    judging process holds the lock); 3: stopped by the run limit or the ledger; 4: refused."""
+    judging process holds the lock); 3: stopped by the run limit, the ledger or SIGTERM; 4: refused
+    (a configuration problem, or no room left under the caps); 5 (``DEFERRED``): nothing was sent
+    because the unpaid provider-key check failed or the key had no headroom for the pilot just
+    now, and the next pass tries again."""
     from research.analysis.judge import live as lv
     from research.analysis.judge import pipeline as pl
     from research.analysis.judge.client import RunLimit
@@ -964,7 +1069,7 @@ def _live(args, *, run_dir, judge_dir, settings, standing, mode, scope, ledger, 
         return 0
     margin = args.live_margin_seconds if args.live_margin_seconds is not None else lv.DEFAULT_MARGIN_SECONDS
     try:
-        lock = lv.judge_lock(judge_dir, wait_seconds=0)
+        lock = lv.judging_locks(judge_dir, ledger=ledger, run_id=run_dir.name, wait_seconds=0)
         lock.__enter__()
     except lv.JudgeBusy as error:
         print(json.dumps({"live": "skipped", "busy": str(error)}))
@@ -982,6 +1087,8 @@ def _live(args, *, run_dir, judge_dir, settings, standing, mode, scope, ledger, 
         run_limit = RunLimit(limit["limit_usd"], source=limit["source"], basis=limit["basis"],
                              standing_approval=standing, prior_usd=limit["prior_usd"],
                              prior=dict(prior, live_committed_usd=live_prior["committed_usd"], live_cap_usd=str(live_cap)))
+        if termination is not None:
+            termination.register(run_limit)
         clients = {}
         pipeline = pl.Pipeline(run_dir, live_dir, mode=mode, clients=clients, settings=settings, stage="prefilter",
                                scope=scope, ledger_path=ledger, models=models, route=describe_route(routes),
@@ -1004,11 +1111,11 @@ def _live(args, *, run_dir, judge_dir, settings, standing, mode, scope, ledger, 
             record_standing_approval(live_dir, standing, run_dir=run_dir, ledger=ledger)
             try:
                 report = clients["haiku"].prepare()   # the host key in memory and the unpaid provider-limit check
-            except Exception as error:   # e.g. ProviderLimitError: nothing was sent
-                return refuse(f"provider key check failed ({type(error).__name__}: {error}); nothing was sent")
+            except Exception as error:   # e.g. ProviderLimitError or a failed GET: nothing was sent
+                return _defer(live_dir, run_dir, f"provider key check failed ({type(error).__name__}: {error})")
             problem = _key_headroom(report, (args.pilot_ledger or ledger).resolve(), "pilot", limit["room_usd"])
             if problem:
-                return refuse(problem)
+                return _defer(live_dir, run_dir, problem)
         record = lv.LivePass(run_dir, pipeline, margin=margin, log=log, agents=agents).run()
     finally:
         lock.__exit__(None, None, None)
@@ -1020,6 +1127,17 @@ def _live(args, *, run_dir, judge_dir, settings, standing, mode, scope, ledger, 
                                                                                   "requests", "denied")}}
     print(json.dumps(summary, indent=2, default=str))
     return 3 if record.get("stopped") else 0
+
+
+def _defer(live_dir, run_dir, reason):
+    """A live pass that sent nothing because of a passing condition (the provider-key check failed,
+    or the key had no headroom for the pilot just now): recorded in live/state.json, exit
+    ``DEFERRED`` (the supervisor tries again next pass instead of ending live judging)."""
+    from research.analysis.judge import live as lv
+    lv.record_unavailable(live_dir, reason, run_id=run_dir.name, kind="deferred")
+    print(f"DEFERRED: {reason}; nothing was sent", file=sys.stderr)
+    print(json.dumps({"live": "deferred", "reason": reason}))
+    return DEFERRED
 
 
 DEFAULT_LIVE_MOCK_CAP_USD = Decimal("10")

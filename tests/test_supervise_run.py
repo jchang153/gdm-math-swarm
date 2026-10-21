@@ -108,6 +108,14 @@ if mode == 'refuse':
     raise SystemExit(4)
 if mode == 'crash':
     raise RuntimeError('judge crashed')
+if mode == 'defer' and '--live' in sys.argv:
+    raise SystemExit(5)   # run_transcript_judge.py DEFERRED: nothing sent, try again next pass
+"""
+SLOW_EARLY_JUDGE = STUB_JUDGE + """import time
+if '--stage' in sys.argv:          # the early model stages: slow, and they spend
+    open(os.path.join(root, 'early-nice'), 'w').write(str(os.nice(0)))
+    time.sleep(4)
+    open(os.path.join(root, 'early-finished'), 'w').write('done')
 """
 STUB_FREEZE = STUB_ORDER + """import datetime, json
 if not os.path.exists(os.path.join(root, 'freeze-fails')):
@@ -330,7 +338,8 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         self.assertGreaterEqual(len(passes), 1)
         root = self.tmp.resolve()
         for text in ("--standing-approval-from-config " + str(self.config.resolve()),
-                     "--ledger " + str(root / "state" / "budget.sqlite"), "--credentials-root " + str(root)):
+                     "--ledger " + str(root / "state" / "budget.sqlite"), "--credentials-root " + str(root),
+                     "--haiku-concurrency 8"):
             self.assertIn(text, passes[0])
         record = json.loads((self.phase / "live-judge.json").read_text())
         self.assertEqual(record["mode"], "paid")
@@ -366,15 +375,111 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         self.assertTrue(passes)
         self.assertTrue(all("--mock" in line and shadow in line and "--standing-approval" not in line
                             for line in passes))
+        self.assertTrue(all("--haiku-concurrency 8" in line for line in passes))
         post = [line for line in self.lines() if "--live" not in line]
-        self.assertEqual(len(post), 2)
-        mocked = [line for line in post if "--mock" in line]
-        self.assertEqual(len(mocked), 1)
-        self.assertIn(shadow, mocked[0])
-        self.assertIn("--standing-approval-from-config", post[-1])   # the paid post-run judge, unchanged
-        self.assertNotIn("--stage", post[-1])
+        self.assertEqual(len(post), 3)
+        early, paid, resume = post
+        # The shadow rehearses the paid order: model stages beside the follow-ups, the resume after them.
+        for line in (early, resume):
+            self.assertIn("--mock", line)
+            self.assertIn(shadow, line)
+            self.assertIn("--prefilter-window-count off", line)
+            self.assertNotIn("--standing-approval", line)
+        self.assertIn("--stage verify", early)
+        self.assertNotIn("--stage", resume)
+        self.assertIn("--standing-approval-from-config", paid)   # the paid post-run judge, unchanged
+        self.assertNotIn("--stage", paid)
+        self.assertNotIn("--prefilter-window-count", paid)
+        order = self.follow_up_order()
+        self.assertLess(order.index("timeline.py"), len(order) - 2)   # paid judge, then the shadow resume
+        self.assertEqual(order[-2:], ["run_transcript_judge.py", "run_transcript_judge.py"])
         record = self.judge_record()
         self.assertEqual((record["early"]["name"], record["early"]["exit"]), ("behavior-judge-shadow", 0))
+        self.assertEqual((record["shadow_resume"]["exit"], record["shadow_resume"]["outcome"]), (0, "complete"))
+        self.assertTrue((self.phase / "behavior-judge-shadow-resume.exit").exists())
+        self.assertIn("behavior-judge-shadow-resume.log", self.packaged()[0])
+
+    # -- review findings (October 20, 2026) ------------------------------------------------------------
+    def test_failed_follow_up_stops_the_early_stages(self):
+        """Before live judging a failed follow-up meant no judge spend; the early stages, which no resume
+        will finish, are stopped instead of running to completion."""
+        self.pricing(1)
+        (self.tmp / "scripts" / "run_transcript_judge.py").write_text(SLOW_EARLY_JUDGE)
+        (self.tmp / "research" / "analysis" / "timeline.py").write_text("raise SystemExit(7)\n")
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 7)
+        record = self.judge_record()
+        self.assertEqual(record["outcome"], "skipped")
+        self.assertFalse((self.tmp / "early-finished").exists())
+        self.assertIn("did not complete (exit 7)", record["early"]["stopped"])
+        self.assertNotEqual(record["early"]["exit"], 0)
+        self.assertTrue((self.phase / "behavior-judge-early.exit").exists())
+
+    def test_early_stages_are_reaped_when_a_follow_up_step_raises(self):
+        self.pricing(1)
+        (self.tmp / "scripts" / "run_transcript_judge.py").write_text(SLOW_EARLY_JUDGE)
+        sup = supervise.Supervisor(self.args("--no-shutdown"))
+        with mock.patch.object(supervise.Supervisor, "follow_ups", side_effect=OSError("No space left on device")):
+            self.assertEqual(sup.main(), 2)
+        self.assertIsNone((sup.early or {}).get("proc"))   # waited for and recorded, never left running
+        self.assertIn("without resuming the judge", sup.early["stopped"])
+        self.assertTrue((self.phase / "behavior-judge-early.exit").exists())
+        self.assertFalse((self.tmp / "early-finished").exists())
+        self.assertEqual(json.loads((self.phase / "worker.exit").read_text()), 2)
+
+    def test_early_stages_run_at_low_priority_with_few_history_workers(self):
+        self.pricing(1)
+        (self.tmp / "scripts" / "run_transcript_judge.py").write_text(SLOW_EARLY_JUDGE)
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        self.assertEqual((self.tmp / "early-nice").read_text(), "19")
+        early = [line for line in self.lines() if "--stage verify" in line]
+        self.assertIn(f"--history-workers {supervise.EARLY_HISTORY_WORKERS}", early[0])
+        record = self.judge_record()
+        self.assertEqual((record["early"]["exit"], record["early"]["low_priority"]), (0, True))
+        self.assertEqual(json.loads((self.phase / "live-judge.json").read_text())["isolation"]["nice"], 19)
+
+    def test_memory_scope_is_used_only_where_memory_max_applies(self):
+        sup = supervise.Supervisor(self.args("--no-shutdown"))
+        limit = str(8 << 30)
+        for stdout, expected in (("max\n", False), (limit + "\n", True)):
+            sup._scope_ok = None
+            done = supervise.subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+            with mock.patch.object(supervise.shutil, "which", return_value="/usr/bin/systemd-run"), \
+                    mock.patch.object(supervise.subprocess, "run", return_value=done) as run:
+                self.assertIs(sup.scope_ok(), expected, sup.scope_detail)
+                self.assertIn("MemoryMax=8G", run.call_args[0][0])
+                prefix = sup.live_prefix()
+            self.assertEqual("systemd-run" in prefix, expected)
+        self.assertEqual(supervise._memory_bytes("512M"), 512 << 20)
+
+    def test_a_deferred_live_pass_never_ends_live_judging(self):
+        self.pricing(1)
+        self.live_pilot(seconds=2.0)
+        (self.tmp / "judge-mode").write_text("defer")
+        self.assertEqual(self.live_run(), 0)
+        record = json.loads((self.phase / "live-judge.json").read_text())
+        self.assertIsNone(record["stopped"])
+        self.assertGreater(record["deferred"], supervise.LIVE_MAX_FAILURES)
+        self.assertTrue(all(t.get("deferred") for t in record["ticks"] if t.get("exit") == 5))
+        self.assertEqual(record["failures"], 0)
+
+    def test_live_pass_is_drained_after_the_pilot_exits(self):
+        """A pass still running after the pilot exits gets SIGTERM and time to settle its in-flight requests
+        (it exits 3), instead of being killed with its holds left reserved."""
+        self.pricing(1)
+        (self.tmp / "scripts" / "run_transcript_judge.py").write_text(STUB_ORDER + """import signal, time
+if '--live' in sys.argv:
+    def stop(signum, frame):
+        time.sleep(1.0)   # the in-flight requests settle
+        raise SystemExit(3)
+    signal.signal(signal.SIGTERM, stop)
+    time.sleep(30)
+""")
+        self.live_pilot(seconds=0.5)
+        with mock.patch.object(supervise, "LIVE_STOP_WAIT_SECONDS", 0.5):
+            self.assertEqual(self.live_run(), 0)
+        record = json.loads((self.phase / "live-judge.json").read_text())
+        last = record["ticks"][-1]
+        self.assertEqual((last["exit"], last.get("terminated"), last.get("killed")), (3, True, None))
 
     # The inherited runs use the base config (no auto judge keys) and stub follow-ups.
     test_full_cycle_without_shutdown = None

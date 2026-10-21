@@ -2364,14 +2364,24 @@ class Pipeline:
         self.log(f"live units: {self.warm.describe()}")
         return self.warm
 
+    def warm_folder(self):
+        """The live store this judge adopts from (opened, or the default judge_dir/live)."""
+        if self.warm is not None:
+            return self.warm.folder
+        if self.warm_from:
+            return Path(self.warm_from)
+        return self.judge_dir / WARM_DIRNAME
+
     async def _adopt_warm(self, model, path, input_sha, *, system, user, unit_id, purpose, max_tokens, parse,
                           salvage, repair, refusal_retry):
         """A live unit made for exactly this request (warm.py), checked by replaying its recorded
         outputs through ``_drive_unit`` and copied to ``path``; else None (the request is sent)."""
         candidate = self.warm.candidate(path, input_sha, purpose=purpose, model_id=self.model_id(model),
                                         mode=self.mode)
+        carry = dict(model=model, path=path, input_sha=input_sha, system=system, user=user, unit_id=unit_id,
+                     purpose=purpose, max_tokens=max_tokens)
         if candidate is None:
-            return None
+            return self._carry_refusal(**carry)
         found, source = candidate
         if found.get("status") in FINAL:
             replayed = json.loads(json.dumps(found))
@@ -2386,12 +2396,36 @@ class Pipeline:
                                                   replay=True)
             except ReplayNeedsRequest as missing:
                 self.warm.reject(path, source, f"replay_needs_request:{missing}")
-                return None
+                return self._carry_refusal(**carry)
             keys = ("status", "reason", "result", "problems")
             if canonical({k: replayed.get(k) for k in keys}) != canonical({k: found.get(k) for k in keys}):
                 self.warm.reject(path, source, "replay_mismatch")
-                return None
+                return self._carry_refusal(**carry)
         return self.warm.adopt(path, source, found)
+
+    def _carry_refusal(self, *, model, path, input_sha, system, user, unit_id, purpose, max_tokens):
+        """Judge revision v3, item 6 across the live/post-run boundary: a live unit of exactly this
+        request that met a refusal and was not adopted (a store-wide guard, the code hash or the
+        replay check failed) is never sent again identically. When the request body this judge would
+        send is byte-identical to the one the live pass sent (``WarmStore.sent_body_sha256``), the live
+        unit's recorded steps are carried into a pending unit at ``path``: ``unit`` then decides from
+        them with this judge's own code and sends only what they lack (the one retry of a refusal
+        whose retry was not admitted, or a repair). Otherwise None: a different request is sent."""
+        twin = self.warm.refused_twin(path, input_sha, purpose=purpose, model_id=self.model_id(model),
+                                      mode=self.mode)
+        client = self.clients.get(model)
+        if twin is None or client is None or not hasattr(client, "body"):
+            return None
+        found, source = twin
+        sent = self.warm.sent_body_sha256(found)
+        from .warm import body_sha256
+        if sent is None or sent != body_sha256(client.body(system, user, max_tokens, client.route.effort,
+                                                           cache_system=self.cache_request())):
+            self.warm.reject(path, source, "refused_request_not_byte_identical" if sent else
+                             "refused_request_unverifiable")
+            return None
+        fresh = self.new_unit(model, unit_id=unit_id, purpose=purpose, system=system, user=user)
+        return self.warm.carry(path, source, found, fresh)
 
     async def run(self):
         started = self.started_at = _now()
@@ -3371,11 +3405,22 @@ class Pipeline:
                "requests": requests, "by_stage": dict(sorted(by_stage.items())),
                "by_model": dict(sorted(by_model.items())), "by_purpose": by_purpose,
                "replaced_units": replaced_unit_spend(self.judge_dir)}
-        if (self.judge_dir / WARM_DIRNAME / "units").is_dir():
+        live_folder = self.warm_folder()
+        if (live_folder / "units").is_dir():
             # Live behavior judge: units screened during the run. Adopted ones are counted above (their
             # copies in units/); the unadopted ones were paid once and are reported here.
             from .warm import live_spend
-            out["live"] = live_spend(self.judge_dir)
+            out["live"] = live_spend(self.judge_dir, live_folder)
+        if self.ledger_path and self.ledger_path.exists():
+            # Everything the ledger holds for this run's judging (every invocation, live passes, units
+            # redone or never adopted, in-flight and uncertain holds): what the per-run cap counts.
+            from .client import committed_for_run
+            try:
+                archives = sorted({self.judge_dir.resolve(), (self.run_dir / "analysis" / "judge").resolve()})
+                out["run_ledger"] = committed_for_run(self.ledger_path, self.run_id, scope=self.scope,
+                                                      archives=archives)
+            except Exception as error:   # never hides the per-unit record
+                out["run_ledger_error"] = type(error).__name__
         if self.ledger_path and self.ledger_path.exists():
             from research_swarm.budget import read_snapshot
             try:

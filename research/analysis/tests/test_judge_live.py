@@ -32,6 +32,7 @@ import io
 import json
 import random
 import shutil
+import signal
 import sqlite3
 import sys
 import tempfile
@@ -702,6 +703,24 @@ class LiveThenPostEquivalenceTests(unittest.TestCase):
         state = json.loads((self.warm.judge_dir / "state.json").read_text())
         self.assertEqual(state["invocations"][-1]["live"]["adopted"], self.live_count)
 
+    def test_report_counts_live_spend_never_adopted(self):
+        """Review finding: the report's total left out live units never adopted; the ledger counted them."""
+        report = json.loads((self.warm.judge_dir / "report.json").read_text())
+        cost = report["cost_by_stage"]
+        unadopted = Decimal(self.consistency["spend"]["unadopted_settled_usd"])
+        self.assertGreater(unadopted, 0)
+        self.assertEqual((cost["live_unadopted_units"], Decimal(cost["live_unadopted_settled_usd"])), (1, unadopted))
+        self.assertEqual(Decimal(cost["all_settled_usd"]), Decimal(cost["total_usd"]) + unadopted)
+        # The ledger's own total for the run: every live pass and invocation (the post-run clients of this
+        # rehearsal label no run id, so their rows are found through the request archives).
+        with contextlib.closing(sqlite3.connect(self.warm.root / "ledger.sqlite")) as db:
+            everything = db.execute("SELECT COALESCE(SUM(COALESCE(actual, reserved)), 0) FROM calls").fetchone()[0]
+        from research_swarm.budget import usd
+        self.assertEqual(Decimal(cost["run_ledger_committed_usd"]), Decimal(usd(everything)))
+        page = (self.warm.judge_dir / "report.html").read_text()
+        self.assertIn("Also paid during the run", page)
+        self.assertIn("The ledger holds", page)
+
     def test_refused_window_is_adopted_and_never_resent(self):
         refused = json.loads((self.warm.judge_dir / "units" / "agent-001" / "prefilter" / "A01.w0002.json").read_text())
         self.assertEqual((refused["status"], refused["reason"]), ("ungraded", "refused_twice"))
@@ -973,26 +992,487 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("busy", out)
 
+    def launch_config(self, **changes):
+        """RUN/settings.json as the runtime writes it at the run's start ("config": the launch config)."""
+        config = dict({"auto_behavior_judge": True, "behavior_judge_approval": "owner (test)",
+                       "behavior_judge_max_usd": 50, "run_dir": "runs/x"}, **changes)
+        (self.run_dir / "settings.json").write_text(json.dumps({"config": config, "effective": {}}))
+
     def test_window_count_setting(self):
         args = self.cli.parse_args(["--run-dir", str(self.run_dir)])
         self.assertTrue(self.cli.window_count_setting(args, self.judge_dir))
-        live_manifest = self.judge_dir / "live" / "manifest.json"
-        pl.write_json(live_manifest, {"settings": dict(OFF.binding())})
+        # A live store never decides it (whether a live pass got far is timing) ...
+        pl.write_json(self.judge_dir / "live" / "manifest.json", {"settings": dict(OFF.binding())})
+        self.assertTrue(self.cli.window_count_setting(args, self.judge_dir))
+        # ... the run's own launch config does: paid live judging means no window count, for every invocation.
+        self.launch_config()
         self.assertFalse(self.cli.window_count_setting(args, self.judge_dir))
-        self.assertTrue(self.cli.window_count_setting(self.cli.parse_args(["--run-dir", str(self.run_dir),
-                                                                           "--no-warm"]), self.judge_dir))
+        self.assertFalse(self.cli.window_count_setting(args, self.tmp / "elsewhere" / tjp.RUN_ID / "analysis" / "judge"))
+        self.launch_config(live_behavior_judge="mock")   # the shadow passes "off" itself; the paid judge keeps v3
+        self.assertTrue(self.cli.window_count_setting(args, self.judge_dir))
+        self.launch_config(live_behavior_judge=False)
+        self.assertTrue(self.cli.window_count_setting(args, self.judge_dir))
+        self.launch_config()
         pl.write_json(self.judge_dir / "manifest.json", {"settings": dict(ON.binding())})  # a v3 directory resumes v3
         self.assertTrue(self.cli.window_count_setting(args, self.judge_dir))
+        # A re-judge into another --output-dir reproduces what the run's own judge directory recorded.
+        rejudge = self.tmp / "rejudge" / tjp.RUN_ID / "analysis" / "judge"
+        own = self.run_dir / "analysis" / "judge"
+        pl.write_json(own / "manifest.json", {"settings": dict(ON.binding())})
+        self.assertTrue(self.cli.window_count_setting(args, rejudge))
+        pl.write_json(own / "manifest.json", {"settings": dict(OFF.binding())})
+        self.assertFalse(self.cli.window_count_setting(args, rejudge))
+        self.launch_config(live_behavior_judge=False)
+        self.assertFalse(self.cli.window_count_setting(args, rejudge))
+        self.assertFalse(self.cli.window_count_setting(args, own))
+        self.launch_config()
         flagged = self.cli.parse_args(["--run-dir", str(self.run_dir), "--prefilter-window-count", "off"])
         self.assertFalse(self.cli.window_count_setting(flagged, self.judge_dir))
         self.assertFalse(self.cli.window_count_setting(self.cli.parse_args(["--run-dir", str(self.run_dir), "--live"])))
         self.assertTrue(self.cli.settings_from(args, judge_dir=self.judge_dir).prefilter_window_count)
+
+    def test_window_count_never_depends_on_how_far_a_live_pass_got(self):
+        """Review finding: the format followed live/manifest.json, which only a pass that got past the
+        Inspect gate, the lock and the run limit wrote. Two runs with the same config and transcripts, in
+        neither of which a live pass screened anything, must get the same Haiku request bytes."""
+        formats = {}
+        for name, gate in (("got_far", None), ("stopped_at_the_gate", "inspect_ai unavailable (ImportError)")):
+            run_dir = self.tmp / name / "runs" / tjp.RUN_ID
+            (run_dir / "inspect").mkdir(parents=True)
+            judge = self.tmp / name / "copy" / tjp.RUN_ID / "analysis" / "judge"
+            self.run_dir = run_dir
+            self.launch_config()
+            with mock.patch.object(live, "inspect_gate", return_value=gate):
+                code, out, err = self.call("--live", "--mock", "--output-dir", str(judge))
+            self.assertEqual(code, 0, err)
+            self.assertEqual((judge / "live" / "manifest.json").exists(), gate is None)
+            args = self.cli.parse_args(["--run-dir", str(run_dir), "--mock", "--output-dir", str(judge)])
+            formats[name] = self.cli.settings_from(args, None, judge).prefilter_window_count
+        self.assertEqual(formats, {"got_far": False, "stopped_at_the_gate": False})
+        # Without live judging in the config, a pass that wrote the live manifest changes nothing either.
+        self.run_dir = self.tmp / "no_live" / "runs" / tjp.RUN_ID
+        (self.run_dir / "inspect").mkdir(parents=True)
+        self.launch_config(live_behavior_judge=False)
+        judge = self.tmp / "no_live" / "copy" / tjp.RUN_ID / "analysis" / "judge"
+        code, _, err = self.call("--live", "--mock", "--output-dir", str(judge))
+        self.assertEqual(code, 0, err)
+        self.assertTrue((judge / "live" / "manifest.json").exists())
+        args = self.cli.parse_args(["--run-dir", str(self.run_dir), "--mock", "--output-dir", str(judge)])
+        self.assertTrue(self.cli.settings_from(args, None, judge).prefilter_window_count)
 
     def test_binding_keeps_v3_manifests(self):
         self.assertNotIn("prefilter_window_count", pl.PipelineSettings().binding())
         self.assertIs(pl.PipelineSettings(prefilter_window_count=False).binding()["prefilter_window_count"], False)
         with self.assertRaises(ValueError):
             pl.PipelineSettings(prefilter_window_count="no").validate()
+
+
+def prefilter_windows_sent(rehearsal, start=0):
+    """Window ids of the Haiku screening requests sent through the rehearsal transport since ``start``."""
+    out = []
+    for request in rehearsal.transport.requests[start:]:
+        body = request["body"]
+        purpose, window = rehearsal.model.classify(tjp.system_text(body), body["messages"][-1]["content"])
+        if purpose == "prefilter":
+            out.append(window)
+    return out
+
+
+class ReviewFixTests(unittest.TestCase):
+    """Review findings on the live judge (October 20, 2026): each test fails on the code before its fix."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="judge-live-review-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def screened(self, agents, store=None):
+        rehearsal = tjp.Rehearsal(self.tmp / "warm", settings=SETTINGS, judge_mode="candidates", agents=agents)
+        store = store or rehearsal.judge_dir / "live"
+        pipeline = mock_pipeline(rehearsal, store)
+        live.open_live_store(pipeline, {})
+        asyncio.run(live.send_requests(pipeline, live_requests(rehearsal, store, 1.0)))
+        return rehearsal, store, pipeline
+
+    # -- --warm-from a store outside the judge directory ------------------------------------------
+    def test_post_run_with_a_store_outside_the_judge_directory_completes(self):
+        rehearsal, store, _ = self.screened(["agent-004"], store=self.tmp / "elsewhere" / "live")
+        units = sorted(store.glob("units/agent-004/prefilter/*.json"))
+        self.assertTrue(units)
+        before = {p: p.read_bytes() for p in store.rglob("*") if p.is_file()}
+        summary = rehearsal.run_pipeline(warm_from=store)
+        self.assertEqual(summary["status"], "complete", summary["errors"])
+        self.assertEqual(summary["live"]["adopted"], len(units))
+        state = json.loads((rehearsal.judge_dir / "state.json").read_text())
+        self.assertEqual(len(state["invocations"]), 1)
+        record = json.loads((rehearsal.judge_dir / "warm-consistency.json").read_text())
+        self.assertEqual(record["adopted"], len(units))
+        self.assertEqual(record["spend"]["adopted_units"], len(units))
+        # The other judge's store is only read.
+        self.assertEqual({p: p.read_bytes() for p in store.rglob("*") if p.is_file()}, before)
+        spend = json.loads((rehearsal.judge_dir / "pipeline.json").read_text())["spend"]
+        self.assertEqual(spend["live"]["adopted_units"], len(units))
+
+    def test_warm_from_outside_the_output_dir_on_the_command_line(self):
+        import test_judge_estimate
+        harness = test_judge_estimate.CommandLineTests("test_run_limit_flag")
+        harness.setUp()
+        try:
+            store = harness.tmp / "elsewhere" / "live"
+            folder = store / "units" / "agent-001" / "prefilter"
+            folder.mkdir(parents=True)
+            pl.write_json(folder / "A01.w0001@0123456789abcdef.json",
+                          {"schema": pl.UNIT_SCHEMA, "unit_id": "A01.w0001", "purpose": "prefilter", "status": "ok",
+                           "steps": [{"kind": "initial", "client": {"settlements": [{"cost_usd": "0.01"}]}}]})
+            code, _, err = harness.call("--mock", "--output-dir", str(harness.judge_dir), "--warm-from", str(store),
+                                        "--stage", "prefilter")
+            self.assertEqual(code, 0, err[-2000:])
+            state = json.loads((harness.judge_dir / "state.json").read_text())
+            self.assertEqual(len(state["invocations"]), 1)
+            self.assertEqual(state["invocations"][0]["live"]["spend"]["unadopted_settled_usd"], "0.01")
+        finally:
+            harness.tearDown()
+
+    # -- paid live spend that was set aside ---------------------------------------------------------
+    def test_live_spend_counts_set_aside_units(self):
+        from research.analysis.judge import warm
+        judge_dir = self.tmp / "judge"
+        folder = judge_dir / "live" / "units" / "agent-001" / "prefilter"
+        folder.mkdir(parents=True)
+
+        def unit(cost, status="ok"):
+            return {"schema": pl.UNIT_SCHEMA, "unit_id": "A01.w0001", "purpose": "prefilter", "status": status,
+                    "steps": [{"kind": "initial", "client": {"settlements": [{"cost_usd": cost}]}}]}
+        pl.write_json(folder / "A01.w0001@0123456789abcdef.json", unit("0.01"))
+        pl.write_json(folder / "A01.w0002@0123456789abcdef.json.failed-20261020T120000Z", unit("0.02", "grading_failed"))
+        pl.write_json(folder / "A01.w0003@0123456789abcdef.json.code-changed-20261020T120000Z", unit("0.04", "pending"))
+        spent = warm.live_spend(judge_dir)
+        self.assertEqual((Decimal(spent["settled_usd"]), Decimal(spent["unadopted_settled_usd"])),
+                         (Decimal("0.07"), Decimal("0.07")))
+        self.assertEqual((spent["units"], spent["unadopted_units"], spent["set_aside_units"]), (3, 1, 2))
+
+    # -- consistency.json after an invocation killed before WarmStore.finish ----------------------
+    def test_adoptions_of_a_killed_invocation_are_recorded(self):
+        from research.analysis.judge import warm
+        rehearsal, store, _ = self.screened(["agent-004"])
+        units = sorted(store.glob("units/agent-004/prefilter/*.json"))
+        with mock.patch.object(warm.WarmStore, "finish", side_effect=KeyboardInterrupt("killed")):
+            with self.assertRaises(KeyboardInterrupt):
+                rehearsal.run_pipeline(stage="verify")
+        self.assertFalse((store / "consistency.json").exists())
+        final = rehearsal.run_pipeline()
+        self.assertEqual(final["status"], "complete", final["errors"])
+        consistency = json.loads((store / "consistency.json").read_text())
+        self.assertEqual((consistency["adopted"], consistency["windows_not_screened_live"]), (len(units), 1))
+        self.assertEqual(final["live"]["adopted"], len(units))
+
+    # -- a refused request is never resent identically across the live/post-run boundary --------
+    def refused(self):
+        rehearsal, store, pipeline = self.screened(["agent-001"])
+        path = next(store.glob("units/agent-001/prefilter/A01.w0002@*.json"))
+        unit = json.loads(path.read_text())
+        self.assertEqual((unit["status"], unit["reason"]), ("ungraded", "refused_twice"))
+        self.assertEqual(prefilter_windows_sent(rehearsal).count("A01.w0002"), 2)
+        return rehearsal, store, pipeline, path
+
+    def post_unit(self, rehearsal, window="A01.w0002"):
+        return json.loads((rehearsal.judge_dir / "units" / "agent-001" / "prefilter" / f"{window}.json").read_text())
+
+    def test_refused_window_is_not_resent_when_the_store_is_disabled(self):
+        rehearsal, store, _, _ = self.refused()
+        manifest = json.loads((store / "manifest.json").read_text())
+        manifest["models"]["haiku"]["canonical_slug"] = "refreshed"   # e.g. a route record refreshed in between
+        (store / "manifest.json").write_text(json.dumps(manifest))
+        sent = len(rehearsal.transport.requests)
+        summary = rehearsal.run_pipeline()
+        self.assertEqual(summary["status"], "complete", summary["errors"])
+        windows = prefilter_windows_sent(rehearsal, sent)
+        self.assertNotIn("A01.w0002", windows)            # the refused request was not sent a third time
+        self.assertIn("A01.w0001", windows)               # everything else was screened again (store disabled)
+        unit = self.post_unit(rehearsal)
+        self.assertEqual((unit["status"], unit["reason"]), ("ungraded", "refused_twice"))
+        self.assertIn("refusal_carried_from", unit)
+        self.assertNotIn("adopted_from", unit)
+        consistency = json.loads((store / "consistency.json").read_text())
+        self.assertEqual((consistency["enabled"], consistency["adopted"], consistency["refusals_carried"]),
+                         (False, 0, 1))
+        self.assertIn("binding differs: models", consistency["disabled_reason"])
+        # The same result as a post-run-only judge, whose window is refused twice as well.
+        cold = tjp.Rehearsal(self.tmp / "cold", settings=SETTINGS, judge_mode="candidates", agents=["agent-001"])
+        self.assertEqual(cold.run_pipeline()["status"], "complete")
+        self.assertEqual(outputs(rehearsal.judge_dir), outputs(cold.judge_dir))
+
+    def test_refused_window_made_by_other_judge_code_is_carried(self):
+        rehearsal, store, _, path = self.refused()
+        unit = json.loads(path.read_text())
+        unit["live"]["code_sha256"] = "0" * 64
+        path.write_text(json.dumps(unit))
+        sent = len(rehearsal.transport.requests)
+        self.assertEqual(rehearsal.run_pipeline()["status"], "complete")
+        self.assertNotIn("A01.w0002", prefilter_windows_sent(rehearsal, sent))
+        self.assertEqual(self.post_unit(rehearsal)["reason"], "refused_twice")
+        reasons = [r["reason"] for rows in json.loads((store / "consistency.json").read_text())["detail"]
+                   ["rejected"].values() for r in rows]
+        self.assertEqual(reasons, ["judge_code_differs"])
+
+    def test_a_refused_window_whose_request_differs_is_sent(self):
+        rehearsal, store, _, path = self.refused()
+        unit = json.loads(path.read_text())
+        unit["live"]["code_sha256"] = "0" * 64
+        path.write_text(json.dumps(unit))
+        for raw in unit["steps"][0]["client"]["raw_paths"]:
+            if raw.endswith(".request.json"):
+                archived = json.loads((store / raw).read_text())
+                archived["body_sha256"] = "f" * 64          # the live pass sent another body
+                (store / raw).write_text(json.dumps(archived))
+        sent = len(rehearsal.transport.requests)
+        self.assertEqual(rehearsal.run_pipeline()["status"], "complete")
+        self.assertEqual(prefilter_windows_sent(rehearsal, sent).count("A01.w0002"), 1)   # a different request
+        reasons = sorted(r["reason"] for rows in json.loads((store / "consistency.json").read_text())["detail"]
+                         ["rejected"].values() for r in rows)
+        self.assertEqual(reasons, ["judge_code_differs", "refused_request_not_byte_identical"])
+
+    def test_live_pass_sends_only_the_retry_of_a_pending_refused_unit_left_by_other_code(self):
+        rehearsal, store, pipeline, path = self.refused()
+        unit = json.loads(path.read_text())
+        step = unit["steps"][0]
+        step["client"].update(refusals=1, refusal_details=step["client"]["refusal_details"][:1],
+                              error=dict(step["client"]["error"], reason=pl.REFUSAL_RETRY_PENDING))
+        unit.update(status="pending", reason=None)
+        unit["live"]["code_sha256"] = "0" * 64
+        path.write_text(json.dumps(unit))
+        request = next(r for r in live_requests(rehearsal, store, 1.0) if r["window"]["id"] == "A01.w0002")
+        sent = len(rehearsal.transport.requests)
+        outcomes, stopped = asyncio.run(live.send_requests(pipeline, [request]))
+        self.assertIsNone(stopped)
+        self.assertEqual(prefilter_windows_sent(rehearsal, sent), ["A01.w0002"])   # only the retry
+        self.assertEqual(list(path.parent.glob(path.name + ".*")), [])               # never set aside
+        unit = json.loads(path.read_text())
+        self.assertEqual([s["kind"] for s in unit["steps"]], ["initial", "initial_retry"])
+        self.assertIn("continued_by_code_sha256", unit["live"])
+
+    def test_live_pass_never_resends_a_failed_refused_unit(self):
+        rehearsal, store, pipeline, path = self.refused()
+        unit = json.loads(path.read_text())
+        unit["status"] = "grading_failed"
+        path.write_text(json.dumps(unit))
+        request = next(r for r in live_requests(rehearsal, store, 1.0) if r["window"]["id"] == "A01.w0002")
+        sent = len(rehearsal.transport.requests)
+        outcomes, _ = asyncio.run(live.send_requests(pipeline, [request]))
+        self.assertEqual(prefilter_windows_sent(rehearsal, sent), [])
+        self.assertEqual(outcomes["agent-001"]["refused_left"], 1)
+
+    # -- the per-run cap and lock ------------------------------------------------------------------
+    def test_a_run_judged_before_labels_carried_the_run_id_keeps_its_spend(self):
+        import test_judge_estimate
+        harness = test_judge_estimate.CommandLineTests("test_run_limit_flag")
+        harness.setUp()
+        try:
+            code, _, err = harness.call("--mock", "--output-dir", str(harness.judge_dir), "--stage", "prefilter")
+            self.assertEqual(code, 0, err)
+            ledger = harness.judge_dir / "rehearsal-ledger.sqlite"
+            with contextlib.closing(sqlite3.connect(ledger)) as db, db:   # the labels origin/main wrote
+                db.execute("UPDATE calls SET agent=replace(agent, ?, ':')", (f":{tjp.RUN_ID}:",))
+            self.assertEqual(committed_for_run(ledger, tjp.RUN_ID, scope="rehearsal")["committed_usd"], "0")
+            with_archives = committed_for_run(ledger, tjp.RUN_ID, scope="rehearsal", archives=[harness.judge_dir])
+            self.assertGreater(Decimal(with_archives["committed_usd"]), 0)
+            self.assertEqual(with_archives["legacy_rows"], with_archives["rows"])
+            code, _, err = harness.call("--mock", "--output-dir", str(harness.judge_dir), "--stage", "judge",
+                                        "--max-selected-fraction", "1")
+            self.assertEqual(code, 0, err)
+            first, second = (inv["run_limit"] for inv in json.loads((harness.judge_dir / "state.json").read_text())
+                             ["invocations"])
+            self.assertEqual(Decimal(second["prior_usd"]), Decimal(first["settled_usd"]))
+            self.assertEqual(Decimal(second["prior_usd"]), Decimal(with_archives["committed_usd"]))
+        finally:
+            harness.tearDown()
+
+    def test_two_output_dirs_of_one_run_share_the_run_lock(self):
+        import test_judge_estimate
+        harness = test_judge_estimate.CommandLineTests("test_run_limit_flag")
+        harness.setUp()
+        try:
+            ledger = harness.tmp / "shared-ledger.sqlite"
+            other = harness.tmp / "other" / tjp.RUN_ID / "analysis" / "judge"
+            with live.judging_locks(other, ledger=ledger, run_id=tjp.RUN_ID):   # e.g. the supervisor's judge
+                code, _, err = harness.call("--mock", "--output-dir", str(harness.judge_dir), "--ledger", str(ledger),
+                                            "--lock-wait-seconds", "0")
+                self.assertEqual(code, 4)
+                self.assertIn("held by another judging process", err)
+                code, out, err = harness.call("--live", "--mock", "--output-dir", str(harness.judge_dir), "--ledger",
+                                              str(ledger))
+                self.assertEqual(code, 0, err)
+                self.assertIn("busy", out)
+            self.assertFalse((harness.judge_dir / "state.json").exists())   # nothing ran
+            code, _, err = harness.call("--mock", "--output-dir", str(harness.judge_dir), "--ledger", str(ledger),
+                                        "--stage", "prefilter")
+            self.assertEqual(code, 0, err)
+            # Another run on the same ledger is not held up.
+            with live.judging_locks(other, ledger=ledger, run_id="another-run"):
+                code, _, err = harness.call("--mock", "--output-dir", str(harness.judge_dir), "--ledger", str(ledger),
+                                            "--stage", "prefilter", "--lock-wait-seconds", "0")
+            self.assertEqual(code, 0, err)
+        finally:
+            harness.tearDown()
+
+    def test_key_headroom_counts_the_pilots_unbilled_holds(self):
+        import run_transcript_judge as cli
+        ledger = self.tmp / "budget.sqlite"
+        book = BudgetLedger(ledger, {"pilot": "58", "analysis": "200"})
+        in_flight = book.reserve("pilot", "agent-001", Decimal("8"))   # remaining $50, the key not yet charged
+        problem = cli._key_headroom({"limit_remaining": "58"}, ledger, "pilot", Decimal("8"))
+        self.assertIsNotNone(problem)   # admitting it would leave the key $42 for the pilot's $50 + $8
+        self.assertIn("unbilled holds $8", problem)
+        book.settle(in_flight, Decimal("8"))
+        self.assertIsNotNone(cli._key_headroom({"limit_remaining": "50"}, ledger, "pilot", Decimal("8")))
+        self.assertIsNone(cli._key_headroom({"limit_remaining": "58"}, ledger, "pilot", Decimal("8")))
+        self.assertIsNone(cli._key_headroom({"limit_remaining": None}, ledger, "pilot", Decimal("8")))
+
+    # -- a stop request: nothing more is admitted, in-flight requests settle ---------------------
+    def test_closed_run_limit_admits_nothing_more(self):
+        limit = RunLimit("50", source="standing_approval")
+        token = limit.admit(Decimal("1"))
+        self.assertIsNotNone(token)
+        limit.close("SIGTERM received")
+        self.assertIsNone(limit.admit(Decimal("0.01")))
+        limit.settle(token, Decimal("0.5"))
+        record = limit.record()
+        self.assertEqual((record["closed"]["reason"], record["settled_usd"], record["denied"]),
+                         ("SIGTERM received", "0.5", 1))
+
+    def test_stop_while_requests_are_in_flight_settles_them_and_stops_cleanly(self):
+        rehearsal = tjp.Rehearsal(self.tmp / "stop", settings=SETTINGS, judge_mode="candidates")
+        pipeline = rehearsal.pipeline(run_limit=RunLimit("40", source="override"))
+        import run_transcript_judge as cli
+        termination = cli.Termination()
+        notes = []
+        termination.notify = notes.append
+        termination.register(pipeline.run_limit)
+        seen = []
+
+        def on_request(request):
+            seen.append(request)
+            if len(seen) == 3:   # three requests in flight or done: the supervisor's SIGTERM arrives
+                termination.handle(signal.SIGTERM, None)
+        rehearsal.transport.on_request = on_request
+        rehearsal.transport.delay = 0.05
+        summary = asyncio.run(pipeline.run())
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(summary["status"], "stopped")
+        self.assertEqual(summary["stop"]["reason"], "run_limit")
+        self.assertIn("SIGTERM", summary["run_limit"]["closed"]["reason"])
+        with contextlib.closing(sqlite3.connect(rehearsal.root / "ledger.sqlite")) as db:
+            states = dict(db.execute("SELECT state, COUNT(*) FROM calls GROUP BY state").fetchall())
+        self.assertNotIn("reserved", states)
+        self.assertEqual(sum(states.values()), len(seen))
+        with self.assertRaises(KeyboardInterrupt):   # a second signal stops at once
+            termination.handle(signal.SIGTERM, None)
+
+    def test_sigterm_stops_a_judging_process_cleanly(self):
+        """A real SIGTERM to a --mock judging process with requests in flight: exit 3, every ledger row
+        settled (none left reserved), the invocation recorded. Before the fix the process died at once
+        (exit -15) and its holds stayed reserved."""
+        import subprocess
+        import time
+        import test_judge_estimate
+        harness = test_judge_estimate.CommandLineTests("test_run_limit_flag")
+        harness.setUp()
+        driver = self.tmp / "driver.py"
+        driver.write_text(DRIVER.format(paths=json.dumps([str(REPO), str(REPO / "src"), str(TESTS),
+                                                           str(REPO / "scripts")])))
+        try:
+            ledger = harness.judge_dir / "rehearsal-ledger.sqlite"
+            proc = subprocess.Popen([sys.executable, str(driver), str(harness.run_dir), "--mock", "--output-dir",
+                                     str(harness.judge_dir), "--history-workers", "1"],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=str(REPO))
+            deadline = time.monotonic() + 60
+            reserved = 0
+            while time.monotonic() < deadline and proc.poll() is None:
+                if ledger.exists():
+                    try:
+                        with contextlib.closing(sqlite3.connect(ledger, timeout=5)) as db:
+                            reserved = db.execute("SELECT COUNT(*) FROM calls WHERE state='reserved'").fetchone()[0]
+                    except sqlite3.Error:
+                        reserved = 0
+                if reserved:
+                    break
+                time.sleep(0.05)
+            self.assertGreater(reserved, 0, "no request was in flight")
+            proc.send_signal(signal.SIGTERM)
+            out, err = proc.communicate(timeout=120)
+            self.assertEqual(proc.returncode, 3, err.decode()[-3000:])
+            with contextlib.closing(sqlite3.connect(ledger)) as db:
+                left = db.execute("SELECT COUNT(*) FROM calls WHERE state='reserved'").fetchone()[0]
+            self.assertEqual(left, 0)
+            state = json.loads((harness.judge_dir / "state.json").read_text())
+            self.assertEqual(state["invocations"][-1]["status"], "stopped")
+            self.assertIn("SIGTERM", state["invocations"][-1]["run_limit"]["closed"]["reason"])
+            self.assertIn(b"STOPPING", err)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            harness.tearDown()
+
+    # -- a transient key-check failure or headroom shortfall defers the pass --------------------
+    def test_key_check_failure_or_no_headroom_defers_the_pass(self):
+        import run_transcript_judge as cli
+        from research.analysis.judge.route import JudgeRouteSettings
+        run_dir = self.tmp / "runs" / tjp.RUN_ID
+        (run_dir / "inspect").mkdir(parents=True)
+        ledger = self.tmp / "budget.sqlite"
+        BudgetLedger(ledger, {"pilot": "50", "analysis": "200"})
+        config = self.tmp / "launch-config.json"
+        config.write_text(json.dumps({"auto_behavior_judge": True, "behavior_judge_approval": "owner (test)",
+                                      "behavior_judge_max_usd": 50, "run_dir": "runs/x"}))
+
+        class Client:
+            def __init__(self, outcome):
+                self.outcome = outcome
+
+            def prepare(self):
+                if isinstance(self.outcome, BaseException):
+                    raise self.outcome
+                return self.outcome
+        for outcome, text in ((RuntimeError("HTTP 502 from the key endpoint"), "provider key check failed"),
+                              ({"limit_remaining": "1"}, "below the pilot's remaining allowance")):
+            err = io.StringIO()
+            with mock.patch("research_swarm.budget.judge_analysis_problems", return_value=[]), \
+                    mock.patch.object(cli, "route_settings",
+                                      return_value=JudgeRouteSettings.defaults(pricing_verified=True)), \
+                    mock.patch.object(cli, "_clients", return_value={"haiku": Client(outcome)}), \
+                    mock.patch.object(live, "inspect_gate", return_value=None), \
+                    contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                code = cli.main(["--run-dir", str(run_dir), "--live", "--standing-approval-from-config", str(config),
+                                 "--ledger", str(ledger), "--credentials-root", str(self.tmp)])
+            self.assertEqual(code, cli.DEFERRED, err.getvalue())
+            self.assertIn(text, err.getvalue())
+            state = json.loads((run_dir / "analysis" / "judge" / "live" / "state.json").read_text())
+            self.assertIn(text, state["passes"][-1]["deferred"])
+
+
+DRIVER = """import json, sys
+from pathlib import Path
+sys.path[:0] = json.loads({paths!r})
+from unittest import mock
+from research_swarm.inspect_adapter import disable_inspect_dotenv
+disable_inspect_dotenv()
+import test_judge_estimate as tje
+from research.analysis.judge import client
+run_dir = Path(sys.argv[1])
+run = tje.feature_run(run_dir)
+index = {{agent: (run_dir / "inspect" / "synthetic.eval", agent, 1) for agent in tje.AGENTS}}
+init = client.FakeTransport.__init__
+def slow(self, *args, **kwargs):
+    kwargs["delay"] = 1.0   # every request stays in flight for a second
+    init(self, *args, **kwargs)
+with mock.patch("research.analysis.judge.history.sample_index", return_value=index), \
+        mock.patch("research.analysis.judge.history.build_run", lambda run_dir, agents=None, **kwargs: run), \
+        mock.patch("research.analysis.judge.history.default_history_workers", return_value=1), \
+        mock.patch.object(client.FakeTransport, "__init__", slow):
+    import run_transcript_judge as cli
+    sys.exit(cli.main(["--run-dir", str(run_dir), "--window-tokens", "300", *sys.argv[2:]]))
+"""
 
 
 class LiveConfigTests(unittest.TestCase):

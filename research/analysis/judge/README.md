@@ -631,8 +631,9 @@ has to send.
 | `review/`, `report.json`, `report.html` | The five-minute report (`report.json` schema `gdm-judge-report/3`, with `reading.visible_words` and, since rubric v3.1, `reading.collapsed_words`, the run level's `plain_summary` and each card finding's `plain_explanation`) and the read-only evidence browser (`review/index.html` plus one page per agent with a finding; `review/manifest.json` schema `gdm-judge-review-manifest/3`). The `results.json` key `behavior_judge` uses schema `gdm-judge-summary/3` and links the browser as `evidence_browser`. |
 | `superseded/<mode>-<timestamp>/` | After `--upgrade-judge-revision` (package/candidate switch within this revision): the previous mode's judge outputs and manifest, kept unreported. |
 | `rehearsal-ledger.sqlite` | Mock mode only. Mock runs never use the authoritative ledger. |
-| `live/` | Live judging during the run: `manifest.json`, `units/<agent>/prefilter/<window>@<sha16>.json`, `raw/`, `state.json` (every pass), `standing-approvals.json` and, after the post-run judge, `consistency.json`. Never published. |
-| `.judge.lock` | The run's judge lock (one judging process at a time). |
+| `live/` | Live judging during the run: `manifest.json`, `units/<agent>/prefilter/<window>@<sha16>.json`, `raw/`, `state.json` (every pass), `standing-approvals.json` and, after the post-run judge, `consistency.json` and `consistency-journal.jsonl`. Never published. |
+| `.judge.lock` | The judge directory's lock (one judging process at a time; every spending invocation also holds the run's lock, `<ledger folder>/.judge-run-locks/<ledger name>-<run id>.lock`). |
+| `warm-consistency.json`, `warm-consistency-journal.jsonl` | Only with `--warm-from` a store outside this directory: what was adopted from it (the store itself is only read). |
 
 The agent result (`gdm-judge-agent-result/4`) holds `status` (`graded`, `ungraded`,
 `grading_failed`) and `status_reason`; `judge_model`, `verifier_model`, the rubric version and
@@ -849,8 +850,11 @@ model allocation are unchanged.
 1. **During the run** `scripts/supervise_run.py` starts `run_transcript_judge.py --run-dir RUN
    --live --standing-approval-from-config CONFIG --ledger ... --credentials-root ...` every
    `behavior_judge_live_interval_seconds` (default 300; one pass at a time, never after the run
-   stop; nice 19, idle I/O, `oom_score_adj` 1000, a systemd `MemoryMax` scope where available; log
-   `live-judge.log`, record `live-judge.json`). A pass (`live.py`):
+   stop; Haiku concurrency 8, since the pilot's provider key is shared; nice 19, `oom_score_adj`
+   1000, the idle I/O class, which only I/O schedulers such as BFQ honour (not `mq-deadline` or
+   `none`), and a systemd scope with `MemoryMax` only where the supervisor verified that the scope's
+   cgroup reports that `memory.max`; log `live-judge.log`, record `live-judge.json` with the
+   isolation actually applied). A pass (`live.py`):
    - reads each agent's sample from Inspect's realtime buffer (read-only; inspect_ai pinned to
      0.3.279, otherwise the pass records `live_source_unavailable` and exits 0), or from the
      `.eval` once flushed, then `runtime.jsonl` (complete lines only) and the conference
@@ -865,19 +869,39 @@ model allocation are unchanged.
    Units are stored as `live/units/<agent>/prefilter/<window>@<sha16>.json`, plus `raw/`,
    `manifest.json` and `state.json`. Ledger labels are `judge-haiku:<run id>:live:prefilter:<window>`.
    A pass's room is the smallest of `behavior_judge_live_max_usd` minus earlier live passes, the
-   per-run cap minus everything this run's judging holds, and the analysis allowance. A pass is
-   refused (exit 4) unless the provider key is unlimited, or its `limit_remaining` covers the
-   pilot's remaining allowance plus that room. A refused (4) or stopped (3) pass ends live passes
-   for the run.
+   per-run cap minus everything this run's judging holds, and the analysis allowance. With a
+   finite provider key a pass sends nothing unless the key's `limit_remaining` covers the pilot's
+   remaining ledger allowance, plus the reservations of the pilot's requests in flight or of
+   uncertain billing (`held_usd`: the ledger has taken them off its remaining allowance, the key
+   has not been charged for them yet), plus the pass's room. A pass whose unpaid key check fails
+   or finds no such headroom is deferred (exit 5, recorded in `live/state.json`; the next pass tries
+   again). A refused (4: a configuration problem or no room under the caps) or stopped (3) pass
+   ends live passes for the run. After the pilot exits, a pass still running after 120 s gets
+   SIGTERM: it admits nothing more, lets its requests in flight settle and exits 3 (it is killed
+   only after 15 more minutes).
 2. **When the pilot exits** the judge's model stages start at once (`--stage verify`,
-   `behavior-judge-early.log`), beside reconcile, evaluate and timeline. No candidate, sample or
-   verifier request reads evaluator verdicts: the history digest excludes host context, and a
-   request that did would raise `StaleUnit` in step 3 rather than mix inputs.
+   `behavior-judge-early.log`), beside reconcile, evaluate and timeline, at nice 19, `oom_score_adj`
+   1000, the idle I/O class and with two history workers, so the evaluator's Lean comparators keep
+   the CPUs. No candidate, sample or verifier request reads evaluator verdicts: the history digest
+   excludes host context, and a request that did would raise `StaleUnit` in step 3 rather than mix
+   inputs. If a follow-up fails, no resume will finish these stages, so they are stopped the same
+   way (SIGTERM; their units stay cached and a later manual resume pays nothing twice) and the
+   post-run judge is skipped, as before live judging. A judge process still running when the
+   supervisor finishes for any other reason (an exception) is stopped the same way before the
+   final ledger backup.
 3. **After the follow-ups**, the usual post-run invocation runs as a resume. It sends only the
    run-level request (when needed), then writes host facts, labels and the report.
 
 **Same result as a post-run-only judge.** `prefilter_window_count: false` (bound in the manifest)
-leaves the agent's final window count out of the Haiku header. Everything else in a window's
+leaves the agent's final window count out of the Haiku header. Which format a run gets is decided
+by recorded settings and its configuration, never by timing: a judge directory's recorded setting
+(a resume), else the setting `RUN/analysis/judge` recorded (a re-judge into another `--output-dir`
+reproduces the original judgment), else `false` exactly when the run's own launch config
+(`RUN/settings.json` "config", written at the run's start) has paid live judging
+(`auto_behavior_judge` true, `live_behavior_judge` not false or "mock"), else the v3 bytes. A run whose live passes never got far (a run shorter than one
+interval, an unavailable Inspect buffer, a busy lock) and a later re-judge of the saved run into
+another `--output-dir` therefore send the same bytes as one whose passes screened everything.
+Everything else in a window's
 request (its items, id and index) is fixed once the window is final, so a window screened during
 the run is the post-run request byte for byte. The post-run judge adopts a live unit (`warm.py`)
 only when all of these hold:
@@ -891,22 +915,55 @@ only when all of these hold:
 A `grading_failed` live unit is never adopted. Everything downstream (selection, forced windows,
 the seeded sample, candidates, verification, host stages, run level, report) comes from the final
 record. A wrong guess about finality costs one Haiku request (about $0.006) and never changes a
-result. `live/consistency.json` lists what was adopted, what was rejected and why, and windows
-screened for another request. `pipeline.json` `spend.live` splits live spend into adopted (already
-in the post-run spend) and unadopted.
+result.
+
+**Refusals.** A refused request is never resent identically (judge revision v3, item 6), live or
+post-run. A live pass continues a pending unit whose retry was not admitted (only the retry is
+sent, even when other judge code made it) and never retries a failed unit that met a refusal. When
+the post-run judge does not adopt a live unit that met a refusal (a store-wide guard, the code hash
+or the replay check failed), but the request body it would send is byte-identical to the one the
+live pass sent (the archived `body_sha256`), it carries the live unit's recorded steps into
+`units/` (`refusal_carried_from`) and decides from them with its own code, sending only what they
+lack (the one retry, or a repair); a request that differs is a different request and is sent.
+
+**Records.** `live/consistency.json` lists what was adopted, what was carried, what was rejected and
+why, and windows screened for another request. Each decision is also appended at once to
+`live/consistency-journal.jsonl`, and the record is rebuilt from it and from the units'
+`adopted_from` and `refusal_carried_from`, so an invocation killed before its end (the early stages'
+timeout, a crash) loses nothing. A store named by `--warm-from` outside the judge directory (for
+example a re-judge into a new `--output-dir` reusing `runs/<id>/analysis/judge/live`) is only read:
+its record goes to `<judge dir>/warm-consistency.json`. `pipeline.json` `spend.live` splits live
+spend into adopted (already in the post-run spend) and unadopted, units set aside and sent again
+(`*.json.failed-*`, `*.json.code-changed-*`) included, and `spend.run_ledger` is the ledger's own
+total for the run. The report's spend section (and the results page's behavior-judge section) adds
+to the units' total what was paid during the run and never adopted, and states the ledger's total.
 
 **Per-run cap.** The standing cap (and the $50 default) holds across invocations:
 `client.committed_for_run` sums the ledger rows labelled with the run id (`COALESCE(actual,
-reserved)`, so an orphaned hold counts). `RunLimit(prior_usd=...)` starts there, and a resume never
-gets a fresh cap. Every judging invocation of a run holds `RUN/analysis/judge/.judge.lock`.
+reserved)`, so an orphaned hold counts) and, for requests made before the labels carried the run id
+(`judge-<model>:<purpose>:<unit>`), the judge rows that the request archives of the judge directory
+and of `RUN/analysis/judge` name. `RunLimit(prior_usd=...)` starts there, and a resume never gets a
+fresh cap. Every spending judging invocation of a run (live passes, the early stages, the post-run
+judge, a manual re-judge into another `--output-dir`) holds the run's lock,
+`<ledger folder>/.judge-run-locks/<ledger name>-<run id>.lock` (keyed like the cap: by the ledger and
+the run id), then its judge directory's `.judge.lock`, so two invocations of one run never read the
+same prior. SIGTERM stops any judging invocation cleanly: nothing more is admitted
+(`RunLimit.close`), the requests in flight settle their ledger rows, the state is recorded and it
+exits 3; a second SIGTERM or SIGINT interrupts at once. What live passes paid and the post-run judge
+did not adopt stays counted against the per-run cap (the cap counts all of a run's judging spend);
+the refusal rule and the clean stop keep that small.
 
 **Opt out, shadow.** `live_behavior_judge: false` gives post-run judging exactly as before (v3
 bytes, `prefilter_window_count` left out of the binding). `"mock"` runs mock live passes (`--live
---mock --output-dir PHASE/live-judge-shadow/<run>/analysis/judge`) and a mock post-run pass there
-(free; check its `live/consistency.json`). The paid post-run judge stays unchanged. Manual use:
-`--live --mock --output-dir ...` during a run; `--no-warm` or `--warm-from DIR` for post-run
-adoption; `--prefilter-window-count on|off` (default: the judge directory's recorded setting, else
-its live store's, else on).
+--mock --output-dir PHASE/live-judge-shadow/<run>/analysis/judge`) and then mock passes there in the
+paid flow's order (free; `--prefilter-window-count off`): the model stages (`--stage verify`) beside
+the follow-ups, and the resume after them (`behavior-judge-shadow-resume.log`), so the shadow's host
+facts, labels and run level never read evaluator verdicts that are still being written; check its
+`live/consistency.json`. The paid post-run judge stays unchanged (v3 bytes). Manual use: `--live
+--mock --output-dir ...` during a run; `--no-warm` or `--warm-from DIR` for post-run adoption;
+`--prefilter-window-count on|off` (default: the judge directory's recorded setting, else the one
+`RUN/analysis/judge` recorded, else off for a run whose launch config had paid live judging, else on;
+pass `off` to adopt from a store made for a run without that config).
 
 ## Costs
 

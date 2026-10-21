@@ -318,8 +318,28 @@ def stage_rows(judge_dir, pipeline):
                      "matches_pipeline_spend": (total == recorded) if recorded is not None and source != "not recorded"
                      else None,
                      "uncertain_requests": sum(r["uncertain_requests"] or 0 for r in rows)}
+    cost_by_stage.update(paid_beyond_units(pipeline, total if source != "not recorded" else None))
     allocation = {r["stage"]: r["models"] for r in rows}
     return rows, allocation, cost_by_stage
+
+
+def paid_beyond_units(pipeline, units_total):
+    """What the run's judging paid outside the units of this report (``pipeline.json`` spend): units
+    later redone (``replaced_units``), live screening never adopted (``live``: mispredicted windows, a
+    disabled store, units set aside and sent again), and the ledger's own total for the run
+    (``run_ledger``: every invocation and live pass, in-flight and uncertain holds at their full
+    reservation; what the per-run cap counts). ``all_settled_usd`` adds the first two to the units'
+    total."""
+    spend = (pipeline.get("spend") or {}) if isinstance(pipeline, dict) else {}
+    replaced = _decimal((spend.get("replaced_units") or {}).get("settled_usd")) or Decimal(0)
+    live = spend.get("live") or {}
+    unadopted = _decimal(live.get("unadopted_settled_usd")) or Decimal(0)
+    ledger = spend.get("run_ledger") or {}
+    return {"replaced_settled_usd": str(replaced), "live_unadopted_settled_usd": str(unadopted),
+            "live_unadopted_units": int(live.get("unadopted_units") or 0) + int(live.get("set_aside_units") or 0),
+            "all_settled_usd": None if units_total is None else str(units_total + replaced + unadopted),
+            "run_ledger_committed_usd": ledger.get("committed_usd"),
+            "run_ledger_unresolved_rows": ledger.get("unresolved_rows")}
 
 
 # --------------------------------------------------------------------- agents
@@ -769,6 +789,19 @@ def _spend_html(report):
                  f"{replaced['files']} unit(s) later redone ({replaced.get('requests', 0)} request(s), kept as "
                  "<code>*.stale-*</code>/<code>*.failed-*</code> copies under <code>units/</code>; not in the total "
                  "above).</p>")
+    if cost.get("live_unadopted_units"):
+        extra += (f"<p class=\"foot\">Also paid during the run: ${esc(cost.get('live_unadopted_settled_usd'))} for "
+                  f"{cost['live_unadopted_units']} live screening unit(s) never adopted (screened for another request, "
+                  "set aside and sent again, or not adoptable; see <code>live/consistency.json</code>); not in the "
+                  "total above.</p>")
+    if cost.get("all_settled_usd") is not None and cost["all_settled_usd"] != cost.get("total_usd"):
+        extra += f"<p class=\"foot\">Settled in all for this run's judging: ${esc(cost['all_settled_usd'])}.</p>"
+    if cost.get("run_ledger_committed_usd") is not None:
+        extra += (f"<p class=\"foot\">The ledger holds ${esc(cost['run_ledger_committed_usd'])} for this run's "
+                  "judging (every invocation and live pass; a request in flight or of uncertain billing at its full "
+                  "reservation): what the per-run cap counts"
+                  + (f"; {cost['run_ledger_unresolved_rows']} row(s) still unresolved"
+                     if cost.get("run_ledger_unresolved_rows") else "") + ".</p>")
     return ("<div class=\"scroll\"><table><tr><th>Stage</th><th>Model</th><th>Requests</th><th>Settled cost</th></tr>"
             + "".join(rows) + "</table></div>"
             f"<p class=\"foot\">Total ${esc(cost['total_usd'] or 'not recorded')} (source {esc(cost['source'])}"
@@ -1024,6 +1057,11 @@ def render_results_section(report, judge_rel="analysis/judge"):
                    for c, n in counts["cohorts"].items() if n)
     paper = ", ".join(f"{c} {projection['cohorts'][c]}" for c in rv.PAPER_ORDER)
     total = report["cost_by_stage"].get("total_usd")
+    everything = report["cost_by_stage"].get("all_settled_usd")
+    ledger_total = report["cost_by_stage"].get("run_ledger_committed_usd")
+    beyond = ((f"; ${everything} settled in all, live screening not adopted and redone units included"
+               if everything is not None and everything != total else "")
+              + (f"; the ledger holds ${ledger_total} for the run" if ledger_total is not None else ""))
     compared = (report.get("cost") or {}).get("compared") or {}
     estimated = (f" (estimated {_usd(compared['estimate_central_usd'])} central for the "
                  f"{_plural(compared['invocations'], 'completed judging invocation')}, which settled "
@@ -1045,7 +1083,8 @@ def render_results_section(report, judge_rel="analysis/judge"):
             f"<p>Paper projection (denominator {projection['denominator']}): {esc(paper)}. Evaluation aware: "
             f"{esc(awareness_text(counts))}. Not counted: {counts['ungraded']} ungraded, "
             f"{counts['grading_failed']} grading failed; {counts['open_items']} unresolved or ungraded item(s) "
-            f"listed in the report. Analysis spending {esc('$' + total if total else 'not recorded')}{esc(estimated)}. "
+            f"listed in the report. Analysis spending {esc('$' + total if total else 'not recorded')}{esc(estimated)}"
+            f"{esc(beyond)}. "
             "Earlier statements in this report about paid analysis predate this judge.</p>"
             f"<p><a href=\"{judge_rel}/report.html\">Behavior judge report</a>{browser} · "
             f"<a href=\"{judge_rel}/report.json\">Report JSON</a></p></section>")
