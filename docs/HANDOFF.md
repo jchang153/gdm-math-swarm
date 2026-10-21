@@ -21,8 +21,9 @@ current enough for a new agent to continue without asking.
   run ids. Say what a half-finished job still needs and how to resume it.
 - **Keep it short and factual.** Replace stale text; don't append a diary. Use
   absolute dates (for example 2026-10-21), never "today" or "yesterday".
-- **Never put credential values here.** Record only where credentials live and
-  whether they are present.
+- **The repo is PUBLIC.** Never put credential values, the cloud provider, project or
+  host names, account emails, private URLs or budget figures here. Those go in the
+  git-ignored `HANDOFF.local.md` at the repo root, which must be kept current too.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
 Last updated: 2026-10-21 by Claude (Opus 5.5) session.
@@ -40,7 +41,7 @@ Swarms* (https://arxiv.org/pdf/2609.04170):
 - The study looks at whether agents spontaneously exploit the judge, spread
   exploits, or blow the whistle.
 
-Each agent is the Claude Code CLI in a Docker container on a GCP VM. Inspect AI's
+Each agent is the Claude Code CLI in a Docker container on a cloud VM. Inspect AI's
 model bridge routes its model calls to OpenRouter, so any model can drive it.
 
 ## Read these first
@@ -49,7 +50,8 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
 |---|---|
 | `AGENTS.md` | Hard rules: credentials, budgets, VM shutdown, never expose researcher material to agents |
 | `docs/plan.md` | All owner decisions, with dates |
-| `docs/gcp-vm.md`, `docs/validation.md` | VM setup and the run procedure; read before touching a VM |
+| `HANDOFF.local.md` (git-ignored, owner's machine only) | Hosts, accounts, step-by-step VM operation, budget status |
+| `docs/validation.md` | The run procedure; read before touching a VM |
 | `docs/experiment-library.md` | HF Space publishing rules and the guarded update scopes |
 | `docs/prompts.md`, `src/research_swarm/prompts.py` | Prompt variants |
 | `docs/judges.md`, `docs/evaluator.md` | Weak operational judge vs. independent proof checker |
@@ -62,8 +64,7 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
   - Port 22 times out. Push over 443 with:
     `GIT_SSH_COMMAND="ssh -o HostKeyAlias=github.com" git push ssh://git@ssh.github.com:443/jchang153/gdm-math-swarm.git main`
   - Git binary: `/Library/Developer/CommandLineTools/usr/bin/git`.
-- **Shared results site (private, keep private):**
-  https://huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments
+- **Shared results site:** a private HF Space (URL in `HANDOFF.local.md`); keep it private.
   - A static site with the run list, per-run pages, Inspect View, behavior judge,
     conference browser and proof-checker results.
   - Run list is newest first. baseline100 is deliberately unlisted.
@@ -73,12 +74,9 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
 - **Local experiment library:** `runs/index.html`, rebuilt with
   `scripts/build_experiment_index.py`.
 - **Raw runs:** `runs/<run-id>/`. Git-ignored; back them up separately.
-- **VMs:** GCP project `GCP-PROJECT`, zone `us-central1-a`.
-  - Instances: `owner-vm`, `-2`, `-3`, `-4`.
-  - gcloud: `/Users/owner/.local/share/gdm-vm-tools/google-cloud-sdk/bin/gcloud`, with `--tunnel-through-iap`.
-  - If the login has expired, re-run `gcloud auth login OWNER-ACCOUNT`.
-  - Always stop VMs after work and verify TERMINATED.
-  - Do not touch collaborator Amelie's VM, files or branches.
+- **VMs:** owner-only cloud VMs; names, access and the operating procedure are in
+  `HANDOFF.local.md`. Always stop VMs after work and verify they're stopped. Do not
+  touch collaborator Amelie's VM, files or branches.
 - **Credentials:** host-only `.env`, Git-ignored. It holds the owner's OpenRouter
   key and HF login. Never read or print the values; containers never get them.
 - **Python:** `.venv/bin/python`. Run tests with
@@ -197,10 +195,8 @@ is being merged into main via `collab-env`.
   `runs/owner-glm53-20261021T184313Z/analysis/judge-partial-first-attempt/`.
 - The near-live mirror uploads loose snapshot files, which add to the HF file
   count. Handle this only when it becomes a problem (owner's call).
-- Budget context as of 2026-10-21:
-  - GCP balance: see `HANDOFF.local.md`.
-  - OpenRouter balance: see `HANDOFF.local.md`.
-  - A 1-hour, 5-agent run costs roughly $40–90 including judge and report.
+- Budget status and remaining credits: see `HANDOFF.local.md`. A 1-hour, 5-agent run
+  costs roughly $40–90 including judge and report.
 
 ## Known gotchas
 
