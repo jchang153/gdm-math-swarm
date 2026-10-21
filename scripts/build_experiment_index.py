@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
+from catalogue_page import CHEATING, COHORT_GLOSS, COHORT_LABELS, COHORTS, FLAGGED, SCRIPT, STYLE
 from space_navigation import private_space_navigation
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,7 +90,7 @@ def build(runs, hosted=False, unlisted=None):
                      'elapsed_seconds': elapsed, 'pilot_spent_usd': str(spent),
                      'distinct_verified_tasks': len(distinct),
                      'task_count': config.get('task_count'), 'agent_exits': data['agent_exits'],
-                     'links': {}}
+                     'links': {}, 'summary': run_summary(path.parent, data)}
             for name, target in [('Report', 'results.html'), ('Transcripts', 'transcripts/index.html'),
                                  ('Conference', 'conference-view/index.html'),
                                  ('Inspect View', 'inspect-view/index.html'),
@@ -108,10 +109,75 @@ def build(runs, hosted=False, unlisted=None):
     return {**write_index(runs, entries, warnings, hosted=hosted), 'unlisted': hidden}
 
 
+def judge_summary(report):
+    """Cohort counts of a behavior judge report.json (gdm-judge-report/3), or None if it has none.
+
+    Only counts already shown in the published judge report: no finding text or evidence.
+    """
+    counts = report.get('counts') if isinstance(report, dict) else None
+    if not isinstance(counts, dict) or not isinstance(counts.get('cohorts'), dict):
+        return None
+    number = lambda v: v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None  # noqa: E731
+    cohorts = {k: number(counts['cohorts'].get(k)) for k in COHORTS if k in counts['cohorts']}
+    if any(v is None for v in cohorts.values()) or number(counts.get('agents')) is None:
+        return None
+    summary = {'mode': report.get('mode') if isinstance(report.get('mode'), str) else None,
+               'agents': counts['agents'], 'graded': number(counts.get('graded')),
+               'provisional': number(counts.get('provisional')) or 0, 'cohorts': cohorts}
+    return summary
+
+
+def run_summary(run_dir, data):
+    """The catalogue's optional per-run summary: prompt variant, accepted tasks, judge cohorts.
+
+    Entries published before October 21, 2026 lack it; the hosted catalogue then reads the same
+    fields from the run's published results.json and analysis/judge/report.json in the browser.
+    """
+    condition = data.get('condition') if isinstance(data.get('condition'), dict) else {}
+    variant = condition.get('prompt_variant')  # build_results.py records the launch setting here
+    accepted = data.get('operationally_accepted_tasks')
+    judge = None
+    report = run_dir / 'analysis' / 'judge' / 'report.json'
+    if (run_dir / 'analysis' / 'judge' / 'report.html').exists() and report.is_file() and not report.is_symlink():
+        try:
+            judge = judge_summary(json.loads(report.read_text()))
+        except (ValueError, OSError):
+            judge = None
+    return {'prompt_variant': variant if isinstance(variant, str) else None,
+            'accepted_tasks': accepted if isinstance(accepted, int) and not isinstance(accepted, bool) else None,
+            'judge': judge}
+
+
 def newest_first(entries):
     """Catalogue order: newest first by actual start time (owner request, October 21, 2026); ties by run ID, reversed."""
     return sorted(entries, key=lambda e: (datetime.datetime.fromisoformat(
         e['start_utc'].replace('Z', '+00:00')).timestamp(), e['run']), reverse=True)
+
+
+def duration_text(seconds):
+    seconds = int(seconds)
+    if seconds >= 3600:
+        return f'{seconds // 3600}h {seconds % 3600 // 60:02d}m'
+    return f'{seconds // 60}m {seconds % 60:02d}s'
+
+
+def judge_text(entry):
+    """(cell HTML, sort value) of the behavior judge column; plain words, no finding text."""
+    summary = entry.get('summary')
+    judge = summary.get('judge') if isinstance(summary, dict) else None
+    if judge:
+        parts = [f'{judge["cohorts"][k]} {COHORT_LABELS[k][0 if judge["cohorts"][k] == 1 else 1]}'
+                 for k in FLAGGED if judge['cohorts'].get(k)]
+        flagged = sum(judge['cohorts'].get(k, 0) for k in CHEATING)
+        text = ' · '.join(parts) if parts else 'none flagged'
+        graded = judge['graded'] if judge['graded'] is not None else judge['agents']
+        extra = f'of {graded} graded' + (f', {judge["provisional"]} provisional' if judge['provisional'] else '')
+        if judge.get('mode') not in (None, 'paid'):
+            extra += f' ({judge["mode"]})'
+        return f'{html.escape(text)}<br><small>{html.escape(extra)}</small>', flagged
+    if 'Behavior judge' in entry['links']:
+        return ('see report' if isinstance(summary, dict) else '<span class="pending">…</span>'), -1
+    return '<span class="muted">not run</span>', -2
 
 
 def write_index(runs, entries, warnings=(), *, hosted=False):
@@ -123,27 +189,83 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
     rows = []
     for e in entries:
         links = ' · '.join(f'<a href="{esc(url, quote=True)}">{esc(name)}</a>' for name, url in e['links'].items())
-        duration = f'{int(e["elapsed_seconds"]) // 60}m {int(e["elapsed_seconds"]) % 60}s'
-        tasks = f'{e["distinct_verified_tasks"]} / {e["task_count"] or "?"}'
+        summary = e.get('summary') if isinstance(e.get('summary'), dict) else None
+        pending = '<span class="pending" title="Not in this catalogue entry">…</span>'
+        variant = (esc(summary['prompt_variant']) if summary and summary.get('prompt_variant')
+                   else '<span class="muted">not recorded</span>' if summary else pending)
+        accepted = summary.get('accepted_tasks') if summary else None
+        accepted_text = str(accepted) if accepted is not None else ('?' if summary else pending)
+        judge, judge_sort = judge_text(e)
+        stamp = datetime.datetime.fromisoformat(e['start_utc'].replace('Z', '+00:00')).timestamp()
+        spent = Decimal(e['pilot_spent_usd'])
         errors = e['agent_exits'].get('error', 0)
-        rows.append('<tr><td><strong>' + esc(e['date']) + '</strong><br><small>' + esc(e['run']) + '</small></td>'
-                    '<td>' + esc(e['track']) + '<br><small>' + esc(e['model']) + '<br>' + esc(e['provider_route']) + '</small></td>'
-                    f'<td>{e["agents"]}</td><td>{duration}</td><td>${Decimal(e["pilot_spent_usd"]):.2f}</td>'
-                    f'<td>{tasks}</td><td>{errors}</td><td>{links}</td></tr>')
-    body = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            '<title>GDM Math Swarm experiments</title><style>'
-            'body{max-width:1450px;margin:40px auto;padding:0 24px;font:16px system-ui;line-height:1.5;color:#18212b;background:#fafbfc}'
-            'h1{margin-bottom:8px}p{max-width:950px;color:#475569}input{box-sizing:border-box;width:100%;padding:12px;border:1px solid #b8c2cf;border-radius:7px;margin:18px 0;background:white;font:inherit}'
-            '.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;background:white}td,th{padding:14px 12px;border-bottom:1px solid #dde3ea;text-align:left;vertical-align:top}th{font-size:13px;color:#475569}small{font-size:12px;color:#596579}a{color:#155eaa}td:last-child{min-width:210px}'
-            '</style><h1>GDM Math Swarm experiments</h1>'
+        cells = [('Start', f'{stamp:.3f}', '', f'<strong>{esc(e["date"])}</strong><br><small>{esc(e["run"])}</small>'),
+                 ('Model', esc(e['model'], quote=True), '',
+                  f'{esc(e["model"])}<br><small>{esc(e["track"])} · {esc(e["provider_route"])}</small>'),
+                 ('Prompt variant', None, 'c-variant', variant),
+                 ('Agents', str(e['agents']), '', str(e['agents'])
+                  + (f'<br><small>{errors} error exit{"s" if errors != 1 else ""}</small>' if errors else '')),
+                 ('Duration', f'{float(e["elapsed_seconds"]):.3f}', '', duration_text(e['elapsed_seconds'])),
+                 ('Accepted / genuine', str(e['distinct_verified_tasks']), 'c-tasks',
+                  f'<span class="c-accepted">{accepted_text}</span> / <strong>{e["distinct_verified_tasks"]}</strong>'
+                  f'<br><small>of {esc(str(e["task_count"] or "?"))} tasks</small>'),
+                 ('Cost', f'{spent:.6f}', '', f'${spent:.2f}'),
+                 ('Behavior judge', str(judge_sort), 'c-judge', judge),
+                 ('Open', None, 'open', links)]
+        rows.append(f'<tr data-run="{esc(e["run"], quote=True)}"><td class="pick"><input type="checkbox" '
+                    f'aria-label="Compare {esc(e["run"], quote=True)}" value="{esc(e["run"], quote=True)}"></td>'
+                    + ''.join(f'<td data-label="{label}"' + (f' data-sort="{sort}"' if sort is not None else '')
+                              + (f' class="{cls}"' if cls else '') + f'><div class="v">{content}</div></td>'
+                              for label, sort, cls, content in cells) + '</tr>')
+    # The compare view and the filters read the same entries; '<' is escaped so the JSON
+    # can never close its script element.
+    blob = json.dumps(entries, separators=(',', ':'), ensure_ascii=False).replace('<', '\\u003c')
+    note = ('This private archive contains saved experiment records and derived views. Access requires permission '
+            'to this Hugging Face Space. Preserve the original records when moving a run.' if hosted else
+            'These files are stored on this computer. Raw runs and transcripts are excluded from Git; the code '
+            'repository alone is not a backup or a shared results library. Keep the full experiment folder when '
+            'backing up or moving a run.')
+    glossary = ''.join(f'<dt>{esc(COHORT_LABELS[k][1].capitalize())}</dt><dd>{esc(COHORT_GLOSS[k])}</dd>'
+                       for k in COHORTS)
+    headers = [('', None), ('Start', 'start'), ('Model', 'model'), ('Prompt variant', 'variant'),
+               ('Agents', 'agents'), ('Duration', 'duration'), ('Accepted / genuine', 'tasks'),
+               ('Cost', 'cost'), ('Behavior judge', 'judge'), ('Open', None)]
+    head = ''.join(f'<th scope="col" data-key="{k}"' + (' aria-sort="descending"' if k == 'start' else '')
+                   + f'><button type="button">{esc(t)}</button></th>' if k else
+                   f'<th scope="col">{"<span class=sr>Select</span>" if not t else esc(t)}</th>' for t, k in headers)
+    body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<meta name="color-scheme" content="light dark">'
+            '<title>GDM Math Swarm experiments</title><style>' + STYLE + '</style></head><body>'
+            '<h1>GDM Math Swarm experiments</h1>'
             '<p>A private library of saved runs: results, full agent transcripts, independent evaluations and timelines.</p>'
-            f'<p><strong>{len(entries)} saved experiment(s)</strong>. Verified tasks count distinct intended statements, so duplicate accepted proofs count once.</p>'
-            '<label for="filter">Find an experiment</label><input id="filter" type="search" placeholder="Search date, run, model or condition…">'
-            '<div class="scroll"><table id="runs"><thead><tr><th>Run</th><th>Condition / model</th><th>Agents</th><th>Duration</th><th>Pilot model cost</th><th>Verified tasks</th><th>Agent errors</th><th>Open</th></tr></thead><tbody>'
+            f'<p><strong>{len(entries)} saved experiment(s)</strong>, newest first. Tick 2 to 4 runs to compare them side by side.</p>'
+            '<div class="toolbar"><label class="grow">Find<input id="filter" type="search" placeholder="Date, run, model, condition…"></label>'
+            '<label>Model<select id="f-model"><option value="">All</option></select></label>'
+            '<label>Prompt variant<select id="f-variant"><option value="">All</option></select></label>'
+            '<label>Behavior judge<select id="f-judge"><option value="">All</option><option value="run">Run</option>'
+            '<option value="flagged">Cheating found</option><option value="clean">None flagged</option>'
+            '<option value="none">Not run</option></select></label>'
+            '<label>Sort<select id="sort">' + ''.join(f'<option value="{k}">{esc(t)}</option>' for t, k in headers if k)
+            + '</select></label><button type="button" id="direction" aria-label="Sort direction">Newest first ↓</button></div>'
+            '<div class="actions"><span id="shown" aria-live="polite"></span>'
+            '<button type="button" id="compare" disabled>Compare selected (0)</button>'
+            '<button type="button" id="clear" class="quiet">Clear selection</button></div>'
+            '<section id="compare-view" hidden aria-label="Compare runs"><div class="cmp-head"><h2>Compare runs</h2>'
+            '<button type="button" id="close-compare" class="quiet">Close</button></div><div class="scroll" id="compare-table"></div></section>'
+            '<div class="scroll"><table id="runs"><thead><tr>' + head + '</tr></thead><tbody>'
             + ''.join(rows) + '</tbody></table></div>'
-            + ('<p>This private archive contains saved experiment records and derived views. Access requires permission to this Hugging Face Space. Preserve the original records when moving a run.</p>' if hosted else
-               '<p>These files are stored on this computer. Raw runs and transcripts are excluded from Git; the code repository alone is not a backup or a shared results library. Keep the full experiment folder when backing up or moving a run.</p>') +
-            '<script>document.getElementById("filter").addEventListener("input",function(){const q=this.value.toLowerCase();document.querySelectorAll("#runs tbody tr").forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q));});</script></html>')
+            '<details class="help"><summary>What the columns mean</summary><dl>'
+            '<dt>Accepted / genuine</dt><dd>Accepted: distinct tasks the weak operational judge accepted during the run '
+            '(acceptance is not mathematical validity). Genuine: distinct intended statements with at least one '
+            'submission the independent evaluator found genuine, so duplicate accepted proofs count once.</dd>'
+            '<dt>Cost</dt><dd>Settled pilot model spend from the run\'s budget ledger.</dd>'
+            '<dt>Behavior judge</dt><dd>The researcher-only post-hoc transcript judge, by cohort. "not run" means no '
+            'judge outputs are published for the run; "…" means the entry predates these columns and the run\'s own '
+            'records could not be read here.</dd>' + glossary + '</dl></details>'
+            f'<p class="note">{esc(note)}</p>'
+            f'<script type="application/json" id="catalogue-data">{blob}</script>'
+            '<script>' + SCRIPT + '</script></body></html>')
     (runs / 'index.html').write_text(private_space_navigation(body) if hosted else body)
     (runs / 'experiments.json').write_text(json.dumps({'schema': 'gdm-experiment-index/1', 'experiments': entries, 'warnings': warnings}, indent=2))
     return {'index': str(runs / 'index.html'), 'experiments': len(entries), 'warnings': warnings}
