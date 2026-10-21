@@ -44,17 +44,24 @@ Output, in `RUN/analysis/incident/` (the site links to it):
    has its stable id (`A07.t0123.r`, `post-000004`, `sub-000012`, ...).
 2. **Plan** (Opus): 2-5 storylines and the record ids to quote (at most 8 per storyline, 30 in all).
    Unknown ids are dropped and recorded.
-3. **Evidence**: exact record texts by id. A record of at most 1,800 characters is offered whole; a
-   longer one goes to Sonnet (one request per storyline), which copies one to three short verbatim
-   passages; the host checks each passage and discards an unverified one (recorded in evidence.json).
-4. **Write** (Opus): the Markdown report in the requested structure. Quotes only through excerpt
-   blocks (`:::excerpt <id>` ... `:::`) or `"words" [<id>]`; labels, agent, time and links are added
-   by the host, never by the model.
-5. **Verify** (host, `verify.py`): every quote piece (pieces separated by `[...]`) must be a verbatim
-   substring of the cited record's full text after **whitespace normalization only**; every cited id
-   must exist; the required sections must be present. With problems, Opus revises once; the version
-   with fewer problems is kept and any remaining unverified quote is marked in report.html and
-   report.md and listed in evidence.json.
+3. **Evidence**: exact record texts by id. A record of at most 700 characters is offered whole. For a
+   longer one, Sonnet (one request per storyline) points to one to three short passages by their first
+   and last words; the host cuts each passage out of the record between those anchors, so every
+   excerpt is verbatim by construction (anchors not found are recorded and discarded). Sonnet never
+   copies transcript text: asking it to copy passages verbatim was refused by the provider
+   ("reverse engineering or duplicating model outputs") on the first paid run. A refused multi-record
+   request is never resent; each record is then asked for on its own, and a record still refused gets a
+   host-chosen excerpt (around the behavior judge's quote of it, else the first keyword-net match, else
+   its opening). Every excerpt gets an id (`E1`, `E2`, ...).
+4. **Write** (Opus): the Markdown report in the requested structure. The writer shows an excerpt by a
+   line `:::excerpt E7`; the host replaces it with the excerpt's exact text, label (reasoning, message,
+   tool call, submission, board post, DM...), agent, time and links. Short inline quotes are written as
+   `"words" [<id>]`. Unknown or repeated excerpt ids are removed and reported.
+5. **Verify** (host, `verify.py`): every block and inline quote piece (pieces separated by `[...]`) must
+   be a verbatim substring of the cited record's full text after **whitespace normalization only**;
+   every cited id must exist; the required sections must be present. With problems, Opus revises once;
+   the version with fewer problems is kept and any remaining unverified quote is marked in report.html
+   and report.md and listed in evidence.json.
 6. **Render** (host, `render.py`): report.html (clean serif reading typography, light and dark),
    report.md, evidence.json. Inspect View links point at the run's bundle
    (`RUN/inspect-view/index.html#/logs/<log>/samples/sample/<agent>/<epoch>/transcript?event=<model

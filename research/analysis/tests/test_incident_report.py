@@ -224,6 +224,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(evidence["plan_dropped_items"][0]["item"], "A99.t9999.r")
         attempts = evidence["verification"]["attempts"]
         self.assertTrue(any(FAKE[:20] in p for p in attempts[0]["problems"]))
+        self.assertIn("unknown excerpt id E999", attempts[0]["problems"])
         self.assertTrue(attempts[1].get("kept"))
         md = (fx.out / "report.md").read_text()
         page = (fx.out / "report.html").read_text()
@@ -238,8 +239,9 @@ class PipelineTests(unittest.TestCase):
         self.assertIn('id="rec-post-000001"', page)
         # Long records went to the extractor; its quotes are verified against the full text.
         long_record = [r for s in evidence["evidence"]["storylines"] for r in s["records"] if r["id"] == "A02.t0001.r"]
-        if long_record:
-            self.assertTrue(all(e["source"] == "sonnet" and e["verified"] for e in long_record[0]["excerpts"]))
+        excerpt = long_record[0]["excerpts"][0]
+        self.assertEqual(excerpt["source"], "sonnet")   # cut out by the host between the model's anchors
+        self.assertEqual(LONG[excerpt["offsets"][0]:excerpt["offsets"][1]], excerpt["quote"])
         # A rerun reuses every unit: nothing is sent.
         sent = len(fx.transport.requests)
         fx.go()
@@ -250,8 +252,9 @@ class PipelineTests(unittest.TestCase):
         fx.go()
         evidence = json.loads((fx.out / "evidence.json").read_text())
         self.assertEqual(evidence["verification"]["summary"]["unverified"], 1)
-        self.assertIn("**Unverified excerpt**", (fx.out / "report.md").read_text())
-        self.assertIn("Not verified:", (fx.out / "report.html").read_text())
+        self.assertIn("*(unverified quote)*", (fx.out / "report.md").read_text())
+        self.assertIn('class="unverified-mark"', (fx.out / "report.html").read_text())
+        self.assertIn("unknown excerpt id E999", evidence["verification"]["attempts"][0]["problems"])
 
     def test_run_limit_stops_cleanly(self):
         fx = Fixture(self.tmp.name, limit="0.000001")
@@ -260,6 +263,37 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(caught.exception.reason, "run_limit")
         self.assertEqual(fx.transport.requests, [])
         self.assertFalse((fx.out / "report.html").exists())
+
+
+class ExtractionFallbackTests(unittest.TestCase):
+    def test_refused_extraction_splits_then_falls_back_to_host_excerpt(self):
+        from research.analysis.judge.client import fake_completion
+        with tempfile.TemporaryDirectory() as root:
+            fx = Fixture(root)
+
+            def responder(request):
+                system = request["body"]["messages"][0]["content"]
+                system = system if isinstance(system, str) else system[0]["text"]
+                if "point to the key moments" in system:
+                    return fake_completion("", finish_reason="content_filter", refusal="blocked",
+                                           model="anthropic/claude-sonnet-5.5")
+                return fx.model(request)
+
+            fx.transport.responder = responder
+            fx.go()
+            evidence = json.loads((fx.out / "evidence.json").read_text())
+            self.assertTrue(evidence["extract_refusals"])
+            records = [r for s in evidence["evidence"]["storylines"] for r in s["records"] if r["id"] == "A02.t0001.r"]
+            excerpt = records[0]["excerpts"][0]
+            self.assertEqual(excerpt["source"], "host_fallback")
+            self.assertIn("benchmark", excerpt["quote"])    # around the keyword-net match
+            self.assertIn(excerpt["quote"], LONG)
+
+    def test_locate_span(self):
+        text = "Alpha beta.\n  Gamma   delta epsilon. Zeta eta."
+        lo, hi = verify.locate_span(text, "Gamma delta", "epsilon.")
+        self.assertEqual(text[lo:hi], "Gamma   delta epsilon.")
+        self.assertIsNone(verify.locate_span(text, "Gamma delta", "theta"))
 
 
 class HelperTests(unittest.TestCase):

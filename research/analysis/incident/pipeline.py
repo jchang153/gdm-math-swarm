@@ -32,7 +32,7 @@ from . import prompts, render, verify
 from .digest import ITEM_ID_RE, Locator, build_digest, digest_text
 
 SCHEMA = "gdm-incident-evidence/1"
-SHORT_CHARS = 1800            # a record this short is offered to the writer whole
+SHORT_CHARS = 700             # a record this short is offered to the writer whole
 LONG_VIEW_CHARS = 50000       # a longer record is shown to the extractor as windows
 MAX_STORYLINES = 5
 MAX_ITEMS_PER_STORY = 8
@@ -137,9 +137,11 @@ class IncidentPipeline:
         self.judge_dir = judge_dir
         self.units = []
         self.dropped = []
+        self.extract_refusals = []
+        self.judge_quotes = {}
 
     # -- model units -----------------------------------------------------------
-    async def call(self, key, stage, unit, system, user):
+    async def call(self, key, stage, unit, system, user, *, refusal_retry=True):
         client = self.clients[key]
         max_tokens = MAX_TOKENS[stage]
         request_sha = hashlib.sha256(json.dumps([client.route.model_id, system, user, max_tokens],
@@ -152,7 +154,8 @@ class IncidentPipeline:
             return cached["text"]
         self.log(f"{stage}: {unit} -> {client.route.model_id}")
         result = await client.complete(system=system, user=user, purpose=f"incident_{stage}", unit_id=unit,
-                                       max_tokens=max_tokens, effort=client.route.effort)
+                                       max_tokens=max_tokens, effort=client.route.effort,
+                                       refusal_retry=refusal_retry)
         record = {"unit": unit, "stage": stage, "model": client.route.model_id, "request_sha256": request_sha,
                   "status": result["status"], "error": result.get("error"), "text": result.get("text"),
                   "cost_usd": None if result.get("cost_usd") is None else str(result["cost_usd"]),
@@ -210,7 +213,7 @@ class IncidentPipeline:
 
     async def evidence(self, plan):
         from research.analysis.judge.pipeline import RECALL_PATTERN
-        stories = []
+        stories, number = [], 0
         for story in plan["storylines"]:
             records, long_records = [], []
             for entry in story["items"]:
@@ -220,49 +223,136 @@ class IncidentPipeline:
                 text = (item.get("text") or "").strip()
                 if len(text) <= SHORT_CHARS:
                     if text:
-                        record["excerpts"].append({"quote": text, "note": "whole record", "source": "host",
-                                                   "verified": True})
+                        record["excerpts"].append({"quote": text, "note": "whole record", "source": "host"})
                 else:
                     long_records.append({"id": item["id"], "label": loc["label"], "agent": loc["agent"],
                                          "time": loc["time"], "why": entry.get("why"),
                                          "text": long_view(item["text"], RECALL_PATTERN)})
                 records.append(record)
+            by_id = {r["id"]: r for r in records}
             if long_records:
-                reply = await self.call("sonnet", "extract", f"extract-{story['id']}", prompts.EXTRACT_SYSTEM,
-                                        prompts.extract_user(story, long_records))
-                try:
-                    excerpts = parse_json_object(reply).get("excerpts") or []
-                except ValueError:
-                    excerpts = []
-                by_id = {r["id"]: r for r in records}
-                for excerpt in excerpts:
-                    if not isinstance(excerpt, dict) or excerpt.get("item") not in by_id:
-                        continue
-                    quote = str(excerpt.get("quote") or "").strip()
-                    target = by_id[excerpt["item"]]
-                    ok, reason = verify.check_quote(quote, self.locator.item(target["id"]))
-                    if ok and len(quote) > MAX_EXCERPT_CHARS:
-                        ok, reason = False, f"longer than {MAX_EXCERPT_CHARS} characters"
-                    entry = {"quote": quote, "note": excerpt.get("note"), "source": "sonnet", "verified": ok}
-                    if ok:
-                        target["excerpts"].append(entry)
-                    else:
-                        target["rejected"].append(dict(entry, reason=reason))
+                await self.extract(story, long_records, by_id)
+            for record in records:
+                if record["id"] in {r["id"] for r in long_records} and not record["excerpts"]:
+                    self.fallback_excerpt(record, RECALL_PATTERN)
+                for excerpt in record["excerpts"]:
+                    number += 1
+                    excerpt["eid"] = f"E{number}"
+                    excerpt["verified"] = True
             stories.append(dict(story, records=records))
         return {"storylines": stories}
 
+    async def extract(self, story, long_records, by_id):
+        """Sonnet points to passages by anchors; the host cuts them out. A refused multi-record request
+        is never resent: each record is then asked for on its own, and a record still refused (or
+        without a usable passage) gets a host-chosen excerpt (``fallback_excerpt``)."""
+        groups = [long_records]
+        try:
+            replies = [await self.call("sonnet", "extract", f"extract-{story['id']}", prompts.EXTRACT_SYSTEM,
+                                       prompts.extract_user(story, long_records),
+                                       refusal_retry=len(long_records) == 1)]
+        except StageError as error:
+            if error.reason not in ("refused_once", "refused_twice") or len(long_records) == 1:
+                if error.reason in ("refused_once", "refused_twice"):
+                    self.extract_refusals.append({"storyline": story["id"], "items": [r["id"] for r in long_records]})
+                    return
+                raise
+            self.extract_refusals.append({"storyline": story["id"], "items": [r["id"] for r in long_records],
+                                          "split": True})
+            replies, groups = [], [[r] for r in long_records]
+            for record in long_records:
+                try:
+                    replies.append(await self.call("sonnet", "extract", f"extract-{story['id']}-{record['id']}",
+                                                   prompts.EXTRACT_SYSTEM, prompts.extract_user(story, [record])))
+                except StageError as single:
+                    if single.reason not in ("refused_once", "refused_twice"):
+                        raise
+                    self.extract_refusals.append({"storyline": story["id"], "items": [record["id"]]})
+        for reply in replies:
+            try:
+                passages = parse_json_object(reply).get("passages") or []
+            except ValueError:
+                passages = []
+            for passage in passages:
+                if not isinstance(passage, dict) or passage.get("item") not in by_id:
+                    continue
+                target = by_id[passage["item"]]
+                if len(target["excerpts"]) >= 3:
+                    continue
+                text = self.locator.item(target["id"])["text"]
+                span = verify.locate_span(text, str(passage.get("start") or ""), str(passage.get("end") or ""))
+                entry = {"note": passage.get("note"), "source": "sonnet", "anchors": [passage.get("start"),
+                                                                                       passage.get("end")]}
+                if span is None:
+                    target["rejected"].append(dict(entry, reason="anchors not found verbatim"))
+                    continue
+                quote = text[span[0]:span[1]].strip()
+                if len(quote) > MAX_EXCERPT_CHARS:
+                    target["rejected"].append(dict(entry, reason=f"passage longer than {MAX_EXCERPT_CHARS} characters"))
+                    continue
+                target["excerpts"].append(dict(entry, quote=quote, offsets=list(span)))
+
+    def fallback_excerpt(self, record, pattern):
+        """Host-chosen excerpt of a long record: around a behavior-judge quote of it, else around the first
+        keyword-net match, else its opening; cut at sentence boundaries, at most MAX_EXCERPT_CHARS."""
+        text = self.locator.item(record["id"])["text"]
+        anchor = None
+        for quote in self.judge_quotes.get(record["id"], []):
+            span = verify.locate_span(text, quote)
+            if span:
+                anchor = span
+                break
+        if anchor is None:
+            match = pattern.search(text)
+            anchor = (match.start(), match.end()) if match else (0, 0)
+        lo = max(0, anchor[0] - 250)
+        hi = min(len(text), max(anchor[1] + 250, lo + 400), lo + MAX_EXCERPT_CHARS)
+        if lo:
+            cut = max(text.rfind(". ", lo - 200, anchor[0]), text.rfind("\n", lo - 200, anchor[0]))
+            lo = cut + 1 if cut >= 0 else lo
+        end = max(text.rfind(". ", anchor[1], hi), text.rfind("\n", anchor[1], hi))
+        hi = end + 1 if end > anchor[1] else hi
+        quote = text[lo:hi].strip()
+        if quote:
+            record["excerpts"].append({"quote": quote, "note": "host-chosen passage (extraction unavailable)",
+                                       "source": "host_fallback", "offsets": [lo, hi]})
+
+    def expand_excerpts(self, markdown, evidence):
+        """':::excerpt E7' lines -> verbatim excerpt blocks (':::excerpt <item>' ... ':::'); unknown or
+        repeated ids are removed and returned as problems."""
+        table = {e["eid"]: (r["id"], e["quote"]) for s in evidence["storylines"] for r in s["records"]
+                 for e in r["excerpts"]}
+        problems, used = [], set()
+
+        def replace(match):
+            eid = match.group(1)
+            if eid not in table:
+                problems.append(f"unknown excerpt id {eid}")
+                return ""
+            if eid in used:
+                problems.append(f"excerpt {eid} used more than once")
+                return ""
+            used.add(eid)
+            item_id, quote = table[eid]
+            return f":::excerpt {item_id}\n{quote}\n:::"
+
+        out = re.sub(r"^:::excerpt[ \t]+(E\d+)[ \t]*(?:\n:::[ \t]*(?=\n|$))?", replace, markdown, flags=re.M)
+        return out, problems
+
     async def write(self, digest, plan, evidence):
         text = digest_text(digest, per_agent_notable=WRITER_NOTABLE)
-        draft = strip_markdown_fence(await self.call("opus", "write", "write", prompts.WRITE_SYSTEM,
-                                                     prompts.write_user(text, plan, evidence)))
+        raw = strip_markdown_fence(await self.call("opus", "write", "write", prompts.WRITE_SYSTEM,
+                                                   prompts.write_user(text, plan, evidence)))
+        draft, expand_problems = self.expand_excerpts(raw, evidence)
         checks = verify.verify_markdown(draft, self.locator.item)
-        problems = self.problems(draft, checks)
+        problems = expand_problems + self.problems(draft, checks)
         attempts = [{"version": "draft", "problems": problems, "summary": checks["summary"]}]
         if problems and self.repair_enabled:
-            revised = strip_markdown_fence(await self.call("opus", "repair", "repair", prompts.REPAIR_SYSTEM,
-                                                           prompts.repair_user(draft, problems, evidence)))
+            revised_raw = strip_markdown_fence(await self.call("opus", "repair", "repair", prompts.REPAIR_SYSTEM,
+                                                               prompts.repair_user(raw, problems, evidence)))
+            revised, revised_expand = self.expand_excerpts(revised_raw, evidence)
             revised_checks = verify.verify_markdown(revised, self.locator.item)
-            revised_problems = self.problems(revised, revised_checks)
+            revised_problems = revised_expand + self.problems(revised, revised_checks)
             attempts.append({"version": "repair", "problems": revised_problems, "summary": revised_checks["summary"]})
             if len(revised_problems) <= len(problems):
                 draft, problems = revised, revised_problems
@@ -286,6 +376,11 @@ class IncidentPipeline:
         generated = _now()
         digest = build_digest(self.run_dir, self.history, judge_dir=self.judge_dir)
         write_json(self.out_dir / "digest.json", digest)
+        for agent in digest["agents"].values():
+            for finding in (agent.get("judge") or {}).get("findings") or []:
+                for cited in finding.get("evidence") or []:
+                    if cited.get("item") and cited.get("quote"):
+                        self.judge_quotes.setdefault(cited["item"], []).append(cited["quote"])
         self.log(f"digest: {len(digest['agents'])} agents, {len(digest_text(digest)):,} characters of prompt text")
         plan = await self.plan(digest)
         evidence = await self.evidence(plan)
@@ -306,7 +401,8 @@ class IncidentPipeline:
                                                                             for q in checks["quotes"]],
                                    "citations": checks["citations"],
                                    "structure_problems": verify.structure_problems(draft), "attempts": attempts},
-                  "plan": plan, "plan_dropped_items": self.dropped, "evidence": evidence,
+                  "plan": plan, "plan_dropped_items": self.dropped,
+                  "extract_refusals": self.extract_refusals, "evidence": evidence,
                   "locators": {item_id: self.locator.locate(item_id) for item_id in evidence["cited_ids"]},
                   "inspect_view_present": self.locator.inspect_view_present, "units": self.units}
         write_json(self.out_dir / "evidence.json", record)

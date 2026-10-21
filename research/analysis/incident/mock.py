@@ -78,29 +78,28 @@ class MockModel:
         out = []
         for item_id, text in re.findall(r"----- RECORD (" + ITEM_ID + r") \([^\n]*\n(?:What the planner[^\n]*\n)?"
                                         r"(.*?)\n----- END OF RECORD \1", user, re.S):
-            body = text.strip()
-            sentence = re.split(r"(?<=[.!?])\s", body, maxsplit=1)[0][:300].strip()
-            if sentence:
-                out.append({"item": item_id, "quote": sentence, "note": "first sentence"})
-        return json.dumps({"excerpts": out})
+            words = text.split()
+            if len(words) >= 12:
+                out.append({"item": item_id, "start": " ".join(words[:6]), "end": " ".join(words[6:12]),
+                            "note": "opening words"})
+        return json.dumps({"passages": out})
 
     def write(self, user, *, fabricate=None):
         fabricate = self.fabricate if fabricate is None else fabricate
         stories = re.findall(r"^## STORYLINE (S\d+): (.*)$", user, re.M)
-        excerpts = re.findall(r"^### RECORD (" + ITEM_ID + r") \|[^\n]*\n(?:EXCERPT 1[^\n]*:\n(.*?)(?=\n### RECORD |"
-                              r"\n## STORYLINE |\n*$))?", user, re.S | re.M)
+        excerpts = re.findall(r"^EXCERPT (E\d+)", user, re.M)
         agents = re.findall(r"^=== (agent-\d+) \(A\d+\), persona ([^\n]*)$", user, re.M)
         lines = ["# Mock incident report: a quiet run", "", "## Summary", "",
                  "This mock report tells the whole story in plain words. The agents worked on the problems.", "",
                  "## Case studies", ""]
-        used = [(i, q) for i, q in excerpts if q and q.strip()]
+        used = excerpts
         for number, (sid, title) in enumerate(stories or [("S1", "Mock storyline")], 1):
             lines += [f"### {number}. {title}", "", "**Context.** The agent was trying to prove a theorem.", ""]
-            for item_id, quote in used[(number - 1) * 2:(number - 1) * 2 + 2]:
-                lines += [f":::excerpt {item_id}", quote.strip().split("\n")[0], ":::", ""]
-                lines += [f"This shows the moment in plain words [{item_id}].", ""]
-            if fabricate and number == 1 and used:
-                lines += [f":::excerpt {used[0][0]}", FAKE, ":::", ""]
+            for eid in used[(number - 1) * 2:(number - 1) * 2 + 2]:
+                lines += [f":::excerpt {eid}", "", "This shows the moment in plain words.", ""]
+            if fabricate and number == 1:
+                item_id = (re.findall(r"^### RECORD (" + ITEM_ID + r") \|", user, re.M) or ["A01.t0001.r"])[0]
+                lines += [f'It also said "{FAKE}" [{item_id}].', "", ":::excerpt E999", ""]
         lines += ["## What didn't happen", "", "No agent quit in protest.", "",
                   "## How sure we are", "", "This rests on model judgment.", "",
                   "## What to try next", "", "- **Prompts:** try a clearer rule statement.",
@@ -112,4 +111,5 @@ class MockModel:
     @staticmethod
     def repair(user):
         draft = user.split("\nYOUR DRAFT:\n", 1)[1].rsplit("\n\nReturn the complete corrected report", 1)[0]
-        return re.sub(r":::excerpt [^\n]+\n" + re.escape(FAKE) + r"\n:::\n\n?", "", draft)
+        draft = re.sub(r'It also said "' + re.escape(FAKE) + r'" \[[^\]]+\]\.\n\n?', "", draft)
+        return draft.replace(":::excerpt E999\n", "")

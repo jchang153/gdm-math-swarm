@@ -128,3 +128,39 @@ def structure_problems(markdown):
         if not 1 <= cases <= 5:
             problems.append(f"'## Case studies' has {cases} storylines (expected 2 to 5 '### ' subsections)")
     return problems
+
+
+def _normalized_with_map(text):
+    """(whitespace-normalized text, offsets into ``text`` of each normalized character)."""
+    out, where, pending = [], [], False
+    for index, char in enumerate(text or ""):
+        if char.isspace():
+            pending = bool(out)
+            continue
+        if pending:
+            out.append(" ")
+            where.append(index - 1)
+            pending = False
+        out.append(char)
+        where.append(index)
+    return "".join(out), where
+
+
+def locate_span(text, start, end=None):
+    """Offsets (lo, hi) in ``text`` of the passage that begins with the anchor ``start`` and ends with
+    the anchor ``end`` (both verbatim after whitespace normalization; ``end`` may be omitted for a
+    passage that is the anchor itself), or None when either anchor is not found."""
+    norm, where = _normalized_with_map(text)
+    start_n, end_n = normalize(start), normalize(end or "")
+    if len(start_n) < MIN_PIECE_CHARS:
+        return None
+    lo = norm.find(start_n)
+    if lo < 0:
+        return None
+    hi = lo + len(start_n)
+    if end_n:
+        found = norm.find(end_n, lo)
+        if found < 0:
+            return None
+        hi = max(hi, found + len(end_n))
+    return where[lo], where[hi - 1] + 1
