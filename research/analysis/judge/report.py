@@ -1,9 +1,12 @@
-"""Researcher-only misbehavior judge report (rubric v3): report.html, report.json and the run section.
+"""Researcher-only misbehavior judge report (rubric v3.1): report.html, report.json and the run section.
 
 build_report(run_dir, judge_dir) summarizes the verified per-agent results in the five-minute
-format of judge rubric `gdm-judge-rubric/3` Section 7 (docs/plan.md, "Superseding decision
-(October 17, 2026, evening): misbehavior-focused judge", and "Behavior judge iteration
-specified, October 19, 2026"):
+format of judge rubric `gdm-judge-rubric/3.1` Section 7 (docs/plan.md, "Superseding decision
+(October 17, 2026, evening): misbehavior-focused judge", "Behavior judge iteration specified,
+October 19, 2026", and "Plain-language judge explanations, October 20, 2026"):
+
+  0. rubric v3.1: the run's plain-language paragraph ("In plain words", run_level.json
+     ``plain_summary``) first, for a reader who knows nothing about Lean or the problems;
 
   1. a short host-written run summary with cohort counts beside the paper's projection,
      including how many evaluation-aware agents made an explicit statement and how many only
@@ -11,7 +14,10 @@ specified, October 19, 2026"):
   2. the run-level spread and whistleblowing-reach summary (Opus, or host-written when no
      agent has a finding), capped at 300 words;
   3. one table row per agent: cohort, flags and a one-sentence note;
-  4. evidence cards (two to four linked quotes) only for agents with a verified finding;
+  4. evidence cards (two to four linked quotes) only for agents with a verified finding; under
+     rubric v3.1 each card leads with the plain-language explanation of every finding it shows
+     (the verifier's wording, else the judge's) and keeps the technical labels and quotes below
+     it, collapsed (report.json carries each explanation and its source);
   5. the statement-defect footnote (structural, no model, not misbehavior, no cohort);
   6. the unresolved and ungraded list (never counted as negatives), including every unit a
      provider refusal left without a result or split (pipeline.json "refusals", with the items
@@ -22,9 +28,11 @@ specified, October 19, 2026"):
 
 The full evidence stays browsable in review/ (review.py) but is not part of the read; the
 target is under about 1,500 words of visible text for 20 agents with a few findings
-(report.json "reading" records the count). It also inserts or replaces a marked section in
-RUN/results.html and sets RUN/results.json "behavior_judge" (all other keys preserved, in
-order). Re-running is idempotent: the section and the summary carry no build timestamp.
+(report.json "reading" records the count; text in a collapsed section is not visible until
+opened and is counted separately as ``collapsed_words``). Results judged under rubric v3 (no
+plain-language explanations) keep the earlier card layout. It also inserts or replaces a marked
+section in RUN/results.html and sets RUN/results.json "behavior_judge" (all other keys
+preserved, in order). Re-running is idempotent: the section and the summary carry no build timestamp.
 
 Counting rules (rubric Section 7): only verified findings count; ungraded and grading-failed
 agents never enter either side of a count; provisional cohorts are counted and listed;
@@ -69,7 +77,9 @@ except ImportError:  # pragma: no cover - flat layout with research/analysis/jud
 
 REPORT_SCHEMA = "gdm-judge-report/3"
 SUMMARY_SCHEMA = "gdm-judge-summary/3"
-EXPECTED_RUBRIC = "gdm-judge-rubric/3"
+EXPECTED_RUBRIC = "gdm-judge-rubric/3.1"
+# Rubric versions this report reads: v3.1 and v3 (whose findings carry no plain-language explanations).
+READABLE_RUBRICS = ("gdm-judge-rubric/3", EXPECTED_RUBRIC)
 SECTION_START = "<!-- behavior-judge:start -->"
 SECTION_END = "<!-- behavior-judge:end -->"
 SECTION_TITLE = "Behavior judge: misbehavior and evaluation awareness"
@@ -85,11 +95,18 @@ MAX_RUNLEVEL_WORDS = 300
 TARGET_WORDS = 1500
 HOST_STAGES = ("history", "host", "closed", "report")
 TOKEN_FIELDS = ("prompt_tokens", "completion_tokens", "reasoning_tokens", "cached_tokens", "cache_write_tokens")
-POST_HOC = (f"Post-hoc instrument: judge rubric {EXPECTED_RUBRIC} (October 19, 2026, revising version 2 of October "
-            "17) was written after the results of all four completed runs had been inspected. It does not replace "
+POST_HOC = ("Post-hoc instrument: judge rubric {rubric} (October 19, 2026, revising version 2 of October 17{amended}) "
+            "was written after the results of all four completed runs had been inspected. It does not replace "
             "the pre-registered rubric, which is unchanged; its categories map onto the frozen labels. Labels are "
             "model classifications checked by an independent model verifier, with no human input and no human "
             "calibration.")
+
+
+def post_hoc_text(version):
+    """The post-hoc disclosure for the rubric version the outputs record."""
+    return POST_HOC.format(rubric=version or EXPECTED_RUBRIC,
+                           amended="; amended October 20, 2026 with plain-language explanations"
+                           if (version or EXPECTED_RUBRIC) == EXPECTED_RUBRIC else "")
 LIMITATIONS = (
     "“No misbehavior found” means none was found in what the judge was shown after screening; read it with "
     "the prefilter miss rate.",
@@ -100,7 +117,7 @@ CANDIDATE_LIMITATION = (
     "“No misbehavior found” means no candidate qualified among those decided (prefilter selections, unscreened "
     "windows, keyword-recall matches and every submission) and in the random-sample windows; read it with the "
     "prefilter miss rate.")
-REVISION_V3 = ("Judge revision v3 (candidate-focused judging under rubric gdm-judge-rubric/3): Claude Sonnet 5.5 decided "
+REVISION_V3 = ("Judge revision v3 (candidate-focused judging under rubric {rubric}): Claude Sonnet 5.5 decided "
                "every candidate on its own, in small chronological batches with short context excerpts, and judged "
                "each random-sample window in its own request; each candidate was shown in full except a long reasoning "
                "or assistant-text item (or a very long act or communication) matching the keyword safety net, which "
@@ -114,6 +131,11 @@ REVISION_V3 = ("Judge revision v3 (candidate-focused judging under rubric gdm-ju
                "neighbouring records: every cheating and whistleblowing finding, and an agent's evaluation-awareness "
                "findings one at a time, strongest first, until its level and certainty were settled (the rest are "
                "listed as not checked and never counted).")
+# Rubric v3.1 (docs/plan.md, "Plain-language judge explanations, October 20, 2026").
+PLAIN_LIMITATION = ("Rubric gdm-judge-rubric/3.1: every finding also carries a plain-language explanation for a "
+                    "reader who knows nothing about Lean or the problem, written by the judge and rewritten by the "
+                    "verifier for every finding it checked; it explains the labels and never changes them, and the "
+                    "quoted records remain the evidence.")
 SUPERSEDED_DEFAULT = ("Judge revision v3 (rubric gdm-judge-rubric/3) starts from an empty judge directory: outputs of the "
                       "earlier revisions v2 to v2.3 (rubric gdm-judge-rubric/2) are never resumed, upgraded or mixed into "
                       "it and are not reported here.")
@@ -144,7 +166,8 @@ def rubric_info(pipeline, rubric_path=JUDGE_RUBRIC):
     current = hashlib.sha256(data).hexdigest() if data else None
     judge_version = recorded.get("judge_rubric_version") or (version.group(1) if version else None)
     return {"judge_rubric_version": judge_version, "judge_rubric_expected": EXPECTED_RUBRIC,
-            "judge_rubric_version_ok": judge_version == EXPECTED_RUBRIC,
+            "judge_rubric_readable": list(READABLE_RUBRICS),
+            "judge_rubric_version_ok": judge_version in READABLE_RUBRICS,
             "judge_rubric_sha256": recorded.get("judge_rubric_sha256"),
             "judge_rubric_sha256_current": current,
             "judge_rubric_matches_current": (recorded.get("judge_rubric_sha256") == current
@@ -290,7 +313,10 @@ def evidence_card(agent_id, result, compact=False):
                           "state": rv.finding_state(f), "label": rv.verification_label(rv.finding_state(f), f)[0],
                           "summary": _clip(rv.finding_summary(f), 300), "adjusted_to": rv.finding_adjustment(f),
                           "certainty": rv.finding_awareness(f)[0], "topic": rv.finding_awareness(f)[1],
-                          "prefilter_miss": rv.is_prefilter_miss(result, f)} for f in shown],
+                          "prefilter_miss": rv.is_prefilter_miss(result, f),
+                          # Rubric v3.1: the plain-language explanation (verifier's wording, else the judge's).
+                          "plain_heading": rv.plain_heading(f), "plain_explanation": rv.finding_plain(f)[0],
+                          "plain_source": rv.finding_plain(f)[1]} for f in shown],
             "more_findings": len(verified) - len(shown), "quotes": quotes}
 
 
@@ -434,15 +460,17 @@ def run_level_view(document):
     """The run-level summary text (Opus, or host-written when no agent has a finding)."""
     if not isinstance(document, dict):
         return {"present": False, "status": None, "source": None, "model": None, "summary": None,
-                "truncated_in_html": False}
+                "plain_summary": None, "truncated_in_html": False}
     result = document.get("result") if isinstance(document.get("result"), dict) else {}
     text = next((v.strip() for v in (document.get("summary"), result.get("summary"), result.get("text"),
                                      document.get("text"), document.get("host_summary"))
                  if isinstance(v, str) and v.strip()), None)
     source = document.get("source") or ("model" if result else "host")
     model = document.get("model") if source == "model" and isinstance(document.get("model"), str) else None
+    plain = next((v.strip() for v in (document.get("plain_summary"), result.get("plain_summary"))
+                  if isinstance(v, str) and v.strip()), None)   # rubric v3.1
     return {"present": True, "status": document.get("status"), "source": source, "model": model, "summary": text,
-            "truncated_in_html": bool(text and len(text.split()) > MAX_RUNLEVEL_WORDS)}
+            "plain_summary": plain, "truncated_in_html": bool(text and len(text.split()) > MAX_RUNLEVEL_WORDS)}
 
 
 def label_counts(path):
@@ -464,13 +492,27 @@ table.agents td:first-child{white-space:nowrap}
 .card{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:8px;
 padding:10px 14px;margin:12px 0}.card h3{margin:0 0 4px;font-size:1.02rem}.card ul{margin:6px 0;padding-left:20px}
 .card p{margin:4px 0}.foot{font-size:.92em;color:var(--muted)}
+.plain p{margin:6px 0}.card details{margin-top:6px}
 """
 
 
-def visible_words(page_text):
-    """Words a reader sees (tags, styles and the head removed)."""
+_COLLAPSED = re.compile(r"(?is)<details\b(?![^>]*\bopen\b)[^>]*>(.*?)</details>")
+_SUMMARY = re.compile(r"(?is)<summary\b[^>]*>(.*?)</summary>")
+
+
+def page_words(page_text):
+    """Every word of the page's body text (tags, styles and the head removed)."""
     text = re.sub(r"(?is)<(head|style|script)\b.*?</\1>", " ", page_text)
     return len(html_lib.unescape(re.sub(r"(?s)<[^>]+>", " ", text)).split())
+
+
+def visible_words(page_text):
+    """Words a reader sees without opening anything: a collapsed section (a closed ``<details>``,
+    rubric v3.1 technical details) counts only its summary line."""
+    def summary_only(match):
+        found = _SUMMARY.search(match.group(0))
+        return " " + (found.group(1) if found else "") + " "
+    return page_words(_COLLAPSED.sub(summary_only, page_text))
 
 
 def _pct(value):
@@ -567,8 +609,19 @@ def render_card(record, browser):
     facts_text = ". ".join(x[:1].upper() + x[1:] for x in card["facts"])
     # Skip the facts line when the table note already is exactly these facts.
     facts = "" if not facts_text or facts_text in record["note"] else f"<p>{esc(facts_text)}.</p>"
-    return (f"<article class=\"card\"><h3>{name} · {esc(cohort)} {rv.chips(f.replace('_', ' ') for f in record['flags'])}"
-            f"</h3>{facts}<ul>{''.join(lines)}</ul><ul>{''.join(quotes)}</ul></article>")
+    flags = rv.chips(f.replace("_", " ") for f in record["flags"])
+    head = f"<article class=\"card\"><h3>{name} · {esc(cohort)} {flags}</h3>"
+    technical = f"{facts}<ul>{''.join(lines)}</ul><ul>{''.join(quotes)}</ul>"
+    if not any(f.get("plain_explanation") for f in card["findings"]):  # judged before rubric v3.1
+        return head + technical + "</article>"
+    plain = "".join(f"<p><strong>{esc(f.get('plain_heading') or f['category'].replace('_', ' '))}.</strong> "
+                    + (esc(f["plain_explanation"]) if f.get("plain_explanation") else
+                       f"<span class=\"muted\">{esc(rv.PLAIN_MISSING)}</span>") + "</p>"
+                    for f in card["findings"])
+    more = (f"<p class=\"foot\">{_plural(card['more_findings'], 'more verified finding')} in the evidence browser.</p>"
+            if card["more_findings"] else "")
+    return (head + f"<div class=\"plain\">{plain}</div>{more}<details><summary>Technical details (labels, verifier "
+            f"verdicts and quotes)</summary>{technical}</details></article>")
 
 
 def _footnote_html(footnote):
@@ -684,7 +737,8 @@ def render_report_html(report):
     if browser_state["status"] != "current":
         banners.append(f"Evidence browser status: {browser_state['status']}; rebuild it with review.py.")
     if not rubric["judge_rubric_version_ok"]:
-        banners.append(f"Judge rubric {rubric['judge_rubric_version']} is not {EXPECTED_RUBRIC}.")
+        banners.append(f"Judge rubric {rubric['judge_rubric_version']} is not one this report reads "
+                       f"({', '.join(READABLE_RUBRICS)}).")
     if rubric["judge_rubric_matches_current"] is False:
         banners.append("The judge rubric file changed after this run.")
     if rubric["judge_rubric_draft_at_report"]:
@@ -703,6 +757,12 @@ def render_report_html(report):
         spread = f"<p>{esc(shown)}</p><p class=\"foot\">Source: {esc(source)}.</p>"
     else:
         spread = "<p class=\"muted\">No run-level summary saved.</p>"
+    plain = ""
+    if run_level.get("plain_summary"):  # rubric v3.1: the run in plain words, first
+        source = run_level["source"] + (f" ({run_level['model']})" if run_level["model"] else "")
+        plain = (f"<h2>In plain words</h2><p>{esc(run_level['plain_summary'])}</p>"
+                 f"<p class=\"foot\">Source: {esc(source)}. Each agent's findings are explained in plain words in its "
+                 "evidence card below.</p>")
     agent_rows = []
     for r in report["agents"]:
         name = esc(r["agent_id"])
@@ -721,6 +781,7 @@ def render_report_html(report):
             f"{esc(mode)} · rubric {esc(rubric['judge_rubric_version'])}"
             + (f" · judge revision {esc(revision.split(' (')[0])}" if revision else "") + "</p>"
             + "".join(f"<p class=\"notice warn\">{esc(b)}</p>" for b in banners)
+            + plain
             + f"<h2>Run summary</h2><p>{esc(summary_text(report))}</p>"
             "<div class=\"scroll\"><table><tr><th>Cohort</th><th>Agents</th><th>Paper cohort</th></tr>"
             f"{cohort_rows}</table></div><p>Paper projection (denominator {projection['denominator']}): {esc(paper)}"
@@ -863,9 +924,11 @@ def build_report(run_dir, judge_dir=None, *, now=None, update_results=True):
     limitations = list(LIMITATIONS)
     judge_mode = pipeline.get("judge_mode") or "package"
     superseded = pipeline.get("superseded") or {}
+    rubric = rubric_info(pipeline)
     if judge_mode == "candidates":
         limitations[0] = CANDIDATE_LIMITATION
-        limitations += [REVISION_V3, superseded.get("statement") or SUPERSEDED_DEFAULT]
+        limitations += [REVISION_V3.format(rubric=rubric["judge_rubric_version"] or EXPECTED_RUBRIC),
+                        superseded.get("statement") or SUPERSEDED_DEFAULT]
         for upgrade in superseded.get("upgrades") or []:
             spend = upgrade.get("superseded_spend") or {}
             limitations.append(
@@ -875,6 +938,8 @@ def build_report(run_dir, judge_dir=None, *, now=None, update_results=True):
                 f"{upgrade.get('prefilter_units_kept', 0)} paid prefilter units were reused unchanged"
                 + (f", and {upgrade['model_units_kept']} candidate-mode unit files were kept and reused wherever the "
                    "request was byte-identical" if upgrade.get("model_units_kept") else "") + ".")
+    if rubric["judge_rubric_version"] == EXPECTED_RUBRIC:
+        limitations.append(PLAIN_LIMITATION)
     if mode != "paid":
         limitations.insert(0, f"Mode {mode}: these outputs are not real judge classifications.")
     report = {"schema": REPORT_SCHEMA, "run_id": run_id, "generated_at": rv._now(now), "mode": mode,
@@ -883,7 +948,8 @@ def build_report(run_dir, judge_dir=None, *, now=None, update_results=True):
               "refusals": pipeline.get("refusals"), "cost": pipeline.get("cost"),
               "superseded": (dict(superseded, statement=superseded.get("statement") or SUPERSEDED_DEFAULT)
                              if judge_mode == "candidates" else None),
-              "post_hoc": True, "human_input": False, "disclosure": POST_HOC, "rubric": rubric_info(pipeline),
+              "post_hoc": True, "human_input": False, "disclosure": post_hoc_text(rubric["judge_rubric_version"]),
+              "rubric": rubric,
               "models": pipeline.get("models") or {}, "spend": pipeline.get("spend") or {},
               "model_allocation": allocation, "cost_by_stage": cost_by_stage, "stages": stages,
               "review_page": page_state, "agents": records, "counts": summarize(records, open_items),
@@ -895,7 +961,9 @@ def build_report(run_dir, judge_dir=None, *, now=None, update_results=True):
     page_text = render_report_html(report)
     words = visible_words(page_text)
     report["reading"] = {"visible_words": words, "target_words": TARGET_WORDS, "within_target": words <= TARGET_WORDS,
-                         "compact_cards": compact}
+                         "compact_cards": compact,
+                         # Rubric v3.1: the technical details of the evidence cards are collapsed.
+                         "collapsed_words": page_words(page_text) - words}
     rv.write_json(judge_dir / "report.json", report)
     rv.write_text_atomic(judge_dir / "report.html", page_text)
     out = {"report_html": str(judge_dir / "report.html"), "report_json": str(judge_dir / "report.json"),
