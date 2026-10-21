@@ -13,6 +13,7 @@ import shutil
 
 from build_experiment_index import build
 from space_navigation import private_space_navigation
+from site_style import themed
 
 ROOT = Path(__file__).resolve().parents[1]
 # Behavior judge outputs under RUN/analysis/judge/ (docs/experiment-library.md, "Behavior
@@ -201,7 +202,8 @@ This archive must be hosted in a **private** Space. Do not upload credentials.
     (output / 'robots.txt').write_text('User-agent: *\nDisallow: /\n')
     for page in output.rglob('*.html'):
         modules = ['./assets/' + p.name for p in sorted((page.parent / 'assets').glob('*.js'))] if page.parent.name == 'inspect-view' else []
-        page.write_text(private_space_navigation(page.read_text(), modules))
+        text = page.read_text() if 'inspect-view' in page.relative_to(output).parts else themed(page.read_text())
+        page.write_text(private_space_navigation(text, modules))
     files = {str(p.relative_to(output)): {'bytes': p.stat().st_size,
              'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
              for p in sorted(output.rglob('*')) if p.is_file()}

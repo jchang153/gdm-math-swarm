@@ -99,6 +99,33 @@ class GeneratedPagesTest(unittest.TestCase):
         assert_themed(self, document)
         self.assertIn('id="private-space-navigation"', document)
 
+    def test_prepared_space_pages_are_themed_except_inspect_view(self):
+        from unittest.mock import patch
+        sys.path.insert(0, str(ROOT / 'tests'))
+        import prepare_hf_library
+        from test_judge_publication import make_run, make_viewer
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            viewer = make_viewer(root)
+            make_run(root / 'runs', 'r1')
+            (root / 'runs' / 'r1' / 'results.html').write_text(
+                '<!doctype html><html><head><title>old</title></head><body>x</body></html>')
+            output = root / 'bundle'
+            argv = ['prepare_hf_library.py', '--runs-dir', str(root / 'runs'), '--output-dir', str(output),
+                    '--run', f'r1={viewer}']
+            with patch.object(sys, 'argv', argv), patch('builtins.print'):
+                prepare_hf_library.main()
+            pages = list(output.rglob('*.html'))
+            inspect = [p for p in pages if 'inspect-view' in p.relative_to(output).parts]
+            ours = [p for p in pages if p not in inspect]
+            self.assertTrue(inspect and any(p.name == 'results.html' for p in ours))
+            for page in ours:
+                text = page.read_text()
+                assert_themed(self, text)
+                self.assertIn('id="private-space-navigation"', text)
+            for page in inspect:
+                self.assertNotIn(MARKER, page.read_text())
+
 
 if __name__ == '__main__':
     unittest.main()
