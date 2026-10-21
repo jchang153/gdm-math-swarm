@@ -179,6 +179,9 @@ RUBRIC_VERSION = schema.RUBRIC_ID
 LEGACY_PIPELINE_VERSION = "gdm-judge-pipeline/3"
 LEGACY_RUBRIC_VERSION = "gdm-judge-rubric/2"
 STAGES = ("history", "prefilter", "judge", "verify", "host", "closed", "runlevel", "report")
+# Live behavior judge (docs/plan.md, "Live behavior judge during the run (October 20, 2026)"): the
+# units screened during the run are kept in <judge dir>/live/ (live.py writes them, warm.py adopts).
+WARM_DIRNAME = "live"
 MODES = ("paid", "rehearsal")
 FINAL = ("ok", "ungraded", "grading_failed")
 # A unit refused (content filter): a multi-item request on its only attempt (judge revision v3,
@@ -370,16 +373,26 @@ class PipelineSettings:
     passage_min_chars: int = 4000
     passage_chars: int = 500
     act_passage_min_chars: int = 12000
+    # Live behavior judge (docs/plan.md, "Live behavior judge during the run (October 20, 2026)"):
+    # False leaves ``window_count`` (the agent's final number of windows, unknown until the run
+    # stops) out of the Haiku screening request's header, so a window screened during the run is
+    # the byte-identical request the post-run judge sends. Metadata only: the window's items,
+    # its id and its index are unchanged. True (the v3 default) keeps the v3 bytes and is left
+    # out of the binding, so existing v3 judge directories still match and rescore.
+    prefilter_window_count: bool = True
 
     def binding(self):
         """Settings that shape model inputs. In package mode the candidate settings are left out,
-        so a v2/v2.1 package-mode manifest still matches exactly."""
+        so a v2/v2.1 package-mode manifest still matches exactly; ``prefilter_window_count`` is
+        bound only when False (its v3 default leaves v3 manifests unchanged)."""
         out = asdict(self)
         for key in RUNTIME_SETTINGS:
             out.pop(key)
         if self.judge_mode == "package":
             for key in CANDIDATE_SETTINGS:
                 out.pop(key)
+        if self.prefilter_window_count is True:
+            out.pop("prefilter_window_count")
         return out
 
     def runtime(self):
@@ -420,6 +433,8 @@ class PipelineSettings:
         for name in ("candidate_context_chars", "passage_min_chars", "act_passage_min_chars"):
             if not isinstance(getattr(self, name), int) or getattr(self, name) < 0:
                 problems.append(f"{name} must be a non-negative integer")
+        if not isinstance(self.prefilter_window_count, bool):
+            problems.append("prefilter_window_count must be True or False")
         if problems:
             raise ValueError("; ".join(problems))
         return self
@@ -431,6 +446,10 @@ class BudgetStop(RuntimeError):
 
 class StaleUnit(RuntimeError):
     """A cached unit was produced from a different prompt than the current one."""
+
+
+class ReplayNeedsRequest(RuntimeError):
+    """Replaying a recorded unit (adoption of a live unit) reached a step that was never sent."""
 
 
 class PipelineError(RuntimeError):
@@ -512,6 +531,32 @@ def window_items(window, items_by_id):
     for piece_id, item, text in window_pieces(window, items_by_id):
         out.append(item if piece_id == item["id"] else dict(item, id=piece_id, text=text))
     return out
+
+
+def window_index(window):
+    """The 1-based index of a window, from its id (``A07.w0012`` -> 12): the same as its position
+    in the agent's full window list, also when only some windows are passed (the live judge)."""
+    return int(str(window["id"]).rsplit(".w", 1)[1])
+
+
+def prefilter_request(agent_id, code, window, items_by_id, settings, window_count=None):
+    """(system, user) of the Haiku screening request for one window: the one builder shared by the
+    pipeline, the cached-unit checks, the estimates and the live judge. ``window_count`` (the
+    agent's number of windows) is shown only while ``settings.prefilter_window_count`` is True
+    (the v3 default); with False the request depends only on the window's items, id and index."""
+    meta = {"agent_id": agent_id, "agent_code": code, "window_id": window["id"], "window_index": window_index(window),
+            "window_count": window_count if settings.prefilter_window_count else None}
+    return prompts.prefilter_messages_v2(window_items(window, items_by_id), meta)
+
+
+def prefilter_unit_options(window, settings):
+    """Keyword arguments of ``Pipeline.unit`` for one window's screening unit, besides the request
+    and the path (shared by the pipeline and the live judge, so both build the same unit)."""
+    return {"unit_id": window["id"], "purpose": "prefilter", "max_tokens": settings.max_tokens["prefilter"],
+            "parse": _schema_parser(schema.parse_prefilter, window_item_ids=window["item_ids"]),
+            # A window holds many items (judge revision v3, item 6): a refused window is never resent
+            # identically; it is forced, so each of its items is decided as a candidate.
+            "refusal_retry": len(window["item_ids"]) == 1, "subjects": [window["id"]]}
 
 
 def exposure_graph_rows(history):
@@ -1708,7 +1753,7 @@ class Pipeline:
     def __init__(self, run_dir, judge_dir, *, mode, clients, settings=None, agents=None, stage="report",
                  scope="analysis", ledger_path=None, models=None, route=None, history_loader=None,
                  agent_ids=None, retry_failed=False, recompute_stale=False, label_check=True, rescore_only=False,
-                 defects_path=None, log=None, upgrade_judge_revision=False, run_limit=None):
+                 defects_path=None, log=None, upgrade_judge_revision=False, run_limit=None, warm_from=None):
         if mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}")
         if stage not in STAGES:
@@ -1747,6 +1792,11 @@ class Pipeline:
         self._completions = 0
         self._cond = None
         self._build_lock = threading.Lock()
+        # Live behavior judge (warm.py): a ``WarmStore`` of the units screened during the run, adopted
+        # by exact request; None disables adoption. ``warm_from`` names its directory (default
+        # judge_dir/live when it exists; False never adopts).
+        self.warm = None
+        self.warm_from = warm_from
 
     # -- helpers ----------------------------------------------------------
     def reached(self, stage):
@@ -2086,25 +2136,51 @@ class Pipeline:
         client = self.clients.get(model)  # absent in --rescore-cached runs, which never call
         input_sha = sha256_text(system + "\0" + user)
         unit = self._load_unit(path, input_sha)
+        if unit is None and self.warm is not None and not self.rescore_only:
+            # Live behavior judge (warm.py): a unit screened during the run for exactly this request
+            # is adopted (copied in) instead of sending the request again.
+            unit = await self._adopt_warm(model, path, input_sha, system=system, user=user, unit_id=unit_id,
+                                          purpose=purpose, max_tokens=max_tokens, parse=parse, salvage=salvage,
+                                          repair=repair, refusal_retry=refusal_retry)
         if unit is not None and unit.get("status") in FINAL:
             return unit
         if self.rescore_only:
             raise PipelineError(f"{unit_id}: no completed cached unit at {path} (a --rescore-cached run makes no "
                                 "model calls)")
-        unit = unit or {"schema": UNIT_SCHEMA, "unit_id": unit_id, "purpose": purpose, "model": model,
-                        "model_id": self.model_id(model), "mode": self.mode, "input_sha256": input_sha,
-                        "input_tokens_estimate": estimate_tokens(system) + estimate_tokens(user),
-                        "status": "pending", "steps": []}
-        if purpose != "prefilter" and self.judge_mode == "candidates":
-            unit.setdefault("judge_revision", self.judge_revision)
+        unit = unit or self.new_unit(model, unit_id=unit_id, purpose=purpose, system=system, user=user)
         if subjects is not None:
             unit.setdefault("subjects", list(subjects))
+        return await self._drive_unit(unit, path, client, system=system, user=user, purpose=purpose,
+                                      unit_id=unit_id, max_tokens=max_tokens, parse=parse, salvage=salvage,
+                                      repair=repair, refusal_retry=refusal_retry)
+
+    def new_unit(self, model, *, unit_id, purpose, system, user):
+        """A pending unit record for one request (no step yet)."""
+        unit = {"schema": UNIT_SCHEMA, "unit_id": unit_id, "purpose": purpose, "model": model,
+                "model_id": self.model_id(model), "mode": self.mode, "input_sha256": sha256_text(system + "\0" + user),
+                "input_tokens_estimate": estimate_tokens(system) + estimate_tokens(user),
+                "status": "pending", "steps": []}
+        if purpose != "prefilter" and self.judge_mode == "candidates":
+            unit["judge_revision"] = self.judge_revision
+        return unit
+
+    async def _drive_unit(self, unit, path, client, *, system, user, purpose, unit_id, max_tokens, parse,
+                          salvage=None, repair=None, refusal_retry=True, replay=False):
+        """The decision flow of ``unit`` over ``unit``'s recorded steps, sending (and saving) only
+        the steps not recorded yet. ``replay=True`` (adoption of a live unit, warm.py) never sends
+        or saves anything: a step that is not recorded raises ``ReplayNeedsRequest``, and the
+        finished unit is only returned, so the recorded outputs are re-parsed, repaired from and
+        salvaged by exactly the code the post-run judge runs."""
+        if purpose != "prefilter" and self.judge_mode == "candidates":
+            unit.setdefault("judge_revision", self.judge_revision)
         cache = self.cache_request()
 
         async def step(kind, step_user, retry=None):
             for done in unit["steps"]:
                 if done["kind"] == kind:
                     return done["client"]
+            if replay:
+                raise ReplayNeedsRequest(kind)
             result = await self._call(client, system=system, user=step_user,
                                       purpose=purpose if kind.startswith("initial") else f"{purpose}_repair",
                                       unit_id=unit_id, max_tokens=max_tokens, cache_system=cache,
@@ -2131,7 +2207,8 @@ class Pipeline:
             refused = unit_refusals(unit)
             if refused["attempts"]:
                 unit["refusals"] = refused
-            write_json(path, unit)
+            if not replay:
+                write_json(path, unit)
             return unit
 
         limit = [output_limit_problem(max_tokens)]
@@ -2183,12 +2260,56 @@ class Pipeline:
             elif self.run_limit is not None and client.run_limit is not self.run_limit:
                 raise PipelineError(f"the {key} client holds another run limit than this invocation")
 
+    def open_warm(self):
+        """Open the live behavior judge's store of units screened during the run (warm.py) when
+        ``warm_from`` names one or judge_dir/live exists (``warm_from=False`` never adopts); every
+        adoption guard is checked here once."""
+        from .warm import WarmStore
+        if self.warm_from is False or self.rescore_only:
+            return None
+        folder = Path(self.warm_from) if self.warm_from else self.judge_dir / WARM_DIRNAME
+        if not folder.is_dir():
+            return None
+        self.warm = WarmStore.open(folder, self)
+        self.log(f"live units: {self.warm.describe()}")
+        return self.warm
+
+    async def _adopt_warm(self, model, path, input_sha, *, system, user, unit_id, purpose, max_tokens, parse,
+                          salvage, repair, refusal_retry):
+        """A live unit made for exactly this request (warm.py), checked by replaying its recorded
+        outputs through ``_drive_unit`` and copied to ``path``; else None (the request is sent)."""
+        candidate = self.warm.candidate(path, input_sha, purpose=purpose, model_id=self.model_id(model),
+                                        mode=self.mode)
+        if candidate is None:
+            return None
+        found, source = candidate
+        if found.get("status") in FINAL:
+            replayed = json.loads(json.dumps(found))
+            for key in ("status", "reason", "result", "problems", "completed_at", "first_problems", "salvage",
+                        "refusals"):
+                replayed.pop(key, None)
+            replayed["status"] = "pending"
+            try:
+                replayed = await self._drive_unit(replayed, path, None, system=system, user=user, purpose=purpose,
+                                                  unit_id=unit_id, max_tokens=max_tokens, parse=parse,
+                                                  salvage=salvage, repair=repair, refusal_retry=refusal_retry,
+                                                  replay=True)
+            except ReplayNeedsRequest as missing:
+                self.warm.reject(path, source, f"replay_needs_request:{missing}")
+                return None
+            keys = ("status", "reason", "result", "problems")
+            if canonical({k: replayed.get(k) for k in keys}) != canonical({k: found.get(k) for k in keys}):
+                self.warm.reject(path, source, "replay_mismatch")
+                return None
+        return self.warm.adopt(path, source, found)
+
     async def run(self):
         started = self.started_at = _now()
         self.judge_dir.mkdir(parents=True, exist_ok=True)
         self.check_manifest()
         if self.run_limit is not None:
             self._attach_run_limit()
+        self.open_warm()
         agents = self.agent_list()
         self.log(f"judge pipeline: run {self.run_id}, mode {self.mode}, {len(agents)} agent(s), stage {self.stage}"
                  + (f", run limit ${self.run_limit.limit} ({self.run_limit.source})" if self.run_limit else ""))
@@ -2237,6 +2358,8 @@ class Pipeline:
                    "stop": self.stop, "errors": self.errors, "spend": self.spend(),
                    "run_limit": self.run_limit.record() if self.run_limit else None,
                    "rescore_only": self.rescore_only, "reused_units_with_changed_prompt": self.reused_stale}
+        if self.warm is not None:
+            summary["live"] = self.warm.finish()
         state = read_json(self.judge_dir / "state.json", {"schema": STATE_SCHEMA, "invocations": []})
         state["invocations"].append(summary)
         write_json(self.judge_dir / "state.json", state)
@@ -2288,6 +2411,12 @@ class Pipeline:
             raise PipelineError(f"{path}: the reconstructed history of {agent_id} changed since the cached units were "
                                 "made (digest mismatch); use a new --output-dir")
         if existing is not None and existing.get("window_tokens") == self.settings.window_tokens:
+            host = host_context_digest(history)
+            if existing.get("host_context_digest") != host:
+                # Host-only context changed (e.g. evaluator verdicts written after an earlier stage ran):
+                # the agent-visible record and its windows are the same; only this note is refreshed.
+                existing = dict(existing, host_context_digest=host)
+                write_json(path, existing)
             return existing
         items = _get(history, "items", []) or []
         windows = make_windows(items, self.settings.window_tokens)
@@ -2311,22 +2440,15 @@ class Pipeline:
         items = _get(history, "items", []) or []
         by_id = {item["id"]: item for item in items}
         code = _get(history, "code") or agent_code(agent_id)
-        max_tokens = self.settings.max_tokens["prefilter"]
 
-        async def one(index, window):
-            pieces = window_items(window, by_id)
-            meta = {"agent_id": agent_id, "agent_code": code, "window_id": window["id"], "window_index": index,
-                    "window_count": len(windows)}
-            system, user = prompts.prefilter_messages_v2(pieces, meta)
-            # A window holds many items (judge revision v3, item 6): a refused window is never resent
-            # identically; it is forced (below), so each of its items is decided as a candidate.
+        async def one(window):
+            system, user = prefilter_request(agent_id, code, window, by_id, self.settings, len(windows))
+            # A refused window is forced (below), so each of its items is decided as a candidate.
             return window["id"], await self.unit(
                 STAGE_MODELS["prefilter"], self.unit_dir(agent_id) / "prefilter" / f"{window['id']}.json",
-                unit_id=window["id"], purpose="prefilter", system=system, user=user, max_tokens=max_tokens,
-                parse=_schema_parser(schema.parse_prefilter, window_item_ids=window["item_ids"]),
-                refusal_retry=len(window["item_ids"]) == 1, subjects=[window["id"]])
+                system=system, user=user, **prefilter_unit_options(window, self.settings))
 
-        results = await asyncio.gather(*(one(n, w) for n, w in enumerate(windows, 1)), return_exceptions=True)
+        results = await asyncio.gather(*(one(w) for w in windows), return_exceptions=True)
         units = {}
         for result in results:
             if isinstance(result, BaseException):
@@ -3141,6 +3263,11 @@ class Pipeline:
                "requests": requests, "by_stage": dict(sorted(by_stage.items())),
                "by_model": dict(sorted(by_model.items())), "by_purpose": by_purpose,
                "replaced_units": replaced_unit_spend(self.judge_dir)}
+        if (self.judge_dir / WARM_DIRNAME / "units").is_dir():
+            # Live behavior judge: units screened during the run. Adopted ones are counted above (their
+            # copies in units/); the unadopted ones were paid once and are reported here.
+            from .warm import live_spend
+            out["live"] = live_spend(self.judge_dir)
         if self.ledger_path and self.ledger_path.exists():
             from research_swarm.budget import read_snapshot
             try:
@@ -3623,13 +3750,11 @@ def cached_prefilter(judge_dir, agent_id, history, settings):
     code = _get(history, "code") or agent_code(agent_id)
     windows = summary["windows"]
     selected, forced, unselected, mismatched = set(), set(), [], []
-    for index, window in enumerate(windows, 1):
+    for window in windows:
         unit = read_json(Path(judge_dir) / "units" / agent_id / "prefilter" / f"{window['id']}.json")
         if not unit or unit.get("status") not in FINAL:
             return None
-        system, user = prompts.prefilter_messages_v2(window_items(window, by_id), {
-            "agent_id": agent_id, "agent_code": code, "window_id": window["id"], "window_index": index,
-            "window_count": len(windows)})
+        system, user = prefilter_request(agent_id, code, window, by_id, settings, len(windows))
         if unit.get("input_sha256") != sha256_text(system + "\0" + user):
             mismatched.append(window["id"])
         if unit["status"] == "ok":
@@ -3769,10 +3894,8 @@ def estimate_agent(run, agent_id, settings, route_settings, assumptions, fractio
     system = system or system_prompt_tokens()
     haiku_requests, haiku_cached, max_window_bytes = [], [], 0
     unit_dir = Path(judge_dir) / "units" / agent_id / "prefilter" if judge_dir else None
-    for index, window in enumerate(windows, 1):
-        sys_text, user = prompts.prefilter_messages_v2(window_items(window, by_id), {
-            "agent_id": agent_id, "agent_code": history.code, "window_id": window["id"], "window_index": index,
-            "window_count": len(windows)})
+    for window in windows:
+        sys_text, user = prefilter_request(agent_id, history.code, window, by_id, settings, len(windows))
         haiku_requests.append(estimate_tokens(sys_text) + estimate_tokens(user))
         haiku_cached.append(unit_dir is not None
                             and cached_unit(unit_dir / f"{window['id']}.json", sys_text, user) is not None)

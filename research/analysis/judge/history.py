@@ -346,13 +346,19 @@ class RunHistory:
 # Conference
 
 
-def _connect_readonly(path):
+def _connect_readonly(path, live=False):
     """Read-only connection. When the write-ahead log is absent or empty (a saved run) the
     database is opened ``immutable`` first, so reading never touches its ``-shm`` file;
-    otherwise ``mode=ro`` first, so committed WAL content is read."""
+    otherwise ``mode=ro`` first, so committed WAL content is read. ``live=True`` (a database
+    another process is still writing, e.g. the conference of a running experiment read by the
+    live behavior judge) opens it ``mode=ro`` only and never ``immutable``: an empty WAL there
+    says nothing about the next write, and SQLite assumes an immutable file never changes."""
     wal = Path(str(path) + "-wal")
     settled = not wal.exists() or wal.stat().st_size == 0
-    order = ("?mode=ro&immutable=1", "?mode=ro") if settled else ("?mode=ro", "?mode=ro&immutable=1")
+    if live:
+        order = ("?mode=ro",)
+    else:
+        order = ("?mode=ro&immutable=1", "?mode=ro") if settled else ("?mode=ro", "?mode=ro&immutable=1")
     for suffix in order:
         try:
             db = sqlite3.connect("file:" + pathname2url(str(Path(path).resolve())) + suffix, uri=True)
@@ -364,11 +370,12 @@ def _connect_readonly(path):
     return None
 
 
-def load_conference(run_dir):
-    """Conference records keyed by internal id (never writes the database)."""
+def load_conference(run_dir, *, live=False):
+    """Conference records keyed by internal id (never writes the database). ``live=True``: the
+    database may still be written (``_connect_readonly(live=True)``)."""
     conf = ConferenceRecords()
     path = Path(run_dir) / "conference" / "state.sqlite"
-    db = _connect_readonly(path) if path.exists() else None
+    db = _connect_readonly(path, live=live) if path.exists() else None
     if db is None:
         conf.problems.append({"file": str(path), "error": "missing_or_unreadable"})
         return conf
@@ -1005,7 +1012,10 @@ def file_version_diff(history, item, context=3):
 # Host context
 
 
-def load_runtime(run_dir, problems):
+def load_runtime(run_dir, problems, *, complete_lines_only=False):
+    """``runtime.jsonl`` records in order (``RT.L<n>`` is record n). ``complete_lines_only``
+    (a file still being appended to, read by the live behavior judge): a last line without its
+    newline is a record still being written and is left out, never parsed or numbered."""
     path = Path(run_dir) / "runtime.jsonl"
     records = []
     if not path.exists():
@@ -1013,6 +1023,8 @@ def load_runtime(run_dir, problems):
         return records
     with path.open(encoding="utf-8") as handle:
         for number, line in enumerate(handle, 1):
+            if complete_lines_only and not line.endswith("\n"):
+                break
             try:
                 records.append(json.loads(line))
             except ValueError:
@@ -1224,6 +1236,20 @@ def run_item_turn(item_id):
     return int(match.group(1)) if match else None
 
 
+def load_run_base(run_dir, *, live=False):
+    """RunHistory of a run directory without any agent (runtime, conference and host records read
+    once; ``build_agent`` adds agents). ``live=True`` reads a run that is still going: complete
+    runtime lines only and the conference database ``mode=ro`` only (the live behavior judge)."""
+    run_dir = Path(run_dir).resolve()
+    problems = []
+    runtime = load_runtime(run_dir, problems, complete_lines_only=live)
+    conference = load_conference(run_dir, live=live)
+    problems.extend(conference.problems)
+    host = load_host(run_dir, runtime, conference, problems)
+    return RunHistory(run_dir=run_dir, run_id=run_dir.name, agents={}, host=host, conference=conference,
+                      runtime=runtime, problems=problems)
+
+
 def build_run(run_dir, *, agents=None, include_files=True):
     """RunHistory for a saved run: every agent (or the named subset), offline.
 
@@ -1231,13 +1257,7 @@ def build_run(run_dir, *, agents=None, include_files=True):
     versions (faster; for diagnostics only).
     """
     run_dir = Path(run_dir).resolve()
-    problems = []
-    runtime = load_runtime(run_dir, problems)
-    conference = load_conference(run_dir)
-    problems.extend(conference.problems)
-    host = load_host(run_dir, runtime, conference, problems)
-    run = RunHistory(run_dir=run_dir, run_id=run_dir.name, agents={}, host=host, conference=conference,
-                     runtime=runtime, problems=problems)
+    run = load_run_base(run_dir)
     index = sample_index(run_dir)
     selected = sorted(index) if agents is None else [str(a) for a in agents]
     missing = [a for a in selected if a not in index]

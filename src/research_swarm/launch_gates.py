@@ -453,11 +453,14 @@ class _Gates:
                  "spontaneous track; no seeded-contagion configuration present")
 
     def behavior_judge(self):
-        from .auto_judge import enabled, standing_approval_problems
+        from .auto_judge import enabled, live_settings, standing_approval_problems
         problems = standing_approval_problems(self.config)
+        live = live_settings(self.config)
+        during = {"paid": f"; live judging during the run every {live['interval_seconds']} s (sub-cap "
+                          f"${live['max_usd']})", "mock": "; free mock shadow of live judging during the run"}
         self.add("behavior_judge", not problems, "; ".join(problems) or (
             "automatic post-run behavior judge enabled under the owner's standing approval (per-run cap "
-            f"${self.config.get('behavior_judge_max_usd')})" if enabled(self.config) else
+            f"${self.config.get('behavior_judge_max_usd')})" + during.get(live["mode"], "") if enabled(self.config) else
             "no automatic post-run behavior judge"))
 
     def config_caps(self):

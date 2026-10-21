@@ -120,6 +120,19 @@ else:
 """
 APPROVAL = {"auto_behavior_judge": True, "behavior_judge_approval": "owner standing approval (test)",
             "behavior_judge_max_usd": 50}
+STUB_LIVE_PILOT = """import datetime, json, os, sys, time
+config = json.load(open(sys.argv[sys.argv.index('--config') + 1]))
+run = config['run_dir']
+os.makedirs(run, exist_ok=True)
+open(os.path.join(run, 'settings.json'), 'w').write('{}')
+def record(kind):
+    open(os.path.join(run, 'runtime.jsonl'), 'a').write(json.dumps({'kind': kind, 'timestamp': time.time()}) + '\\n')
+record('common_start')
+time.sleep(SECONDS)
+open('stop-at', 'w').write(datetime.datetime.now(datetime.timezone.utc).isoformat())
+record('run_stop')
+time.sleep(0.4)
+"""
 
 
 class AutoBehaviorJudgeTests(SuperviseRunTests):
@@ -148,6 +161,15 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         path = self.tmp / "order.log"
         return [line.split()[0] for line in path.read_text().splitlines()] if path.exists() else []
 
+    def lines(self, script="run_transcript_judge.py"):
+        path = self.tmp / "order.log"
+        return [line for line in path.read_text().splitlines() if line.startswith(script)] if path.exists() else []
+
+    def follow_up_order(self):
+        """The order of the sequential steps (the early judge runs beside the follow-ups)."""
+        lines = (self.tmp / "order.log").read_text().splitlines() if (self.tmp / "order.log").exists() else []
+        return [line.split()[0] for line in lines if "--stage verify" not in line and "--live" not in line]
+
     def judge_record(self):
         return json.loads((self.phase / "behavior-judge.json").read_text())
 
@@ -162,8 +184,8 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
     def test_judge_runs_after_the_follow_ups_and_is_packaged(self):
         self.pricing(1)
         self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
-        self.assertEqual(self.order(), ["reconcile_ledger.py", "evaluate_run.py", "evaluate_run.py", "timeline.py",
-                                        "run_transcript_judge.py"])  # fresh record: no freeze
+        self.assertEqual(self.follow_up_order(), ["reconcile_ledger.py", "evaluate_run.py", "evaluate_run.py",
+                                                  "timeline.py", "run_transcript_judge.py"])  # fresh record: no freeze
         judge_line = (self.tmp / "order.log").read_text().splitlines()[-1]
         root = self.tmp.resolve()
         for text in ("--standing-approval-from-config " + str(self.config.resolve()),
@@ -171,11 +193,20 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
                      "--run-dir " + str(root / "runs" / "run-x")):
             self.assertIn(text, judge_line)
         self.assertNotIn("--i-have-user-approval", judge_line)
+        self.assertNotIn("--stage", judge_line)   # the post-run judge finishes everything (a resume)
+        # Live judging is on by default: the model stages started when the pilot exited, beside the follow-ups.
+        early = [line for line in self.lines() if "--stage verify" in line]
+        self.assertEqual(len(early), 1)
+        self.assertIn("--standing-approval-from-config " + str(self.config.resolve()), early[0])
         record = self.judge_record()
         self.assertEqual((record["outcome"], record["exit"]), ("complete", 0))
+        self.assertEqual((record["early"]["outcome"], record["early"]["exit"]), ("complete", 0))
+        self.assertEqual(record["live"]["mode"], "paid")
         self.assertEqual((self.phase / "behavior-judge.exit").read_text().strip(), "0")
+        self.assertEqual((self.phase / "behavior-judge-early.exit").read_text().strip(), "0")
         phase, run = self.packaged()
-        self.assertTrue({"behavior-judge.json", "behavior-judge.log", "behavior-judge.exit"} <= phase)
+        self.assertTrue({"behavior-judge.json", "behavior-judge.log", "behavior-judge.exit", "live-judge.json",
+                         "behavior-judge-early.log", "behavior-judge-early.exit"} <= phase)
         self.assertIn("judge-route-pricing/judge-route-pricing-20261001T000000Z.json", phase)
         self.assertIn("runs/run-x/analysis/judge/report.json", run)
         status = json.loads((self.phase / "supervisor-status.json").read_text())
@@ -251,6 +282,26 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         record = self.judge_record()
         self.assertEqual(record["outcome"], "skipped")
         self.assertIn("did not complete (exit 7)", record["reason"])
+        # The early model stages had already started with the pilot's exit; the post-run judge is skipped.
+        self.assertEqual([("--stage verify" in line) for line in self.lines()], [True])
+
+    def test_without_live_judging_the_post_run_judge_runs_alone(self):
+        self.pricing(1)
+        self.write_config(live_behavior_judge=False)
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        self.assertEqual(self.order(), ["reconcile_ledger.py", "evaluate_run.py", "evaluate_run.py", "timeline.py",
+                                        "run_transcript_judge.py"])
+        record = self.judge_record()
+        self.assertNotIn("early", record)
+        self.assertNotIn("live", record)
+        self.assertFalse((self.phase / "live-judge.json").exists())
+        (self.tmp / "order.log").unlink()
+        self.phase = self.tmp / "runs" / "phase-b" / "run-y"
+        self.phase.mkdir(parents=True)
+        self.config = self.phase / "launch-config.json"
+        self.write_config(live_behavior_judge=False)
+        (self.tmp / "research" / "analysis" / "timeline.py").write_text("raise SystemExit(7)\n")
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 7)
         self.assertNotIn("run_transcript_judge.py", self.order())
 
     def test_no_judge_without_the_config_keys(self):
@@ -258,6 +309,72 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
         self.assertFalse((self.phase / "behavior-judge.json").exists())
         self.assertNotIn("run_transcript_judge.py", self.order())
+
+    # -- live passes while the pilot runs ------------------------------------------------------
+    def live_pilot(self, seconds=1.5):
+        """A stub pilot that marks the common start, runs ``seconds`` and then the run stop."""
+        (self.tmp / "scripts" / "run_pilot.py").write_text(STUB_LIVE_PILOT.replace("SECONDS", str(seconds)))
+
+    def live_run(self, *extra):
+        settings = {"mode": "paid", "max_usd": "10", "interval_seconds": 0}
+        if "mock" in extra:
+            settings["mode"] = "mock"
+        with mock.patch("research_swarm.auto_judge.live_settings", return_value=settings):
+            return supervise.Supervisor(self.args("--no-shutdown", "--poll-seconds", "0.1")).main()
+
+    def test_live_passes_run_while_the_pilot_runs(self):
+        self.pricing(1)
+        self.live_pilot()
+        self.assertEqual(self.live_run(), 0)
+        passes = [line for line in self.lines() if "--live" in line]
+        self.assertGreaterEqual(len(passes), 1)
+        root = self.tmp.resolve()
+        for text in ("--standing-approval-from-config " + str(self.config.resolve()),
+                     "--ledger " + str(root / "state" / "budget.sqlite"), "--credentials-root " + str(root)):
+            self.assertIn(text, passes[0])
+        record = json.loads((self.phase / "live-judge.json").read_text())
+        self.assertEqual(record["mode"], "paid")
+        self.assertIsNone(record["stopped"])
+        self.assertTrue(record["ticks"] and all(t.get("exit") == 0 for t in record["ticks"]))
+        self.assertIn("=== live pass 1", (self.phase / "live-judge.log").read_text())
+        import datetime
+        stop = datetime.datetime.fromisoformat((self.tmp / "stop-at").read_text().strip())
+        late = [t for t in record["ticks"]   # a pass starts only while the run stop is not recorded
+                if datetime.datetime.fromisoformat(t["started_utc"]) > stop + datetime.timedelta(seconds=0.15)]
+        self.assertEqual(late, [], (record["ticks"], stop))
+        self.assertEqual(self.follow_up_order()[-1], "run_transcript_judge.py")
+        phase, _ = self.packaged()
+        self.assertTrue({"live-judge.json", "live-judge.log"} <= phase)
+
+    def test_a_refused_live_pass_ends_the_live_passes(self):
+        self.pricing(1)
+        self.live_pilot(seconds=2.0)
+        (self.tmp / "judge-mode").write_text("refuse")
+        self.assertEqual(self.live_run(), 0)
+        record = json.loads((self.phase / "live-judge.json").read_text())
+        self.assertEqual(len(record["ticks"]), 1)
+        self.assertIn("refused", record["stopped"])
+        self.assertEqual(self.judge_record()["outcome"], "refused")   # the post-run judge still ran
+
+    def test_mock_shadow_beside_the_paid_post_run_judge(self):
+        self.pricing(1)
+        self.live_pilot()
+        self.write_config(live_behavior_judge="mock")
+        self.assertEqual(self.live_run("mock"), 0)
+        shadow = str((self.phase / supervise.SHADOW_DIR / "run-x" / "analysis" / "judge").resolve())
+        passes = [line for line in self.lines() if "--live" in line]
+        self.assertTrue(passes)
+        self.assertTrue(all("--mock" in line and shadow in line and "--standing-approval" not in line
+                            for line in passes))
+        post = [line for line in self.lines() if "--live" not in line]
+        self.assertEqual(len(post), 2)
+        mocked = [line for line in post if "--mock" in line]
+        self.assertEqual(len(mocked), 1)
+        self.assertIn(shadow, mocked[0])
+        self.assertIn("--standing-approval-from-config", post[-1])   # the paid post-run judge, unchanged
+        self.assertNotIn("--stage", post[-1])
+        record = self.judge_record()
+        self.assertEqual((record["early"]["name"], record["early"]["exit"]), ("behavior-judge-shadow", 0))
 
     # The inherited runs use the base config (no auto judge keys) and stub follow-ups.
     test_full_cycle_without_shutdown = None

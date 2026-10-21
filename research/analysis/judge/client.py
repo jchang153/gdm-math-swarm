@@ -386,6 +386,39 @@ def rate_limit_delay(rate_limited, retry_after=None, jitter=0.0):
 
 RUN_LIMIT_REASON = "run_limit"
 RUN_LIMIT_SCHEMA = "gdm-judge-run-limit/1"
+LABEL_PREFIX = "judge-"
+LABEL_LENGTH = 200
+
+
+def request_label(model_key, purpose, unit_id, run_id=None):
+    """The ledger label of one judge request (the ``calls.agent`` column):
+    ``judge-<model>:<run id>:<purpose>:<unit id>``, or ``judge-<model>:<purpose>:<unit id>``
+    without a run id (requests made before the per-run cap existed). The run id comes before
+    anything long, so truncation to ``LABEL_LENGTH`` characters never cuts it."""
+    parts = [f"{LABEL_PREFIX}{model_key}"] + ([str(run_id)] if run_id else []) + [str(purpose), str(unit_id)]
+    return ":".join(parts)[:LABEL_LENGTH]
+
+
+def committed_for_run(ledger_path, run_id, scope=ANALYSIS_SCOPE):
+    """What the ledger holds against one run's judging, read only (docs/plan.md, "Live behavior
+    judge during the run (October 20, 2026)"): the sum over every ``scope`` row whose label names
+    ``run_id`` (``request_label``) of its billed amount, or its full reservation while it is
+    reserved or uncertain (``COALESCE(actual, reserved)``, exactly what the ledger counts). The
+    ledger row is the first durable record of a request (written before its request archive),
+    so a hold orphaned by a killed process is counted too. Returns
+    ``{"run_id", "committed_usd", "rows", "unresolved_rows"}``; a missing ledger counts 0."""
+    from research_swarm.budget import usd
+    path = Path(ledger_path)
+    if not run_id or not path.exists():
+        return {"run_id": run_id, "committed_usd": "0", "rows": 0, "unresolved_rows": 0}
+    marker = f":{run_id}:"
+    with closing(sqlite3.connect("file:" + str(path.resolve()) + "?mode=ro", uri=True, timeout=30)) as db:
+        db.execute("PRAGMA busy_timeout=30000")
+        row = db.execute("SELECT COALESCE(SUM(COALESCE(actual, reserved)), 0), COUNT(*), "
+                         "COALESCE(SUM(CASE WHEN state IN ('reserved', 'uncertain') THEN 1 ELSE 0 END), 0) "
+                         "FROM calls WHERE scope=? AND substr(agent, 1, ?)=? AND instr(agent, ?) > 0",
+                         (scope, len(LABEL_PREFIX), LABEL_PREFIX, marker)).fetchone()
+    return {"run_id": run_id, "committed_usd": str(usd(row[0])), "rows": int(row[1]), "unresolved_rows": int(row[2])}
 
 
 class RunLimit:
@@ -406,11 +439,19 @@ class RunLimit:
     totals (``record()``)."""
 
     def __init__(self, limit_usd, *, source="estimate", estimate=None, factor=None, floor_usd=None, basis=None,
-                 standing_approval=None):
+                 standing_approval=None, prior_usd=None, prior=None):
         limit = _decimal_or_none(limit_usd)
         if limit is None or limit <= 0:
             raise ValueError("run limit must be a positive amount in USD")
         self.limit = limit
+        # A per-run cap (docs/plan.md, "Live behavior judge during the run (October 20, 2026)"): what
+        # earlier invocations already committed against the same run (``committed_for_run``) counts
+        # against ``limit`` from the start, so a resume or a later stage never gets a fresh cap.
+        prior_amount = _decimal_or_none(prior_usd)
+        if prior_amount is not None and prior_amount < 0:
+            raise ValueError("prior_usd must not be negative")
+        self.prior = prior_amount or Decimal(0)
+        self.prior_record = prior
         self.source = source
         self.estimate = estimate
         self.factor = factor
@@ -436,7 +477,8 @@ class RunLimit:
             return self._committed()
 
     def _committed(self):
-        return sum((held for held, _, _ in self._held.values()), Decimal(0)) + self._uncertain + self._settled
+        return (sum((held for held, _, _ in self._held.values()), Decimal(0)) + self._uncertain + self._settled
+                + self.prior)
 
     def _row(self, purpose, model):
         return self.by_purpose.setdefault(purpose or "?", {"model_key": model, "requests": 0, "settled_usd": Decimal(0),
@@ -497,6 +539,7 @@ class RunLimit:
                     "basis": self.basis, "factor": None if self.factor is None else str(self.factor),
                     "floor_usd": None if self.floor is None else str(self.floor), "created_at": self.created_at,
                     "estimate": self.estimate, "standing_approval": self.standing_approval,
+                    "prior_usd": str(self.prior), "prior": self.prior_record,
                     "committed_usd": str(self._committed()),
                     "peak_committed_usd": str(self.peak_committed), "settled_usd": str(self._settled),
                     "uncertain_usd": str(self._uncertain), "in_flight_usd": str(held), "requests": self.requests,
@@ -551,7 +594,7 @@ class JudgeClient:
     """
     def __init__(self, model_key, ledger_path, scope=ANALYSIS_SCOPE, archive_dir=None, settings=None, http=None,
                  max_concurrency=None, *, paid_authorized=False, ledger_caps=None, key_loader=None, verify_limit=None,
-                 credentials_root=None, repo_root=None, run_limit=None):
+                 credentials_root=None, repo_root=None, run_limit=None, run_id=None):
         if model_key not in MODEL_KEYS:
             raise ValueError(f"Unknown judge model {model_key!r}; expected one of {MODEL_KEYS}")
         if run_limit is not None and not isinstance(run_limit, RunLimit):
@@ -617,6 +660,9 @@ class JudgeClient:
                 return load_openrouter_key(root)
         self.ledger = BudgetLedger(self.ledger_path, caps)
         self.run_limit = run_limit
+        # The judged run's id goes into every ledger label (``request_label``), so the per-run cap
+        # can be computed from the ledger alone (``committed_for_run``).
+        self.run_id = run_id
         self._limit_tokens = {}             # ledger request id -> RunLimit token
         self.http = UrllibTransport(max_workers=max_concurrency) if self._paid else http
         self._key_loader = key_loader
@@ -906,7 +952,7 @@ class JudgeClient:
             body = self.body(system, user, max_tokens, effort, response_format, cache_system=cache_system)
             data = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             reservation = self.settings.reservation(self.model_key, data, max_tokens, cache_system=cache_system)
-            label = f"judge-{self.model_key}:{purpose}:{unit_id}"[:200]
+            label = request_label(self.model_key, purpose, unit_id, self.run_id)
             token = None
             if self.run_limit is not None:
                 # This invocation's own limit (judge revision v3, item 7), checked before the ledger.

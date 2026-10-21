@@ -1,5 +1,26 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Live behavior judge during the run (October 20, 2026)
+
+The owner approved in chat on October 20, 2026, verbatim: "Judge during the run, not after". The
+goal: behavior-judge results within minutes of the run's clock stopping. Recorded meaning, for the
+owner's runs with `auto_behavior_judge` true (same standing approval, same $50 per-run cap, same
+frozen judge revision v3, rubric `gdm-judge-rubric/3`, prompts and model allocation):
+
+| Item | Rule |
+| --- | --- |
+| During the run | `scripts/supervise_run.py` starts one live pass (`run_transcript_judge.py --live`) every `behavior_judge_live_interval_seconds` (default 300) after the common start, never two at once and never after the run stop. A pass reads each agent's Inspect sample from Inspect's realtime buffer (read-only; the `.eval` once flushed), `runtime.jsonl` (complete lines only) and the conference database (`mode=ro` only), and has Haiku screen only the windows that can no longer change. Units go to `RUN/analysis/judge/live/` under the hash of their request. Sonnet and Opus never run during the run: their v3 requests contain end-of-run facts. |
+| Same results as post-run judging | The post-run judge is unchanged. It adopts a live unit only for a byte-identical request, with the same binding, provider route and judge code (code hashes), and only when replaying the stored outputs through its own parse, repair and salvage gives the same result. It never adopts a `grading_failed` unit. Everything downstream is recomputed from the final records, so timing only changes which requests were paid for early. Every adoption and every unadopted live unit is listed in `live/consistency.json`. |
+| Request header | The Haiku screening request leaves out `window_count` (the agent's final number of windows) through the binding setting `prefilter_window_count: false`. This is metadata only: the window's items, id and index are unchanged. The default (true, the v3 bytes) is left out of the binding, so existing v3 judge directories still resume and rescore. |
+| After the run | As the pilot exits, the judge's model stages (`--stage verify`) start in parallel with reconcile, evaluate and timeline: no model request reads evaluator verdicts. The post-run judge then finishes as a resume (host facts, run level, report). |
+| Budget | One ledger, the analysis scope, with the run id in every judge ledger label. The $50 per-run cap now holds across invocations: what the ledger already holds for the run counts against it, orphaned holds included, so a resume never gets a fresh $50. Live passes have a sub-cap, `behavior_judge_live_max_usd` (default $10). A pass is refused unless the shared provider key, after the live pass's room, still leaves the pilot its full remaining allowance (or the key is unlimited). |
+| Isolation | Host-side only. Agent containers have no host mounts and no network, and judge files stay under `RUN/analysis/judge/`, which HF publication excludes. A live pass runs at nice 19 and idle I/O priority, with `oom_score_adj` 1000 and a systemd memory scope where available. A refused or budget-stopped pass ends live passes for the run. Live passes are recorded in `PHASE/live-judge.json` as a possible timing and CPU confound. |
+| Opt out or shadow | `live_behavior_judge: false` restores post-run-only judging exactly. `"mock"` runs free mock live passes and a mock post-run pass into `PHASE/live-judge-shadow/`, beside the unchanged paid post-run judge. Proposal, not yet decided by the owner: run the shadow on the VM once before the first paid live run. |
+
+Proposal, not decided by the owner: on gemini10 the evaluator's 11-15 minutes of sequential
+comparator work, not the judge, is now the slowest step before the verdict-dependent report.
+Running comparators in parallel after the stop is an owner decision outside the judge.
+
 ## No cost estimates for judge runs, October 20, 2026
 
 Owner (chat): "Don't require estimates for anything—either runs or behavior judges." and "I don't

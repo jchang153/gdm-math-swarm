@@ -21,6 +21,18 @@ ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
    scripts/freeze_judge_route.py. Its outputs land in RUN/analysis/judge/ (packaged with the
    run); its outcome is recorded in behavior-judge.json and never changes the worker exit or
    stops the packaging;
+   With ``auto_behavior_judge`` true the judge also runs DURING the run (docs/plan.md, "Live behavior
+   judge during the run (October 20, 2026)"; ``live_behavior_judge``, default true): while the pilot
+   runs, one live screening pass (``run_transcript_judge.py --live``) every
+   ``behavior_judge_live_interval_seconds`` (default 300) after the common start, at most one at a
+   time, under nice/ionice, ``oom_score_adj`` 1000 and, where available, a systemd memory scope (an
+   agent or Inspect is never the out-of-memory victim), never after the run stop; a refused or
+   budget-stopped pass ends the live passes for the run. When the pilot exits, the judge's model
+   stages (``--stage verify``) start at once, in parallel with the unpaid follow-ups (no model request
+   reads the evaluator's verdicts), and the post-run judge above finishes it as a resume (host facts,
+   run level, report). ``live_behavior_judge: "mock"`` instead runs free mock live passes and a mock
+   post-run pass into PHASE/live-judge-shadow/ beside the unchanged paid post-run judge (a shadow
+   check before the first paid live run); ``false`` keeps the post-run judge alone;
 5. packages the run and phase records with SHA-256 checksums and waits up to --retrieval-wait
    seconds for a ``retrieved.marker`` in the phase directory;
 6. shuts the VM down only when it is idle (no Docker containers, no other tmux session, no
@@ -45,6 +57,7 @@ import datetime
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -60,6 +73,27 @@ JUDGE_STEPS = ("judge-route-freeze", "behavior-judge")  # after FOLLOW_UPS, only
 JUDGE_PRICING_GLOB = "judge-route-pricing-*.json"
 JUDGE_PRICING_MAX_AGE_HOURS = 72  # research/analysis/judge/route.py DEFAULT_MAX_AGE_HOURS
 JUDGE_OUTCOMES = {0: "complete", 2: "errors_or_held_agents", 3: "stopped", 4: "refused"}
+# Live behavior judge (docs/plan.md, "Live behavior judge during the run (October 20, 2026)").
+LIVE_FILES = ("live-judge.log", "live-judge.json", "behavior-judge-early.log", "behavior-judge-early.exit",
+              "behavior-judge-shadow.log", "behavior-judge-shadow.exit")
+LIVE_STOP_WAIT_SECONDS = 120     # an in-flight live pass may finish after the pilot exits, then SIGTERM
+LIVE_KILL_WAIT_SECONDS = 60
+LIVE_MAX_FAILURES = 3            # failed (crashed) live passes in a row before live passes stop
+LIVE_MEMORY_MAX = "8G"           # default systemd scope memory ceiling of one live pass (when systemd-run works)
+EARLY_JUDGE_TIMEOUT_SECONDS = 4 * 3600
+SHADOW_DIR = "live-judge-shadow"
+
+
+def _live_preexec():  # pragma: no cover - runs in the child before exec (Linux)
+    """Lowest CPU priority, and the first process the kernel's out-of-memory killer picks."""
+    try:
+        os.nice(19)
+    except OSError:
+        pass
+    try:
+        Path("/proc/self/oom_score_adj").write_text("1000")
+    except OSError:
+        pass
 IDLE_PROCESSES = {"bash", "sh", "sshd", "sshd-session", "sshd-auth", "tmux: server", "tmux", "systemd", "(sd-pam)",
                   "dbus-daemon", "ps", "sleep"}
 ENV_KEYS = ("PATH", "HOME", "USER", "LANG", "TERM", "XDG_RUNTIME_DIR")
@@ -88,6 +122,10 @@ class Supervisor:
         self.env["PYTHONPATH"] = "src"
         self.settled_at_launch = None
         self.judge_record = None
+        self.live = None          # live behavior judge state (live_setup)
+        self.early = None         # the judge's model stages started when the pilot exits
+        self.last_events = []
+        self._scope_ok = None
 
     # -- records -------------------------------------------------------------
     def status(self, stage, **fields):
@@ -113,6 +151,7 @@ class Supervisor:
                     events.append(json.loads(line))
                 except json.JSONDecodeError:
                     pass
+        self.last_events = events
         finished = [e for e in events if e.get("kind") == "inference_finished"]
         usage = [(e.get("payload") or {}).get("provider_usage") or {} for e in finished]
         prompt = sum(u.get("prompt_tokens", 0) or 0 for u in usage)
@@ -135,14 +174,14 @@ class Supervisor:
             self.config_path.write_text(json.dumps(config, indent=2))
 
     # -- steps -----------------------------------------------------------------
-    def step(self, name, arguments):
+    def step(self, name, arguments, on_wait=None):
         self.status(name)
         with (self.phase / (name + ".log")).open("x") as log:
             process = subprocess.Popen([str(self.root / ".venv/bin/python"), "-u", *arguments], cwd=self.root,
                                        env=self.env, stdout=log, stderr=subprocess.STDOUT)
             while True:
                 try:
-                    process.wait(timeout=30)
+                    process.wait(timeout=self.args.poll_seconds)
                     break
                 except subprocess.TimeoutExpired:
                     if name == "pilot":
@@ -151,6 +190,8 @@ class Supervisor:
                         except Exception as error:  # a checkpoint failure never stops the run
                             (self.phase / "checkpoint-error.json").write_text(
                                 json.dumps({"type": type(error).__name__}))
+                    if on_wait is not None:
+                        on_wait()
         (self.phase / (name + ".exit")).write_text(f"{process.returncode}\n")
         return process.returncode
 
@@ -183,6 +224,214 @@ class Supervisor:
     def judge_fresh(self):
         path, age = self.judge_pricing()
         return path is not None and age is not None and 0 <= age <= JUDGE_PRICING_MAX_AGE_HOURS
+
+    # -- live behavior judge (docs/plan.md, "Live behavior judge during the run (October 20, 2026)") -----
+    def judge_command(self, *extra):
+        return ["scripts/run_transcript_judge.py", "--run-dir", str(self.run), *extra]
+
+    def paid_judge_args(self):
+        return ["--standing-approval-from-config", str(self.config_path), "--ledger", str(self.ledger),
+                "--credentials-root", str(self.root)]
+
+    def shadow_judge_dir(self):
+        return self.phase / SHADOW_DIR / self.run.name / "analysis" / "judge"
+
+    def live_setup(self):
+        """Decide from CONFIG whether the judge runs during the run (``live_behavior_judge``)."""
+        self.live = None
+        try:
+            config = json.loads(self.config_path.read_text())
+            sys.path.insert(0, str(ROOT / "src"))
+            from research_swarm.auto_judge import enabled, live_settings, standing_approval_problems
+            if not enabled(config) or self.args.no_postrun or standing_approval_problems(config):
+                return None
+            settings = live_settings(config)
+        except Exception as error:   # never stops the run: no live judging, recorded
+            self.live = {"mode": None, "error": f"{type(error).__name__}: {error}", "ticks": []}
+            self.live_record()
+            self.live = None
+            return None
+        if settings["mode"] is None:
+            return None
+        self.live = {"mode": settings["mode"], "interval_seconds": settings["interval_seconds"],
+                     "max_usd": settings["max_usd"], "ticks": [], "stopped": None, "next_at": None,
+                     "failures": 0, "proc": None, "started_utc": now()}
+        self.live_record()
+        return self.live
+
+    def live_record(self):
+        if self.live is None:
+            return
+        data = {k: v for k, v in self.live.items() if k not in ("proc", "handle")}
+        (self.phase / "live-judge.json").write_text(json.dumps(data, indent=2, default=str))
+
+    def scope_ok(self):
+        """Whether ``systemd-run --user --scope`` works here (checked once)."""
+        if self._scope_ok is None:
+            self._scope_ok = False
+            if shutil.which("systemd-run"):
+                try:
+                    self._scope_ok = subprocess.run(["systemd-run", "--user", "--scope", "--quiet", "true"],
+                                                    env=self.env, capture_output=True, timeout=15).returncode == 0
+                except (OSError, subprocess.SubprocessError):
+                    self._scope_ok = False
+        return self._scope_ok
+
+    def live_prefix(self):
+        """Low priority and a memory ceiling for one live pass: an experimental agent or Inspect must
+        never be slowed much or picked by the out-of-memory killer because of the judge."""
+        prefix = []
+        if self.scope_ok():
+            prefix += ["systemd-run", "--user", "--scope", "--quiet", "-p", f"MemoryMax={self.args.live_memory_max}"]
+        if shutil.which("ionice"):
+            prefix += ["ionice", "-c3"]
+        return prefix
+
+    def run_stopped(self):
+        """Whether runtime.jsonl records the run stop now (read just before a live pass starts)."""
+        path = self.run / "runtime.jsonl"
+        try:
+            with path.open("rb") as handle:
+                handle.seek(max(0, path.stat().st_size - 262144))
+                return b'"run_stop"' in handle.read()
+        except OSError:
+            return False
+
+    def live_pass_command(self):
+        if self.live["mode"] == "mock":
+            return self.judge_command("--live", "--mock", "--output-dir", str(self.shadow_judge_dir()))
+        return self.judge_command("--live", *self.paid_judge_args())
+
+    def live_tick(self):
+        """Called every poll while the pilot runs: finish a done pass, start the next one when due."""
+        live = self.live
+        if not live or live.get("stopped"):
+            return
+        try:
+            proc = live.get("proc")
+            if proc is not None:
+                code = proc.poll()
+                if code is None:
+                    return
+                self.live_finished(code)
+                if live.get("stopped"):
+                    return
+            kinds = {e.get("kind") for e in self.last_events}
+            if "run_stop" in kinds or "common_start" not in kinds:
+                return
+            clock = time.time()
+            if live["next_at"] is None:
+                live["next_at"] = clock + live["interval_seconds"]
+            if clock < live["next_at"]:
+                return
+            if self.run_stopped():
+                return
+            live["next_at"] = clock + live["interval_seconds"]
+            if live["mode"] == "paid" and not self.judge_fresh():
+                code = subprocess.run([str(self.root / ".venv/bin/python"), "-u", "scripts/freeze_judge_route.py"],
+                                      cwd=self.root, env=self.env, capture_output=True, timeout=300).returncode
+                if not self.judge_fresh():
+                    live["ticks"].append({"utc": now(), "skipped": f"no fresh judge route pricing record (freeze exit "
+                                                                    f"{code})"})
+                    self.live_record()
+                    return
+            with (self.phase / "live-judge.log").open("a") as log:
+                log.write(f"\n=== live pass {len(live['ticks']) + 1} at {now()} ===\n")
+                log.flush()
+                live["proc"] = subprocess.Popen(
+                    self.live_prefix() + [str(self.root / ".venv/bin/python"), "-u", *self.live_pass_command()],
+                    cwd=self.root, env=self.env, stdout=log, stderr=subprocess.STDOUT, preexec_fn=_live_preexec)
+            live["ticks"].append({"started_utc": now(), "pid": live["proc"].pid})
+            self.live_record()
+        except Exception as error:   # a live-judge problem never stops the run
+            live["stopped"] = f"supervisor error {type(error).__name__}: {error}"
+            self.live_record()
+
+    def live_finished(self, code, *, terminated=False):
+        live = self.live
+        tick = live["ticks"][-1] if live["ticks"] else {}
+        tick.update(exit=code, finished_utc=now(), **({"terminated": True} if terminated else {}))
+        live["proc"] = None
+        if terminated:
+            pass
+        elif code == 3:
+            live["stopped"] = "a live pass stopped at the run limit or the ledger (exit 3)"
+        elif code == 4:
+            live["stopped"] = "a live pass was refused (exit 4; see live-judge.log)"
+        elif code != 0:
+            live["failures"] += 1
+            if live["failures"] >= LIVE_MAX_FAILURES:
+                live["stopped"] = f"{LIVE_MAX_FAILURES} failed live passes in a row (last exit {code})"
+        else:
+            live["failures"] = 0
+        self.live_record()
+
+    def live_stop(self):
+        """After the pilot exits: let an in-flight pass finish briefly, then SIGTERM (then SIGKILL)."""
+        live = self.live
+        if not live or live.get("proc") is None:
+            return
+        proc = live["proc"]
+        try:
+            code, terminated = proc.wait(timeout=LIVE_STOP_WAIT_SECONDS), False
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            terminated = True
+            try:
+                code = proc.wait(timeout=LIVE_KILL_WAIT_SECONDS)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                code = proc.wait()
+        self.live_finished(code, terminated=terminated)
+
+    def background(self, name, arguments):
+        """A follow-up process running beside the others (its log and exit like ``step``)."""
+        handle = (self.phase / (name + ".log")).open("x")
+        proc = subprocess.Popen([str(self.root / ".venv/bin/python"), "-u", *arguments], cwd=self.root, env=self.env,
+                                stdout=handle, stderr=subprocess.STDOUT)
+        return {"name": name, "proc": proc, "handle": handle, "started_utc": now()}
+
+    def early_judge_start(self, worker_code):
+        """When the pilot exits: the judge's model stages at once (``--stage verify``; paid live mode),
+        or the free mock shadow post-run pass (mock live mode), beside the unpaid follow-ups."""
+        live = self.live
+        if not live or worker_code != 0 or self.args.no_postrun or not (self.run / "settings.json").exists():
+            return None
+        try:
+            if live["mode"] == "mock":
+                self.early = self.background("behavior-judge-shadow", self.judge_command(
+                    "--mock", "--output-dir", str(self.shadow_judge_dir())))
+                return self.early
+            if not self.judge_fresh():   # the post-run judge refreshes the record and does everything itself
+                self.early = {"name": "behavior-judge-early", "skipped": "no fresh judge route pricing record"}
+                return None
+            self.early = self.background("behavior-judge-early", self.judge_command(
+                *self.paid_judge_args(), "--stage", "verify"))
+        except Exception as error:   # the post-run judge still covers everything
+            self.early = {"name": "behavior-judge-early", "error": f"{type(error).__name__}: {error}"}
+        return self.early
+
+    def early_judge_wait(self):
+        early = self.early
+        if not early or early.get("proc") is None:
+            return early
+        proc = early["proc"]
+        try:
+            code = proc.wait(timeout=EARLY_JUDGE_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            try:
+                code = proc.wait(timeout=LIVE_KILL_WAIT_SECONDS)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                code = proc.wait()
+            early["timed_out"] = True
+        early["handle"].close()
+        (self.phase / (early["name"] + ".exit")).write_text(f"{code}\n")
+        early.update(exit=code, outcome=JUDGE_OUTCOMES.get(code, "failed"), finished_utc=now())
+        for key in ("proc", "handle"):
+            early.pop(key, None)
+        return early
 
     def behavior_judge(self, worker_code):
         """The paid behavior judge under the config's standing approval, or a recorded skip. Never
@@ -223,6 +472,11 @@ class Supervisor:
                         record["reason"] = refused[-1] if refused else "refused (see behavior-judge.log)"
         except Exception as error:  # a judge failure never fails the run's packaging
             record.update(outcome="supervisor_error", error_type=type(error).__name__, detail=str(error))
+        if self.live is not None:
+            record["live"] = {k: v for k, v in self.live.items() if k not in ("proc", "ticks")} | {
+                "passes": len(self.live.get("ticks") or [])}
+        if self.early is not None:
+            record["early"] = {k: v for k, v in self.early.items() if k not in ("proc", "handle")}
         record["finished_utc"] = now()
         (self.phase / "behavior-judge.json").write_text(json.dumps(record, indent=2))
         self.status("behavior-judge-" + record["outcome"], worker_exit=worker_code, behavior_judge=record)
@@ -233,13 +487,17 @@ class Supervisor:
         try:
             self.backup("budget-before-launch.sqlite")
             self.settled_at_launch = Decimal(self.snapshot()["pilot"]["settled_usd"])
+            self.live_setup()
             code = self.step("pilot", ["scripts/run_pilot.py", "--config", str(self.config_path),
-                                       "--launch-paid-pilot", "--yes"])
+                                       "--launch-paid-pilot", "--yes"], on_wait=self.live_tick)
+            self.live_stop()
             self.disable_launch()
             self.backup("budget-after-pilot.sqlite")
             self.live_checkpoint()
+            self.early_judge_start(code)
             if code == 0 and (self.run / "settings.json").exists() and not self.args.no_postrun:
                 code = self.follow_ups()
+            self.early_judge_wait()
             self.judge_record = self.behavior_judge(code)
         except Exception as error:
             self.status("worker_error", error_type=type(error).__name__, detail=str(error))
@@ -264,7 +522,7 @@ class Supervisor:
                     else self.run.name)
         selected = ["budget-final.sqlite", "budget-before-launch.sqlite", "budget-after-pilot.sqlite", "pilot.exit",
                     "pilot.log", "supervisor-console.log", "worker.exit", "live-checkpoint.json",
-                    self.config_path.name, "behavior-judge.json"] + [
+                    self.config_path.name, "behavior-judge.json", *LIVE_FILES] + [
                         a + b for a in FOLLOW_UPS + JUDGE_STEPS for b in (".log", ".exit")]
         with tarfile.open(self.phase / "completed-phase.tgz", "w:gz") as tar:
             for name in selected:
@@ -274,6 +532,8 @@ class Supervisor:
             pricing = (self.judge_record or {}).get("pricing_record")
             if pricing and Path(pricing).exists():  # the route record the judge ran with
                 tar.add(pricing, arcname="judge-route-pricing/" + Path(pricing).name)
+            if (self.phase / SHADOW_DIR).is_dir():  # the free mock shadow of the live judge
+                tar.add(self.phase / SHADOW_DIR, arcname=SHADOW_DIR)
         hashes = {name: hashlib.sha256((self.phase / name).read_bytes()).hexdigest()
                   for name in ("completed-run.tgz", "completed-phase.tgz")}
         (self.phase / "completed-checksums.json").write_text(json.dumps(hashes, indent=2))
@@ -337,6 +597,10 @@ def parse_args(argv=None):
                         help="seconds to wait for runs/phase-b/.../retrieved.marker before the idle check (default 600)")
     parser.add_argument("--no-postrun", action="store_true", help="skip the unpaid reconcile/evaluate/timeline steps")
     parser.add_argument("--no-shutdown", action="store_true", help="leave the VM running at the end")
+    parser.add_argument("--live-memory-max", default=LIVE_MEMORY_MAX,
+                        help="memory ceiling of one live behavior-judge pass in its systemd scope (default 8G)")
+    parser.add_argument("--poll-seconds", type=float, default=30.0,
+                        help="seconds between checkpoints (and live-judge checks) while the pilot runs (default 30)")
     return parser.parse_args(argv)
 
 

@@ -513,6 +513,7 @@ package and candidate modes within this revision (section "History" below).
 | `schema.py`, `validate.py` | Output parsing (judge, decisions, prefilter, verifier, run level) and host validation (citations, ownership, channels, exposure order, certainty and topic); `validate.quote_span` places a quote in its item. |
 | `cohort.py`, `labels.py` | Verified categories (`apply_verification_v2`, evaluator authority, the `not_checked` state), the evaluation-awareness order and stop rule (`awareness_order`, `awareness_progress`), cohorts and flags (`compute_v2`), frozen-rubric labels (`map_frozen_labels_v2`). |
 | `pipeline.py` | The orchestrator: resumable on-disk stages, budget and run-limit stops, the selection guard, prefilter-miss tagging, the statement-defect footnote, the dry-run scenario projection and the mock model. |
+| `live.py`, `warm.py` | The live judge during the run (final windows from Inspect's realtime buffer, screened into `live/`) and the post-run adoption of byte-identical live units (section "Live judging during the run"). |
 | `estimate.py` | The per-invocation estimate (cached units free), its pricing in central/high/stress columns, the run limit and the estimate-against-actual record. |
 | `review.py`, `report.py` | The read-only evidence browser for flagged agents, the five-minute `report.html`/`report.json` and the `results.html` section. |
 | `statement_defects.json` | Researcher statement-defect table (host only; read for the footnote). |
@@ -545,6 +546,8 @@ has to send.
 | `review/`, `report.json`, `report.html` | The five-minute report (`report.json` schema `gdm-judge-report/3`, with `reading.visible_words`) and the read-only evidence browser (`review/index.html` plus one page per agent with a finding; `review/manifest.json` schema `gdm-judge-review-manifest/3`). The `results.json` key `behavior_judge` uses schema `gdm-judge-summary/3` and links the browser as `evidence_browser`. |
 | `superseded/<mode>-<timestamp>/` | After `--upgrade-judge-revision` (package/candidate switch within this revision): the previous mode's judge outputs and manifest, kept unreported. |
 | `rehearsal-ledger.sqlite` | Mock mode only. Mock runs never use the authoritative ledger. |
+| `live/` | Live judging during the run: `manifest.json`, `units/<agent>/prefilter/<window>@<sha16>.json`, `raw/`, `state.json` (every pass), `standing-approvals.json` and, after the post-run judge, `consistency.json`. Never published. |
+| `.judge.lock` | The run's judge lock (one judging process at a time). |
 
 The agent result (`gdm-judge-agent-result/3`) holds `status` (`graded`, `ungraded`,
 `grading_failed`) and `status_reason`; `judge_model`, `verifier_model`, the rubric version and
@@ -743,6 +746,76 @@ with its reason, or `supervisor_error`) and adds the judge logs and the pricing 
 `completed-phase.tgz`; the judge directory is inside `completed-run.tgz`. A judge outcome never
 changes the worker exit or stops the packaging. The run report (`scripts/build_results.py`) still
 excludes judge content.
+
+### Live judging during the run (October 20, 2026)
+
+docs/plan.md, "Live behavior judge during the run (October 20, 2026)" (the owner: "Judge during the
+run, not after"). For configs with `auto_behavior_judge` and `live_behavior_judge` true (the
+default), most of the judge runs before the clock stops. Only the last windows, verification and
+the run level remain after it. Judge revision v3, the rubric, the Sonnet/Opus prompts and the
+model allocation are unchanged.
+
+1. **During the run** `scripts/supervise_run.py` starts `run_transcript_judge.py --run-dir RUN
+   --live --standing-approval-from-config CONFIG --ledger ... --credentials-root ...` every
+   `behavior_judge_live_interval_seconds` (default 300; one pass at a time, never after the run
+   stop; nice 19, idle I/O, `oom_score_adj` 1000, a systemd `MemoryMax` scope where available; log
+   `live-judge.log`, record `live-judge.json`). A pass (`live.py`):
+   - reads each agent's sample from Inspect's realtime buffer (read-only; inspect_ai pinned to
+     0.3.279, otherwise the pass records `live_source_unavailable` and exits 0), or from the
+     `.eval` once flushed, then `runtime.jsonl` (complete lines only) and the conference
+     database (`mode=ro`, never `immutable`);
+   - rebuilds the history with the unchanged `history.build_agent`;
+   - keeps the final prefix: items before the earliest unsettled turn and before `now - 120 s`, and
+     conference results whose join window ended twice `JOIN_SLACK` earlier. A turn is settled when
+     it and the next model event are complete and all its tool results are observed, unless its
+     output was discarded or the session restarted;
+   - screens the closed windows of that prefix with Haiku.
+
+   Units are stored as `live/units/<agent>/prefilter/<window>@<sha16>.json`, plus `raw/`,
+   `manifest.json` and `state.json`. Ledger labels are `judge-haiku:<run id>:live:prefilter:<window>`.
+   A pass's room is the smallest of `behavior_judge_live_max_usd` minus earlier live passes, the
+   per-run cap minus everything this run's judging holds, and the analysis allowance. A pass is
+   refused (exit 4) unless the provider key is unlimited, or its `limit_remaining` covers the
+   pilot's remaining allowance plus that room. A refused (4) or stopped (3) pass ends live passes
+   for the run.
+2. **When the pilot exits** the judge's model stages start at once (`--stage verify`,
+   `behavior-judge-early.log`), beside reconcile, evaluate and timeline. No candidate, sample or
+   verifier request reads evaluator verdicts: the history digest excludes host context, and a
+   request that did would raise `StaleUnit` in step 3 rather than mix inputs.
+3. **After the follow-ups**, the usual post-run invocation runs as a resume. It sends only the
+   run-level request (when needed), then writes host facts, labels and the report.
+
+**Same result as a post-run-only judge.** `prefilter_window_count: false` (bound in the manifest)
+leaves the agent's final window count out of the Haiku header. Everything else in a window's
+request (its items, id and index) is fixed once the window is final, so a window screened during
+the run is the post-run request byte for byte. The post-run judge adopts a live unit (`warm.py`)
+only when all of these hold:
+- the binding, provider route and judge code hashes (pipeline, prompts, schema, validate, history,
+  windows, client, route) are the same;
+- the request hash is the same;
+- the status is `ok` or `ungraded`, or `pending` with only the refusal retry left;
+- replaying the stored outputs through its own parse, repair and salvage (`_drive_unit(replay=True)`)
+  gives the same status, reason, result and problems.
+
+A `grading_failed` live unit is never adopted. Everything downstream (selection, forced windows,
+the seeded sample, candidates, verification, host stages, run level, report) comes from the final
+record. A wrong guess about finality costs one Haiku request (about $0.006) and never changes a
+result. `live/consistency.json` lists what was adopted, what was rejected and why, and windows
+screened for another request. `pipeline.json` `spend.live` splits live spend into adopted (already
+in the post-run spend) and unadopted.
+
+**Per-run cap.** The standing cap (and the $50 default) holds across invocations:
+`client.committed_for_run` sums the ledger rows labelled with the run id (`COALESCE(actual,
+reserved)`, so an orphaned hold counts). `RunLimit(prior_usd=...)` starts there, and a resume never
+gets a fresh cap. Every judging invocation of a run holds `RUN/analysis/judge/.judge.lock`.
+
+**Opt out, shadow.** `live_behavior_judge: false` gives post-run judging exactly as before (v3
+bytes, `prefilter_window_count` left out of the binding). `"mock"` runs mock live passes (`--live
+--mock --output-dir PHASE/live-judge-shadow/<run>/analysis/judge`) and a mock post-run pass there
+(free; check its `live/consistency.json`). The paid post-run judge stays unchanged. Manual use:
+`--live --mock --output-dir ...` during a run; `--no-warm` or `--warm-from DIR` for post-run
+adoption; `--prefilter-window-count on|off` (default: the judge directory's recorded setting, else
+its live store's, else on).
 
 ## Costs
 

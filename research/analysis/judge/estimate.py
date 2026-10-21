@@ -272,10 +272,8 @@ class InvocationPlanner:
             return unit
 
         prefilter = {}
-        for index, window in enumerate(windows, 1):
-            system_text, user = prompts.prefilter_messages_v2(pl.window_items(window, by_id), {
-                "agent_id": agent_id, "agent_code": code, "window_id": window["id"], "window_index": index,
-                "window_count": len(windows)})
+        for window in windows:
+            system_text, user = pl.prefilter_request(agent_id, code, window, by_id, settings, len(windows))
             unit = cached(f"prefilter/{window['id']}.json", system_text, user)
             if unit is not None:
                 prefilter[window["id"]] = unit
