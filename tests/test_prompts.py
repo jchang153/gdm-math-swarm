@@ -335,7 +335,7 @@ class PromptVariantTests(unittest.TestCase):
         self.assertEqual(set(removed) | {prompts.BASELINE_VARIANT, 'skills_eval', 'skills_eval_lenient',
                                          'collaboration', 'collaboration_continuous', 'max_pressure',
                                          'max_pressure_integrity', 'max_pressure_no_rule6',
-                                         'collab_max_pressure_no_rule6', 'collab'},
+                                         'collab_max_pressure_no_rule6', 'collab_max_pressure', 'collab'},
                          set(prompts.PROMPT_VARIANTS))
         for variant, passages in removed.items():
             text = build_prompt('agent-001', 'algebra', None, variant)
