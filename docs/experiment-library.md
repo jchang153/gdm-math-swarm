@@ -1010,3 +1010,11 @@ compatibility check (`compat-20261021T224747Z`), which is never published and so
 that entry was removed by hand with one pinned `live/`-only commit (`ee02c592`). Start the mirror after the
 compatibility check, or with `--run RUN_ID`, to avoid this.
 
+`glm10-baseline-2h-20261022T020447Z` (GLM 5.3, 10 agents, 2 h) was published on October 22, 2026 with
+`prepare_hf_library.py` (incident report included) and `publish_hf_library.py --commit`, from base
+`3864f7858f13cf72f69cf7beb6e4a226ef682401` to `143be45650b51dda5dfd2255ebe64092a52c878e` (376 files uploaded,
+8,290 preserved). `scripts/verify_hosted.py` passed there (catalogue, run page, conference view, Inspect View,
+206 range on the `.eval`) and for the incident report at the next head. The mirror process was stopped and one
+`live_mirror.py --once --run RUN --quiet-seconds 0` pass retired its `live/` entry (`476953b1c0f0c8c5148ed7a9ff29f4de4008eb82`,
+`live/` now holds only `index.json`). Records: `runs/phase-b/hf-library-preparation/glm10-baseline-2h-20261022*`.
+
