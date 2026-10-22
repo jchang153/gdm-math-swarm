@@ -188,7 +188,9 @@ def offline_links(document, page, offline):
     offline" notice. Returns (document, [noted run-relative paths])."""
     import posixpath
     base = PurePosixPath(page).parent
-    notice = posixpath.relpath('results.html', base.as_posix() or '.') + '#raw-records-offline'
+    # Rooted paths: relpath of two absolute paths never consults the process's working directory.
+    notice = posixpath.relpath('/run/results.html', posixpath.normpath('/run/' + base.as_posix())) \
+        + '#raw-records-offline'
     noted = []
 
     def replace(match):

@@ -47,6 +47,8 @@ class Hub(TwoRepoHub):
                                      operations=[op for op in operations if not getattr(op, 'delete', False)])
 
     def list_lfs_files(self, repo, repo_type):
+        if getattr(self, 'lfs_files', None) is not None:
+            return self.lfs_files
         return [SimpleNamespace(filename=f'{RUN}/runtime.jsonl', file_oid=self.old_sha, size=10)]
 
     def permanently_delete_lfs_files(self, repo, objects, rewrite_history, repo_type):
@@ -195,7 +197,127 @@ class MigrationTests(unittest.TestCase):
         self.assertTrue(result['verified'])
 
 
+class SwitchAndDeleteEvalTests(unittest.TestCase):
+    """migrate_dataset.py switch and delete-eval (stages 3 and 4 of the Inspect logs)."""
+    setUp = MigrationTests.setUp
+    migrate = MigrationTests.migrate
+
+    def copied(self):
+        self.migrate(commit=True)  # stage 2: the log is in the dataset
+        self.hub.repos['space'].files['logs-test/index.html'] = b'<html></html>'
+        return self.hub.repos['dataset'].sha
+
+    def switch(self, commit_sha, **kwargs):
+        defaults = dict(dataset_commit=commit_sha, operation=add, delete_operation=remove, commit=True,
+                        receipt=self.root / 'sw' / 'receipt.json', backup_dir=self.root / 'sw' / 'backup')
+        return migrate_dataset.switch(self.hub, self.hub.download, **{**defaults, **kwargs})
+
+    def delete_eval(self, **kwargs):
+        defaults = dict(switch_receipt=self.root / 'sw' / 'receipt.json', delete_operation=remove, operation=add,
+                        commit=True, receipt=self.root / 'de' / 'receipt.json', backup_dir=self.root / 'de' / 'backup')
+        return migrate_dataset.delete_eval(self.hub, self.hub.download, **{**defaults, **kwargs})
+
+    def test_switch_adds_shim_and_signin_and_records_the_logs(self):
+        sha = self.copied()
+        space = self.hub.repos['space'].files
+        before = dict(space)
+        result = self.switch(sha)
+        self.assertEqual(result['status'], 'verified')
+        page = space[f'{RUN}/inspect-view/index.html'].decode()
+        self.assertEqual(dataset_logs.shim_settings(page), (dataset_logs.DATASET_REPO, sha, f'{RUN}/inspect'))
+        self.assertIn('data-signin="../../signin.html"', page)
+        self.assertIn('signin.html', space)
+        self.assertNotIn('logs-test/index.html', space)
+        self.assertEqual(space[f'{RUN}/inspect/{LOG}'], self.log)  # logs stay until delete-eval
+        changed = {n for n in before if n in space and space[n] != before[n]}
+        self.assertEqual(changed, {f'{RUN}/inspect-view/index.html', 'archive-manifest.json'})
+        manifest = json.loads(space['archive-manifest.json'])
+        for name in (f'{RUN}/inspect/{LOG}', f'{RUN}/inspect-view/logs/{LOG}'):
+            self.assertEqual(manifest['dataset_files'][name]['path'], f'{RUN}/inspect/{LOG}')
+            self.assertEqual(manifest['dataset_files'][name]['commit'], sha)
+            self.assertNotIn('moved', manifest['dataset_files'][name])
+            self.assertIn(name, manifest['files'])
+        self.assertEqual(manifest['dataset_switch']['runs'], [RUN])
+        self.assertEqual(manifest['files']['signin.html'], dataset_logs.digest(space['signin.html']))
+        self.assertTrue((self.root / 'sw' / 'backup' / 'original' / RUN / 'inspect-view' / 'index.html').is_file())
+        self.assertEqual(self.switch(sha, receipt=self.root / 'sw2.json')['note'], 'already switched')
+
+    def test_switch_refuses_a_log_missing_from_the_dataset(self):
+        before = dict(self.hub.repos['space'].files)
+        with self.assertRaisesRegex(ValueError, 'without an identical dataset copy'):
+            self.switch(self.hub.repos['dataset'].sha)
+        self.assertEqual(self.hub.repos['space'].files, before)
+
+    def test_switch_plan_is_read_only(self):
+        sha = self.copied()
+        before = dict(self.hub.repos['space'].files)
+        self.assertFalse(self.switch(sha, commit=False)['committed'])
+        self.assertEqual(self.hub.repos['space'].files, before)
+
+    def test_delete_eval_needs_a_verified_switch(self):
+        self.copied()
+        (self.root / 'sw').mkdir()
+        (self.root / 'sw' / 'receipt.json').write_text(json.dumps({'operation': 'switch', 'status': 'failed'}))
+        with self.assertRaisesRegex(ValueError, 'not a verified switch'):
+            self.delete_eval()
+
+    def test_delete_eval_deletes_verified_copies_and_purges(self):
+        sha = self.copied()
+        self.switch(sha)
+        oid = hashlib.sha256(self.log).hexdigest()
+        self.hub.lfs_files = [SimpleNamespace(filename=f'{RUN}/inspect/{LOG}', file_oid=oid, size=len(self.log)),
+                              SimpleNamespace(filename='other', file_oid='f' * 64, size=1)]
+        space = self.hub.repos['space'].files
+        space['live/other/inspect-view/logs/x.eval'] = live = b'live log'  # other bytes: its object is separate
+        result = self.delete_eval()
+        self.assertEqual(result['status'], 'verified')
+        self.assertNotIn(f'{RUN}/inspect/{LOG}', space)
+        self.assertNotIn(f'{RUN}/inspect-view/logs/{LOG}', space)
+        self.assertEqual(space['live/other/inspect-view/logs/x.eval'], live)
+        self.assertEqual([o.file_oid for o in self.hub.purged], [oid])
+        manifest = json.loads(space['archive-manifest.json'])
+        self.assertNotIn(f'{RUN}/inspect/{LOG}', manifest['files'])
+        self.assertIn('moved', manifest['dataset_files'][f'{RUN}/inspect/{LOG}'])
+        self.assertTrue(manifest['dataset_switch']['space_logs_deleted'])
+        self.assertTrue((self.root / 'de' / 'backup' / 'deleted.json').is_file())
+        self.assertEqual(self.delete_eval(receipt=self.root / 'de2.json')['note'], 'no Space log copies left')
+
+    def test_delete_eval_keeps_objects_still_referenced(self):
+        sha = self.copied()
+        self.switch(sha)
+        oid = hashlib.sha256(self.log).hexdigest()
+        self.hub.lfs_files = [SimpleNamespace(filename=f'{RUN}/inspect/{LOG}', file_oid=oid, size=len(self.log))]
+        self.delete_eval()  # the live/ copy has the same bytes: its object is not purged
+        self.assertEqual(self.hub.purged, [])
+        self.assertIn('live/other/inspect-view/logs/x.eval', self.hub.repos['space'].files)
+
+    def test_delete_eval_refuses_a_differing_dataset_copy(self):
+        sha = self.copied()
+        self.switch(sha)
+        self.hub.repos['dataset'].files[f'{RUN}/inspect/{LOG}'] = b'other bytes'
+        before = dict(self.hub.repos['space'].files)
+        with self.assertRaisesRegex(ValueError, 'dataset copy missing or different'):
+            self.delete_eval()
+        self.assertEqual(self.hub.repos['space'].files, before)
+
+
 class HelperTests(unittest.TestCase):
+    def test_offline_links_do_not_depend_on_the_working_directory(self):
+        import os
+        page = '<a href="../conference/events.jsonl">e</a>'
+        here = os.getcwd()
+        gone = tempfile.mkdtemp()
+        os.chdir(gone)
+        os.rmdir(gone)  # the process's working directory no longer exists
+        try:
+            new, noted = dataset_logs.offline_links(page, 'conference-view/index.html', {'conference/events.jsonl'})
+            top, _ = dataset_logs.offline_links('<a href="x.jsonl">x</a>', 'results.html', {'x.jsonl'})
+        finally:
+            os.chdir(here)
+        self.assertIn('href="../results.html#raw-records-offline"', new)
+        self.assertEqual(noted, ['conference/events.jsonl'])
+        self.assertIn('href="results.html#raw-records-offline"', top)
+
     def test_categories(self):
         c = dataset_logs.category
         self.assertEqual(c('inspect/a.eval'), 'eval')
