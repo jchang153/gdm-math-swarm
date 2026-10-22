@@ -1005,5 +1005,8 @@ to `53791397a96c70de752c4076a576699d824b5154` (886 files uploaded, 7,759 preserv
 first, Space private). `scripts/verify_hosted.py` passed for all four at that revision. With `--bundle`
 only `index.html` differs, as expected: the published catalogue merges the existing entries, the bundle's
 lists only the new runs. Records are in the ignored `runs/phase-b/hf-library-preparation/glm-oversight-4runs-20261022*`.
-The near-live mirror then retired their `live/` entries.
+The near-live mirror then retired their `live/` entries (`af0b5e02`). It had also mirrored the baseline launch's
+compatibility check (`compat-20261021T224747Z`), which is never published and so is never retired automatically;
+that entry was removed by hand with one pinned `live/`-only commit (`ee02c592`). Start the mirror after the
+compatibility check, or with `--run RUN_ID`, to avoid this.
 
