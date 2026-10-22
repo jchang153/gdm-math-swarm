@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-22 by Claude (Opus 5.5) session (incident reports: contagion section and table of contents, backfilled and republished; proposal: Inspect logs in a private HF dataset).
+Last updated: 2026-10-22 by Claude (Opus 5.5) session (logs dataset: code on main, Inspect logs copied and verified; test deployment and download-only move pending).
 
 ## What the project is
 
@@ -84,10 +84,17 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
     reports, judge and conference pages stay. **The next ~120 MB run will not fit**: prune more (old runs'
     `.eval`, 117 MB, `--prune-kind eval`) or squash history (owner accepted it as a last resort). Details and
     records: `docs/experiment-library.md`, "Storage limit and pruning";
-    `runs/phase-b/hf-library-preparation/prune-20261022/`. **Proposal (2026-10-22, not approved or implemented):** move the `.eval` logs
-    (277 MB unique) to a private HF dataset read by the static site with the viewer's own HF OAuth token and a
-    fetch shim; Docker proxy Spaces need PRO. Owner must create `HF-ORG/LOGS-DATASET` and extend
-    tokens. See `docs/experiment-library.md`, "Logs in a dataset repo (proposal)". Incident reports (only `report.html`,
+    `runs/phase-b/hf-library-preparation/prune-20261022/`. **Logs dataset (2026-10-22, owner-approved design):** the private dataset
+    `HF-ORG/LOGS-DATASET` now holds all 17 published runs' Inspect logs (275.3 MB, dataset commit
+    `b4f10b10`, each verified by size and SHA-256 against the Space copy, 15 also against local copies, plus 206
+    ranged reads); the Space is unchanged apart from README OAuth metadata (`882dd1ff`). Code on main:
+    `scripts/dataset_logs.py`, `scripts/migrate_dataset.py` (`maintain_hf_run.py --scope migrate-logs`),
+    `scripts/hf_site/{signin.html,evallog-fetch.js}`; new publishes and the live mirror send logs and raw records to
+    the dataset. **Pending:** the `logs-test/` deployment and the copy plus Space deletion of download-only files
+    (`.jsonl`, snapshots, databases, `transcripts/`; frees about 544 MB) were stopped by the agent's permission
+    check and need the operator's go-ahead; then the owner's sign-in test; deleting the Space `.eval` (stage 4,
+    275 MB) needs separate owner approval. See `docs/experiment-library.md`, "Logs and raw records in the dataset
+    repo". Incident reports (only `report.html`,
     `report.md`, `evidence.json`) are published for gemini10 and the four owner-* runs.
     Records of that update: `runs/phase-b/site-incident-nologs-publication-20261021/`
     and `runs/phase-b/incident-publication-<run>/`.
@@ -368,6 +375,15 @@ is being merged into main via `collab-env`.
      those checks come back "unresolved").
 
 ## Next steps / open items
+
+- Logs dataset, in order (details: `docs/experiment-library.md`, "Logs and raw records in the dataset repo"):
+  1. deploy the test area:
+     `PYTHONPATH=scripts:src .venv/bin/python scripts/migrate_dataset.py deploy-test --run glm100-baseline-30m-20261022T050055Z --dataset-commit b4f10b1082dbae32d81d6bd52b78f2f433450c99 --receipt runs/phase-b/hf-library-preparation/logs-migration-20261022/logs-test-receipt.json`,
+     then re-render the catalogue (`maintain_hf_run.py --rerender-catalogue --commit ...`) so that
+     `?page=logs-test/index.html` deep-links to it;
+  2. copy and delete the download-only files:
+     `maintain_hf_run.py --all-published-runs --scope migrate-logs --migrate-category jsonl --migrate-category snapshots --migrate-category database --migrate-category transcripts --commit --delete-moved --receipt ... --backup-dir ...`;
+  3. owner signs in once on the test area; then, with separate owner approval, stage 4 deletes the Space `.eval`.
 
 - Owner to review the incident reports (the Gemini 3.1 pilot first) and the
   collab prompt text.

@@ -640,15 +640,120 @@ passed at that revision for the catalogue, run page, conference view, Inspect Vi
 evidence browser and a 206 range on the `.eval` (with `--bundle` only the merged catalogue `index.html` differs, as
 expected). Records: `runs/phase-b/hf-library-preparation/judge-glm100-repeat2-20261022T055342Z-20261022*`.
 
-## Logs in a dataset repo (proposal)
+## Logs and raw records in the dataset repo
 
-Status: **proposal only** (October 22, 2026). Not implemented and not approved. The owner asked to move the
-Inspect `.eval` logs out of the Space (at its 1 GB cap) into a private HF dataset, with the site reading them
-from there. The feasibility tests below used throwaway private repos, all deleted afterwards. They were created
-under the operator's user namespace because the operator's fine-grained token is scoped to the Space and
-`create_repo` in the organization returned 403.
+Status (October 22, 2026): **code implemented; Inspect logs copied to the dataset and verified; the `logs-test/`
+deployment and the move of the download-only files are pending (see below); deleting the Space's `.eval` logs
+awaits the owner's separate approval.** Owner decisions of October 22, 2026: move the
+Inspect `.eval` logs from the Space into the private dataset `HF-ORG/LOGS-DATASET`, read by the
+static Space with the viewer's own "Sign in with HF" token (OAuth `read-repos`, no stored secret); then "go ahead
+and move everything to dataset that's not necessary for current functionality of the website", with deletion
+from the Space authorized for those download-only files only (not the `.eval` logs, which Inspect View still
+reads from the Space until the owner confirms the sign-in test).
 
-### Findings
+State on October 22, 2026 (records: `runs/phase-b/hf-library-preparation/logs-migration-20261022/`):
+
+- **Space metadata**: `hf_oauth: true` and `hf_oauth_scopes: [read-repos]` were added to the Space README at
+  `882dd1ff338cba6b5e7d3faad0f54bf0484d3d52` (guarded commit from `8982306`; before/after copies and receipt in
+  the records). HF now injects `OAUTH_CLIENT_ID`, `OAUTH_SCOPES` and `OPENID_PROVIDER_URL` into served pages;
+  the pages are otherwise unchanged. `/oauth/authorize` accepts any path on the Space host as `redirect_uri`.
+- **Inspect logs copied and verified** (`--scope migrate-logs --commit`, receipt `eval-receipt.json`, status
+  `verified`): the 34 `.eval` paths of the 17 published runs (two Space copies of each log) became 17 dataset
+  files, 275,288,498 bytes, at dataset commit `b4f10b1082dbae32d81d6bd52b78f2f433450c99` (one commit per run).
+  - Each matched its Space copy (LFS SHA-256 and size) and its dataset record.
+  - 15 also matched the local `runs/RUN/inspect/` copy byte for byte. The local copies of cache100 and
+    glm10-baseline-2h are iCloud placeholders that `brctl download` did not fetch; they were verified against
+    the Space copy only.
+  - The first and last 64 bytes of all 17 were read through resolve with HTTP 206.
+  - A CORS preflight from the Space origin allows `authorization, range`. Anonymous resolve gives 401; with a
+    bearer token it gives a 302 to `us.aws.cdn.hf.co`, which answers Range with 206,
+    `Access-Control-Allow-Origin: *` and `Access-Control-Expose-Headers: *`.
+  - The Space is unchanged; its `.eval` files stay until stage 4 is approved. The live run's log under
+    `live/glm100-baseline-90m-20261022T183812Z/` was left alone.
+- **Pending**: the copy and Space deletion of the download-only categories, and the `logs-test/` deployment.
+  The agent's tool-permission check stopped those HF writes; they need the operator's go-ahead in their own
+  session. At the Space head `882dd1ff` the download-only categories are:
+  - `.jsonl`: 113 files, 380.5 MB (267.6 MB unique LFS);
+  - snapshots: 1,856 files, 290.3 MB (166.1 MB LFS; the loose files are baseline100's);
+  - databases: 50 files, 110.6 MB (110.0 MB LFS);
+  - transcripts: 100 files, 205.9 MB (regular Git files, which HF's `used_storage` does not count).
+
+  Deleting and purging them would free about 543.7 MB of the 920.0 MB `used_storage`. Deleting the `.eval` logs
+  afterwards (stage 4) would free another 275.3 MB.
+
+### What lives where
+
+- **Dataset** (`scripts/dataset_logs.py`, `category()`): Inspect logs at `RUN/inspect/<name>.eval` (live runs:
+  `live/RUN/inspect/<name>.eval`); every other download-only run file at its own `RUN/<path>`: raw `.jsonl`
+  records, `snapshots.tar.gz`, `snapshots.manifest.json` and loose `snapshots/` files, `.db`/`.sqlite` databases
+  (and `-shm`/`-wal`), and the old custom transcript pages `RUN/transcripts/`. Dataset files are immutable: a
+  commit refuses a path that already holds other bytes.
+- **Space**: every page and what pages load: the catalogue, run pages, `results.json`, conference views, judge
+  report and evidence browser (with its JSON), incident reports, Inspect View (app, `logs/listing.json`), plus
+  `signin.html` at the root once switched. `archive-manifest.json` records moved files under `dataset_files`
+  (`{repo, path, commit, bytes, sha256, category, moved}`); files pruned earlier stay under `offline_files`.
+- **Links**: a page link to a moved file points to the dataset file page
+  (`huggingface.co/datasets/HF-ORG/LOGS-DATASET/blob/<commit>/RUN/<path>`, new tab) with the note
+  "(in the private logs dataset)"; a link to a pruned file without a dataset copy points to the run page's
+  "Raw records kept offline" notice. `verify_hosted.py` fails a page that still links a moved or absent file.
+
+### Sign-in and the fetch shim
+
+- `hf_site/evallog-fetch.js` is inlined first into each Inspect View `index.html` (`data-dataset`,
+  `data-commit` pinned to the dataset commit of that run's logs, `data-path` `RUN/inspect`, `data-signin`). It
+  rewrites same-origin GET/HEAD requests for `logs/<name>.eval` to
+  `huggingface.co/datasets/<dataset>/resolve/<commit>/RUN/inspect/<name>` with `Authorization: Bearer <viewer's
+  OAuth token>`, `redirect: 'follow'` and `credentials: 'omit'` (HF answers with a 302 to its CDN, which serves
+  Range requests with 206). Without a token it returns 401 and shows a yellow "Sign in with HF" bar.
+- `hf_site/signin.html` (no external libraries) runs PKCE against the `window.huggingface.variables` HF injects
+  (`OAUTH_CLIENT_ID`, `OAUTH_SCOPES`, `OPENID_PROVIDER_URL`), asks for `openid profile read-repos` with
+  `orgIds` of gdm-math-swarm, exchanges the code at `/oauth/token` (CORS allowed, public PKCE client) and stores
+  `{accessToken, expiresAt}` in `localStorage` (`evallog-oauth`); then it returns to the page it came from.
+- **It runs in its own tab, not in the Space frame.** HF's login page cannot be framed, and it sends
+  `Cross-Origin-Opener-Policy: same-origin`, which severs a popup's opener, so the token cannot be posted back
+  to the frame (the shim still accepts such a message if a browser keeps the opener), and Chrome partitions the
+  frame's storage. The sign-in link carries the frame's `__sign`; that first top-level visit sets the static
+  host's own `hf_jwt` cookie (24 h, `SameSite=Lax`), so HF's redirect back to `signin.html` and the following
+  pages load in that tab without `__sign`. Read the logs in that tab.
+- **Space metadata**: OAuth needs `hf_oauth: true` and `hf_oauth_scopes: [read-repos]` in the Space README
+  (committed at `882dd1ff`, the only production change for OAuth; pages unchanged). HF then injects the OAuth
+  variables into every served page's `window.huggingface` script, which `verify_hosted.py` strips before
+  comparing bytes.
+- **Deep link**: the catalogue opens `?page=PATH.html` or `#page=PATH.html` (same-site `.html` paths only),
+  keeping the session, so `huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments?page=logs-test/index.html`
+  reaches a page the catalogue does not link.
+
+### Commands
+
+- New runs: `prepare_hf_library.py` writes dataset-bound files to `OUTPUT/dataset-files/` (with
+  `manifest.json`), injects the shim and adds `signin.html`; `publish_hf_library.py --commit` commits the dataset
+  first (verified per file), pins the dataset commit into the pages, then commits the Space and refuses any
+  dataset category bound for the Space (`--records-in-space` only reproduces legacy bundles for maintenance).
+- Live runs: `live_mirror.py` commits live logs to `live/RUN/inspect/` in the dataset, then the pages-only Space
+  `live/` commit; superseded live logs are purged from the dataset (`repo_type="dataset"`).
+- Existing runs: `maintain_hf_run.py --all-published-runs --scope migrate-logs [--migrate-category eval|jsonl|
+  snapshots|database|transcripts ...] [--commit --receipt FILE --backup-dir DIR [--delete-moved]]`
+  (`scripts/migrate_dataset.py`): plan (pinned Space head, every file downloaded, checked against its record,
+  credential-screened and compared with `runs/RUN/` when readable; iCloud placeholders get `brctl download`,
+  and after two that do not download the rest are left to the Space copy), copy (verified dataset commits, one
+  per run; size and LFS SHA-256 or Git blob id per path; first and last 64 bytes of each log through resolve,
+  206), and with `--delete-moved` (never `eval`) one Space commit that deletes the moved files, repoints links,
+  moves their manifest records to `dataset_files`, is verified, and then purges the freed LFS objects without
+  rewriting history. Other maintenance scopes refuse to re-add a file recorded in `dataset_files`.
+- Test area: `python scripts/migrate_dataset.py deploy-test --run RUN --dataset-commit SHA --receipt FILE` adds
+  only `logs-test/` (landing page, `signin.html`, `evallog-fetch.js`, the run's Inspect View without `.eval`).
+- Verify: `verify_hosted.py --run RUN --revision SHA` (dataset checks run automatically when the run's Inspect
+  View has a shim: `dataset_private`, `inspect_shim`, `range_206` per log via the dataset, `preflight`,
+  `no_moved_links`, `no_broken_links`, `dataset_links_resolve`; `--expect-no-space-logs` after stage 4).
+
+### Proposal record (October 22, 2026)
+
+The owner asked to move the Inspect `.eval` logs out of the Space (at its 1 GB cap) into a private HF dataset,
+with the site reading them from there. The feasibility tests below used throwaway private repos, all deleted
+afterwards. They were created under the operator's user namespace because the operator's fine-grained token is
+scoped to the Space and `create_repo` in the organization returned 403.
+
+#### Findings
 
 - **Direct fetch with the browser's HF session: not possible.** `huggingface.co/datasets/.../resolve/...`
   answers CORS preflights for any `Origin`, including the Space's `*.static.hf.space` origin:
@@ -694,7 +799,7 @@ under the operator's user namespace because the operator's fine-grained token is
     free user or organization, 1 TB for PRO and 1 TB per seat for Team (docs/hub/storage-limits). The dataset's
     `used_storage` equalled its file bytes.
 
-### Recommended design: static site, viewer's own OAuth token, fetch shim
+#### Recommended design: static site, viewer's own OAuth token, fetch shim
 
 No server, no secret and no cold start, on the free plan.
 
@@ -725,7 +830,7 @@ No server, no secret and no cold start, on the free plan.
     Space secret would replace OAuth.
   - A static Space cannot hold a secret: anything it serves is visible to viewers.
 
-### Changes per script (not implemented)
+#### Changes per script (as proposed; implemented as described above)
 
 - `prepare_hf_library.py`:
   - writes `.eval` files to a separate `logs/RUN/inspect/` bundle with a SHA-256 manifest, and no longer into the
@@ -756,7 +861,7 @@ No server, no secret and no cold start, on the free plan.
     - the Inspect View `index.html` carries the shim with the expected dataset and commit;
     - a preflight from the Space origin allows `authorization,range`.
 
-### Migration of existing runs (guarded, reversible)
+#### Migration of existing runs (guarded, reversible)
 
 `maintain_hf_run.py --scope migrate-logs --commit --receipt FILE --backup-dir DIR`, in stages:
 
@@ -775,7 +880,7 @@ No server, no secret and no cold start, on the free plan.
    - This frees about 277 MB of the current 920 MB.
    - Undoing it means re-uploading from the dataset with SHA-256 checks, which is bounded by the 1 GB cap.
 
-### Owner actions
+#### Owner actions (as proposed)
 
 - Create the private dataset `HF-ORG/LOGS-DATASET` in the organization, and add it with write
   access to each publisher's fine-grained token. The operator's current token reaches only the Space, and repo
