@@ -135,15 +135,21 @@ def judge_publication(source):
 # The custom transcript export (scripts/export_transcripts.py, RUN/transcripts/) is local-only:
 # agent transcripts are read in Inspect View (owner, October 21, 2026), so it is not published.
 LOCAL_ONLY_DIRS = frozenset({'transcripts'})
+# The resume bundle (RUN/resume/, research_swarm.resume_bundle: agent session transcripts, workspace
+# archives, the resume manifest) is private raw state for continuing a run (owner, October 22, 2026):
+# it stays in the packaged run and is never published to the Space, with or without other flags.
+PRIVATE_RAW_DIRS = frozenset({'resume'})
 # A page that links the unpublished transcript export was made by an older generator.
 TRANSCRIPT_LINK = re.compile(r'href="(?:\.\./)*transcripts/', re.I)
 
 
 def run_excluded(relative, transcript_export=False):
-    """True for run paths that stay local: the transcript export (unless ``transcript_export``, only
+    """True for run paths that stay local: the resume bundle (always), the transcript export (unless ``transcript_export``, only
     for ``maintain_hf_run.py --scope transcripts`` of runs published with one) and judge files off the
     allowlist."""
     parts = Path(relative).parts
+    if parts and parts[0] in PRIVATE_RAW_DIRS:
+        return True
     return ((not transcript_export and bool(parts) and parts[0] in LOCAL_ONLY_DIRS) or judge_excluded(relative)
             or incident_excluded(relative))
 

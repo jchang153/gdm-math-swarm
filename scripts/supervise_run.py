@@ -755,6 +755,18 @@ class Supervisor:
             os.sync()
         return code
 
+    def resume_summary(self):
+        """RUN/resume/manifest.json in brief (packaged inside completed-run.tgz; never published)."""
+        try:
+            manifest = json.loads((self.run / "resume" / "manifest.json").read_text())
+        except (OSError, ValueError):
+            return None
+        agents = manifest.get("agents") or {}
+        return {"agents_saved": sum(1 for a in agents.values() if a.get("status") == "saved"),
+                "agents_failed": sorted(k for k, a in agents.items() if a.get("status") != "saved"),
+                "missing_agents": manifest.get("missing_agents"),
+                "total_archive_bytes": manifest.get("total_archive_bytes")}
+
     def package(self, code):
         if not self.run.exists():
             return
@@ -780,7 +792,7 @@ class Supervisor:
         hashes = {name: hashlib.sha256((self.phase / name).read_bytes()).hexdigest()
                   for name in ("completed-run.tgz", "completed-phase.tgz")}
         (self.phase / "completed-checksums.json").write_text(json.dumps(hashes, indent=2))
-        self.status("ready_for_retrieval", worker_exit=code, hashes=hashes,
+        self.status("ready_for_retrieval", worker_exit=code, hashes=hashes, resume_bundle=self.resume_summary(),
                     behavior_judge=None if self.judge_record is None else
                     {k: self.judge_record.get(k) for k in ("outcome", "exit", "reason")},
                     incident_report=None if self.incident_record is None else

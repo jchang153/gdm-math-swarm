@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-22 22:15 UTC by Claude (Opus 5.5) session (dataset migration progress, disk cleanup, planned ~/code move, resume bundle).
+Last updated: 2026-10-22 22:30 UTC by Claude (Opus 5.5) session (resume bundle saving side landed on main; continuation feasibility).
 
 ## What the project is
 
@@ -338,12 +338,15 @@ is being merged into main via `collab-env`.
      repos, so after the move only Time Machine backs them up.
    - **Until then,** use a fresh clone in the scratchpad for git (the main checkout's `git status` hangs on 60+
      offloaded objects).
-4. **Resume bundle** (an agent, worktree `.worktrees/run-continue`): feasibility assessment of continuing finished
-   runs; then build saving only (session JSONLs, workspace tarballs, manifest, in-flight list, optional checkpoints)
-   so future runs are extendable. No continuation tool yet (owner: "don't build it yet", then "go ahead" for saving).
-   It may be blocked by the iCloud git issue; check its status.
 
 **Done recently (details under "Runs so far"):**
+- **Resume bundle (2026-10-22, saving side only).** Every pilot run now saves `RUN/resume/`: per agent, a
+  full archive of `/workspace`, `/tmp` (wiki) and `/home/researcher` (Claude Code session JSONLs), open tool
+  calls, the process table, and a run manifest. Optional checkpoints come from `resume_checkpoint_minutes`
+  (off by default). It is packaged in `completed-run.tgz` and never published to the Space. See docs/runtime.md,
+  "Resume bundle". No continuation tool exists yet (owner decision). The runs before this one (including
+  glm100-baseline-30m, -repeat2 and -repeat3) have only the 5-s snapshots. Those hold every agent's final
+  session JSONL, but not deletions, non-text files or `/tmp` outside `/tmp/w`.
 - The neutral collab environment is in use since 2026-10-21; its runtime risks (moved config dir,
   API-key helper, attribution reminder) were confirmed fine.
 - The website QoL work and near-live mirror are live and used.
@@ -363,6 +366,10 @@ is being merged into main via `collab-env`.
      `maintain_hf_run.py --all-published-runs --scope migrate-logs --migrate-category jsonl --migrate-category snapshots --migrate-category database --migrate-category transcripts --commit --delete-moved --receipt ... --backup-dir ...`;
   3. owner signs in once on the test area; then, with separate owner approval, stage 4 deletes the Space `.eval`.
 
+- **First real run with the resume bundle:** check the `resume_bundle_saved` events (one per agent),
+  `RUN/resume/manifest.json` (`missing_agents` empty, no `status: error`), the per-agent archive size
+  (estimated at 0.3-0.5 MB), and that agent stop-to-exit time grew by only seconds. Also check that
+  `credential_withheld` is empty. A continuation tool (`--from-run`, segments) is not approved yet.
 - Owner to review the incident reports (the Gemini 3.1 pilot first) and the
   collab prompt text.
 - Proposed next experiments, not yet approved:

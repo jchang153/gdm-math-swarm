@@ -44,6 +44,16 @@ def agent_transport_scope():
         _AGENT_KEY.reset(token)
 
 
+def agent_transport_key_id():
+    """A non-secret identifier of the current agent's signing key (None outside a scope):
+    a domain-separated SHA-256 prefix, from which the key cannot be recovered. Recorded in
+    the resume bundle (research_swarm.resume_bundle); the key itself is never written."""
+    key = _AGENT_KEY.get()
+    if key is None:
+        return None
+    return hashlib.sha256(b"research-swarm-reasoning-key-id/1:" + key).hexdigest()[:16]
+
+
 @contextlib.contextmanager
 def _bridge_scope(bridge):
     # No await between checking/assigning: concurrent requests on this bridge

@@ -131,7 +131,10 @@ def load_bundle(bundle):
         if path.is_symlink():
             raise ValueError('Linked archive entry refused')
         if path.is_file():
-            safe_path(path.relative_to(bundle).as_posix())
+            relative = safe_path(path.relative_to(bundle).as_posix())
+            if len(relative.parts) > 2 and relative.parts[1] == 'resume':
+                # RUN/resume/ (research_swarm.resume_bundle) is private raw state, never published.
+                raise ValueError('Resume bundle in archive; upload refused')
     manifest = json.loads((bundle / 'archive-manifest.json').read_text())
     if manifest.get('schema') != 'gdm-private-space/1':
         raise ValueError('Expected a prepare_hf_library.py bundle')

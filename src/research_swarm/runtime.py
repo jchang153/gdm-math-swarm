@@ -478,6 +478,7 @@ def exit_status(status, filter_state=None):
 # this long for its in-flight request to settle (with its reported cost and
 # generation id) before its agent is cancelled. Config key in_flight_grace_seconds.
 IN_FLIGHT_GRACE_SECONDS = 120.0
+RESUME_SAVE_TIMEOUT_SECONDS = 420  # resume_bundle.SAVE_TIMEOUT_SECONDS plus the read-back
 IN_FLIGHT_POLL_SECONDS = 0.1
 
 
@@ -526,7 +527,7 @@ def restart_delay(consecutive_quick):
 def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, run_dir, record, clock,
                 system_prompt_mode="replace", auto_memory=True, in_flight_grace=IN_FLIGHT_GRACE_SECONDS,
                 auto_restart=False, neutral=False, roles=None, definitions_for=None, continue_for=None,
-                env_for=None):
+                env_for=None, resume=None):
     """Solver running one genuine Claude Code peer inside its own sandbox.
 
     ``roles`` ({agent_id: "solver"|"overseer"}, oversight.roles), ``definitions_for(agent_id)``
@@ -544,6 +545,11 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
     refused; the agent is cancelled once its in-flight request (if any) has settled,
     or after ``in_flight_grace`` seconds (a request still running then is cancelled
     and stays an uncertain ledger hold).
+
+    ``resume`` (a resume_bundle.ResumeBundler, or None): after the final snapshot poll each
+    agent's resume state is saved (docs/runtime.md, "Resume bundle"), and every
+    ``resume.checkpoint_minutes`` after the common start when that is set. Saving reads the
+    container only; prompts, tools and messages are unchanged.
     """
     from inspect_ai.agent import AgentState
     from inspect_ai.model import ChatMessageUser
@@ -594,6 +600,20 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
             continue_message = ((continue_for(agent_id) if continue_for else None)
                                 or (NEUTRAL_CONTINUE_MESSAGE if neutral else CONTINUE_MESSAGE))
             outcome = {"status": None, "error": None, "harness_after_stop": None}
+            restart_count = [0]
+
+            def resume_fields():
+                from .reasoning_bridge import agent_transport_key_id
+                inference = getattr(gen_filter, "state", None) or {}
+                return {"persona": persona, "role": role or "solver",
+                        "appended_prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+                        "system_prompt_mode": system_prompt_mode, "claude_auto_memory": auto_memory,
+                        "neutral_environment": bool(neutral),
+                        "continue_message_sha256": hashlib.sha256(continue_message.encode()).hexdigest(),
+                        "tool_names": [d.get("name") for d in agent_definitions if isinstance(d, dict)],
+                        "reasoning_transport_key_id": agent_transport_key_id(),
+                        "harness_status": outcome["status"], "restarts": restart_count[0],
+                        "requests": inference.get("requests"), "in_flight_requests": inference.get("in_flight")}
 
             def budget_refused():
                 inference = getattr(gen_filter, "state", None) or {}
@@ -619,6 +639,7 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
                         quick = quick + 1 if session_status == "error" or made <= RESTART_QUICK_REQUESTS else 0
                         delay = restart_delay(quick)
                         restarts += 1
+                        restart_count[0] = restarts
                         _safe_record(record, "agent_restart", agent_id, {
                             "restart": restarts, "ended": exit_status(session_status, getattr(gen_filter, "state", None)),
                             "requests_in_session": made, "delay_seconds": delay,
@@ -674,6 +695,8 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
                         group.start_soon(run_agent)
                         group.start_soon(watch_stop)
                         group.start_soon(snapshots.run, sbox)
+                        if resume is not None and resume.checkpoint_minutes:
+                            group.start_soon(resume.run_checkpoints, sbox, agent_id, resume_fields)
                 finally:
                     with anyio.CancelScope(shield=True):
                         try:
@@ -681,6 +704,13 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
                                 await snapshots.poll(sbox, final=True)  # final observed versions
                         except Exception as ex:
                             record("snapshot_error", agent_id, {"stage": "final", "type": type(ex).__name__})
+                        if resume is not None:
+                            try:
+                                with anyio.fail_after(RESUME_SAVE_TIMEOUT_SECONDS):
+                                    await resume.save_agent(sbox, agent_id, agent=resume_fields())
+                            except Exception as ex:
+                                _safe_record(record, "resume_bundle_error", agent_id,
+                                             {"label": "final", "error": type(ex).__name__})
                         inference = dict(getattr(gen_filter, "state", None) or {})
                         if outcome["status"] is None:
                             # Cancelled without an outcome: by the run stop (a request refused
@@ -1408,6 +1438,39 @@ def build_openrouter_model(settings, repo_root, max_connections, *, run_budget_u
     return model, limit
 
 
+def resume_run_info(config, effective, settings, repo_root, agent_ids, listing):
+    """The run-level part of the resume manifest (resume_bundle): what a continuation of this
+    run must match. Values only; no credential (the model settings hold no key)."""
+    from . import resume_bundle
+    model = asdict(settings)
+    manifest_path = config.get("fixed_task_manifest")
+    if manifest_path and not Path(manifest_path).is_absolute():
+        manifest_path = Path(repo_root) / manifest_path
+    return {
+        "run_dir": str(config.get("run_dir")), "agent_ids": list(agent_ids),
+        "ledger_run_id": effective.get("run_id"), "budget_track": effective.get("budget_track"),
+        "ledger_path": effective.get("ledger_path"), "run_budget_usd": effective.get("run_budget_usd"),
+        "prompt_variant": effective.get("prompt_variant"), "persona_seed": effective.get("persona_seed"),
+        "persona_reviewing": effective.get("persona_reviewing"), "roles": effective.get("roles"),
+        "overseer": effective.get("overseer"), "system_prompt_mode": effective.get("system_prompt_mode"),
+        "neutral_environment": effective.get("neutral_environment"),
+        "prompt_cache_normalization": effective.get("prompt_cache_normalization"),
+        "claude_code_env": effective.get("claude_code_env"), "auto_restart": effective.get("auto_restart"),
+        "images": effective.get("images"), "compose_sha256": effective.get("compose_sha256"),
+        "agent_memory": effective.get("agent_memory"), "agent_cpus": effective.get("agent_cpus"),
+        "judge": effective.get("judge"),
+        "model": {k: model.get(k) for k in model if "key" not in k.lower()},
+        "dataset_revision": effective.get("dataset_revision"), "task_set": effective.get("task_set"),
+        "task_ids_sha256": hashlib.sha256(json.dumps([t["task_id"] for t in listing]).encode()).hexdigest(),
+        "fixed_task_manifest": config.get("fixed_task_manifest"),
+        "fixed_task_manifest_sha256": resume_bundle.file_digest(manifest_path) if manifest_path else None,
+        "max_run_seconds": config.get("max_run_seconds"),
+        "config_sha256": hashlib.sha256(json.dumps(config, sort_keys=True, default=str).encode()).hexdigest(),
+        "code": resume_bundle.code_version(repo_root),
+        "checkpoint_minutes": resume_bundle.checkpoint_minutes(config),
+    }
+
+
 def eval_options(agent_count, run_dir, config):
     """eval_async options shared by the paid paths (one sample and sandbox per peer)."""
     return dict(max_samples=agent_count, max_sandboxes=agent_count, max_tasks=1,
@@ -1494,6 +1557,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
         raise LaunchBlocked("; ".join(report["blockers"]))
     # Required, never defaulted (preflight also checks it equals agent_count).
     connections = max_connections(config)
+    from . import resume_bundle
+    resume_checkpoints = resume_bundle.checkpoint_minutes(config)  # refuses an invalid value before any work
     from inspect_ai import eval_async
     from .inspect_adapter import (InstructionArchive, budget_filter, claude_code_env, credentials_in_environment,
                                   disable_inspect_dotenv)
@@ -1554,6 +1619,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     listing, task_files = export_public_tasks(repo_root, task_set=task_set)
     # Before any agent container starts (and so before the barrier): warm the page cache.
     warm_up = await asyncio.to_thread(warm_up_lean, images["lean"]["id"], record, **warm_up_options(config))
+    resume = None
     conference, compiler, observer = make_conference(repo_root, run_dir, agent_ids, config, record,
                                                      lean_image=images["lean"]["id"],
                                                      conference_factory=conference_factory)
@@ -1603,6 +1669,12 @@ async def _run_pilot(config, repo_root, conference_factory=None):
         barrier = StartBarrier(len(agent_ids), record)
         clock = RunClock(barrier)
         archive = InstructionArchive(run_dir / "instructions", record)
+        # Resume bundle (docs/runtime.md "Resume bundle"): saved per agent at stop (and at the
+        # optional checkpoints); private raw state, never published to the HF Space.
+        resume = resume_bundle.ResumeBundler(run_dir, record, neutral=neutral, clock=clock,
+                                             checkpoint_minutes=resume_checkpoints,
+                                             run_info=resume_run_info(config, effective, settings, repo_root,
+                                                                      agent_ids, listing))
         def prompt_for(agent, persona):
             if overseer is not None and agent == overseer["agent_id"]:
                 return oversight.build_overseer_prompt(agent, solver_ids, listing, variant, overseer["powers"])
@@ -1617,7 +1689,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                                                 clock.stop, **neutral_args),
                              run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,
                              auto_memory=auto_memory, in_flight_grace=in_flight_grace,
-                             auto_restart=config.get("auto_restart") is True, **neutral_args)
+                             auto_restart=config.get("auto_restart") is True, resume=resume, **neutral_args)
         task = build_task(agent_ids=agent_ids, files=agent_files(task_files), solver=solver, compose=compose,
                           metadata={"condition": condition_label(variant, track), "prompt_variant": variant,
                                     "persona_reviewing": reviewing, "personas": personas, "persona_seed": persona_seed,
@@ -1629,6 +1701,11 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                clock, conference, record, config)
     finally:
         await asyncio.to_thread(conference.close)
+        if resume is not None:  # the final manifest lists every participant (missing ones too)
+            try:
+                resume.write_manifest(resume_bundle.FINAL_LABEL, expected=agent_ids)
+            except Exception as ex:
+                _safe_record(record, "resume_bundle_error", None, {"label": "manifest", "error": type(ex).__name__})
         (run_dir / "run-budget.json").write_text(json.dumps(ledger.end_run(), indent=2))
         (run_dir / "budget-final.json").write_text(json.dumps(ledger.snapshot(), indent=2))
         # Measured after the run (presence only): Inspect never loaded the host .env.

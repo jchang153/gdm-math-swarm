@@ -1289,6 +1289,27 @@ All 20 captured RESEARCH.md files are empty. Do not infer unrecorded wiki edits 
 private communication from empty sections. No experimental behavior is changed,
 and no model inference is used for this view.
 
+## Resume bundle for future continuation (October 22, 2026)
+
+Owner request (2026-10-22): be able to continue a finished run later as a new segment instead of
+restarting. After a feasibility assessment, the owner decided: **build the saving side only**
+so every future run is easy to extend; **do not build the continuation tool yet**. Approved:
+
+1. At run stop, before teardown, save per agent: the Claude Code session JSONL(s), the full
+   workspace (`/workspace`, the private wiki `/tmp/w/memory/wiki`, RESEARCH.md), a resume manifest
+   (`RUN/resume/manifest.json`: session ids, persona, prompt variant and hash, role, a reasoning-
+   transport key *identifier* (never the key), image ids, model route and pricing, code commit,
+   dataset revision and manifest hash, neutral-env version, clock state, ledger run id), and the
+   in-flight tool calls and processes at stop. Screen with the existing credential screen. A
+   `docker commit` was optional; it was not adopted (see docs/runtime.md, "Resume bundle").
+2. Optional periodic checkpoints: config `resume_checkpoint_minutes`, default off.
+3. `RUN/resume/` goes in the packaged run tarball and stays out of the HF Space (private raw
+   state). If the logs-dataset tooling lands, it may route there; until then it is excluded
+   from publication.
+4. No change to agent prompts or behaviour, proven by a byte-identity test.
+
+Implementation: `src/research_swarm/resume_bundle.py`; docs/runtime.md, "Resume bundle".
+
 ## GLM oversight runs, October 21, 2026
 
 Owner-approved (2026-10-21): four GLM 5.3 runs, each with 5 solver agents, 1 hour, all 71

@@ -474,6 +474,81 @@ must be observed in the live compatibility check (**pending**).
 * Compaction content that the harness does not expose is not recoverable by
   assertion.
 
+## Resume bundle
+
+Owner decision of 2026-10-22 (docs/plan.md, "Resume bundle for future continuation"): every
+pilot run saves, for each agent, the state a later segment would need to continue it. Only
+the saving side exists; there is no continuation tool yet. Code:
+`src/research_swarm/resume_bundle.py`, wired into `runtime.peer_solver` and `_run_pilot`.
+
+* **When.** In each agent's shielded `finally`, after the final snapshot poll and before
+  `agent_exit` (the container is still up), bounded by 420 s. Optional mid-run checkpoints:
+  config `resume_checkpoint_minutes` (default unset = off) saves the same layout every N
+  minutes after the common start, under `RUN/resume/checkpoint-<min>/`. Checkpoints archive a
+  working container, so they are not atomic across files.
+* **Layout.** `RUN/resume/agents/<agent>/state.tar.gz` and `agent.json`, plus
+  `RUN/resume/manifest.json` (schema `gdm-resume-bundle/1`).
+* **Archive contents.** One gzip tar of `/workspace` (RESEARCH.md included), `/tmp` (the private
+  wiki `/tmp/w/memory/wiki` included, and Claude Code's background-task output files) and
+  `/home/researcher`. That last root holds the Claude Code config directory: `~/.agent` in the
+  neutral environment, `~/.claude` otherwise. The config directory holds the session
+  transcripts `projects/-workspace/<session-id>.jsonl`, sidechain transcripts, tool-results,
+  todos and settings.
+  * Symlinks are stored as links, so the read-only Mathlib tree is never copied.
+  * Files over 256 MB, or anything past 2 GB in total, are listed under `skipped` and not
+    archived. The same applies to unreadable paths.
+  * Unlike the 5-s snapshots, the archive is complete: every file type is kept and deletions
+    are respected.
+* **Credential screen.** Every member is checked on the host with the publication screen
+  (`scripts/publish_hf_library.py` `SECRET`; a test keeps the two patterns identical). A
+  matching member is withheld; its path goes in `credential_withheld` and a
+  `resume_bundle_credential_withheld` event. Inspect SWE's public bridge placeholder key in
+  `apiKeyHelper` is exempt, as in publication. The containers hold no provider credential.
+* **Per-agent record (`agent.json`).**
+  * The session ids, main and sidechain transcript hashes, and the tool calls still open in
+    each session at stop time.
+  * The live process table read from `/proc` (background `lake`/`lean` jobs, shells).
+  * Persona, role, prompt sha256, continuation-message sha256, tool names, system-prompt mode
+    and auto-memory.
+  * The **reasoning-transport key id**: a domain-separated SHA-256 prefix of the agent's
+    in-memory signing key. It is an identifier only; the key itself is never written.
+  * The harness status, restarts and request counts, and the clock state.
+* **Run record (`manifest.json`).**
+  * The ledger run id, budget track, ledger path and run budget.
+  * The prompt variant, persona seed, roles and overseer, neutral-env version, prompt-cache
+    normalization and Claude Code env.
+  * The image ids and compose hash, the model route and pricing record, the judge settings.
+  * The dataset revision, the task-id hash and the fixed task manifest hash.
+  * `max_run_seconds`, the config sha256 and the code commit (with a dirty flag).
+  * The clock state (common start, elapsed, stop reason), every agent's entry, and
+    `missing_agents`.
+* **No change to agents.** Prompts, tool definitions, messages and the files an agent reads
+  are untouched. The bundle is built by a short in-container `python3 -I` script into one
+  hidden file `/tmp/.gdm-resume-<random>.tgz.NNN` (64 MB parts, under Inspect's 100 MB read
+  limit). The host reads it back, deletes it at once, and checks it against the script's
+  sha256; it is excluded from the archive itself. `tests/test_resume_bundle.py` checks that
+  the rendered prompt, tool definitions and messages are byte-identical with and without the
+  bundle.
+* **Failures** are recorded (`resume_bundle_error`, `status: error` in the manifest) and never
+  fail the agent or the run.
+* **Retrieval and privacy.**
+  * The bundle travels in `completed-run.tgz`, and the supervisor's `ready_for_retrieval`
+    status summarizes it (`resume_bundle`).
+  * It is private raw state and is never published to the HF Space:
+    `prepare_hf_library.py` `run_excluded` always skips `resume/`, and
+    `publish_hf_library.py` refuses a bundle that contains it.
+  * Back it up with the raw run.
+* **Not captured, by design.**
+  * A `docker commit` of each container is not taken. Its writable layer would add little
+    beyond the three roots, and Inspect SWE installs the Claude Code binary into the
+    container, adding an estimated hundreds of MB per agent.
+  * Running processes cannot be restored; the process table records what was running.
+  * The reasoning-transport key is not saved. A continuation would re-sign the
+    `research-swarm-reasoning-v1:` markers in the transcripts with a new key, or drop them.
+* **Size.** The 2026-10-22 100-agent, 30-min runs held about 1.0 MB of final text per agent
+  (0.9 MB of it the session transcript), so expect roughly 0.3–0.5 MB per agent compressed
+  (about 30–50 MB per 100-agent run). Measure it on the first real run.
+
 ## Stopping
 
 Wall time begins at the first-inference common barrier (maximum 5400 s); depletion
