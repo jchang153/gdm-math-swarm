@@ -680,7 +680,7 @@ class LaunchGateTests(GateFixture):
             self.assertTrue(self.evaluate_gemini(owner)["evidence"]["approved_settings"]["passed"], model)
             mismatch = {**owner, "provider_settings": {**config["provider_settings"], "model_id": GEMINI_MODEL_ID}}
             self.assertBlocked(self.evaluate_gemini(mismatch), "approved_settings", "candidate_model_id")
-        self.assertBlocked(self.evaluate_gemini({**config, "max_run_seconds": 5400}), "approved_settings",
+        self.assertBlocked(self.evaluate_gemini({**config, "max_run_seconds": 4500}), "approved_settings",
                            "max_run_seconds")
         deepseek = {**config, "candidate_model_id": MODEL_ID,
                     "provider_settings": {**config["provider_settings"], "model_id": MODEL_ID}}
