@@ -642,9 +642,10 @@ expected). Records: `runs/phase-b/hf-library-preparation/judge-glm100-repeat2-20
 
 ## Logs and raw records in the dataset repo
 
-Status (October 22, 2026): **code implemented; Inspect logs copied to the dataset and verified; the `logs-test/`
-deployment and the move of the download-only files are pending (see below); deleting the Space's `.eval` logs
-awaits the owner's separate approval.** Owner decisions of October 22, 2026: move the
+Status (October 22, 2026, 23:40 UTC): **code complete (switch and delete-eval on main `db629a3`); Inspect logs
+and download-only files copied to the dataset and verified; the owner tested the sign-in end to end; the Space
+deletion of the download-only files, the switch and the `.eval` deletion are approved ("do all of those") and
+await the operator's run (commands under "Pending").** Owner decisions of October 22, 2026: move the
 Inspect `.eval` logs from the Space into the private dataset `HF-ORG/LOGS-DATASET`, read by the
 static Space with the viewer's own "Sign in with HF" token (OAuth `read-repos`, no stored secret); then "go ahead
 and move everything to dataset that's not necessary for current functionality of the website", with deletion
@@ -675,16 +676,31 @@ State on October 22, 2026 (records: `runs/phase-b/hf-library-preparation/logs-mi
     `Access-Control-Allow-Origin: *` and `Access-Control-Expose-Headers: *`.
   - The Space is unchanged; its `.eval` files stay until stage 4 is approved. The live run's log under
     `live/glm100-baseline-90m-20261022T183812Z/` was left alone.
-- **Pending**: the copy and Space deletion of the download-only categories, and the `logs-test/` deployment.
-  The agent's tool-permission check stopped those HF writes; they need the operator's go-ahead in their own
-  session. At the Space head `882dd1ff` the download-only categories are:
-  - `.jsonl`: 113 files, 380.5 MB (267.6 MB unique LFS);
-  - snapshots: 1,856 files, 290.3 MB (166.1 MB LFS; the loose files are baseline100's);
-  - databases: 50 files, 110.6 MB (110.0 MB LFS);
-  - transcripts: 100 files, 205.9 MB (regular Git files, which HF's `used_storage` does not count).
+- **Test area** `logs-test/` (Space `7803413`; catalogue re-rendered with the `?page=` handler): the owner signed
+  in and Inspect View loaded a log from the dataset and opened a transcript. `switch` removes `logs-test/`.
+- **Download-only files copied and verified** (receipt `raw-files/receipt.json`): 2,119 files of 113 `.jsonl`,
+  1,856 snapshot, 50 database and 100 transcript paths (987.2 MB) at dataset commit
+  `fef7f18d6c585c86fda11fef30ced4a3b38ea231`, each verified by size and SHA-256 or Git blob id. The Space
+  deletion then failed before any Space commit (Space still `cfec6d65`, 920.0 MB): `offline_links` called
+  `posixpath.relpath` on relative paths, which reads `os.getcwd()`, and the clone the process ran in had been
+  re-created by another agent. Fixed in `db629a3` (rooted paths; regression test).
+- **Pending (the agent's HF writes were refused by its permission check; run from a clone no one else touches):**
+  1. re-run the move; the copy is skipped (already present and verified) and the delete commit completes:
+     `maintain_hf_run.py --all-published-runs --scope migrate-logs --migrate-category jsonl --migrate-category
+     snapshots --migrate-category database --migrate-category transcripts --delete-moved --commit --receipt
+     RECORDS/raw-files/receipt-retry.json --backup-dir RECORDS/raw-files/backup-retry`
+     (frees about 543.7 MB of `used_storage`);
+  2. `migrate_dataset.py switch --dataset-commit b4f10b1082dbae32d81d6bd52b78f2f433450c99 --commit --receipt
+     RECORDS/switch-receipt.json --backup-dir RECORDS/switch-backup` (one guarded commit: `signin.html`, the shim
+     in all 17 published runs' `inspect-view/index.html`, 34 log copies recorded in `dataset_files`, a
+     `dataset_switch` record, `logs-test/` removed; the read-only plan at `cfec6d65` passed);
+  3. `verify_hosted.py --run RUN --revision SWITCH_SHA` for each run (dataset checks run automatically);
+  4. `migrate_dataset.py delete-eval --switch-receipt RECORDS/switch-receipt.json --commit --receipt
+     RECORDS/delete-eval-receipt.json --backup-dir RECORDS/delete-eval-backup` (frees about 275.3 MB);
+  5. `verify_hosted.py --run RUN --revision DELETE_SHA --expect-no-space-logs` for each run.
 
-  Deleting and purging them would free about 543.7 MB of the 920.0 MB `used_storage`. Deleting the `.eval` logs
-  afterwards (stage 4) would free another 275.3 MB.
+  `RECORDS` is `runs/phase-b/hf-library-preparation/logs-migration-20261022`. The live run's log under `live/`
+  is not in the dataset and stays in the Space.
 
 ### What lives where
 
@@ -745,6 +761,14 @@ State on October 22, 2026 (records: `runs/phase-b/hf-library-preparation/logs-mi
   206), and with `--delete-moved` (never `eval`) one Space commit that deletes the moved files, repoints links,
   moves their manifest records to `dataset_files`, is verified, and then purges the freed LFS objects without
   rewriting history. Other maintenance scopes refuse to re-add a file recorded in `dataset_files`.
+- Switch and delete (Inspect logs of existing runs): `migrate_dataset.py switch --dataset-commit SHA [--commit
+  --receipt FILE --backup-dir DIR] [--keep-test]` checks every Space log copy against the dataset at SHA (size
+  and LFS SHA-256), requires each page to differ by the shim alone, then makes one guarded commit (rebased only
+  over `live/` changes) and verifies the inventory. `migrate_dataset.py delete-eval --switch-receipt FILE
+  [--commit --receipt FILE --backup-dir DIR] [--no-purge]` needs a verified switch receipt, deletes only copies
+  whose `dataset_files` record matches the dataset and the Space (SHA-256, size) and whose run's shim reads that
+  commit, verifies, then purges the freed LFS objects (`rewrite_history=False`). Both plan read-only without
+  `--commit`.
 - Test area: `python scripts/migrate_dataset.py deploy-test --run RUN --dataset-commit SHA --receipt FILE` adds
   only `logs-test/` (landing page, `signin.html`, `evallog-fetch.js`, the run's Inspect View without `.eval`).
 - Verify: `verify_hosted.py --run RUN --revision SHA` (dataset checks run automatically when the run's Inspect

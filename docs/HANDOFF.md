@@ -293,7 +293,7 @@ rule (originally rule 6; the old rule 7 becomes 6).
 The configs and multi-model harness fixes are on branch `owner-multimodel`, which
 is being merged into main via `collab-env`.
 
-## In flight as of 2026-10-22 22:15 UTC (check status before redoing anything)
+## In flight as of 2026-10-22 23:40 UTC (check status before redoing anything)
 
 1. **`glm100-baseline-90m-20261022T183812Z`: done 2026-10-22** (headline under "Runs so far"). Retrieved to the
    Mac with checksums (`runs/phase-b/retrieval-glm100-baseline-90m/`), VM owner-vm stopped and set back to
@@ -315,13 +315,17 @@ is being merged into main via `collab-env`.
      catalogue re-rendered with the `?page=` deep-link handler); **the owner signed in and confirmed Inspect View loaded
      a log from the dataset and opened a transcript**; move the download-only files; "do all of those" = switch every
      run's Inspect View to the dataset, then delete the Space `.eval` copies.
-   - **RUNNING:** `maintain_hf_run.py --all-published-runs --scope migrate-logs --migrate-category jsonl/snapshots/
-     database/transcripts --delete-moved --commit` (copy, verify, repoint links, delete from Space; about 544 MB).
-     Receipt and log: `runs/phase-b/hf-library-preparation/logs-migration-20261022/raw-files/`.
-   - **NEXT (an agent, after the move exits):** build and run `switch` (shim plus signin on every run's Inspect View),
-     then `delete-eval` (delete the Space .eval copies and purge LFS, 275 MB), then `verify_hosted --expect-no-space-logs`.
-     After this, every viewer signs in with HF once per browser to see transcripts. Work happens in a clean clone
-     (scratchpad `clone/`), because the main checkout's git is blocked by iCloud.
+   - **Download-only move: copy done, Space delete failed (nothing deleted).** 2,119 files (987.2 MB) copied and
+     verified at dataset `fef7f18d`. The delete stage crashed with `FileNotFoundError` from `os.getcwd()` because
+     another agent re-created the scratchpad `clone/` under the running process; Space unchanged (`cfec6d65`,
+     920.0 MB). Bug fixed on main `db629a3` (`offline_links` no longer uses the cwd).
+   - **Code done (main `db629a3`):** `migrate_dataset.py switch` and `delete-eval`, with mocked-Hub tests.
+   - **NEXT (operator's session; the agent's HF writes were refused by its permission check):** the five commands
+     in docs/experiment-library.md, "Logs and raw records in the dataset repo", "Pending": re-run the move, `switch`,
+     `verify_hosted`, `delete-eval`, `verify_hosted --expect-no-space-logs`. Use a private clone directory (not the
+     shared scratchpad `clone/`). Expected end state: about 100 MB `used_storage` plus pages.
+   - **After the switch, every viewer must "Sign in with HF" once per browser (token about 8 h; a 24 h `hf_jwt`
+     cookie for the tab) to see Inspect View transcripts**; the other pages work without it.
    - Future publishes (`publish_hf_library.py`) and the live mirror put these file types straight into the dataset.
    - Space storage is about 920 MB of its 1 GB per-Space cap (not raisable). Private datasets count
      against the account quota (about 100 GB free).
