@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en" data-org-ids="__ORG_IDS__" data-default-return="__DEFAULT_RETURN__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Sign in with HF</title>
+<style>
+:root{--bg:#ffffff;--fg:#1f2328;--muted:#59636e;--line:#d0d7de;--accent:#0969da;--warn:#9a6700}
+@media (prefers-color-scheme: dark){:root{--bg:#0d1117;--fg:#e6edf3;--muted:#9198a1;--line:#3d444d;--accent:#4493f8;--warn:#d29922}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:640px;margin:0 auto;padding:32px 16px}
+h1{font-size:1.5rem;margin:0 0 12px}
+p{margin:0 0 12px}
+.muted{color:var(--muted);font-size:.9rem}
+button{font:inherit;padding:8px 16px;border-radius:6px;border:1px solid var(--line);background:var(--accent);color:#fff;cursor:pointer}
+button.secondary{background:transparent;color:var(--fg)}
+#status.error{color:var(--warn)}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<main>
+<h1>Sign in with Hugging Face</h1>
+<p>The Inspect logs of this library are stored in a private Hugging Face dataset. Inspect View reads them with
+your own HF sign-in (read access to the organization's repositories). Nothing is stored on a server: the access
+token stays in this browser for this site and expires after a few hours.</p>
+<p id="status">Checking…</p>
+<p><button id="signin" type="button" hidden>Sign in with HF</button>
+<button id="signout" type="button" class="secondary" hidden>Sign out</button></p>
+<p id="next"></p>
+<p class="muted">At the HF consent screen, grant access to the organization <strong>gdm-math-swarm</strong>.
+HF's sign-in pages cannot be shown inside the Space's frame, so this page runs in its own tab; read the logs in
+this tab afterwards.</p>
+</main>
+<script>
+(() => {
+  const KEY = 'evallog-oauth';
+  const PENDING = 'evallog-oauth-pending';
+  const root = document.documentElement.dataset;
+  const status = document.getElementById('status');
+  const signin = document.getElementById('signin');
+  const signout = document.getElementById('signout');
+  const next = document.getElementById('next');
+
+  function say(text, error) { status.textContent = text; status.className = error ? 'error' : ''; }
+  // Only a path on this site, never another origin.
+  function safeReturn(value) {
+    if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return null;
+    const url = new URL(value, location.origin);
+    return url.origin === location.origin ? url.pathname + url.hash : null;
+  }
+  function stored() {
+    try {
+      const value = JSON.parse(localStorage.getItem(KEY) || 'null');
+      return value && value.accessToken && (!value.expiresAt || value.expiresAt > Date.now() + 30000) ? value : null;
+    } catch (error) { return null; }
+  }
+  function base64url(bytes) {
+    return btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function random() { return base64url(crypto.getRandomValues(new Uint8Array(32))); }
+  function showNext(target) {
+    next.textContent = '';
+    if (!target) return;
+    const link = document.createElement('a');
+    link.href = target;
+    link.textContent = 'Continue to the page you came from';
+    next.append(link);
+  }
+  function refresh() {
+    const token = stored();
+    signin.hidden = !!token;
+    signout.hidden = !token;
+    if (token) say('Signed in' + (token.expiresAt ? ' until ' + new Date(token.expiresAt).toLocaleString() : '') + '.');
+  }
+
+  async function start(variables, target) {
+    const verifier = random();
+    const state = random();
+    const challenge = base64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+    const redirectUri = location.origin + location.pathname;  // this page, without its query
+    sessionStorage.setItem(PENDING, JSON.stringify({ verifier, state, redirectUri, target }));
+    const provider = (variables.OPENID_PROVIDER_URL || 'https://huggingface.co').replace(/\/$/, '');
+    const url = new URL(provider + '/oauth/authorize');
+    url.search = new URLSearchParams({
+      client_id: variables.OAUTH_CLIENT_ID, redirect_uri: redirectUri, response_type: 'code',
+      scope: variables.OAUTH_SCOPES || 'openid profile read-repos', state, code_challenge: challenge,
+      code_challenge_method: 'S256', ...(root.orgIds ? { orgIds: root.orgIds } : {}),
+    }).toString();
+    location.assign(url.href);
+  }
+
+  async function finish(variables, params) {
+    let pending = null;
+    try { pending = JSON.parse(sessionStorage.getItem(PENDING) || 'null'); } catch (error) { /* ignore */ }
+    sessionStorage.removeItem(PENDING);
+    history.replaceState(null, '', location.pathname);  // drop the one-time code from the address bar
+    if (!pending || pending.state !== params.get('state')) {
+      say('Sign-in was not started from this tab or has expired; sign in again.', true);
+      return;
+    }
+    const provider = (variables.OPENID_PROVIDER_URL || 'https://huggingface.co').replace(/\/$/, '');
+    say('Finishing sign-in…');
+    const response = await fetch(provider + '/oauth/token', {
+      method: 'POST', credentials: 'omit', referrerPolicy: 'no-referrer',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code', code: params.get('code'), redirect_uri: pending.redirectUri,
+        client_id: variables.OAUTH_CLIENT_ID, code_verifier: pending.verifier,
+      }).toString(),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body.access_token) {
+      say('HF refused the sign-in (' + (body.error_description || body.error || response.status) + '). Sign in again.', true);
+      return;
+    }
+    const token = { accessToken: body.access_token, expiresAt: Date.now() + 1000 * (Number(body.expires_in) || 28800) };
+    localStorage.setItem(KEY, JSON.stringify(token));
+    if (window.opener) {
+      try { window.opener.postMessage({ type: 'evallog-oauth', ...token }, location.origin); } catch (error) { /* gone */ }
+    }
+    refresh();
+    showNext(pending.target);
+    if (pending.target) location.replace(pending.target);
+  }
+
+  function main() {
+    const variables = (window.huggingface && window.huggingface.variables) || {};
+    const params = new URLSearchParams(location.search);
+    const target = safeReturn(params.get('return')) || safeReturn(root.defaultReturn);
+    signout.addEventListener('click', () => {
+      try { localStorage.removeItem(KEY); } catch (error) { /* ignore */ }
+      say('Signed out.');
+      refresh();
+    });
+    if (!variables.OAUTH_CLIENT_ID) {
+      say('HF OAuth is not enabled for this Space (README: hf_oauth: true, hf_oauth_scopes: [read-repos]).', true);
+      return;
+    }
+    signin.addEventListener('click', () => { start(variables, target).catch((error) => say(String(error), true)); });
+    if (params.has('error')) {
+      say('HF sign-in did not complete: ' + (params.get('error_description') || params.get('error')), true);
+      history.replaceState(null, '', location.pathname);
+    } else if (params.has('code')) {
+      finish(variables, params).catch((error) => say('Sign-in failed: ' + error, true));
+      return;
+    }
+    if (!stored()) say('Not signed in.');
+    refresh();
+    if (stored()) showNext(target);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', main); else main();
+})();
+</script>
+</body>
+</html>

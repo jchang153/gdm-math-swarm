@@ -15,6 +15,8 @@ import shutil
 import tarfile
 
 from build_experiment_index import build
+import dataset_logs
+from dataset_logs import COMMIT_PLACEHOLDER, DATASET_REPO, DATASET_SCHEMA, category, dataset_path
 from incident_site import INCIDENT_DIR, add_incident_tab, incident_excluded, incident_files, unpublished_links
 from publish_hf_library import SECRET
 from space_navigation import private_space_navigation
@@ -287,6 +289,79 @@ def copy_records(source, destination, skip=None):
             shutil.copy2(path, target)
 
 
+DATASET_DIR = 'dataset-files'  # bundle folder of the files bound for the private logs dataset
+_SHIM_PROBE = '0' * 40
+
+
+def log_shim(document, run):
+    """An Inspect View page with the dataset fetch shim first in <head>, its commit left as the placeholder
+    that publish_hf_library.py pins to the dataset commit."""
+    shimmed = dataset_logs.with_log_shim(document, path=f'{run}/inspect', commit=_SHIM_PROBE,
+                                         signin='../../' + dataset_logs.SIGNIN_FILE)
+    return shimmed.replace(f'data-commit="{_SHIM_PROBE}"', f'data-commit="{COMMIT_PLACEHOLDER}"', 1)
+
+
+def screen_bytes(name, data):
+    """The credential screen of publish_hf_library.screen for a dataset-bound file (members of Inspect
+    logs and snapshot archives included); the exact public placeholder stays exempt."""
+    if SECRET.search(data):
+        raise ValueError(f'Credential-like content in {name}; not published')
+    if name.endswith('.tar.gz'):
+        for member, content in snapshot_archive_members(data).items():
+            if SECRET.search(content):
+                raise ValueError(f'Credential-like content in a member of {name}; not published')
+    if name.endswith('.eval'):
+        try:
+            import zipfile_zstd  # noqa: F401; registers Inspect's ZIP method
+        except ImportError as error:
+            raise ValueError('Install the publication extra to screen Inspect archives') from error
+        import zipfile
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            for member in archive.namelist():
+                if SECRET.search(archive.read(member)):
+                    raise ValueError(f'Credential-like content in Inspect archive {name}; not published')
+
+
+def relocate_dataset_files(output, runs):
+    """Move every dataset-bound run file (dataset_logs.category) out of the Space bundle into
+    OUTPUT/dataset-files/<dataset path>, deduplicating the two copies of each Inspect log. Returns
+    (dataset manifest files, archive-manifest dataset_files, run -> moved run-relative paths)."""
+    files, by_space, moved = {}, {}, {}
+    target_root = output / DATASET_DIR
+    for run in runs:
+        moved[run] = set()
+        for path in sorted((output / run).rglob('*')):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(output / run).as_posix()
+            kind = category(rel)
+            if kind is None:
+                continue
+            data = path.read_bytes()
+            name = dataset_path(run, rel)
+            screen_bytes(f'{run}/{rel}', data)
+            record = {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+            if name in files:
+                if {k: files[name][k] for k in record} != record:
+                    raise ValueError(f'{run}/{rel} differs from another copy bound for {name}')
+                files[name]['sources'].append(rel)
+            else:
+                target = target_root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+                files[name] = {**record, 'category': kind, 'run': run, 'sources': [rel]}
+            by_space[f'{run}/{rel}'] = {'repo': DATASET_REPO, 'path': name, **record}
+            moved[run].add(rel)
+            path.unlink()
+        for directory in sorted((output / run).rglob('*'), reverse=True):  # emptied folders (logs/, snapshots/)
+            if directory.is_dir() and not any(directory.iterdir()):
+                directory.rmdir()
+    if files:
+        (target_root / 'manifest.json').write_text(json.dumps(
+            {'schema': DATASET_SCHEMA, 'repo': DATASET_REPO, 'files': files}, indent=2))
+    return files, by_space, moved
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runs-dir', type=Path, default=ROOT / 'runs')
@@ -296,6 +371,10 @@ def main():
     parser.add_argument('--include-transcript-export', action='store_true',
                         help='keep RUN/transcripts/ (only to maintain the transcript pages of a run published '
                              'before October 21, 2026 with maintain_hf_run.py --scope transcripts)')
+    parser.add_argument('--records-in-space', action='store_true',
+                        help='legacy layout of runs published before October 22, 2026: keep Inspect logs and raw '
+                             'records in the Space bundle (no dataset-files/, no sign-in shim); only for maintenance '
+                             'scopes that compare a bundle with such a run. publish_hf_library.py refuses it.')
     args = parser.parse_args()
     selected, judge_plans, incident_plans = [], {}, {}
     for specification in args.run:
@@ -346,9 +425,22 @@ def main():
                                  'transcript export; regenerate it with the current build_results.py / '
                                  'export_conference.py')
         copy_records(viewer, output / run_id / 'inspect-view')
+    # The catalogue is built while the Inspect logs are still in the bundle, so that each entry keeps its
+    # (hidden) Inspect log links exactly as published entries have them.
     result = build(output, hosted=True)
     if result['warnings'] or result['experiments'] != len(selected):
         raise ValueError(f'Incomplete catalogue: {result}')
+    dataset_files, space_records, moved = ({}, {}, {}) if args.records_in_space else \
+        relocate_dataset_files(output, [r[0] for r in selected])
+    for run, paths in moved.items():  # links to moved records point to the dataset file (pinned on publish)
+        for page in sorted((output / run).rglob('*.html')):
+            rel = page.relative_to(output / run).as_posix()
+            if rel.startswith('inspect-view/'):
+                continue
+            text, changed = dataset_logs.repoint_links(page.read_text(encoding='utf-8'), rel, run, paths,
+                                                       COMMIT_PLACEHOLDER)
+            if changed:
+                page.write_text(text, encoding='utf-8')
     (output / 'README.md').write_text('''---
 title: GDM Math Swarm Experiments
 emoji: 🐝
@@ -368,14 +460,28 @@ This archive must be hosted in a **private** Space. Do not upload credentials.
 ''')
     (output / 'robots.txt').write_text('User-agent: *\nDisallow: /\n')
     for page in output.rglob('*.html'):
+        if page.relative_to(output).parts[:1] == (DATASET_DIR,):
+            continue  # dataset-bound transcript pages stay as recorded
         modules = ['./assets/' + p.name for p in sorted((page.parent / 'assets').glob('*.js'))] if page.parent.name == 'inspect-view' else []
         text = page.read_text() if 'inspect-view' in page.relative_to(output).parts else themed(page.read_text())
-        page.write_text(private_space_navigation(text, modules))
+        text = private_space_navigation(text, modules)
+        if page.relative_to(output).parts[1:] == ('inspect-view', 'index.html') \
+                and any(category(rel) == 'eval' for rel in moved.get(page.relative_to(output).parts[0], ())):
+            text = log_shim(text, page.relative_to(output).parts[0])  # first in <head>, before the navigation
+        page.write_text(text)
+    # Sign in with HF (the viewer's own OAuth token for the private dataset); no external libraries.
+    if not args.records_in_space:
+        (output / dataset_logs.SIGNIN_FILE).write_text(private_space_navigation(themed(dataset_logs.signin_page())))
     files = {str(p.relative_to(output)): {'bytes': p.stat().st_size,
              'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
-             for p in sorted(output.rglob('*')) if p.is_file()}
+             for p in sorted(output.rglob('*')) if p.is_file() and p.relative_to(output).parts[0] != DATASET_DIR}
     manifest = {'schema': 'gdm-private-space/1', 'runs': [r[0] for r in selected],
                 'files': files, 'total_bytes': sum(f['bytes'] for f in files.values())}
+    if args.records_in_space:
+        manifest['layout'] = 'records-in-space'
+    if space_records:  # where each run file that is not in the Space lives in the private dataset
+        manifest['dataset_repo'] = DATASET_REPO
+        manifest['dataset_files'] = space_records
     judged = {run: {'included': len(plan['included']), 'excluded': plan['excluded']}
               for run, plan in judge_plans.items() if plan is not None}
     if judged:  # record which local judge records were deliberately left out
@@ -391,6 +497,8 @@ This archive must be hosted in a **private** Space. Do not upload credentials.
     (output / 'archive-manifest.json').write_text(json.dumps(manifest, indent=2))
     print(json.dumps({'output': str(output), 'runs': manifest['runs'],
                       'files': len(files), 'bytes': manifest['total_bytes'],
+                      'dataset_files': len(dataset_files),
+                      'dataset_bytes': sum(f['bytes'] for f in dataset_files.values()),
                       'behavior_judge': judged, 'incident_report': incidents}))
 
 

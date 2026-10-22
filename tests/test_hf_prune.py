@@ -59,7 +59,7 @@ class PruneTests(unittest.TestCase):
         self.hub.history['0']['.gitattributes'] += TAR_RULE + b'*.jsonl' + RULE + b'\n'
         bundle = test_hf_snapshots.SnapshotArchiveTests.prepare(SimpleNamespace(root=self.root, runs=self.runs, viewer=viewer),
                                               'published', RUN, OTHER)
-        publish(bundle, self.hub, self.hub.download, commit=True, operation=operation)
+        publish(bundle, self.hub, self.hub.download, commit=True, operation=operation, records_in_space=True)
         self.published = dict(self.hub.files)
 
     def scope(self, commit=False, attempt='attempt-1', **kwargs):

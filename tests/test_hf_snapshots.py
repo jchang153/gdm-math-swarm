@@ -53,13 +53,13 @@ class SnapshotArchiveTests(unittest.TestCase):
         self.hub = Hub(self.root)
         self.hub.history['0']['.gitattributes'] += TAR_RULE  # as in the Space's HF default rules
         publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
-                operation=operation)
+                operation=operation, records_in_space=True)
         self.archived = dict(self.hub.files)
         self.legacy()
 
     def prepare(self, name, *runs):
         output = self.root / 'bundles' / name
-        argv = ['prepare_hf_library.py', '--runs-dir', str(self.runs), '--output-dir', str(output)]
+        argv = ['prepare_hf_library.py', '--records-in-space', '--runs-dir', str(self.runs), '--output-dir', str(output)]
         for run in runs:
             argv += ['--run', f'{run}={self.viewer}']
         with patch.object(sys, 'argv', argv), patch('builtins.print'):

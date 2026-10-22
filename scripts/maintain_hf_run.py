@@ -116,8 +116,9 @@ from prepare_hf_library import judge_excluded
 from publish_hf_library import (DEFAULT_REPO, RUN_ID, batches, digest, load_bundle, matches,
                                 merge_entries, payload, remote_files, validate_lfs_additions)
 
-SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'site', 'unlist', 'snapshots', 'incident', 'prune')
-NO_BUNDLE = ('unlist', 'snapshots', 'prune')
+SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'site', 'unlist', 'snapshots', 'incident', 'prune',
+          'migrate-logs')
+NO_BUNDLE = ('unlist', 'snapshots', 'prune', 'migrate-logs')
 REPLACEABLE = ('results.html', 'results.json')
 INSPECT_VIEW = 'inspect-view/'
 INSPECT_PAGE = INSPECT_VIEW + 'index.html'
@@ -635,6 +636,9 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
     allowed = targets | (set(REGENERATED) if catalogue_scope else set()) | {MANIFEST}
     if any(name not in allowed for name, _ in uploads + root_uploads):
         raise ValueError('Planned upload outside the maintenance allowlist')
+    in_dataset = sorted(name for name, _ in uploads if name in old_archive.get('dataset_files', {}))
+    if in_dataset:  # moved to the private logs dataset (--scope migrate-logs); never re-added to the Space
+        raise ValueError('Planned upload of file(s) now kept in the logs dataset: ' + ', '.join(in_dataset[:EXAMPLES]))
     expected = {**{name: bundle / name for name in sorted(targets)}, **planned_root}
 
     def verify(listing, revision, complete):
@@ -1705,6 +1709,8 @@ def main(argv=None):
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument('--maintain-run', metavar='RUN_ID',
                         help='The already-published run whose results and judge files (or transcripts) are updated')
+    target.add_argument('--all-published-runs', action='store_true',
+                        help='migrate-logs scope: every run recorded in the published archive-manifest.json')
     target.add_argument('--rerender-catalogue', action='store_true',
                         help='Rebuild only index.html from the published experiments.json with the current '
                              'catalogue generator (after a catalogue page change); no entry or run file changes')
@@ -1729,6 +1735,15 @@ def main(argv=None):
                              'removes the Inspect logs, after which Inspect View cannot load the run)')
     parser.add_argument('--no-purge', action='store_true',
                         help='prune scope: keep the removed files\' LFS objects in history (storage is not freed)')
+    parser.add_argument('--migrate-category', action='append',
+                        choices=('eval', 'jsonl', 'snapshots', 'database', 'transcripts'),
+                        help='migrate-logs scope: file categories copied to the logs dataset (repeatable; default eval)')
+    parser.add_argument('--delete-moved', action='store_true',
+                        help='migrate-logs scope: after the verified copy, delete the moved download-only files from '
+                             'the Space, repoint page links and purge their LFS objects (never eval)')
+    parser.add_argument('--dataset-repo', default=None, help='migrate-logs scope: the private logs dataset')
+    parser.add_argument('--pages-dir', type=Path,
+                        help='migrate-logs scope: a local copy of the Space pages (used only where byte-identical)')
     parser.add_argument('--replace-judge', action='store_true',
                         help='judge scope only: replace published judge files of another judge build (for example '
                              'a re-run under a newer rubric) instead of refusing them; published judge files the '
@@ -1757,6 +1772,27 @@ def main(argv=None):
                                     repo=args.repo_id, receipt=args.receipt, backup_dir=args.backup_dir,
                                     operation=CommitOperationAdd), indent=2))
         return
+    if args.scope == 'migrate-logs' or args.all_published_runs:
+        if args.scope != 'migrate-logs' or args.bundle is not None or args.resume_from is not None:
+            parser.error('--all-published-runs needs --scope migrate-logs, which takes no --bundle or --resume-from')
+        if args.commit and (args.receipt is None or args.backup_dir is None):
+            parser.error('--commit requires --receipt and --backup-dir')
+        from huggingface_hub import HfApi, CommitOperationAdd, CommitOperationDelete, hf_hub_download
+        from huggingface_hub.utils import build_hf_headers, get_session
+        import dataset_logs
+        import migrate_dataset
+        result = migrate_dataset.migrate(
+            HfApi(), hf_hub_download, runs=None if args.all_published_runs else [args.maintain_run],
+            categories=tuple(args.migrate_category or ('eval',)), runs_dir=args.runs_dir, commit=args.commit,
+            delete_moved=args.delete_moved, receipt=args.receipt, backup_dir=args.backup_dir,
+            operation=CommitOperationAdd, delete_operation=CommitOperationDelete, session=get_session(),
+            headers=build_hf_headers(), repo=args.repo_id, dataset=args.dataset_repo or dataset_logs.DATASET_REPO,
+            purge=not args.no_purge, pages_dir=args.pages_dir)
+        summary = {k: v for k, v in result.items() if k not in ('files', 'checks', 'dataset_files')}
+        print(json.dumps(summary, indent=2, default=str))
+        return
+    if args.migrate_category or args.delete_moved or args.dataset_repo or args.pages_dir:
+        parser.error('--migrate-category, --delete-moved and --dataset-repo apply only to --scope migrate-logs')
     if (args.scope in NO_BUNDLE) == (args.bundle is not None):
         parser.error('--bundle is required, except for --scope unlist, snapshots or prune, which take none')
     if args.resume_from is not None and args.scope in (*NO_BUNDLE, 'incident'):

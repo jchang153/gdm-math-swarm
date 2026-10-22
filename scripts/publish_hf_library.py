@@ -15,9 +15,14 @@ import tempfile
 import zipfile
 
 from build_experiment_index import newest_first, unlisted_runs, write_index
+import dataset_logs
+from dataset_logs import COMMIT_PLACEHOLDER, DATASET_REPO, DATASET_SCHEMA
 
 DEFAULT_REPO = 'gdm-math-swarm/gdm-math-swarm-experiments'
-ROOT_FILES = {'README.md', 'robots.txt', 'index.html', 'experiments.json'}
+ROOT_FILES = {'README.md', 'robots.txt', 'index.html', 'experiments.json', dataset_logs.SIGNIN_FILE}
+# Root files that are Space configuration: an existing copy is preserved, never replaced.
+CONFIG_FILES = {'README.md', 'robots.txt'}
+DATASET_DIR = 'dataset-files'  # prepare_hf_library.py: files bound for the private logs dataset
 CATALOGUE = {'index.html', 'experiments.json', 'archive-manifest.json'}
 # A key starts at a token boundary: an sk-/hf_ run inside a longer base64/base64url token (for example
 # a provider's encrypted reasoning blob in an Inspect log or session snapshot) is not a key.
@@ -90,6 +95,34 @@ def screen(path):
                     raise ValueError('Credential-like content in Inspect archive; upload refused')
 
 
+def load_dataset_files(bundle, runs):
+    """The bundle's dataset-files/manifest.json files ({dataset path: record}), each checked against its
+    digest, path rules and the credential screen; {} when the bundle has none."""
+    root = Path(bundle) / DATASET_DIR
+    actual = {x.relative_to(root).as_posix() for x in root.rglob('*') if x.is_file()} if root.is_dir() else set()
+    if not actual:
+        return {}
+    manifest = json.loads((root / 'manifest.json').read_text())
+    if manifest.get('schema') != DATASET_SCHEMA or not isinstance(manifest.get('files'), dict):
+        raise ValueError('Expected a prepare_hf_library.py dataset-files manifest')
+    files = manifest['files']
+    if actual != set(files) | {'manifest.json'}:
+        raise ValueError('Dataset files differ from their manifest')
+    for name, info in files.items():
+        safe_path(name)
+        parts = name.split('/')
+        if parts[0] not in runs or info.get('run') != parts[0] or dataset_logs.category('/'.join(parts[1:])) is None:
+            raise ValueError('Dataset file outside the selected runs or categories: ' + name)
+        for source in info.get('sources', []):
+            if dataset_logs.dataset_path(parts[0], source) != name:
+                raise ValueError('Dataset file source does not map to its path: ' + name)
+        path = root / name
+        if digest(path.read_bytes()) != {'bytes': info['bytes'], 'sha256': info['sha256']}:
+            raise ValueError('Dataset file checksum mismatch: ' + name)
+        screen(path)
+    return files
+
+
 def load_bundle(bundle):
     bundle = Path(bundle)
     if bundle.is_symlink():
@@ -105,11 +138,24 @@ def load_bundle(bundle):
     runs = manifest['runs']
     if not runs or len(set(runs)) != len(runs) or any(not RUN_ID.fullmatch(x) for x in runs):
         raise ValueError('Invalid or duplicate run IDs')
-    actual = {x.relative_to(bundle).as_posix() for x in bundle.rglob('*') if x.is_file()}
+    actual = {x.relative_to(bundle).as_posix() for x in bundle.rglob('*')
+              if x.is_file() and x.relative_to(bundle).parts[0] != DATASET_DIR}
     if actual != set(manifest['files']) | {'archive-manifest.json'}:
         raise ValueError('Bundle contents differ from the manifest')
+    manifest['dataset'] = load_dataset_files(bundle, runs)
+    recorded = manifest.get('dataset_files', {})
+    for name, record in recorded.items():
+        run, _, rel = name.partition('/')
+        info = manifest['dataset'].get(record.get('path'))
+        if (run not in runs or info is None or record.get('repo') != DATASET_REPO
+                or dataset_logs.dataset_path(run, rel) != record['path'] or rel not in info.get('sources', [])
+                or (record.get('bytes'), record.get('sha256')) != (info['bytes'], info['sha256'])):
+            raise ValueError('archive-manifest.json dataset_files record does not match the dataset files: ' + name)
     for name, info in manifest['files'].items():
         safe_path(name)
+        if '/' in name and dataset_logs.category(name.split('/', 1)[1]) is not None \
+                and manifest.get('layout') != 'records-in-space':
+            raise ValueError('File bound for the logs dataset, not the Space: ' + name)
         if '/' not in name and name not in ROOT_FILES:
             raise ValueError('Unexpected root file')
         if '/' in name and name.split('/')[0] not in runs:
@@ -216,8 +262,17 @@ def validate_lfs_additions(old, new, selected, changed, final_files):
 
 
 def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=None,
-            operation=None, unlisted=None):
+            operation=None, unlisted=None, dataset_repo=DATASET_REPO, records_in_space=False):
+    """records_in_space: accept a legacy-layout bundle (prepare_hf_library.py --records-in-space); only for
+    reproducing runs published before the logs dataset (no CLI flag: new runs put their logs and raw records
+    in the dataset)."""
     manifest, incoming = load_bundle(bundle)
+    if manifest.get('layout') == 'records-in-space' and not records_in_space:
+        raise ValueError('Legacy records-in-space bundle refused: Inspect logs and raw records go to the logs '
+                         'dataset (prepare without --records-in-space)')
+    dataset_files = manifest.pop('dataset')
+    if dataset_files and dataset_repo != DATASET_REPO:
+        raise ValueError('The prepared bundle records the dataset ' + DATASET_REPO)
     unlisted = set(unlisted_runs() if unlisted is None else unlisted)
     hidden = sorted(set(manifest['runs']) & unlisted)
     if hidden:
@@ -247,22 +302,57 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
     for name in remote:
         if name.split('/')[0] in selected and name not in manifest['files']:
             raise ValueError('Remote run contains an unstaged file: ' + name)
+    # The dataset goes first (no commit spans both repositories); its commit is then pinned into every
+    # Space page that carries the placeholder (Inspect View shims, repointed record links).
+    dataset_result = None
+    pinned = {}
+    if dataset_files:
+        dataset_info = api.repo_info(dataset_repo, repo_type='dataset')
+        if not dataset_info.private:
+            raise ValueError('The logs dataset must be private')
+        dataset_result = {'repo': dataset_repo, 'files': len(dataset_files),
+                          'bytes': sum(x['bytes'] for x in dataset_files.values()),
+                          'base_revision': dataset_info.sha, 'committed': False}
+        if commit:
+            done = dataset_logs.commit_files(
+                api, {n: bundle / DATASET_DIR / n for n in sorted(dataset_files)}, operation=operation,
+                repo=dataset_repo, message='Publish run files kept out of the Space: ' + ', '.join(manifest['runs']))
+            for name, record in done['records'].items():
+                if record != {'bytes': dataset_files[name]['bytes'], 'sha256': dataset_files[name]['sha256']}:
+                    raise ValueError('Dataset copy differs from the prepared file: ' + name)
+            dataset_result.update(committed=True, revision=done['revision'], added=len(done['added']),
+                                  already_present=len(done['already_present']), verified=done['verified'])
+            pin = done['revision']
+        else:
+            pin = None
+        for name in manifest['files']:
+            data = (bundle / name).read_bytes()
+            if COMMIT_PLACEHOLDER.encode() in data:
+                pinned[name] = dataset_logs.pin_commit(data, pin) if pin else data
     uploads = []
+    space_digests = {}
     for name in sorted(manifest['files']):
         if name in CATALOGUE:
             continue
-        data = (bundle / name).read_bytes()
-        if name in ROOT_FILES and name in remote:
+        data = pinned.get(name)
+        if data is None:
+            data = (bundle / name).read_bytes()
+        space_digests[name] = digest(data)
+        if name in CONFIG_FILES and name in remote:
             continue  # Preserve existing Space configuration.
+        if name in ROOT_FILES and name in remote:
+            if not matches(data, remote[name]):
+                uploads.append((name, data))  # the site's own root page (sign-in) follows the bundle
+            continue
         if name in remote:
             if not matches(data, remote[name]):
                 raise ValueError('Immutable remote run file differs: ' + name)
         else:
-            uploads.append((name, bundle / name))
+            uploads.append((name, data if name in pinned else bundle / name))
     files = dict(old_manifest['files'])
     for name in manifest['files']:
-        if name not in ROOT_FILES:
-            files[name] = manifest['files'][name]
+        if name not in ROOT_FILES or name == dataset_logs.SIGNIN_FILE:
+            files[name] = space_digests.get(name, manifest['files'][name])
     for name, data in uploads:
         files[name] = digest(payload(data))
     with tempfile.TemporaryDirectory() as tmp:
@@ -275,13 +365,25 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
     merged_manifest = {**old_manifest, 'schema': 'gdm-private-space/1',  # unlisted runs stay recorded
                        'runs': listed + [x for x in old_manifest['runs'] if x not in listed], 'files': files,
                        'total_bytes': sum(x['bytes'] for x in files.values())}
+    if manifest.get('dataset_files'):
+        merged_manifest['dataset_repo'] = dataset_repo
+        merged_manifest['dataset_files'] = {**old_manifest.get('dataset_files', {}), **{
+            n: {**r, **({'commit': dataset_result['revision']} if dataset_result.get('revision') else {})}
+            for n, r in manifest['dataset_files'].items()}}
     root_uploads.append(('archive-manifest.json', json.dumps(merged_manifest, indent=2).encode()))
     root_uploads = [(n, d) for n, d in root_uploads if n not in remote or not matches(d, remote[n])]
     result = {'repo': repo, 'private': True, 'base_revision': info.sha,
               'runs': [x['run'] for x in entries], 'new_run_files': len(uploads),
-              'catalogue_files': len(root_uploads), 'committed': False}
+              'catalogue_files': len(root_uploads), 'committed': False,
+              **({'dataset': dataset_result} if dataset_result else {})}
     if not commit:
         return result
+    if receipt and dataset_result:
+        Path(receipt).write_text(json.dumps({**result, 'status': 'dataset verified; Space upload pending'}, indent=2))
+    unpinned = [n for n, d in uploads if COMMIT_PLACEHOLDER.encode() in payload(d)]
+    if unpinned:
+        raise ValueError('Page(s) still carry the dataset commit placeholder (no dataset files to pin): '
+                         + ', '.join(unpinned[:5]))
     revision = info.sha
     for batch in [*batches(uploads), *([root_uploads] if root_uploads else [])]:
         current = api.repo_info(repo, repo_type='space')
@@ -326,13 +428,16 @@ def main():
     parser.add_argument('--repo-id', default=DEFAULT_REPO)
     parser.add_argument('--commit', action='store_true', help='Upload; otherwise only plan')
     parser.add_argument('--receipt', type=Path, help='Host-only receipt outside the prepared bundle')
+    parser.add_argument('--dataset-repo', default=DATASET_REPO,
+                        help='private dataset for Inspect logs and raw records (default %(default)s)')
     args = parser.parse_args()
     if args.receipt and args.receipt.resolve().is_relative_to(args.bundle.resolve()):
         parser.error('--receipt must be outside the immutable prepared bundle')
     from huggingface_hub import HfApi, CommitOperationAdd, hf_hub_download
     api = HfApi()
     print(json.dumps(publish(args.bundle, api, hf_hub_download, commit=args.commit,
-          repo=args.repo_id, receipt=args.receipt, operation=CommitOperationAdd), indent=2))
+          repo=args.repo_id, receipt=args.receipt, operation=CommitOperationAdd,
+          dataset_repo=args.dataset_repo), indent=2))
 
 
 if __name__ == '__main__':

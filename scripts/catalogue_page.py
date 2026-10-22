@@ -71,6 +71,13 @@ STYLE = (
 # entries published before the summary columns existed, reading the same fields from the run's
 # own published results.json and judge report.json (same-origin fetch; nothing is sent elsewhere).
 SCRIPT = r'''
+// Deep link (HF forwards the Space URL's query and hash to this frame): ?page=PATH.html or #page=PATH.html
+// opens that page of this site, keeping the private-Space session; only plain same-site .html paths.
+{const q=new URLSearchParams(location.search),h=location.hash.startsWith('#page=')?decodeURIComponent(location.hash.slice(6)):'';
+const page=q.get('page')||h;
+if(/^(?:[A-Za-z0-9][A-Za-z0-9_.-]*\/)*[A-Za-z0-9][A-Za-z0-9_.-]*\.html$/.test(page)&&!page.split('/').includes('..')){
+const url=new URL(page,document.baseURI);if(q.get('__sign'))url.searchParams.set('__sign',q.get('__sign'));
+if(url.origin===location.origin)location.replace(url.href);}}
 (()=>{
 const $=id=>document.getElementById(id);
 const data=JSON.parse($('catalogue-data').textContent);

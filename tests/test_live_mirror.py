@@ -32,6 +32,11 @@ import live_mirror  # noqa: E402
 RUN = 'live-20990101T000000Z'
 
 
+def sha(revision):
+    """A fake commit ID of the in-memory Hub (40 characters, as a real one)."""
+    return f'{revision:040d}'
+
+
 def blob_id(data):
     return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
 
@@ -58,24 +63,40 @@ class FakeRunner:
 
 
 class Hub:
-    """A private Space in memory (the HfApi calls the mirror makes)."""
+    """A private Space in memory (the HfApi calls the mirror makes). Calls with repo_type='dataset' go to
+    ``self.dataset``, a separate in-memory private logs dataset; ``order`` records every commit of both as
+    (repo_type, message, operations)."""
 
-    def __init__(self, private=True):
+    def __init__(self, private=True, repo_type='space', order=None):
         self.files, self.revision, self.private, self.commits = {}, 0, private, []
+        self.repo_type, self.order = repo_type, [] if order is None else order
         self.last_modified = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
         self.cache = Path(tempfile.mkdtemp(prefix='hub-cache-'))
         self.lfs_objects, self.pruned, self.rewrite_history = {}, [], []
+        self.dataset = Hub(repo_type='dataset', order=self.order) if repo_type == 'space' else None
+
+    def _other(self, repo_type):
+        """The in-memory dataset for repo_type='dataset' calls on the Space object, else None."""
+        if repo_type == 'dataset' and self.repo_type == 'space':
+            return self.dataset
+        assert repo_type == self.repo_type, (repo_type, self.repo_type)
+        return None
 
     def repo_info(self, repo, repo_type):
-        return SimpleNamespace(private=self.private, sha=str(self.revision), last_modified=self.last_modified)
+        if self._other(repo_type) is not None:
+            return self.dataset.repo_info(repo=repo, repo_type=repo_type)
+        return SimpleNamespace(private=self.private, sha=sha(self.revision), last_modified=self.last_modified)
 
     def list_repo_tree(self, repo, repo_type, revision, recursive=False, path_in_repo=None):
-        assert revision == str(self.revision)
+        if self._other(repo_type) is not None:
+            return self.dataset.list_repo_tree(repo=repo, repo_type=repo_type, revision=revision, recursive=recursive, path_in_repo=path_in_repo)
+        assert revision == sha(self.revision)
         names = [n for n in self.files if (path_in_repo is None or n.startswith(path_in_repo + '/'))
                  and (recursive or '/' not in n)]
         if path_in_repo and not names:
             raise type('EntryNotFoundError', (Exception,), {})('404')
-        return [SimpleNamespace(path=n, blob_id=blob_id(self.files[n]), lfs=self._lfs(n)) for n in names]
+        return [SimpleNamespace(path=n, size=len(self.files[n]), blob_id=blob_id(self.files[n]), lfs=self._lfs(n))
+                for n in names]
 
     def _lfs(self, name):   # Inspect logs are stored as LFS objects, as on the Hub
         if not name.endswith('.eval'):
@@ -83,23 +104,31 @@ class Hub:
         return SimpleNamespace(sha256=hashlib.sha256(self.files[name]).hexdigest(), size=len(self.files[name]))
 
     def list_lfs_files(self, repo, repo_type):
+        if self._other(repo_type) is not None:
+            return self.dataset.list_lfs_files(repo=repo, repo_type=repo_type)
         return [SimpleNamespace(file_oid=sha, oid=sha, filename=name, size=len(data))
                 for sha, (name, data) in self.lfs_objects.items()]
 
     def permanently_delete_lfs_files(self, repo, lfs_files, rewrite_history, repo_type):
+        if self._other(repo_type) is not None:
+            return self.dataset.permanently_delete_lfs_files(repo=repo, lfs_files=lfs_files, rewrite_history=rewrite_history, repo_type=repo_type)
         self.rewrite_history.append(rewrite_history)
         for item in lfs_files:
             self.pruned.append(item.oid)
             del self.lfs_objects[item.oid]
 
     def download(self, repo, name, repo_type, revision):
+        if self._other(repo_type) is not None:
+            return self.dataset.download(repo=repo, name=name, repo_type=repo_type, revision=revision)
         path = self.cache / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(self.files[name])
         return str(path)
 
     def create_commit(self, *, repo_id, repo_type, parent_commit, commit_message, operations):
-        assert parent_commit == str(self.revision)
+        if self._other(repo_type) is not None:
+            return self.dataset.create_commit(repo_id=repo_id, repo_type=repo_type, parent_commit=parent_commit, commit_message=commit_message, operations=operations)
+        assert parent_commit == sha(self.revision)
         for op in operations:
             if op.kind == 'add':
                 self.files[op.path_in_repo] = op.path_or_fileobj
@@ -109,9 +138,10 @@ class Hub:
             else:
                 del self.files[op.path_in_repo]
         self.commits.append((commit_message, operations))
+        self.order.append((repo_type, commit_message, operations))
         self.last_modified = datetime.datetime.now(datetime.timezone.utc)
         self.revision += 1
-        return SimpleNamespace(oid=str(self.revision))
+        return SimpleNamespace(oid=sha(self.revision))
 
 
 def add(path_in_repo, path_or_fileobj):
@@ -400,17 +430,31 @@ class PassTests(unittest.TestCase):
     def test_pass_publishes_only_live_files_with_inspect_view_and_conference(self):
         report = self.run_pass(inspect_view=live_mirror.build_inspect_view)    # the real Inspect View build
         self.assertEqual(report['runs'][RUN]['inspect_samples'], {'flushed': 0, 'completed': 0, 'running': 1}, report)
+        self.assertIsInstance(report['upload'], dict, report)
         self.assertEqual(report['upload']['committed'], True, report)
         changed = {op.path_in_repo for op in self.hub.commits[0][1]}
         self.assertTrue(all(name.startswith('live/') for name in changed))
         self.assertEqual(self.hub.files['index.html'], b'<html>catalogue</html>')
         prefix = f'live/{RUN}/'
         for name in ('index.html', 'status.json', 'conference-view/index.html', 'inspect-view/index.html',
-                     'inspect-view/logs/listing.json', 'inspect-view/logs/' + self.vm.log.name):
+                     'inspect-view/logs/listing.json'):
             self.assertIn(prefix + name, self.hub.files)
+        # The live Inspect log is in the private logs dataset only, committed (and verified) before the Space.
+        self.assertFalse([n for n in self.hub.files if n.endswith('.eval')])
+        self.assertFalse([op for _, _, ops in self.hub.order[1:] for op in ops if op.path_in_repo.endswith('.eval')])
+        dataset_log = f'live/{RUN}/inspect/' + self.vm.log.name
+        self.assertTrue(self.hub.dataset.files[dataset_log].startswith(b'PK'))   # the live Inspect archive
+        self.assertEqual([kind for kind, _, _ in self.hub.order], ['dataset', 'space'])
+        self.assertTrue(all(op.path_in_repo.startswith('live/') for op in self.hub.order[0][2]))
         self.assertFalse([n for n in self.hub.files if '/transcripts/' in n])   # transcripts: Inspect View only
         viewer = self.hub.files[prefix + 'inspect-view/index.html'].decode()
         self.assertIn('id="private-space-navigation"', viewer)
+        import dataset_logs
+        self.assertEqual(dataset_logs.shim_settings(viewer),
+                         (dataset_logs.DATASET_REPO, sha(self.hub.dataset.revision), f'live/{RUN}/inspect'))
+        self.assertIn('data-signin="../../../signin.html"', viewer)
+        self.assertNotIn(dataset_logs.COMMIT_PLACEHOLDER, viewer)
+        self.assertLess(viewer.index('id="evallog-fetch"'), viewer.index('id="private-space-navigation"'))
         self.assertIn('<script type="module">import "./assets/', viewer)     # as prepare_hf_library.py does
         summary = self.hub.files[prefix + 'index.html'].decode()
         self.assertIn('href="inspect-view/index.html"', summary)
@@ -424,11 +468,12 @@ class PassTests(unittest.TestCase):
         entry = index['runs'][0]
         self.assertEqual((entry['run'], entry['state'], entry['solved'], entry['task_count']), (RUN, 'running', 1, 2))
         self.assertEqual(json.loads(self.hub.files[prefix + 'status.json'])['submissions'], {'accepted': 1})
-        self.assertEqual(report['upload']['live_log_uploads'][0]['path'], prefix + 'inspect-view/logs/' + self.vm.log.name)
+        self.assertEqual(report['upload']['live_log_uploads'][0]['path'], dataset_log)
+        self.assertEqual(report['upload']['dataset']['revision'], sha(self.hub.dataset.revision))
 
     def test_own_recent_commit_does_not_defer_the_next_pass(self):
         self.run_pass()
-        self.assertEqual(self.state['own_revisions'], ['1'])
+        self.assertEqual(self.state['own_revisions'], [sha(1)])
         self.vm.db.execute("INSERT INTO posts (agent_id, intent_type, message, tags, posted_at) VALUES "
                            "('agent-001', 'note', 'later', '[]', 4102444812.0)")
         self.vm.db.execute("INSERT INTO events (timestamp, kind, agent_id, tool, call_id, payload) VALUES "
@@ -455,9 +500,11 @@ class PassTests(unittest.TestCase):
         self.run_pass()
         self.hub.files['experiments.json'] = json.dumps({'experiments': [{'run': 'older-run'}, {'run': RUN}]}).encode()
         self.hub.revision += 1
+        self.assertTrue([n for n in self.hub.dataset.files if n.startswith(f'live/{RUN}/')])
         report = self.run_pass()
         self.assertEqual(report['upload']['runs_removed'], [RUN])
         self.assertFalse([n for n in self.hub.files if n.startswith(f'live/{RUN}/')])
+        self.assertFalse([n for n in self.hub.dataset.files if n.startswith(f'live/{RUN}/')])   # dataset too
         self.assertEqual(json.loads(self.hub.files['live/index.json'])['runs'], [])
 
     def test_stopped_run_gets_one_final_pass_and_a_stopped_vm_is_never_started(self):
@@ -515,22 +562,39 @@ class PassTests(unittest.TestCase):
 
     def test_superseded_live_logs_are_pruned_and_published_ones_never(self):
         self.run_pass()
-        first = self.state['live_log_blobs'][0]['sha256']
-        self.assertEqual(self.hub.pruned, [])                       # still the head's live log
+        first = self.state['dataset_log_blobs'][0]['sha256']
+        self.assertEqual(self.hub.dataset.pruned, [])               # still the head's live log
         self.vm.buffer.log_events([__import__('inspect_ai.log._recorders.types', fromlist=['SampleEvent']).SampleEvent(
             id='agent-001', epoch=1, event=self.vm.sample.events[8])])
         write_running_eval(self.vm.log)                             # the .eval changed on the VM
         report = self.run_pass()
         self.assertTrue(report['upload']['committed'], report)
-        self.assertEqual(self.hub.pruned, [first], report)           # superseded: deleted without history rewrite
-        self.assertEqual(self.hub.rewrite_history, [False])
-        self.assertNotIn(first, {c['sha256'] for c in self.state['live_log_blobs']})
+        # Superseded: deleted from the logs dataset (repo_type='dataset') without history rewrite; the Space
+        # never held it.
+        self.assertEqual(self.hub.dataset.pruned, [first], report)
+        self.assertEqual(self.hub.dataset.rewrite_history, [False])
+        self.assertEqual(self.hub.pruned, [])
+        self.assertNotIn(first, {c['sha256'] for c in self.state['dataset_log_blobs']})
         # A log another file of the head still references (e.g. published byte-identical) is kept.
-        current = self.state['live_log_blobs'][0]
-        self.hub.files['other-run/inspect/copy.eval'] = self.hub.files[current['path']]
-        self.hub.revision += 1
-        pruned, kept = live_mirror.prune_superseded(self.hub, 'repo', str(self.hub.revision), [current])
+        current = self.state['dataset_log_blobs'][0]
+        dataset = self.hub.dataset
+        dataset.files['other-run/inspect/copy.eval'] = dataset.files[current['path']]
+        dataset.revision += 1
+        pruned, kept = live_mirror.prune_superseded(self.hub, 'repo', sha(dataset.revision), [current],
+                                                    repo_type='dataset')
         self.assertEqual((pruned, kept), ([], [current]))
+
+    def test_space_live_logs_of_earlier_mirror_versions_are_still_pruned_from_the_space(self):
+        old = b'an old live log the previous mirror uploaded to the Space'
+        name = f'live/{RUN}/inspect-view/logs/old.eval'
+        self.hub.files[name] = old
+        self.hub.lfs_objects[hashlib.sha256(old).hexdigest()] = (name, old)
+        self.hub.revision += 1
+        self.state['live_log_blobs'] = [{'path': name, 'sha256': hashlib.sha256(old).hexdigest()}]
+        report = self.run_pass()
+        self.assertNotIn(name, self.hub.files)                       # removed from the Space's live/ folder
+        self.assertEqual(self.hub.pruned, [hashlib.sha256(old).hexdigest()], report)
+        self.assertEqual(self.state['live_log_blobs'], [])
 
     def test_keep_live_history_never_deletes(self):
         self.run_pass(prune=False)
@@ -538,7 +602,7 @@ class PassTests(unittest.TestCase):
         self.vm.buffer.log_events([__import__('inspect_ai.log._recorders.types', fromlist=['SampleEvent']).SampleEvent(
             id='agent-001', epoch=1, event=self.vm.sample.events[8])])
         self.run_pass(prune=False)
-        self.assertEqual(self.hub.pruned, [])
+        self.assertEqual((self.hub.pruned, self.hub.dataset.pruned), ([], []))
 
 
 class SyncGuardTests(unittest.TestCase):
@@ -552,16 +616,47 @@ class SyncGuardTests(unittest.TestCase):
                 live_mirror.sync(hub, hub.download, updates={RUN: {'bundle': bundle, 'entry': {'run': RUN}}},
                                  add=add, delete=delete, quiet_seconds=0)
             (bundle / 'conference-view' / 'index.html').write_bytes(b'ok')
-            (bundle / 'inspect-view' / 'logs').mkdir(parents=True)          # an Inspect log may be LFS
+            (bundle / 'inspect-view' / 'logs').mkdir(parents=True)          # an Inspect log goes to the dataset
             (bundle / 'inspect-view' / 'logs' / 'a.eval').write_bytes(b'x' * live_mirror.LFS_SAFE_LIMIT)
             result = live_mirror.sync(hub, hub.download, updates={RUN: {'bundle': bundle, 'entry': {'run': RUN}}},
                                       add=add, delete=delete, quiet_seconds=0, commit=False)
-            self.assertEqual(result['uploads'], 3)
+            self.assertEqual(result['uploads'], 2)                          # the page and live/index.json
+            self.assertEqual(result['dataset']['uploads'], [f'live/{RUN}/inspect/a.eval'])
+            (bundle / 'runtime.jsonl').write_bytes(b'{}\n')                 # any dataset category: never the Space
+            result = live_mirror.sync(hub, hub.download, updates={RUN: {'bundle': bundle, 'entry': {'run': RUN}}},
+                                      add=add, delete=delete, quiet_seconds=0, commit=False)
+            self.assertEqual(result['dataset']['uploads'], [f'live/{RUN}/inspect/a.eval', f'live/{RUN}/runtime.jsonl'])
+            (bundle / 'runtime.jsonl').unlink()
             (bundle / '.env').write_bytes(b'')
             with self.assertRaises(ValueError):
                 live_mirror.sync(hub, hub.download, updates={RUN: {'bundle': bundle, 'entry': {'run': RUN}}},
                                  add=add, delete=delete, quiet_seconds=0)
-        self.assertEqual(hub.commits, [])
+        self.assertEqual(hub.order, [])
+
+    def test_a_public_logs_dataset_is_refused_before_any_commit(self):
+        hub = Hub()
+        hub.dataset.private = False
+        with self.assertRaises(ValueError):
+            live_mirror.sync(hub, hub.download, updates={}, add=add, delete=delete, quiet_seconds=0)
+        self.assertEqual(hub.order, [])
+
+    def test_dataset_commit_is_verified(self):
+        hub = Hub()
+        original = hub.dataset.create_commit
+
+        def lossy(**kwargs):   # the Hub drops the upload: verification must refuse before the Space commit
+            response = original(**kwargs)
+            hub.dataset.files.clear()
+            return response
+        hub.dataset.create_commit = lossy
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / 'b'
+            (bundle / 'inspect-view' / 'logs').mkdir(parents=True)
+            (bundle / 'inspect-view' / 'logs' / 'a.eval').write_bytes(b'log')
+            with self.assertRaisesRegex(ValueError, 'differs from the plan'):
+                live_mirror.sync(hub, hub.download, updates={RUN: {'bundle': bundle, 'entry': {'run': RUN}}},
+                                 add=add, delete=delete, quiet_seconds=0)
+        self.assertEqual(hub.commits, [])   # the Space was not touched
 
     def test_nothing_changed_makes_no_commit(self):
         hub = Hub()

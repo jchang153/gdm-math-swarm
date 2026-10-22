@@ -190,7 +190,7 @@ class RerenderCatalogueTests(unittest.TestCase):
         make_run(self.runs, 'b-new')
         self.hub = maintenance.Hub(self.root)
         publish(self.prepare('published', 'a-old', 'b-new'), self.hub, self.hub.download, commit=True,
-                operation=maintenance.operation, unlisted=set())
+                operation=maintenance.operation, unlisted=set(), records_in_space=True)
         entries = json.loads(self.hub.files['experiments.json'])['experiments']
         push_catalogue(self.hub, entries, html=b'<!doctype html><html>page of an older generator</html>')
         self.published = dict(self.hub.files)

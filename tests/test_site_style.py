@@ -159,7 +159,11 @@ class TranscriptExportNotPublishedTest(unittest.TestCase):
             manifest = json.loads((output / 'archive-manifest.json').read_text())
             self.assertFalse([n for n in manifest['files'] if '/transcripts/' in n])
             # Kept only on request, for maintaining runs published with the export.
-            self.assertTrue((self.prepare(root, '--include-transcript-export') / 'r1/transcripts/index.html').is_file())
+            # (in the legacy layout of such runs; otherwise the export goes to the private logs dataset)
+            self.assertTrue((self.prepare(root, '--include-transcript-export', '--records-in-space')
+                             / 'r1/transcripts/index.html').is_file())
+            self.assertTrue((self.prepare(root, '--include-transcript-export')
+                             / 'dataset-files/r1/transcripts/index.html').is_file())
             (run / 'conference-view' / 'index.html').write_text('<a href="../transcripts/index.html">old</a>')
             with self.assertRaisesRegex(ValueError, 'links the unpublished transcript export'):
                 self.prepare(root)

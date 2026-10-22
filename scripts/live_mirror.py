@@ -24,13 +24,21 @@ Every pass (default every 5 minutes), for each RUNNING VM (never started, stoppe
    Transcripts are read in Inspect View; the custom transcript export is not published (owner, October 21,
    2026: "there's no need for a transcript view on the website when we already have inspect view");
 4. screens the bundle exactly like a normal publication (``publish_hf_library.safe_path`` and ``screen``,
-   Inspect archives included), adds the private-Space navigation, and commits it with the operator's own HF
-   login as ONE commit that touches only ``live/``: changed files are added, files of the previous snapshot
-   that no longer exist are deleted, ``live/index.json`` (the catalogue's "Live now" list) is updated, and
-   the live folder of any run that is now in the published catalogue is removed;
-5. bounds storage growth: after a commit lands, the LFS objects of this mirror's own superseded live Inspect
-   logs (synthesized snapshots, never byte-equal to a published file) that no file of the new head
-   references are permanently deleted, without rewriting history (``--keep-live-history`` keeps them).
+   Inspect archives included), adds the private-Space navigation, and uploads it with the operator's own HF
+   login (docs/experiment-library.md, "Logs and raw records in the dataset repo"): first ONE commit to the private logs dataset
+   (``--dataset-repo``) that touches only its ``live/``: the live Inspect logs (and any other file of a
+   dataset category, ``dataset_logs.category``) at ``live/RUN/inspect/<name>.eval``, verified by size and
+   SHA-256 after the commit; then ONE Space commit that touches only ``live/`` and carries pages only (never
+   an ``.eval``): changed files are added, files of the previous snapshot that no longer exist are deleted,
+   ``live/index.json`` (the catalogue's "Live now" list) is updated, and the live folder of any run that is
+   now in the published catalogue is removed (in both repositories). The live Inspect View reads its logs
+   through the inline fetch shim (``dataset_logs.with_log_shim``), pinned to that dataset commit, with the
+   viewer's own "Sign in with HF" token;
+5. bounds storage growth: after both commits land, the LFS objects of this mirror's own superseded live
+   Inspect logs (synthesized snapshots, never byte-equal to a published file) that no file of the dataset's
+   new head references are permanently deleted from the dataset, without rewriting history
+   (``--keep-live-history`` keeps them). Live logs uploaded to the Space by earlier versions of the mirror are
+   still pruned from the Space the same way once superseded.
 
 A pass that changed nothing makes no commit and unchanged files (the Inspect View app, conference pages)
 are never re-uploaded. The Space history is never squashed or rewritten (published revisions are cited in
@@ -69,6 +77,8 @@ for _path in (SCRIPTS, ROOT / 'src', ROOT):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
+import dataset_logs  # noqa: E402
+from dataset_logs import DATASET_REPO  # noqa: E402
 from publish_hf_library import DEFAULT_REPO, SECRET, matches, safe_path, screen  # noqa: E402
 from site_style import MARKER as THEME_MARKER, themed  # noqa: E402
 from space_navigation import private_space_navigation  # noqa: E402
@@ -645,9 +655,17 @@ def landing_page(summary, problems, interval, *, inspect_view, conference):
             + (f'<h2>Mirror notes</h2><ul>{notes}</ul>' if notes else '') + '</html>')
 
 
-def build_live_bundle(source, bundle, *, vm, snapshot_utc, state, interval, inspect_view=build_inspect_view):
+LIVE_SIGNIN = '../../../signin.html'   # the site's sign-in page, from live/RUN/inspect-view/index.html
+
+
+def build_live_bundle(source, bundle, *, vm, snapshot_utc, state, interval, inspect_view=build_inspect_view, run=None):
     """Render the live views of the local source copy into ``bundle`` (replaced). Returns the summary and
-    the bundle paths of live (synthesized) Inspect logs, whose superseded copies may later be pruned."""
+    the bundle paths of live (synthesized) Inspect logs, whose superseded copies may later be pruned.
+    ``run`` (default: the bundle folder's name) names the dataset folder the Inspect View's shim reads.
+    The shim carries ``dataset_logs.COMMIT_PLACEHOLDER``; ``sync`` pins it to the dataset commit."""
+    run = run or bundle.name
+    if not RUN_ID.fullmatch(run):
+        raise ValueError('Invalid run ID')
     shutil.rmtree(bundle, ignore_errors=True)
     bundle.mkdir(parents=True)
     problems = []
@@ -702,7 +720,10 @@ def build_live_bundle(source, bundle, *, vm, snapshot_utc, state, interval, insp
         target.parent.mkdir(parents=True, exist_ok=True)
         if name == 'inspect-view/index.html':             # as prepare_hf_library.py does for Inspect View
             modules = ['./assets/' + p.name for p in sorted((viewer / 'assets').glob('*.js'))]
-            target.write_text(private_space_navigation(path.read_text(encoding='utf-8'), modules), encoding='utf-8')
+            document = private_space_navigation(path.read_text(encoding='utf-8'), modules)
+            # The shim goes first in <head>: Inspect View reads its logs from the dataset's live/ folder.
+            document = dataset_logs.with_log_shim(document, path=f'{LIVE}/{run}/inspect', signin=LIVE_SIGNIN)
+            target.write_text(document, encoding='utf-8')
         elif name.startswith('conference-view/') and name.endswith('.html'):
             document = path.read_text(encoding='utf-8')
             screen_bytes(name, document.encode('utf-8'))
@@ -764,20 +785,57 @@ def _read_remote_json(download, repo, revision, name, item, empty):
     return json.loads(data)
 
 
-def _may_exceed_lfs_limit(name):
-    """Only Inspect logs may be stored as LFS (Inspect View follows the redirect); pages must not."""
-    parts = name.split('/')
-    return len(parts) == 5 and parts[2:4] == ['inspect-view', 'logs'] and parts[4].endswith('.eval')
+def sync_dataset(api, *, files, refresh, retire, add, delete, repo=DATASET_REPO, commit=True, message=''):
+    """One commit to the private logs dataset that touches only its live/ folder. ``files``: {dataset path:
+    bytes} wanted at the head; ``refresh``: runs whose live/RUN/ files other than ``files`` are removed (the
+    snapshot no longer has them); ``retire``: runs whose live/RUN/ files are all removed (published). Pinned
+    to the planned head, then verified: every wanted file by size and SHA-256 (or Git blob id), removed files
+    absent, nothing else changed. Returns {revision (the head to pin pages to), committed, uploads, ...}."""
+    info = api.repo_info(repo, repo_type='dataset')
+    if not info.private:
+        raise ValueError('The live mirror requires a private logs dataset')
+    present = dataset_logs.dataset_inventory(api, repo, info.sha)
+    records = {n: {**dataset_logs.digest(d), 'git_sha1': dataset_logs._git_sha1(d)} for n, d in files.items()}
+    adds = {n: d for n, d in files.items() if n not in present or not dataset_logs.remote_matches(records[n], present[n])}
+    deletes = set()
+    for run in refresh:
+        deletes |= {n for n in present if n.startswith(f'{LIVE}/{run}/') and n not in files}
+    for run in retire:
+        deletes |= {n for n in present if n.startswith(f'{LIVE}/{run}/')}
+    deletes -= set(adds)
+    for name in [*adds, *deletes]:
+        if not name.startswith(LIVE + '/'):
+            raise ValueError('The live mirror may only change live/ in the logs dataset: ' + name)
+        safe_path(name)
+    result = {'repo': repo, 'base_revision': info.sha, 'revision': info.sha, 'committed': False,
+              'uploads': sorted(adds), 'deletions': sorted(deletes), 'bytes': sum(len(d) for d in adds.values())}
+    if not commit or not (adds or deletes):
+        return result
+    response = api.create_commit(repo_id=repo, repo_type='dataset', parent_commit=info.sha,
+                                 commit_message=message or COMMIT_PREFIX + 'live logs',
+                                 operations=[*(add(path_in_repo=n, path_or_fileobj=d) for n, d in sorted(adds.items())),
+                                             *(delete(path_in_repo=n) for n in sorted(deletes))])
+    final = dataset_logs.dataset_inventory(api, repo, response.oid)
+    bad = [n for n in files if n not in final or not dataset_logs.remote_matches(records[n], final[n])]
+    bad += [n for n in deletes if n in final]
+    bad += [n for n in set(present) | set(final) if n not in files and n not in deletes
+            and present.get(n) != final.get(n)]
+    if bad:
+        raise ValueError('Logs dataset differs from the plan after the live commit: ' + ', '.join(sorted(bad)[:20]))
+    result.update(committed=True, revision=response.oid)
+    return result
 
 
-def sync(api, download, *, updates, add, delete, repo=DEFAULT_REPO, now=None, quiet_seconds=600, commit=True,
-         own_revisions=()):
-    """One live commit. ``updates``: {run: {'bundle': Path | None, 'entry': dict, 'live_logs': [bundle paths]}}
-    (bundle None: only the catalogue entry changes, e.g. the VM stopped). Touches only live/; never another
-    path. Deferred while the Space's head is not one of this mirror's own commits (``own_revisions``) and
-    changed less than ``quiet_seconds`` ago: another publisher is probably still committing. The result's
-    ``live_log_uploads`` lists the synthesized live Inspect logs this commit uploads (candidates for pruning
-    once superseded)."""
+def sync(api, download, *, updates, add, delete, repo=DEFAULT_REPO, dataset_repo=DATASET_REPO, now=None,
+         quiet_seconds=600, commit=True, own_revisions=()):
+    """One live pass upload. ``updates``: {run: {'bundle': Path | None, 'entry': dict, 'live_logs': [bundle
+    paths]}} (bundle None: only the catalogue entry changes, e.g. the VM stopped). Bundle files of a dataset
+    category (``dataset_logs.category``: the live Inspect logs) go to the logs dataset's live/ folder first
+    (``sync_dataset``); then one Space commit touches only live/ with the remaining pages, the Inspect View's
+    shim pinned to the dataset commit. Deferred while the Space's head is not one of this mirror's own
+    commits (``own_revisions``) and changed less than ``quiet_seconds`` ago: another publisher is probably
+    still committing. The result's ``live_log_uploads`` lists the synthesized live Inspect logs this pass
+    uploaded to the dataset (candidates for pruning once superseded)."""
     now = time.time() if now is None else now
     info = api.repo_info(repo, repo_type='space')
     if not info.private:
@@ -800,9 +858,10 @@ def sync(api, download, *, updates, add, delete, repo=DEFAULT_REPO, now=None, qu
         raise ValueError(f'{LIVE_INDEX} is not a {LIVE_SCHEMA} file')
     entries = {e['run']: e for e in index['runs'] if isinstance(e, dict) and RUN_ID.fullmatch(str(e.get('run', '')))}
     adds, deletes, removed, changed, live_logs = {}, set(), [], [], set()
+    pages, dataset_files, refresh = {}, {}, []   # Space path -> bytes (pinned below); dataset path -> bytes
     for run in sorted(set(entries) | set(updates)):
         prefix = f'{LIVE}/{run}/'
-        if run in published:   # published normally: its live mirror is retired
+        if run in published:   # published normally: its live mirror is retired (Space and dataset)
             deletes |= {name for name in remote if name.startswith(prefix)}
             if entries.pop(run, None) is not None or any(n.startswith(prefix) for n in remote):
                 removed.append(run)
@@ -812,15 +871,32 @@ def sync(api, download, *, updates, add, delete, repo=DEFAULT_REPO, now=None, qu
             continue
         if update.get('bundle') is not None:
             bundle = Path(update['bundle'])
-            local = {prefix + p.relative_to(bundle).as_posix(): p for p in sorted(bundle.rglob('*')) if p.is_file()}
-            for name, path in local.items():
-                safe_path(name)
-                if name not in remote or not matches(path.read_bytes(), remote[name]):
-                    adds[name] = path.read_bytes()
+            local = {}
+            for path in sorted(bundle.rglob('*')):
+                if not path.is_file():
+                    continue
+                relative = path.relative_to(bundle).as_posix()
+                safe_path(prefix + relative)
+                if dataset_logs.category(relative) is not None:   # never uploaded to the Space
+                    dataset_files[dataset_logs.dataset_path(run, relative, live=True)] = path.read_bytes()
+                else:
+                    local[prefix + relative] = path.read_bytes()
+            pages.update(local)
+            refresh.append(run)
             deletes |= {name for name in remote if name.startswith(prefix) and name not in local}
-            live_logs |= {prefix + name for name in update.get('live_logs', ())}
+            live_logs |= {dataset_logs.dataset_path(run, name, live=True) for name in update.get('live_logs', ())}
         entries[run] = update['entry']
         changed.append(run)
+    # The dataset first: the Space's live Inspect View pages are pinned to the commit holding their logs.
+    logs = sync_dataset(api, files=dataset_files, refresh=refresh, retire=removed, add=add, delete=delete,
+                        repo=dataset_repo, commit=commit,
+                        message=COMMIT_PREFIX + ', '.join([*(f'update {r}' for r in changed),
+                                                           *(f'retire {r}' for r in removed)]) + ' (live logs)')
+    for name, page in pages.items():
+        if name.endswith('/inspect-view/index.html'):
+            page = dataset_logs.pin_commit(page, logs['revision'])
+        if name not in remote or not matches(page, remote[name]):
+            adds[name] = page
     new_index = {'schema': LIVE_SCHEMA, 'runs': sorted(entries.values(), key=lambda e: e.get('started_utc') or '',
                                                        reverse=True)}
     data = json.dumps(new_index, indent=2).encode()
@@ -831,14 +907,16 @@ def sync(api, download, *, updates, add, delete, repo=DEFAULT_REPO, now=None, qu
         if not name.startswith(LIVE + '/'):
             raise ValueError('The live mirror may only change live/: ' + name)
         safe_path(name)
-    for name, data in adds.items():
-        if len(data) >= LFS_SAFE_LIMIT and not _may_exceed_lfs_limit(name):
+    for name, page in adds.items():
+        if dataset_logs.category(name.split('/', 2)[2] if name.count('/') >= 2 else name) is not None:
+            raise ValueError('A dataset file is never uploaded to the Space: ' + name)
+        if len(page) >= LFS_SAFE_LIMIT:   # pages only: nothing in the Space's live/ may become LFS
             raise ValueError('Live file at or above the LFS limit: ' + name)
     result = {'base_revision': info.sha, 'runs_updated': changed, 'runs_removed': removed,
               'uploads': len(adds), 'deletions': len(deletes), 'bytes': sum(len(d) for d in adds.values()),
-              'committed': False,
-              'live_log_uploads': [{'path': n, 'sha256': hashlib.sha256(adds[n]).hexdigest()}
-                                   for n in sorted(live_logs & set(adds))]}
+              'committed': False, 'dataset': logs,
+              'live_log_uploads': [{'path': n, 'sha256': hashlib.sha256(dataset_files[n]).hexdigest()}
+                                   for n in sorted(live_logs & set(logs['uploads']))]}
     if not commit or not (adds or deletes):
         return result
     message = COMMIT_PREFIX + ', '.join([*(f'update {r}' for r in changed), *(f'retire {r}' for r in removed)])
@@ -849,14 +927,15 @@ def sync(api, download, *, updates, add, delete, repo=DEFAULT_REPO, now=None, qu
     return result
 
 
-def prune_superseded(api, repo, revision, candidates):
+def prune_superseded(api, repo, revision, candidates, repo_type='space'):
     """Permanently delete the LFS objects of this mirror's superseded live Inspect logs, without rewriting
     history. ``candidates``: [{'path', 'sha256'}] recorded when the mirror uploaded them (synthesized
     snapshots only, never a log copied unchanged). An object is deleted only when no file of ``revision``
-    (the whole Space) references it and the Hub lists it under ``live/``; earlier live revisions then lack
-    that log, nothing else changes. Returns (pruned, kept)."""
+    (the whole repository: the logs dataset, or the Space for logs uploaded there by earlier versions of the
+    mirror) references it and the Hub lists it under ``live/``; earlier live revisions then lack that log,
+    nothing else changes. Returns (pruned, kept)."""
     referenced = set()
-    for item in api.list_repo_tree(repo, repo_type='space', revision=revision, recursive=True):
+    for item in api.list_repo_tree(repo, repo_type=repo_type, revision=revision, recursive=True):
         lfs = getattr(item, 'lfs', None)
         if lfs is not None:
             referenced.add(lfs.sha256 if hasattr(lfs, 'sha256') else lfs['sha256'])
@@ -864,10 +943,10 @@ def prune_superseded(api, repo, revision, candidates):
     wanted = {c['sha256'] for c in candidates if c['sha256'] not in referenced and HEX64.fullmatch(c['sha256'])}
     if not wanted:
         return [], kept
-    objects = [f for f in api.list_lfs_files(repo, repo_type='space')
+    objects = [f for f in api.list_lfs_files(repo, repo_type=repo_type)
                if (f.oid in wanted or f.file_oid in wanted) and str(f.filename).startswith(LIVE + '/')]
     if objects:
-        api.permanently_delete_lfs_files(repo, objects, rewrite_history=False, repo_type='space')
+        api.permanently_delete_lfs_files(repo, objects, rewrite_history=False, repo_type=repo_type)
     found = {f.oid for f in objects} | {f.file_oid for f in objects}
     # An object the Hub does not list (stored as a regular file, or already gone) is not retried.
     return sorted(wanted & found), kept
@@ -884,7 +963,8 @@ def load_state(path):
         state = {}
     state.setdefault('schema', 'gdm-live-mirror-state/1')
     state.setdefault('runs', {})
-    state.setdefault('live_log_blobs', [])
+    state.setdefault('live_log_blobs', [])     # Space live logs of earlier mirror versions (pruned from the Space)
+    state.setdefault('dataset_log_blobs', [])  # live logs uploaded to the logs dataset
     return state
 
 
@@ -905,13 +985,13 @@ def mirror_run(cloud, vm, root, run, record, *, work, buffer_dir, interval, insp
     records = runtime_records(source)
     state = 'finished' if any(r.get('kind') == 'run_stop' for r in records) else 'running'
     summary, live_logs = build_live_bundle(source, bundle, vm=vm, snapshot_utc=manifest['utc'], state=state,
-                                           interval=interval, inspect_view=inspect_view)
+                                           interval=interval, inspect_view=inspect_view, run=run)
     record.update(vm=vm, root=root, final=state == 'finished', entry=_entry(summary), last_pass_utc=_iso(now))
     return summary, bundle, live_logs
 
 
 def run_pass(cloud, vms, *, state, work=WORK, api=None, download=None, add=None, delete=None, repo=DEFAULT_REPO,
-             only=None, max_age=3600, buffer_dir=DEFAULT_BUFFER_DIR, interval=300, quiet_seconds=600,
+             dataset_repo=DATASET_REPO, only=None, max_age=3600, buffer_dir=DEFAULT_BUFFER_DIR, interval=300, quiet_seconds=600,
              inspect_view=build_inspect_view, prune=True, now=None):
     now = time.time() if now is None else now
     work.mkdir(parents=True, exist_ok=True)
@@ -954,25 +1034,38 @@ def run_pass(cloud, vms, *, state, work=WORK, api=None, download=None, add=None,
                                    'problems': summary['problems']}
     if api is not None:
         try:
-            report['upload'] = sync(api, download, updates=updates, add=add, delete=delete, repo=repo, now=now,
-                                    quiet_seconds=quiet_seconds, own_revisions=state.get('own_revisions', ()))
+            report['upload'] = sync(api, download, updates=updates, add=add, delete=delete, repo=repo,
+                                    dataset_repo=dataset_repo, now=now, quiet_seconds=quiet_seconds,
+                                    own_revisions=state.get('own_revisions', ()))
             revision = report['upload'].get('revision')
             if revision:
                 state['own_revisions'] = [*state.get('own_revisions', []), revision][-50:]
-                known = {c['sha256'] for c in state['live_log_blobs']}
-                state['live_log_blobs'] += [c for c in report['upload']['live_log_uploads'] if c['sha256'] not in known]
+            if (report['upload'].get('dataset') or {}).get('committed'):
+                known = {c['sha256'] for c in state['dataset_log_blobs']}
+                state['dataset_log_blobs'] += [c for c in report['upload']['live_log_uploads']
+                                               if c['sha256'] not in known]
             for run in report['upload'].get('runs_removed', []):
                 state['runs'].get(run, {})['final'] = True
         except Exception as error:   # the next pass plans again from the latest revision
             report['upload'] = f'failed: {type(error).__name__}: {error}'
         else:
-            if prune and report['upload'].get('revision') and state['live_log_blobs']:
+            # Only after the Space commit landed: its live pages no longer point at the superseded logs.
+            dataset_head = (report['upload'].get('dataset') or {}).get('revision')
+            if prune and report['upload'].get('revision') and dataset_head and state['dataset_log_blobs']:
                 try:
-                    pruned, kept = prune_superseded(api, repo, report['upload']['revision'], state['live_log_blobs'])
-                    state['live_log_blobs'] = kept
+                    pruned, kept = prune_superseded(api, dataset_repo, dataset_head, state['dataset_log_blobs'],
+                                                    repo_type='dataset')
+                    state['dataset_log_blobs'] = kept
                     report['pruned_live_logs'] = len(pruned)
                 except Exception as error:   # kept as candidates; retried after the next commit
                     report['pruned_live_logs'] = f'failed: {type(error).__name__}: {error}'
+            if prune and report['upload'].get('revision') and state['live_log_blobs']:
+                try:   # live logs earlier mirror versions uploaded to the Space
+                    pruned, kept = prune_superseded(api, repo, report['upload']['revision'], state['live_log_blobs'])
+                    state['live_log_blobs'] = kept
+                    report['pruned_space_live_logs'] = len(pruned)
+                except Exception as error:
+                    report['pruned_space_live_logs'] = f'failed: {type(error).__name__}: {error}'
     return report
 
 
@@ -994,6 +1087,8 @@ def main(argv=None):
     parser.add_argument('--keep-live-history', action='store_true',
                         help="keep the LFS objects of superseded live Inspect logs (default: delete them once superseded)")
     parser.add_argument('--repo-id', default=DEFAULT_REPO)
+    parser.add_argument('--dataset-repo', default=DATASET_REPO,
+                        help=f'private logs dataset that receives the live Inspect logs (default {DATASET_REPO})')
     parser.add_argument('--quiet-seconds', type=float, default=600,
                         help='defer while another commit changed the Space less than this many seconds ago (default 600)')
     parser.add_argument('--max-age', type=float, default=3600,
@@ -1014,7 +1109,7 @@ def main(argv=None):
         started = time.monotonic()
         state = load_state(state_path)
         report = run_pass(cloud, args.vm, state=state, work=args.work_dir, api=api, download=download, add=add,
-                          delete=delete, repo=args.repo_id, only=set(args.run or ()), max_age=args.max_age,
+                          delete=delete, repo=args.repo_id, dataset_repo=args.dataset_repo, only=set(args.run or ()), max_age=args.max_age,
                           buffer_dir=args.remote_buffer_dir, interval=args.interval, quiet_seconds=args.quiet_seconds,
                           prune=not args.keep_live_history)
         args.work_dir.mkdir(parents=True, exist_ok=True)

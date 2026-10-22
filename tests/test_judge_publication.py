@@ -112,7 +112,10 @@ class PrepareJudgeOutputsTests(unittest.TestCase):
             make_run(Path(tmp) / 'runs', 'judged-run', judge={'legacy_marks': True})
             output = self.prepare(tmp, 'judged-run')
             judge = output / 'judged-run' / 'analysis' / 'judge'
-            for name in ('report.html', 'report.json', 'labels.jsonl', 'pipeline.json', 'run_level.json',
+            # Raw JSONL records go to the private logs dataset, not the Space (owner, October 22, 2026).
+            self.assertTrue((output / 'dataset-files' / 'judged-run' / 'analysis' / 'judge' / 'labels.jsonl').is_file())
+            self.assertFalse((judge / 'labels.jsonl').exists())
+            for name in ('report.html', 'report.json', 'pipeline.json', 'run_level.json',
                          'agents/agent-001.json', 'packages/agent-001.json', 'review/index.html',
                          'review/manifest.json', 'review/agents/agent-001.html'):
                 self.assertTrue((judge / name).is_file(), name)
