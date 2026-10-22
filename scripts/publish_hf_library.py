@@ -21,8 +21,25 @@ ROOT_FILES = {'README.md', 'robots.txt', 'index.html', 'experiments.json'}
 CATALOGUE = {'index.html', 'experiments.json', 'archive-manifest.json'}
 # A key starts at a token boundary: an sk-/hf_ run inside a longer base64/base64url token (for example
 # a provider's encrypted reasoning blob in an Inspect log or session snapshot) is not a key.
-SECRET = re.compile(rb'(?<![A-Za-z0-9+/_-])(?:sk-[A-Za-z0-9_-]{24,}|hf_[A-Za-z0-9]{30,})'
-                    rb'|-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----')
+_SECRET_PATTERN = re.compile(rb'(?<![A-Za-z0-9+/_-])(?:sk-[A-Za-z0-9_-]{24,}|hf_[A-Za-z0-9]{30,})'
+                             rb'|-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----')
+# Inspect SWE's fixed, public placeholder key (in its open-source code; scripts/isolation_probes.py
+# BRIDGE_PLACEHOLDER), written into every agent's apiKeyHelper setting. Only this exact token is
+# exempt; a longer key that merely starts with it still matches in full and is refused.
+# Owner, October 22, 2026: "I approve".
+PUBLIC_PLACEHOLDERS = frozenset({b'sk-ant-api03-DOq5tyLPrk9M4hPE'})
+
+
+class _SecretScreen:
+    """``SECRET.search(data)``: the first credential-like match that is not a public placeholder."""
+    def search(self, data):
+        for match in _SECRET_PATTERN.finditer(data):
+            if match.group(0) not in PUBLIC_PLACEHOLDERS:
+                return match
+        return None
+
+
+SECRET = _SecretScreen()
 RUN_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]*')
 
 

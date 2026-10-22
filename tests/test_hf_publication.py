@@ -220,6 +220,13 @@ class PublicationTests(unittest.TestCase):
                      b'-----BEGIN PRIVATE KEY-----'):
             self.assertIsNotNone(SECRET.search(text), text[:12])
 
+    def test_only_the_exact_public_placeholder_is_exempt(self):
+        placeholder = b'sk-ant-api03-DOq5tyLPrk9M4hPE'
+        self.assertIsNone(SECRET.search(b'"apiKeyHelper": "echo ' + placeholder + b'"'))
+        # A longer key that starts with the placeholder, or another key next to it, is still refused.
+        self.assertIsNotNone(SECRET.search(b'key ' + placeholder + b'XYZ123'))
+        self.assertIsNotNone(SECRET.search(placeholder + b' and sk-' + b'A' * 30))
+
     def test_malicious_existing_catalogue_link_refused(self):
         bad = entry('evil', 1)
         bad['links']['Report'] = 'javascript:alert(1)'
