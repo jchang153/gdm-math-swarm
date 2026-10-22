@@ -265,6 +265,16 @@ is being merged into main via `collab-env`.
 
 ## In flight as of 2026-10-21 (check status before redoing anything)
 
+- **RUNNING: `glm100-baseline-90m-20261022T183812Z`** on owner-vm, temporarily
+  **n2d-highmem-96**. Launched 2026-10-22 18:38 UTC: GLM 5.3, 100 agents x 7g, 90 min,
+  collab_max_pressure_no_rule6, run budget $400. The owner asked to hold off the judge, so
+  **no behavior judge and no incident report** run (`auto_behavior_judge: false`). The owner may
+  change the judge pipeline first. Live mirror log: `runs/phase-b/live-mirror/mirror-20261022d.log`.
+  Afterwards: retrieve within the supervisor's 600 s wait (or hold it with a placeholder tmux
+  session), stop the VM and **set-machine-type back to n2-standard-64**, then publish. HF storage is
+  near the 1 GB limit, so prune the old runs' .eval files first (`--scope prune --prune-kind eval`,
+  owner OK needed) or get more storage.
+
 0. `glm100-baseline-30m-20261022T050055Z` (2026-10-22, owner-vm) is finished, retrieved to `runs/` with
    checksums (`runs/phase-b/<run>/retrieval-checksums.txt`), analysed (results, transcripts, conference view, index) and its
    VM is TERMINATED and back on n2-standard-64. Pilot exited 0; the incident report was rerun on the VM after
