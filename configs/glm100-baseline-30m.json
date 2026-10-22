@@ -41,7 +41,7 @@
   "agent_image": "gdm-math-swarm-agent:local",
   "lean_image": "gdm-math-swarm-lean:local",
   "comparator_image": "gdm-math-swarm-comparator:local",
-  "agent_memory": "8g",
+  "agent_memory": "7g",
   "agent_cpus": null,
   "judge_max_concurrent": 32,
   "judge_memory": "2g",
