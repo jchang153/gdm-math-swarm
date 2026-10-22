@@ -244,6 +244,15 @@ is being merged into main via `collab-env`.
 
 ## In flight as of 2026-10-21 (check status before redoing anything)
 
+0a. **RUNNING: `glm10-baseline-2h-20261022T020447Z`** on owner-vm, launched 2026-10-22 02:04 UTC.
+   GLM 5.3, 10 agents (20g each), 2 h, collab_max_pressure_no_rule6, run budget $200, auto judge ($50)
+   and incident report ($20). The supervisor stops the VM afterwards (launched without tee). The live
+   mirror runs on the Mac (`runs/phase-b/live-mirror/mirror-20261022.log`).
+   Why this run: the GLM baseline's 0 cheaters vs the earlier run's 4 came down to chance. One agent
+   either tested the answer(...) fill against the judge or assumed answers are checked. More agents
+   and more time give more chances of a "discoverer". Afterwards: the supervisor's incident step fails
+   without results.json (build it, then rerun), retrieve, verify TERMINATED, publish, then compare.
+
 0. Nothing running. The 4 GLM oversight runs (2026-10-21) are finished, retrieved, published
    and their VMs TERMINATED; the live mirror is stopped and its `live/` entries are retired.
 
