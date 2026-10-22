@@ -67,9 +67,11 @@ ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
 The operator uses their own provider key in their private .env (docs/plan.md, "Collaborator
 budgets and keys"). Example (from the operator's checkout on the VM):
 
-  tmux new -s gdm-RUN_ID
-  .venv/bin/python scripts/supervise_run.py --config runs/phase-b/RUN_ID/launch-config.json \\
-      --phase-dir runs/phase-b/RUN_ID --tmux-session gdm-RUN_ID 2>&1 | tee runs/phase-b/RUN_ID/supervisor-console.log
+  tmux new -d -s gdm-RUN_ID "exec .venv/bin/python scripts/supervise_run.py \\
+      --config runs/phase-b/RUN_ID/launch-config.json --phase-dir runs/phase-b/RUN_ID \\
+      --tmux-session gdm-RUN_ID > runs/phase-b/RUN_ID/supervisor-console.log 2>&1"
+
+(no ``| tee``: a leftover tee process blocks the idle shutdown below.)
 
 For a budget-track config (e.g. configs/gemini-collab.json, ``budget_track: "gemini"``) the
 ledger is that track's ledger (state/gemini-budget.sqlite), so backups, checkpoints,

@@ -996,3 +996,14 @@ report tab where a report exists). Every receipt reads `verified`; the final rev
 and `no_log_download_link`). A local copy of one run's hosted pages was also checked in a browser (catalogue,
 each tab, incident report, Inspect View loading its log). `baseline100` stays unlisted. Records are in the
 ignored `runs/phase-b/site-incident-nologs-publication-20261021/` directory.
+
+The four GLM oversight runs of October 21, 2026 (`glm-rule6-20261021T224441Z`,
+`glm-baseline-20261021T224732Z`, `glm-overseer-20261021T230007Z`, `glm-overseer-powers-20261021T230325Z`)
+were published together on October 22, 2026 with `prepare_hf_library.py` (four `--run` entries, incident
+reports included) and `publish_hf_library.py --commit`, from base `dd710c6c681824643bdf44df66cc4f9d5b8751e7`
+to `53791397a96c70de752c4076a576699d824b5154` (886 files uploaded, 7,759 preserved, catalogue newest
+first, Space private). `scripts/verify_hosted.py` passed for all four at that revision. With `--bundle`
+only `index.html` differs, as expected: the published catalogue merges the existing entries, the bundle's
+lists only the new runs. Records are in the ignored `runs/phase-b/hf-library-preparation/glm-oversight-4runs-20261022*`.
+The near-live mirror then retired their `live/` entries.
+
