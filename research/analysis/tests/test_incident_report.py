@@ -249,6 +249,12 @@ class PipelineTests(unittest.TestCase):
         self.assertIn('class="kind">Board post<', page)
         self.assertIn("transcript?event=ev13", page)
         self.assertIn('id="rec-post-000001"', page)
+        # The host-computed contagion section and the table of contents (no model involved).
+        self.assertIn('<h2 id="how-the-exploit-spread">', page)
+        self.assertIn('<nav class="toc"', page)
+        self.assertIn("## How the exploit spread", md)
+        self.assertEqual(evidence["contagion"]["computed_by"], "host (no model)")
+        self.assertTrue((fx.out / "contagion.json").exists())
         # Long records went to the extractor; its quotes are verified against the full text.
         long_record = [r for s in evidence["evidence"]["storylines"] for r in s["records"] if r["id"] == "A02.t0001.r"]
         excerpt = long_record[0]["excerpts"][0]

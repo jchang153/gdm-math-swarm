@@ -7,6 +7,9 @@ October 21, 2026), written to RUN/analysis/incident/ (report.html, report.md, ev
   # Offline rehearsal with the deterministic mock model; output OUTSIDE the run directory.
   PYTHONPATH=src:. .venv/bin/python scripts/run_incident_report.py --run-dir runs/<run> --mock \
       --output-dir <scratch>/<run>/analysis/incident
+  # Host only (no model, no budget): recompute "How the exploit spread" and the table of contents and
+  # insert them into the existing report.html, report.md and evidence.json.
+  PYTHONPATH=src:. .venv/bin/python scripts/run_incident_report.py --run-dir runs/<run> --rerender-contagion
 
 One spending control (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)"):
 this run's incident reporting has its own budget, --run-limit USD (default $20). Every invocation
@@ -69,6 +72,10 @@ def parse_args(argv=None):
     parser.add_argument("--no-repair", action="store_true", help="skip the writer's one revision pass")
     parser.add_argument("--no-model-fallback", action="store_true",
                         help="never send a refused unit to the non-Anthropic fallback model")
+    parser.add_argument("--rerender-contagion", action="store_true",
+                        help="host only, no model call and no budget: recompute the 'How the exploit spread' section "
+                             "and the table of contents and insert them into the existing report.html, report.md "
+                             "and evidence.json (idempotent)")
     parser.add_argument("--extract-model", choices=("opus", "sonnet"), default="opus",
                         help="model that picks excerpts of long records by segment number (default opus; "
                              "Sonnet refused Gemini transcripts on gemini10)")
@@ -148,7 +155,20 @@ def main(argv=None):
         log(f"refused: another incident-report invocation holds {out_dir / '.incident.lock'}; nothing was sent")
         return 2
     with lock:
+        if args.rerender_contagion:
+            return _rerender(args, run_dir, out_dir, log)
         return _run(args, run_dir, out_dir, log)
+
+
+def _rerender(args, run_dir, out_dir, log):
+    """--rerender-contagion: host-computed section and table of contents only (no model, no ledger)."""
+    from research.analysis.incident.contagion import rerender
+    record, written = rerender(run_dir, out_dir, judge_dir=args.judge_dir)
+    summary = {"status": "rerendered", "source": record["source"], "exploit_users": record["exploit_users_total"],
+               "techniques": [{"family": t["family"], **t["counts"]} for t in record["techniques"]],
+               "written": written}
+    print(json.dumps(summary, indent=1))
+    return 0
 
 
 def _run(args, run_dir, out_dir, log):

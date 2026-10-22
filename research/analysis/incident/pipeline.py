@@ -33,7 +33,7 @@ import json
 import re
 from pathlib import Path
 
-from . import prompts, render, verify
+from . import contagion, prompts, render, verify
 from .digest import ITEM_ID_RE, Locator, build_digest, digest_text
 
 SCHEMA = "gdm-incident-evidence/2"
@@ -585,6 +585,9 @@ class IncidentPipeline:
     # -- whole run -----------------------------------------------------------------
     async def run(self):
         generated = _now()
+        # Host-computed, before any model stage: written to contagion.json even if a model stage fails.
+        spread = contagion.compute(self.run_dir, judge_dir=self.judge_dir)
+        write_json(self.out_dir / "contagion.json", spread)
         digest = build_digest(self.run_dir, self.history, judge_dir=self.judge_dir)
         write_json(self.out_dir / "digest.json", digest)
         for agent in digest["agents"].values():
@@ -605,9 +608,11 @@ class IncidentPipeline:
             + render.appendix_markdown(evidence, self.locator, digest)
         checks = verify.verify_markdown(body, self.locator.item)
         markdown = render.banner_markdown(generated) + render.reader_markdown(body, checks, self.locator, evidence)
+        markdown = contagion.insert_markdown(markdown, spread)
         (self.out_dir / "report.md").write_text(markdown, encoding="utf-8")
         page = render.render_html(body, checks, self.locator, digest, generated_at=generated, models=self.models,
                                   evidence=evidence)
+        page = render.add_toc(contagion.insert_html(page, spread))
         (self.out_dir / "report.html").write_text(page, encoding="utf-8")
         record = {"schema": SCHEMA, "run_id": digest["run_id"], "generated_at": generated, "mode": self.mode,
                   "model_generated": True, "post_hoc": True, "models": self.models, "prompts": prompts.VERSION,
@@ -622,7 +627,8 @@ class IncidentPipeline:
                   "extract_refusals": self.extract_refusals, "model_fallbacks": self.model_fallbacks,
                   "evidence": evidence,
                   "locators": {item_id: self.locator.locate(item_id) for item_id in evidence["cited_ids"]},
-                  "inspect_view_present": self.locator.inspect_view_present, "units": self.units}
+                  "inspect_view_present": self.locator.inspect_view_present, "units": self.units,
+                  "contagion": spread}
         write_json(self.out_dir / "evidence.json", record)
         return {"status": "complete", "report": str(self.out_dir / "report.html"),
                 "verification": checks["summary"],

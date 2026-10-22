@@ -407,7 +407,7 @@ def render_html(markdown, checks, locator, digest, *, generated_at, models, evid
     else:
         body = f"<h1>{html.escape(title)}</h1>\n<p class=\"runline\">{run_line}</p>\n" + body
     model_line = ", ".join(f"{k}: {v}" for k, v in sorted(models.items()))
-    return ("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
+    return add_toc("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             f"<title>{html.escape(_plain_title(title))}</title><meta name=\"robots\" content=\"noindex\">"
             f"<style>{STYLE}</style>{KATEX}</head><body><main>"
@@ -523,3 +523,102 @@ def insert_into_section(markdown, heading, text):
 
 def banner_markdown(generated_at):
     return f"> **Model-generated.** {BANNER} Generated {generated_at}.\n\n"
+
+
+# ---------------------------------------------------------------------------
+# Table of contents (owner request, October 22, 2026): a sticky left-margin list on wide screens, a
+# "Contents" button at the top on narrow ones; the section in view is highlighted (IntersectionObserver)
+# and a thin bar shows reading progress. Inline CSS and JS only (works offline and on the static site).
+
+TOC_START, TOC_END = "<!-- toc:start -->", "<!-- toc:end -->"
+TOC_SUBSECTIONS = ("case-studies", "how-the-exploit-spread")
+TOC_STYLE = """
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+h2[id],h3[id]{scroll-margin-top:16px}
+.readbar{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:20;pointer-events:none}
+nav.toc{font:13.5px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;color:var(--muted)}
+nav.toc ol{list-style:none;margin:0;padding:0}
+nav.toc ol ol{padding-left:12px;margin:2px 0 4px}
+nav.toc a{display:block;color:var(--muted);text-decoration:none;padding:3px 8px;border-left:2px solid transparent;
+border-radius:0 4px 4px 0}
+nav.toc a:hover{color:var(--fg);background:rgba(127,127,127,.08)}
+nav.toc a.active{color:var(--fg);border-left-color:var(--accent);font-weight:600}
+nav.toc .toc-title{font-weight:700;text-transform:uppercase;letter-spacing:.06em;font-size:11.5px;margin:0 0 8px 10px}
+nav.toc .toc-toggle{display:none}
+@media (min-width:1240px){
+nav.toc{position:fixed;top:72px;left:max(16px,calc(50% - 380px - 250px));width:220px;max-height:calc(100vh - 96px);
+overflow-y:auto;padding-bottom:12px}
+}
+@media (max-width:1239.98px){
+nav.toc{max-width:760px;margin:12px auto 0;padding:0 16px}
+nav.toc .toc-title{display:none}
+nav.toc .toc-toggle{display:inline-flex;align-items:center;gap:6px;font:600 14px/1 -apple-system,BlinkMacSystemFont,
+"Segoe UI",Helvetica,Arial,sans-serif;color:var(--fg);background:var(--card);border:1px solid var(--rule);
+border-radius:6px;padding:8px 12px;cursor:pointer}
+nav.toc.js > ol{display:none;margin-top:8px;background:var(--card);border:1px solid var(--rule);border-radius:6px;
+padding:6px 4px}
+nav.toc.js.open > ol{display:block}
+}
+"""
+TOC_SCRIPT = """
+(function(){
+var nav=document.querySelector('nav.toc');if(!nav)return;nav.classList.add('js');
+var btn=nav.querySelector('.toc-toggle');
+btn.addEventListener('click',function(){var o=nav.classList.toggle('open');btn.setAttribute('aria-expanded',o)});
+nav.addEventListener('click',function(e){if(e.target.tagName==='A'&&btn.offsetParent!==null){nav.classList.remove('open');
+btn.setAttribute('aria-expanded','false')}});
+var links=[].slice.call(nav.querySelectorAll('a[href^="#"]'));
+var heads=links.map(function(a){return document.getElementById(decodeURIComponent(a.getAttribute('href').slice(1)))});
+var bar=document.querySelector('.readbar');
+function update(){var cur=-1;for(var i=0;i<heads.length;i++){if(heads[i]&&heads[i].getBoundingClientRect().top<=window.innerHeight*0.25)cur=i}
+links.forEach(function(a,i){a.classList.toggle('active',i===cur)});
+if(bar){var h=document.documentElement;var max=h.scrollHeight-h.clientHeight;bar.style.width=(max>0?Math.min(100,100*h.scrollTop/max):0)+'%'}}
+if('IntersectionObserver' in window){var io=new IntersectionObserver(update,{rootMargin:'0px 0px -75% 0px',threshold:[0,1]});
+heads.forEach(function(h){if(h)io.observe(h)})}
+var queued=false;window.addEventListener('scroll',function(){if(!queued){queued=true;requestAnimationFrame(function(){queued=false;update()})}},{passive:true});
+window.addEventListener('resize',update);update();
+})();
+"""
+
+
+def _heading_text(fragment):
+    return html.unescape(re.sub(r"<[^>]+>", "", fragment)).strip()
+
+
+def toc_entries(page):
+    """[(id, text, [(id, text), ...])] for the page's h2 sections, with h3 sub-entries under the
+    case studies and the contagion section."""
+    entries = []
+    for match in re.finditer(r'<h([23]) id="([^"]+)"[^>]*>(.*?)</h\1>', page, re.S):
+        level, ident, text = match.group(1), match.group(2), _heading_text(match.group(3))
+        if level == "2":
+            entries.append((ident, text, []))
+        elif entries and entries[-1][0] in TOC_SUBSECTIONS:
+            entries[-1][2].append((ident, text))
+    return entries
+
+
+def _strip_toc(page):
+    page = re.sub(re.escape(TOC_START) + r".*?" + re.escape(TOC_END), "", page, flags=re.S)
+    return re.sub(r'<style id="toc-style">.*?</style>|<script id="toc-script">.*?</script>', "", page, flags=re.S)
+
+
+def add_toc(page):
+    """The page with its table of contents, reading-progress bar, style and script (idempotent)."""
+    page = _strip_toc(page)
+    entries = toc_entries(page)
+    if not entries:
+        return page
+    items = []
+    for ident, text, subs in entries:
+        sub = ("<ol>" + "".join(f'<li><a href="#{html.escape(i)}">{html.escape(t)}</a></li>' for i, t in subs)
+               + "</ol>") if subs else ""
+        items.append(f'<li><a href="#{html.escape(ident)}">{html.escape(text)}</a>{sub}</li>')
+    nav = (f'{TOC_START}<div class="readbar" aria-hidden="true"></div>'
+           '<nav class="toc" aria-label="Contents"><p class="toc-title">Contents</p>'
+           '<button class="toc-toggle" type="button" aria-expanded="false">&#9776; Contents</button>'
+           f'<ol>{"".join(items)}</ol></nav>{TOC_END}')
+    page = page.replace("</head>", f'<style id="toc-style">{TOC_STYLE}</style></head>', 1)
+    page = re.sub(r"(<body[^>]*>)", lambda m: m.group(1) + nav, page, count=1)
+    return page.replace("</body>", f'<script id="toc-script">{TOC_SCRIPT}</script></body>', 1)

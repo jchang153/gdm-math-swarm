@@ -202,6 +202,13 @@ The full reference is `docs/gcp-vm.md` and `docs/validation.md`.
      report with excerpts verified word for word, in the OpenAI misalignment-report
      style.
    - It runs automatically after the judge.
+   - Every report has a host-computed (no model) section "How the exploit spread"
+     (`research/analysis/incident/contagion.py`, 2026-10-22): an outbreak curve and per-technique
+     transmission trees as inline SVG, from the judge's verified findings or, without a judge, the
+     deterministic answer-field and `decide +native` detectors; plus a LessWrong-style table of contents
+     (sticky left margin on desktop, "Contents" button on phones, scroll highlighting, progress bar).
+     Backfill or refresh an existing report with no model call:
+     `scripts/run_incident_report.py --run-dir runs/<id> --rerender-contagion`.
    - If Anthropic refuses a step, that step goes once to openai/gpt-5.6-sol and is
      flagged. Refused, unbilled calls settle at $0 through OpenRouter's generation
      lookup.
