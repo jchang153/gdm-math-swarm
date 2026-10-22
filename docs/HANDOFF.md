@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-22 by Claude (Opus 5.5) session (glm100-repeat2 behavior judge added to the HF Space).
+Last updated: 2026-10-22 by Claude (Opus 5.5) session (incident reports: contagion section and table of contents, backfilled and republished).
 
 ## What the project is
 
@@ -72,9 +72,9 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
     theme and phone layout. Agent transcripts are read in Inspect View (no custom
     transcript view); raw `.eval` files stay published for Inspect View but are not
     linked as downloads.
-  - Live as of 2026-10-22 at Space revision `0a4ba2fcd9d4408106bdb15e84c85a9bf44c7283`
+  - Live as of 2026-10-22 at Space revision `8982306161852f279cb846ceb64fe228200f24fa` (incident-report re-render)
     (private, 16 listed runs plus unlisted baseline100).
-  - **Storage: 918.7 MB used of the free plan's 1 GB** (HF counts LFS across history). On 2026-10-22
+  - **Storage: 920.0 MB used (2026-10-22, after the incident re-render) of the free plan's 1 GB** (HF counts LFS across history). On 2026-10-22
     the Space hit the limit (981.9 MB; repeat2/3 publication got "403 Storage limit reached"). Owner:
     "Let's start by first just pruning old runs". `maintain_hf_run.py --scope prune` removed 292.7 MB of
     raw LFS files of the old DeepSeek runs (cache100 171.8, baseline8g100 78.0, baseline100 36.7, pilot 6.3;
@@ -209,6 +209,18 @@ The full reference is `docs/gcp-vm.md` and `docs/validation.md`.
      (sticky left margin on desktop, "Contents" button on phones, scroll highlighting, progress bar).
      Backfill or refresh an existing report with no model call:
      `scripts/run_incident_report.py --run-dir runs/<id> --rerender-contagion`.
+     All 13 local incident reports (gemini10, the 4 owner-*, the 4 glm-* oversight runs, glm10-baseline-2h
+     and the 3 glm100 runs) were re-rendered on 2026-10-22 (originals in the session scratchpad only) and
+     republished with `maintain_hf_run.py --scope incident`, one verified commit each, ending at Space
+     revision `8982306161852f279cb846ceb64fe228200f24fa` (`used_storage` still 920.0 MB right after).
+     Records: `runs/phase-b/incident-contagion-publication-20261022/`; bundles (minimal: the three
+     incident files plus the run exports copied from the Space, because many raw run files are iCloud
+     "dataless" on the owner's Mac and a full `prepare_hf_library.py` hangs on them):
+     `runs/phase-b/hf-library-preparation/incident-contagion-20261022/`.
+     Detector counts (the owner's checks): glm100-baseline-30m 15 users, 1 independent (agent-026),
+     8 credits; repeat2 20 users, 2 independent (008, 064), 24 credits; repeat3 2 users, both independent
+     (058, 020), 1 credit. The reports use the judge where one exists; its findings give the same users but
+     7 credits on baseline-30m (it missed agent-032's Erdos567 credit), shown as a cross-check line.
    - If Anthropic refuses a step, that step goes once to openai/gpt-5.6-sol and is
      flagged. Refused, unbilled calls settle at $0 through OpenRouter's generation
      lookup.
