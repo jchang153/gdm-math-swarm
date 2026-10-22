@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-22 22:05 UTC by Claude (Opus 5.5) session (logs dataset: code on main, Inspect logs copied and verified; test deployment and download-only move pending; earlier: glm100-baseline-90m done).
+Last updated: 2026-10-22 22:15 UTC by Claude (Opus 5.5) session (dataset migration progress, disk cleanup, planned ~/code move, resume bundle).
 
 ## What the project is
 
@@ -293,7 +293,7 @@ rule (originally rule 6; the old rule 7 becomes 6).
 The configs and multi-model harness fixes are on branch `owner-multimodel`, which
 is being merged into main via `collab-env`.
 
-## In flight as of 2026-10-22 20:45 UTC (check status before redoing anything)
+## In flight as of 2026-10-22 22:15 UTC (check status before redoing anything)
 
 1. **`glm100-baseline-90m-20261022T183812Z`: done 2026-10-22** (headline under "Runs so far"). Retrieved to the
    Mac with checksums (`runs/phase-b/retrieval-glm100-baseline-90m/`), VM owner-vm stopped and set back to
@@ -311,17 +311,37 @@ is being merged into main via `collab-env`.
      shim; no stored secret.
    - **Done:** all 17 published runs' `.eval` logs copied to the dataset (275.3 MB, commit `b4f10b10`) and verified
      (size + SHA-256 vs the Space copy, 15 also vs local copies, 206 ranged reads). The Space is unchanged.
-   - **Pending (stopped by the agent's permission check; needs the operator's go-ahead):** deploy `logs-test/`
-     (command under "Next steps"), then copy + delete the download-only files (.jsonl, snapshots, .db/.sqlite,
-     `transcripts/`; about 544 MB of `used_storage`), with links repointed to the dataset.
-   - **`.eval` logs:** kept in the Space until the owner completes a test sign-in; deleting them (275 MB) needs
-     that confirmation.
+   - **Owner approvals (2026-10-22):** push code (done, main 6fd29bf); deploy `logs-test/` (done, Space 7803413,
+     catalogue re-rendered with the `?page=` deep-link handler); **the owner signed in and confirmed Inspect View loaded
+     a log from the dataset and opened a transcript**; move the download-only files; "do all of those" = switch every
+     run's Inspect View to the dataset, then delete the Space `.eval` copies.
+   - **RUNNING:** `maintain_hf_run.py --all-published-runs --scope migrate-logs --migrate-category jsonl/snapshots/
+     database/transcripts --delete-moved --commit` (copy, verify, repoint links, delete from Space; about 544 MB).
+     Receipt and log: `runs/phase-b/hf-library-preparation/logs-migration-20261022/raw-files/`.
+   - **NEXT (an agent, after the move exits):** build and run `switch` (shim plus signin on every run's Inspect View),
+     then `delete-eval` (delete the Space .eval copies and purge LFS, 275 MB), then `verify_hosted --expect-no-space-logs`.
+     After this, every viewer signs in with HF once per browser to see transcripts. Work happens in a clean clone
+     (scratchpad `clone/`), because the main checkout's git is blocked by iCloud.
    - Future publishes (`publish_hf_library.py`) and the live mirror put these file types straight into the dataset.
    - Space storage is about 920 MB of its 1 GB per-Space cap (not raisable). Private datasets count
      against the account quota (about 100 GB free).
-3. **Local machine:** the repo lives under `~/Documents` (iCloud). Files were being offloaded
-   ("dataless"), which hung scripts. On 2026-10-22 the owner set "Keep Downloaded" on all GitHub projects.
-   If reads still hang, `brctl download <path>`.
+3. **Local machine.** The repo lives under `~/Documents` (iCloud); offloaded ("dataless") files hung git and scripts.
+   - **Disk:** the Mac was 98% full, which caused the eviction. On 2026-10-22 the owner approved clearing Docker (all
+     images, keeping the 2 healing-agent-swarms volumes), app caches and the HF download cache (token kept). Free
+     space went from 11 GB to 66 GB.
+   - **Download backlog:** about 170k files across `~/Documents/GitHub`, `Codex` and `Codex Projects` were still
+     cloud-only at 21:30 UTC. A read-only counter is running; the owner asked for no other download operations.
+   - **Planned move (approved):** `~/Documents/GitHub/*`, `~/Documents/Codex` and `~/Documents/Codex Projects` go to
+     `~/code/` once all files are downloaded and no agent works in the repo. Afterwards: `git worktree repair`,
+     check `.venv`, update absolute paths in docs, copy Claude memory to the new project path, and remind the owner
+     to re-locate repos in GitHub Desktop and to point the Codex app at `~/code/Codex`. Codex folders aren't git
+     repos, so after the move only Time Machine backs them up.
+   - **Until then,** use a fresh clone in the scratchpad for git (the main checkout's `git status` hangs on 60+
+     offloaded objects).
+4. **Resume bundle** (an agent, worktree `.worktrees/run-continue`): feasibility assessment of continuing finished
+   runs; then build saving only (session JSONLs, workspace tarballs, manifest, in-flight list, optional checkpoints)
+   so future runs are extendable. No continuation tool yet (owner: "don't build it yet", then "go ahead" for saving).
+   It may be blocked by the iCloud git issue; check its status.
 
 **Done recently (details under "Runs so far"):**
 - The neutral collab environment is in use since 2026-10-21; its runtime risks (moved config dir,
