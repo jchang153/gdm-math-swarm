@@ -83,6 +83,14 @@ snapshot digests must equal the archive manifest; deletions go in guarded, revis
 after the archive is uploaded and verified, archive-manifest.json last. The catalogue and every other
 file stay unchanged. An interrupted update continues when the scope is run again.
 
+--scope prune (no --bundle; --runs-dir, default runs/) removes a published run's large raw LFS files to free
+storage (owner, October 22, 2026: "Let's start by first just pruning old runs", HF's 1 GB limit): by default
+its .jsonl records and snapshots.tar.gz (--prune-kind eval also removes the Inspect logs). Each must first
+match the local run records byte for byte (the archive is rebuilt from runs/RUN/snapshots/). One pinned commit
+deletes them, adds a "Raw records kept offline" notice listing them to RUN/results.html and moves their
+archive-manifest.json records to offline_files; then their LFS objects, no longer referenced at the head, are
+permanently deleted without rewriting history (--no-purge keeps them). Rerunning continues from the current state.
+
 Default: read-only plan pinned to the current Space revision. --commit first writes the
 receipt, a before-inventory, backups of the originals and the plan, then uploads in guarded
 batches (catalogue or manifest last), verifies the result against the original pre-maintenance
@@ -94,8 +102,10 @@ credential or starts an experiment.
 """
 import argparse
 import fnmatch
+import html
 import json
 from pathlib import Path
+import re
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -106,8 +116,8 @@ from prepare_hf_library import judge_excluded
 from publish_hf_library import (DEFAULT_REPO, RUN_ID, batches, digest, load_bundle, matches,
                                 merge_entries, payload, remote_files, validate_lfs_additions)
 
-SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'site', 'unlist', 'snapshots', 'incident')
-NO_BUNDLE = ('unlist', 'snapshots')
+SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'site', 'unlist', 'snapshots', 'incident', 'prune')
+NO_BUNDLE = ('unlist', 'snapshots', 'prune')
 REPLACEABLE = ('results.html', 'results.json')
 INSPECT_VIEW = 'inspect-view/'
 INSPECT_PAGE = INSPECT_VIEW + 'index.html'
@@ -1456,6 +1466,240 @@ def archive_snapshots(api, download, *, run, runs_dir, commit=False, repo=DEFAUL
     return result
 
 
+# --scope prune (owner, October 22, 2026: "Let's start by first just pruning old runs"; HF's 1 GB storage limit).
+PRUNE_KINDS = {
+    'jsonl': ('raw JSONL record', lambda rel: rel.endswith('.jsonl')),
+    'snapshots': ('runtime file snapshot archive', lambda rel: rel == 'snapshots.tar.gz'),
+    'eval': ('raw Inspect log', lambda rel: rel.endswith('.eval')),
+}
+PRUNE_DEFAULT = ('jsonl', 'snapshots')
+OFFLINE_KEY = 'offline_files'  # archive-manifest.json: pruned file -> digest, removal date and description
+OFFLINE_MARKER = 'id="raw-records-offline"'
+_OFFLINE_NOTE = re.compile(r'<aside id="raw-records-offline"[^>]*>.*?</aside>', re.S)
+
+
+def offline_note(run, records):
+    """The run page's notice listing the run's pruned files (from archive-manifest.json offline_files)."""
+    prefix = run + '/'
+    rows = ''.join(f'<li><code>{html.escape(n[len(prefix):])}</code> ({r["bytes"] / 1e6:.1f} MB, '
+                   f'{html.escape(r.get("description", "raw file"))}, removed {html.escape(r.get("removed", ""))})</li>'
+                   for n, r in sorted(records.items()))
+    logs = any(n.endswith('.eval') for n in records)
+    affected = ('Inspect View cannot load this run any more (its Inspect logs are offline); this report, the '
+                'conference view and the transcripts are unaffected.' if logs else
+                'This report, the conference view, the transcripts and Inspect View are unaffected.')
+    return (f'<aside id="raw-records-offline" role="note" style="border:1px solid var(--line,#d0d7de);'
+            f'border-left:4px solid var(--accent,#9a6700);border-radius:6px;padding:10px 14px;margin:12px 0;'
+            f'background:var(--card,transparent)"><strong>Raw records kept offline.</strong> To stay within the '
+            f'library\'s 1 GB storage limit, these raw files of this run were removed from this Space; the '
+            f'researchers keep the complete originals offline with the local run records, and their sizes and '
+            f'SHA-256 digests stay recorded in <code>archive-manifest.json</code> ({OFFLINE_KEY}). {affected}'
+            f'<ul>{rows}</ul></aside>')
+
+
+def with_offline_note(document, run, records):
+    """results.html with the offline notice (replaced if present, else inserted after the first </h1>)."""
+    note = offline_note(run, records)
+    if OFFLINE_MARKER in document:
+        return _OFFLINE_NOTE.sub(lambda _: note, document, count=1)
+    if '</h1>' not in document:
+        raise ValueError('results.html has no heading to place the offline notice after')
+    return document.replace('</h1>', '</h1>' + note, 1)
+
+
+def prune_run(api, download, *, run, runs_dir, commit=False, repo=DEFAULT_REPO, receipt=None, backup_dir=None,
+              operation=None, delete_operation=None, kinds=PRUNE_DEFAULT, removed=None, purge=True):
+    """--scope prune: remove one published run's large raw files (LFS-stored .jsonl records and the snapshot
+    archive by default; .eval Inspect logs only with kind 'eval') from the Space to free storage, keeping the
+    run listed with its report, conference view, judge and incident pages.
+
+    Before any write every pruned file must exist in the local run records (runs_dir/RUN) with the published
+    SHA-256 (the snapshot archive is rebuilt deterministically from runs_dir/RUN/snapshots/), so nothing removed
+    is lost; the local copies are only read. One commit pinned to the planned revision deletes the files,
+    replaces RUN/results.html with the published page plus a notice that lists the offline files, and moves
+    their records in archive-manifest.json from files to offline_files. Every other file, the catalogue and
+    .gitattributes stay unchanged (verified). HF counts LFS storage across history, so afterwards (purge=True)
+    the LFS objects of the run's offline files that no file of the new head references are permanently deleted
+    without rewriting history (permanently_delete_lfs_files, rewrite_history=False): earlier revisions then lack
+    those files. Running the scope again continues from the current state (notice, manifest, purge)."""
+    import datetime
+    from prepare_hf_library import SNAPSHOT_ARCHIVE, snapshot_archive
+    if not isinstance(run, str) or not RUN_ID.fullmatch(run):
+        raise ValueError('Invalid run ID')
+    unknown_kinds = sorted(set(kinds) - set(PRUNE_KINDS))
+    if not kinds or unknown_kinds:
+        raise ValueError('Unknown prune kind(s): ' + ', '.join(unknown_kinds or ['(none)']))
+    check_outputs(None, receipt, backup_dir, commit, operation)
+    if commit and delete_operation is None:
+        raise ValueError('Committing requires a delete operation factory')
+    removed = removed or datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+    source = Path(runs_dir) / run
+    if source.is_symlink() or not source.is_dir():
+        raise ValueError('Local run records not found: ' + str(source))
+    info = api.repo_info(repo, repo_type='space', files_metadata=True)
+    if not info.private:
+        raise ValueError('Maintenance requires a private Space')
+    base = info.sha
+    remote = remote_files(api, repo, base)
+    current = inventory(remote)
+
+    def fetch(name, revision=base, listing=None):
+        listing = remote if listing is None else listing
+        data = Path(download(repo, name, repo_type='space', revision=revision)).read_bytes()
+        if not matches(data, listing[name]):
+            raise ValueError('Remote metadata mismatch: ' + name)
+        return data
+
+    prefix = run + '/'
+    page = prefix + 'results.html'
+    for name in (MANIFEST, page):
+        if name not in remote:
+            raise ValueError('Remote file required for maintenance is missing: ' + name)
+    root = json.loads(fetch(MANIFEST))
+    if root.get('schema') != 'gdm-private-space/1' or root.get('warnings') or run not in root.get('runs', []):
+        raise ValueError('Remote archive manifest needs review or does not list the run: ' + run)
+    selected = {}
+    for name, item in remote.items():
+        rel = name[len(prefix):] if name.startswith(prefix) else None
+        if rel is None or not item.lfs:
+            continue  # only LFS objects free storage when removed
+        for kind in kinds:
+            label, chosen = PRUNE_KINDS[kind]
+            if chosen(rel):
+                selected[name] = label
+    # Local originals must exist with the published bytes before anything is removed.
+    verified = {}
+    archive = None
+    for name in sorted(selected):
+        rel = name[len(prefix):]
+        if rel == SNAPSHOT_ARCHIVE:
+            if archive is None:
+                packed = snapshot_archive(source, run)
+                if packed is None:
+                    raise ValueError('The local run has no snapshots/ to rebuild the archive from; nothing is removed')
+                archive = packed[0]
+            data = archive
+            origin = str(source / 'snapshots') + '/ (rebuilt archive)'
+        else:
+            path = source / rel
+            if path.is_symlink() or not path.is_file():
+                raise ValueError('Local original missing; nothing is removed: ' + str(path))
+            data = path.read_bytes()
+            origin = str(path)
+        if not matches(data, remote[name]):
+            raise ValueError('Local original differs from the published file; nothing is removed: ' + name)
+        verified[name] = {**digest(data), 'local': origin}
+        recorded = root['files'].get(name)
+        if recorded is not None and recorded != digest(data):
+            raise ValueError('archive-manifest.json records other bytes for ' + name)
+    offline = dict(root.get(OFFLINE_KEY, {}))
+    for name in verified:
+        offline[name] = {'bytes': verified[name]['bytes'], 'sha256': verified[name]['sha256'],
+                         'removed': removed, 'description': selected[name]}
+    run_offline = {n: r for n, r in offline.items() if n.startswith(prefix)}
+    published_page = fetch(page)
+    planned = {}
+    if run_offline:
+        new_page = with_offline_note(published_page.decode('utf-8'), run, run_offline).encode('utf-8')
+        if new_page != published_page:
+            planned[page] = new_page
+    files = {n: d for n, d in root['files'].items() if n not in verified}
+    for name, data in planned.items():
+        files[name] = digest(data)
+    new_root = {**root, 'files': files, 'total_bytes': sum(x['bytes'] for x in files.values()), OFFLINE_KEY: offline}
+    if new_root != root:
+        planned[MANIFEST] = json.dumps(new_root, indent=2).encode()
+    deletions = sorted(verified)
+    result = {'operation': 'maintain-run', 'scope': 'prune', 'repo': repo, 'private': True, 'run': run,
+              'base_revision': base, 'committed': False, 'kinds': list(kinds),
+              'to_delete': [{'path': n, 'bytes': verified[n]['bytes'], 'sha256': verified[n]['sha256'],
+                             'description': selected[n], 'local_original': verified[n]['local']} for n in deletions],
+              'delete_bytes': sum(verified[n]['bytes'] for n in deletions),
+              'local_originals_verified': len(deletions), 'to_upload': sorted(planned),
+              'offline_files_of_run': len(run_offline), 'files_before': len(remote),
+              'files_after': len(remote) - len(deletions), 'already_applied': not deletions and not planned}
+    for name, data in planned.items():
+        if len(data) >= LFS_SAFE_BYTES or remote[name].lfs:
+            raise ValueError('A planned file is or would become LFS: ' + name)
+    if not commit:
+        return result
+
+    backup_dir, receipt = Path(backup_dir), Path(receipt)
+    revision = base
+
+    def write_receipt(status):
+        write_json(receipt, {**result, 'last_revision': revision, 'status': status})
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if not result['already_applied']:
+            write_receipt('writing backups; nothing uploaded')
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            write_json(backup_dir / INVENTORY, {'operation': 'maintain-run', 'scope': 'prune', 'repo': repo,
+                                                'run': run, 'revision': base, 'origin_revision': base,
+                                                'resume_from': None, 'files': current})
+            for name in [MANIFEST, page, *([ATTRIBUTES] if ATTRIBUTES in remote else [])]:
+                target = backup_dir / ORIGINAL / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(fetch(name))
+            write_json(backup_dir / 'deleted.json', result['to_delete'])
+            write_json(backup_dir / PLAN, result)
+            result.update(backup_dir=str(backup_dir))
+            write_receipt('backups written; nothing uploaded')
+            latest = api.repo_info(repo, repo_type='space')
+            if not latest.private or latest.sha != base:
+                raise ValueError('Space changed concurrently or is no longer private; run the scope again')
+            response = api.create_commit(
+                repo_id=repo, repo_type='space', parent_commit=base,
+                commit_message=f'Prune {run}: remove {len(deletions)} raw file(s) kept offline '
+                               f'({result["delete_bytes"] / 1e6:.1f} MB; page notice, manifest offline records)',
+                operations=[*(delete_operation(path_in_repo=n) for n in deletions),
+                            *(operation(path_in_repo=n, path_or_fileobj=d) for n, d in planned.items())])
+            revision = response.oid
+            write_receipt('committed; verifying')
+            final = api.repo_info(repo, repo_type='space', files_metadata=True)
+            if not final.private or final.sha != revision:
+                raise ValueError('Space changed before verification; inspect the latest revision')
+            final_files = remote_files(api, repo, revision)
+            state = inventory(final_files)
+            expected = set(current) - set(deletions)
+            if set(state) != expected:
+                raise ValueError(f'Remote file inventory changed unexpectedly: missing '
+                                 f'{sorted(expected - set(state))[:EXAMPLES]}, unexpected '
+                                 f'{sorted(set(state) - expected)[:EXAMPLES]}')
+            for name in expected:
+                if name not in planned and not same(current[name], state[name]):
+                    raise ValueError('Unrelated remote file changed: ' + name)
+            for name, data in planned.items():
+                if final_files[name].lfs or not matches(data, final_files[name]):
+                    raise ValueError('File mismatch or stored as LFS after maintenance: ' + name)
+            result.update(committed=True, final_revision=revision, verification={
+                'final_files': len(state), 'deleted': len(deletions),
+                'verified_preserved_files': len(expected - set(planned)), 'gitattributes': 'unchanged'})
+        if purge and run_offline:
+            write_receipt('verified; purging unreferenced LFS objects')
+            referenced = {item.lfs.sha256 for item in api.list_repo_tree(repo, repo_type='space', revision=revision,
+                                                                           recursive=True)
+                          if getattr(item, 'lfs', None) is not None}
+            wanted = {r['sha256'] for r in run_offline.values()} - referenced
+            objects = [f for f in api.list_lfs_files(repo, repo_type='space')
+                       if (f.file_oid in wanted or f.oid in wanted) and str(f.filename).startswith(prefix)]
+            if objects:
+                api.permanently_delete_lfs_files(repo, objects, rewrite_history=False, repo_type='space')
+            result.update(purged_lfs_objects=[{'filename': str(f.filename), 'sha256': f.file_oid, 'size': f.size}
+                                              for f in objects],
+                          purged_bytes=sum(f.size for f in objects))
+    except Exception as error:
+        try:
+            write_receipt('failed: ' + type(error).__name__ + (': ' + str(error) if isinstance(error, ValueError) else ''))
+        except Exception as receipt_error:  # never hide the original error
+            print(f'Could not record the failure in the receipt {receipt}: {type(receipt_error).__name__}: '
+                  f'{receipt_error}', file=sys.stderr)
+        raise
+    result.update(status='verified')
+    write_receipt('verified')
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     target = parser.add_mutually_exclusive_group(required=True)
@@ -1477,7 +1721,14 @@ def main(argv=None):
                              'snapshots: RUN/snapshots/ loose files replaced by RUN/snapshots.tar.gz and its '
                              'manifest (verified member by member), catalogue unchanged; incident: '
                              'RUN/analysis/incident/{report.html,report.md,evidence.json}, the Incident report tab '
-                             'of the published RUN/results.html and the Incident report link of the catalogue entry')
+                             'of the published RUN/results.html and the Incident report link of the catalogue entry; '
+                             'prune: remove the run\'s large raw LFS files (kept offline, verified against --runs-dir), '
+                             'add the offline notice to RUN/results.html and purge the freed LFS objects')
+    parser.add_argument('--prune-kind', action='append', choices=sorted(PRUNE_KINDS),
+                        help='prune scope: file kinds to remove (repeatable; default jsonl and snapshots; eval also '
+                             'removes the Inspect logs, after which Inspect View cannot load the run)')
+    parser.add_argument('--no-purge', action='store_true',
+                        help='prune scope: keep the removed files\' LFS objects in history (storage is not freed)')
     parser.add_argument('--replace-judge', action='store_true',
                         help='judge scope only: replace published judge files of another judge build (for example '
                              'a re-run under a newer rubric) instead of refusing them; published judge files the '
@@ -1507,7 +1758,7 @@ def main(argv=None):
                                     operation=CommitOperationAdd), indent=2))
         return
     if (args.scope in NO_BUNDLE) == (args.bundle is not None):
-        parser.error('--bundle is required, except for --scope unlist or snapshots, which take none')
+        parser.error('--bundle is required, except for --scope unlist, snapshots or prune, which take none')
     if args.resume_from is not None and args.scope in (*NO_BUNDLE, 'incident'):
         parser.error('--scope ' + args.scope + ' takes no --resume-from; run it again, it continues from the '
                      'current state')
@@ -1518,7 +1769,17 @@ def main(argv=None):
     for path, flag in ((args.receipt, '--receipt'), (args.backup_dir, '--backup-dir')):
         if path is not None and args.bundle is not None and not outside(path, args.bundle):
             parser.error(flag + ' must be outside the immutable prepared bundle')
+    if (args.prune_kind or args.no_purge) and args.scope != 'prune':
+        parser.error('--prune-kind and --no-purge apply only to --scope prune')
     from huggingface_hub import HfApi, CommitOperationAdd, hf_hub_download
+    if args.scope == 'prune':
+        from huggingface_hub import CommitOperationDelete
+        print(json.dumps(prune_run(HfApi(), hf_hub_download, run=args.maintain_run, runs_dir=args.runs_dir,
+                                   commit=args.commit, repo=args.repo_id, receipt=args.receipt,
+                                   backup_dir=args.backup_dir, operation=CommitOperationAdd,
+                                   delete_operation=CommitOperationDelete,
+                                   kinds=tuple(args.prune_kind or PRUNE_DEFAULT), purge=not args.no_purge), indent=2))
+        return
     if args.scope == 'snapshots':
         from huggingface_hub import CommitOperationDelete
         print(json.dumps(archive_snapshots(HfApi(), hf_hub_download, run=args.maintain_run, runs_dir=args.runs_dir,

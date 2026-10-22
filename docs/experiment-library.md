@@ -45,7 +45,8 @@ All in `scripts/`; each is documented in its own `--help` and below.
 - `maintain_hf_run.py`: guarded updates of an already published run, `--scope judge` (default),
   `transcripts`, `evaluator`, `results`, `inspect`, `site` or `incident` (`--replace-judge` replaces an already
   published judge build; `site` republishes only regenerated page presentation, see "Site scope" below;
-  `incident` publishes incident reports, see "Incident report outputs"). `--scope unlist` (no `--bundle`) removes a run's catalogue row without deleting files,
+  `incident` publishes incident reports, see "Incident report outputs"; `prune` removes a run's large raw
+  files to free storage, see "Storage limit and pruning"). `--scope unlist` (no `--bundle`) removes a run's catalogue row without deleting files,
   after the run is recorded in the tracked `data/library-unlisted.json`
   (run, date, reason). `build_experiment_index.py` and `publish_hf_library.py` leave recorded runs out
   of the local and hosted lists; `baseline100-20261015T191545Z` is unlisted (October 20, 2026).
@@ -592,6 +593,43 @@ python scripts/maintain_hf_run.py --maintain-run RUN_ID --scope snapshots       
 python scripts/maintain_hf_run.py --maintain-run RUN_ID --scope snapshots --commit \
   --receipt "$OUT/RUN_ID.receipt.json" --backup-dir "$OUT/RUN_ID"
 ```
+
+## Storage limit and pruning
+
+The organization's free plan caps the Space at 1 GB of storage, and HF counts LFS objects across the whole
+history. On October 22, 2026 the Space reached it (`used_storage` 981.9 MB at revision `6d3350b`; 1,110.9 MB of
+LFS files at the head, duplicates counted once by HF), and publishing glm100-repeat2/3 failed with "403 Storage
+limit reached". The owner decided: "Let's start by first just pruning old runs": only the old DeepSeek runs
+(pilot, baseline100, baseline8g100, cache100), keeping every listed run with its page, results, judge and
+report, removing the least useful material first.
+
+`maintain_hf_run.py --maintain-run RUN_ID --scope prune` (no `--bundle`; `--runs-dir`, default `runs/`) removes
+a published run's LFS-stored raw files: by default its `.jsonl` records and `snapshots.tar.gz`
+(`--prune-kind jsonl|snapshots|eval`, repeatable; `eval` also removes the Inspect logs, after which Inspect View
+cannot load that run). Before any write each file must match the local run records byte for byte (the snapshot
+archive is rebuilt deterministically from `runs/RUN/snapshots/`); the local copies are only read. With
+`--commit --receipt FILE --backup-dir DIR` it writes the before-inventory, the original `results.html`,
+`archive-manifest.json` and `.gitattributes`, `deleted.json` and the plan, then makes one commit pinned to the
+planned revision that deletes the files, replaces `RUN/results.html` with the published page plus a "Raw records
+kept offline" notice listing them, and moves their records in `archive-manifest.json` from `files` to
+`offline_files` (bytes, SHA-256, removal date, description). The result is verified (only those files changed;
+catalogue and `.gitattributes` unchanged). Deleting at the head frees nothing by itself, so it then permanently
+deletes the run's offline LFS objects that no file of the new head references (`permanently_delete_lfs_files`,
+`rewrite_history=False`; `--no-purge` keeps them). Revisions keep their IDs, but earlier revisions can no longer
+serve those files. Rerunning continues from the current state and re-adds the notice from `offline_files`, so run
+it again after any later re-render of such a run's `results.html` (for example `--scope site`).
+
+October 22, 2026 (records: `runs/phase-b/hf-library-preparation/prune-20261022/`, including the pre-prune head
+`6d3350b` and its full file listing with sizes): removed 292.7 MB, namely cache100 171.8 MB (`analysis/timeline.jsonl`
+82.2, `snapshots.tar.gz` 79.0, `runtime.jsonl` 10.5), baseline8g100 78.0 MB (`timeline.jsonl` 40.6,
+`snapshots.tar.gz` 37.4), baseline100 36.7 MB (`timeline.jsonl`) and pilot 6.3 MB (`snapshots.tar.gz`); by
+type, `.jsonl` 170.0 MB and `.tar.gz` 122.7 MB (exact bytes in the receipts). Their `.eval` logs, conference
+databases and every page stay published. `used_storage` fell from 981.9 MB to 689.1 MB, so no history squash was
+needed and every revision ID cited in this document still resolves. glm100-repeat2 and glm100-repeat3 were then
+published (head `0a4ba2fc`, `used_storage` 918.7 MB). The next run of about 120 MB will not fit: prune further
+(for example the old runs' `.eval` logs, 117 MB, with `--prune-kind eval`) or, as a last resort the owner accepted
+on October 22, 2026, squash the Space history (`HfApi.super_squash_history`), which makes every earlier revision
+ID cited here stop resolving; write a receipt of the head and its full listing first and record it here.
 
 ## Near-live mirror
 
