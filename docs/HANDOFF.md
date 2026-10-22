@@ -343,7 +343,8 @@ is being merged into main via `collab-env`.
 - **Resume bundle (2026-10-22, saving side only).** Every pilot run now saves `RUN/resume/`: per agent, a
   full archive of `/workspace`, `/tmp` (wiki) and `/home/researcher` (Claude Code session JSONLs), open tool
   calls, the process table, and a run manifest. Optional checkpoints come from `resume_checkpoint_minutes`
-  (off by default). It is packaged in `completed-run.tgz` and never published to the Space. See docs/runtime.md,
+  (off by default). It is packaged in `completed-run.tgz`, never published to the Space, and routed to the private logs
+  dataset (category `resume`) when a run is published. See docs/runtime.md,
   "Resume bundle". No continuation tool exists yet (owner decision). The runs before this one (including
   glm100-baseline-30m, -repeat2 and -repeat3) have only the 5-s snapshots. Those hold every agent's final
   session JSONL, but not deletions, non-text files or `/tmp` outside `/tmp/w`.

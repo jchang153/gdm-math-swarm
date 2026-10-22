@@ -135,21 +135,15 @@ def judge_publication(source):
 # The custom transcript export (scripts/export_transcripts.py, RUN/transcripts/) is local-only:
 # agent transcripts are read in Inspect View (owner, October 21, 2026), so it is not published.
 LOCAL_ONLY_DIRS = frozenset({'transcripts'})
-# The resume bundle (RUN/resume/, research_swarm.resume_bundle: agent session transcripts, workspace
-# archives, the resume manifest) is private raw state for continuing a run (owner, October 22, 2026):
-# it stays in the packaged run and is never published to the Space, with or without other flags.
-PRIVATE_RAW_DIRS = frozenset({'resume'})
 # A page that links the unpublished transcript export was made by an older generator.
 TRANSCRIPT_LINK = re.compile(r'href="(?:\.\./)*transcripts/', re.I)
 
 
 def run_excluded(relative, transcript_export=False):
-    """True for run paths that stay local: the resume bundle (always), the transcript export (unless ``transcript_export``, only
+    """True for run paths that stay local: the transcript export (unless ``transcript_export``, only
     for ``maintain_hf_run.py --scope transcripts`` of runs published with one) and judge files off the
     allowlist."""
     parts = Path(relative).parts
-    if parts and parts[0] in PRIVATE_RAW_DIRS:
-        return True
     return ((not transcript_export and bool(parts) and parts[0] in LOCAL_ONLY_DIRS) or judge_excluded(relative)
             or incident_excluded(relative))
 
@@ -252,6 +246,27 @@ def snapshot_archive_members(archive):
     return members
 
 
+def resume_archive_members(archive):
+    """name -> bytes of the regular files of a resume-bundle agent archive (research_swarm.resume_bundle
+    state.tar.gz), for the credential screen. Unlike a snapshot archive it holds directories, symlinks and
+    dot-folders (the agent's ~/.agent); only absolute or parent-relative member names are refused."""
+    members = {}
+    with tarfile.open(fileobj=io.BytesIO(archive), mode='r:gz') as tar:
+        for info in tar:
+            if info.name.startswith('/') or '..' in info.name.split('/'):
+                raise ValueError('Unsafe resume archive member: ' + info.name)
+            if info.isreg():
+                members[info.name] = tar.extractfile(info).read()
+    return members
+
+
+def archive_members(name, data):
+    """The members to screen of a dataset-bound .tar.gz: resume-bundle archives or snapshot archives."""
+    if '/resume/' in '/' + name.replace('\\', '/'):
+        return resume_archive_members(data)
+    return snapshot_archive_members(data)
+
+
 def check_snapshot_archive(archive, manifest_bytes, run_id):
     """The manifest's member records ({path: {bytes, sha256}}) after checking that the manifest
     describes exactly this archive and its members."""
@@ -313,7 +328,7 @@ def screen_bytes(name, data):
     if SECRET.search(data):
         raise ValueError(f'Credential-like content in {name}; not published')
     if name.endswith('.tar.gz'):
-        for member, content in snapshot_archive_members(data).items():
+        for member, content in archive_members(name, data).items():
             if SECRET.search(content):
                 raise ValueError(f'Credential-like content in a member of {name}; not published')
     if name.endswith('.eval'):

@@ -13,6 +13,9 @@ The Space hits HF's 1 GB repository cap, so (owner, October 22, 2026):
   loose snapshot files, ``.db``/``.sqlite`` databases and the old custom transcript pages
   (``RUN/transcripts/``) go to the dataset at the same ``RUN/<path>``. A page link to one of them points to
   the dataset file page with a note that it is stored in the private logs dataset.
+- **The resume bundle** (``RUN/resume/``, research_swarm.resume_bundle: agent session transcripts, workspace
+  archives, the resume manifest) is private raw state (owner, October 22, 2026): it never goes to the Space;
+  when a run is published it goes to the private dataset at ``RUN/resume/...``.
 
 Everything here uses the operator's own HF login only through ``huggingface_hub``; no token value is
 read, printed or embedded.
@@ -43,8 +46,9 @@ CATEGORIES = {
     'snapshots': 'runtime file snapshot archive',
     'database': 'database file',
     'transcripts': 'custom transcript export (replaced by Inspect View)',
+    'resume': 'resume bundle (private agent state for continuing a run)',
 }
-DOWNLOAD_ONLY = ('jsonl', 'snapshots', 'database', 'transcripts')
+DOWNLOAD_ONLY = ('jsonl', 'snapshots', 'database', 'transcripts', 'resume')
 
 
 def category(relative):
@@ -57,6 +61,8 @@ def category(relative):
         return 'eval'
     if parts[0] == 'transcripts':
         return 'transcripts'
+    if parts[0] == 'resume':  # RUN/resume/ (research_swarm.resume_bundle): private raw state, never the Space
+        return 'resume'
     if parts[0] == 'snapshots' or name in ('snapshots.tar.gz', 'snapshots.manifest.json'):
         return 'snapshots'
     if name.endswith('.jsonl'):

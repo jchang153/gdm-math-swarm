@@ -534,9 +534,11 @@ the saving side exists; there is no continuation tool yet. Code:
 * **Retrieval and privacy.**
   * The bundle travels in `completed-run.tgz`, and the supervisor's `ready_for_retrieval`
     status summarizes it (`resume_bundle`).
-  * It is private raw state and is never published to the HF Space:
-    `prepare_hf_library.py` `run_excluded` always skips `resume/`, and
-    `publish_hf_library.py` refuses a bundle that contains it.
+  * It is private raw state and never goes to the HF Space. When a run is published, `resume/` is a
+    category of the private logs dataset (`scripts/dataset_logs.py` `category`), uploaded at
+    `RUN/resume/...`. `prepare_hf_library.py` moves it to `dataset-files/`, and every member of each
+    agent archive is credential-screened again. `publish_hf_library.py` refuses a bundle whose Space
+    part contains it.
   * Back it up with the raw run.
 * **Not captured, by design.**
   * A `docker commit` of each container is not taken. Its writable layer would add little

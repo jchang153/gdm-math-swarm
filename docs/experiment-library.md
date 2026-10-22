@@ -651,6 +651,11 @@ and move everything to dataset that's not necessary for current functionality of
 from the Space authorized for those download-only files only (not the `.eval` logs, which Inspect View still
 reads from the Space until the owner confirms the sign-in test).
 
+Resume bundle (owner, October 22, 2026): a run's `RUN/resume/` (docs/runtime.md, "Resume bundle": agent
+session transcripts, workspace archives, the resume manifest) is the download-only dataset category `resume`.
+It goes only to the dataset, at `RUN/resume/...`, and never to the Space. Each agent archive is screened member
+by member (`prepare_hf_library.resume_archive_members`).
+
 State on October 22, 2026 (records: `runs/phase-b/hf-library-preparation/logs-migration-20261022/`):
 
 - **Space metadata**: `hf_oauth: true` and `hf_oauth_scopes: [read-repos]` were added to the Space README at

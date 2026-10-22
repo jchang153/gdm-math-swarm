@@ -1304,8 +1304,8 @@ so every future run is easy to extend; **do not build the continuation tool yet*
    `docker commit` was optional; it was not adopted (see docs/runtime.md, "Resume bundle").
 2. Optional periodic checkpoints: config `resume_checkpoint_minutes`, default off.
 3. `RUN/resume/` goes in the packaged run tarball and stays out of the HF Space (private raw
-   state). If the logs-dataset tooling lands, it may route there; until then it is excluded
-   from publication.
+   state). The logs-dataset tooling had landed, so a published run sends it to the private logs
+   dataset (category `resume`).
 4. No change to agent prompts or behaviour, proven by a byte-identity test.
 
 Implementation: `src/research_swarm/resume_bundle.py`; docs/runtime.md, "Resume bundle".

@@ -78,7 +78,14 @@ def screen(path):
     safe_path(path.name)
     if SECRET.search(path.read_bytes()):
         raise ValueError('Credential-like content detected; upload refused')
-    if path.name.endswith('.tar.gz'):  # a run's snapshot archive (prepare_hf_library.py): screen every member
+    if path.name.endswith('.tar.gz') and 'resume' in path.parts:
+        # a resume-bundle agent archive (research_swarm.resume_bundle), bound for the private dataset only:
+        # every regular member is screened (its names include the agent's dot-folders by design)
+        from prepare_hf_library import resume_archive_members
+        for data in resume_archive_members(path.read_bytes()).values():
+            if SECRET.search(data):
+                raise ValueError('Credential-like content in resume archive; upload refused')
+    elif path.name.endswith('.tar.gz'):  # a run's snapshot archive (prepare_hf_library.py): screen every member
         from prepare_hf_library import snapshot_archive_members
         for name, data in snapshot_archive_members(path.read_bytes()).items():
             safe_path(name)
@@ -132,9 +139,9 @@ def load_bundle(bundle):
             raise ValueError('Linked archive entry refused')
         if path.is_file():
             relative = safe_path(path.relative_to(bundle).as_posix())
-            if len(relative.parts) > 2 and relative.parts[1] == 'resume':
-                # RUN/resume/ (research_swarm.resume_bundle) is private raw state, never published.
-                raise ValueError('Resume bundle in archive; upload refused')
+            if len(relative.parts) > 2 and relative.parts[0] != DATASET_DIR and relative.parts[1] == 'resume':
+                # RUN/resume/ (research_swarm.resume_bundle) is private raw state: the private dataset only.
+                raise ValueError('Resume bundle in the Space part of the archive; upload refused')
     manifest = json.loads((bundle / 'archive-manifest.json').read_text())
     if manifest.get('schema') != 'gdm-private-space/1':
         raise ValueError('Expected a prepare_hf_library.py bundle')

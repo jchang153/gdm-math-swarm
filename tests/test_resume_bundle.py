@@ -237,18 +237,20 @@ class ResumeBundleTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(first, reasoning_bridge.agent_transport_key_id())
 
 
-class PublicationExclusionTests(unittest.TestCase):
+class PublicationRoutingTests(unittest.IsolatedAsyncioTestCase):
+    """RUN/resume/ never goes to the Space; published runs carry it to the private logs dataset only."""
     def setUp(self):
         sys.path.insert(0, str(ROOT / "scripts"))
 
-    def test_prepare_never_copies_the_resume_bundle(self):
-        import prepare_hf_library
-        for flag in (False, True):
-            self.assertTrue(prepare_hf_library.run_excluded("resume/manifest.json", flag))
-            self.assertTrue(prepare_hf_library.run_excluded("resume/agents/agent-001/state.tar.gz", flag))
-        self.assertFalse(prepare_hf_library.run_excluded("results.json"))
+    def test_resume_files_are_a_dataset_category(self):
+        import dataset_logs
+        for rel in ("resume/manifest.json", "resume/agents/agent-001/state.tar.gz",
+                    "resume/checkpoint-0015/agents/agent-001/agent.json"):
+            self.assertEqual(dataset_logs.category(rel), "resume")
+            self.assertEqual(dataset_logs.dataset_path("run-x", rel), "run-x/" + rel)
+        self.assertIn("resume", dataset_logs.DOWNLOAD_ONLY)
 
-    def test_publish_refuses_a_bundle_with_resume_state(self):
+    def test_publish_refuses_resume_state_in_the_space_part(self):
         import publish_hf_library
         with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / "run-x" / "resume" / "manifest.json"
@@ -256,6 +258,26 @@ class PublicationExclusionTests(unittest.TestCase):
             target.write_text("{}")
             with self.assertRaisesRegex(ValueError, "Resume bundle"):
                 publish_hf_library.load_bundle(folder)
+
+    async def test_resume_archive_screen_allows_dot_folders_and_refuses_credentials(self):
+        import prepare_hf_library
+        import publish_hf_library
+        folder = Path(tempfile.mkdtemp()).resolve()
+        base = build_container(folder / "container")
+        (base / "workspace/leaked.txt").unlink()
+        data, _ = await resume_bundle.capture_agent(FakeContainer(base))
+        clean = folder / "run-x/resume/agents/agent-001/state.tar.gz"
+        clean.parent.mkdir(parents=True)
+        clean.write_bytes(data)
+        publish_hf_library.screen(clean)          # dot-folders, links and the public placeholder pass
+        prepare_hf_library.screen_bytes("run-x/resume/agents/agent-001/state.tar.gz", data)
+        (base / "workspace/leaked.txt").write_text(f"OPENROUTER={FAKE_KEY}\n")
+        raw, _ = await resume_bundle.capture_agent(FakeContainer(base))
+        clean.write_bytes(raw)                    # an unscreened archive with a credential-shaped member
+        with self.assertRaisesRegex(ValueError, "Credential-like"):
+            publish_hf_library.screen(clean)
+        with self.assertRaisesRegex(ValueError, "Credential-like"):
+            prepare_hf_library.screen_bytes("run-x/resume/agents/agent-001/state.tar.gz", raw)
 
 
 class PeerSolverResumeTests(unittest.IsolatedAsyncioTestCase):
