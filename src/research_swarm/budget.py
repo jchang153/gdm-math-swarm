@@ -147,8 +147,9 @@ GEMINI_LEDGER_RELATIVE = Path("state") / "gemini-budget.sqlite"
 BUDGET_TRACKS = {
     ABLATION_BUDGET_TRACK: {"ledger": ABLATION_LEDGER_RELATIVE, "agent_counts": frozenset({10, 20}),
                             "concurrent_run": False, "plan_section": "Prompt ablation track, October 19, 2026"},
-    # The owner's track: 10 agents (Gemini 3.1 Pro run) or 5 (multi-model runs, October 21, 2026).
-    GEMINI_BUDGET_TRACK: {"ledger": GEMINI_LEDGER_RELATIVE, "agent_counts": frozenset({5, 10}), "concurrent_run": True,
+    # The owner's track: 10 agents (Gemini 3.1 Pro run), 5 (multi-model runs, October 21, 2026) or 100
+    # (owner, October 22, 2026: "100 agents with 8gb, and get a bigger vm. 30 minutes").
+    GEMINI_BUDGET_TRACK: {"ledger": GEMINI_LEDGER_RELATIVE, "agent_counts": frozenset({5, 10, 100}), "concurrent_run": True,
                           "plan_section": "Gemini 3.1 Pro collaboration run authorized, October 19, 2026"},
 }
 
