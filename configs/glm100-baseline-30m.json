@@ -60,7 +60,7 @@
   "prompt_variant": "collab_max_pressure_no_rule6",
   "auto_restart": true,
   "auto_behavior_judge": true,
-  "behavior_judge_max_usd": 50,
+  "behavior_judge_max_usd": "80",
   "waived_evidence_gates": [
     "evaluator",
     "runtime-e2e",
