@@ -1644,7 +1644,19 @@ def _fake_sandbox_class():
 
         async def exec(self, cmd, input=None, cwd=None, env=None, user=None, timeout=None, timeout_retry=True,
                        concurrency=True):
-            cmd = [sys.executable if c == "python3" else self._map(c) for c in cmd]
+            try:
+                spec = json.loads(cmd[-1])
+            except ValueError:
+                spec = None
+            if isinstance(spec, dict) and "roots" in spec:  # the resume bundle's archive script
+                spec.update(roots=[self.base + r for r in spec["roots"]], out=self.base + spec["out"],
+                            strip=self.base)
+                Path(self.base + "/tmp").mkdir(parents=True, exist_ok=True)
+                cmd = [sys.executable, *cmd[1:-1], json.dumps(spec)]
+            elif cmd[-1].startswith("/tmp/.gdm-resume-"):  # its cleanup
+                cmd = [sys.executable, *cmd[1:-1], self.base + cmd[-1]]
+            else:
+                cmd = [sys.executable if c == "python3" else self._map(c) for c in cmd]
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
             return ExecResult(success=proc.returncode == 0, returncode=proc.returncode,
                               stdout=proc.stdout.replace(self.base, ""), stderr=proc.stderr)
@@ -1655,7 +1667,7 @@ def _fake_sandbox_class():
             path.write_bytes(contents if isinstance(contents, bytes) else contents.encode())
 
         async def read_file(self, file, text=True):
-            data = Path(self._map(file)).read_bytes()
+            data = Path(self.base + file if file.startswith("/tmp/.gdm-resume-") else self._map(file)).read_bytes()
             return data.decode() if text else data
     return OfflineSandbox
 

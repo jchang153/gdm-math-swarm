@@ -1443,9 +1443,14 @@ def resume_run_info(config, effective, settings, repo_root, agent_ids, listing):
     run must match. Values only; no credential (the model settings hold no key)."""
     from . import resume_bundle
     model = asdict(settings)
-    manifest_path = config.get("fixed_task_manifest")
-    if manifest_path and not Path(manifest_path).is_absolute():
-        manifest_path = Path(repo_root) / manifest_path
+    fixed = config.get("fixed_task_manifest")
+    if isinstance(fixed, (str, Path)) and fixed:
+        path = Path(fixed) if Path(fixed).is_absolute() else Path(repo_root) / fixed
+        fixed_sha256 = resume_bundle.file_digest(path)
+    elif fixed:
+        fixed_sha256 = hashlib.sha256(json.dumps(fixed, sort_keys=True, default=str).encode()).hexdigest()
+    else:
+        fixed_sha256 = None
     return {
         "run_dir": str(config.get("run_dir")), "agent_ids": list(agent_ids),
         "ledger_run_id": effective.get("run_id"), "budget_track": effective.get("budget_track"),
@@ -1463,12 +1468,21 @@ def resume_run_info(config, effective, settings, repo_root, agent_ids, listing):
         "dataset_revision": effective.get("dataset_revision"), "task_set": effective.get("task_set"),
         "task_ids_sha256": hashlib.sha256(json.dumps([t["task_id"] for t in listing]).encode()).hexdigest(),
         "fixed_task_manifest": config.get("fixed_task_manifest"),
-        "fixed_task_manifest_sha256": resume_bundle.file_digest(manifest_path) if manifest_path else None,
+        "fixed_task_manifest_sha256": fixed_sha256,
         "max_run_seconds": config.get("max_run_seconds"),
         "config_sha256": hashlib.sha256(json.dumps(config, sort_keys=True, default=str).encode()).hexdigest(),
         "code": resume_bundle.code_version(repo_root),
         "checkpoint_minutes": resume_bundle.checkpoint_minutes(config),
     }
+
+
+def _safe_resume_run_info(config, effective, settings, repo_root, agent_ids, listing, record):
+    """``resume_run_info``, never failing a launch: an error is recorded and kept in the manifest."""
+    try:
+        return resume_run_info(config, effective, settings, repo_root, agent_ids, listing)
+    except Exception as ex:
+        _safe_record(record, "resume_bundle_error", None, {"label": "run_info", "error": type(ex).__name__})
+        return {"agent_ids": list(agent_ids), "run_info_error": f"{type(ex).__name__}: {str(ex)[:300]}"}
 
 
 def eval_options(agent_count, run_dir, config):
@@ -1673,8 +1687,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
         # optional checkpoints); private raw state, never published to the HF Space.
         resume = resume_bundle.ResumeBundler(run_dir, record, neutral=neutral, clock=clock,
                                              checkpoint_minutes=resume_checkpoints,
-                                             run_info=resume_run_info(config, effective, settings, repo_root,
-                                                                      agent_ids, listing))
+                                             run_info=_safe_resume_run_info(config, effective, settings, repo_root,
+                                                                            agent_ids, listing, record))
         def prompt_for(agent, persona):
             if overseer is not None and agent == overseer["agent_id"]:
                 return oversight.build_overseer_prompt(agent, solver_ids, listing, variant, overseer["powers"])
