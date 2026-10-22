@@ -14,10 +14,10 @@
   },
   "persona_seed": 260904170,
   "persona_counts": {
-    "algebra": 2,
-    "analysis_topology": 1,
-    "combinatorics": 1,
-    "number_theory": 1
+    "algebra": 3,
+    "analysis_topology": 3,
+    "combinatorics": 2,
+    "number_theory": 2
   },
   "execution": "asynchronous",
   "deployment": "local",
