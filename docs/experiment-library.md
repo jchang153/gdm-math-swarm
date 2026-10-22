@@ -640,6 +640,153 @@ passed at that revision for the catalogue, run page, conference view, Inspect Vi
 evidence browser and a 206 range on the `.eval` (with `--bundle` only the merged catalogue `index.html` differs, as
 expected). Records: `runs/phase-b/hf-library-preparation/judge-glm100-repeat2-20261022T055342Z-20261022*`.
 
+## Logs in a dataset repo (proposal)
+
+Status: **proposal only** (October 22, 2026). Not implemented and not approved. The owner asked to move the
+Inspect `.eval` logs out of the Space (at its 1 GB cap) into a private HF dataset, with the site reading them
+from there. The feasibility tests below used throwaway private repos, all deleted afterwards. They were created
+under the operator's user namespace because the operator's fine-grained token is scoped to the Space and
+`create_repo` in the organization returned 403.
+
+### Findings
+
+- **Direct fetch with the browser's HF session: not possible.** `huggingface.co/datasets/.../resolve/...`
+  answers CORS preflights for any `Origin`, including the Space's `*.static.hf.space` origin:
+  - it echoes the origin and the requested headers (`range`, `authorization`) and allows GET/HEAD
+    (`max-age` 86400);
+  - it exposes `Content-Range`, `Accept-Ranges`, `ETag` and `X-Linked-Size`;
+  - it never sends `Access-Control-Allow-Credentials`, so a `credentials: 'include'` fetch fails in Chromium
+    ("Failed to fetch");
+  - the session cookie would be cross-site anyway, and an anonymous request gets 401.
+- **Direct fetch with a bearer token: works.**
+  - With `Authorization: Bearer`, resolve returns a 302 to a signed `us.aws.cdn.hf.co` URL
+    (`Access-Control-Allow-Origin: *`, everything exposed), which answers Range with 206.
+  - Tested in Chromium against a local endpoint that copies HF's CORS headers and returns HF's real 302 to the
+    real CDN (the test browser had no HF login, and no token was put into a browser):
+    - GET with Range gave 206 with a readable `Content-Range`;
+    - HEAD gave 200 with `Content-Length`.
+  - Inspect View 0.3.279 then loaded the glm-baseline log and opened a sample through a 20-line fetch shim.
+  - Inspect View requests logs with HEAD and then Range GETs, passing `redirect: 'error'` and
+    `credentials: 'same-origin'`. The shim must override them to `redirect: 'follow'` and `credentials: 'omit'`;
+    otherwise HF's 302 fails.
+- **OAuth on a private static Space: provisioned.**
+  - With `hf_oauth: true` and `hf_oauth_scopes: [read-repos]`, HF injects
+    `window.huggingface.variables = {OAUTH_CLIENT_ID, OAUTH_SCOPES: "openid profile read-repos", OPENID_PROVIDER_URL}`
+    into served pages.
+  - `/oauth/authorize` accepts the Space host as `redirect_uri` (302 to login) and rejects a foreign one (400).
+  - A full sign-in was not exercised, because there was no owner login in the test browser.
+  - Per HF docs, `read-repos` covers organization repos only if the user grants that organization at
+    consent; request it with `orgIds=<org id>`.
+- **Server proxy: works, but cannot be hosted on the free plan.**
+  - The prototype is a stdlib Python server. It serves the static pages unchanged. It proxies
+    `RUN/inspect/*.eval` and `RUN/inspect-view/logs/*.eval` to the dataset, passing Range and returning 206,
+    and runs the HF OAuth code flow, keeping the viewer's token only in memory.
+  - Locally it returned identical bytes (full-file SHA-256 equal), and Inspect View loaded and opened a sample.
+  - Creating the Docker Space failed with "402: hosting Gradio and Docker Spaces on free cpu-basic requires a PRO
+    subscription", so its cold start could not be measured.
+  - Static Spaces are free and have no cold start: the test Space read RUNNING 0.1 s after upload.
+- **Quotas.**
+  - **Space:** a 1 GB repository cap, which HF staff say on the forum cannot be raised. `used_storage` is
+    920,036,510 bytes.
+  - **Inspect logs in the Space:** 276.7 MB of unique `.eval` content (18 LFS objects). Counting both the
+    `inspect/` and `inspect-view/logs/` paths it is 552.0 MB, but the duplicates are stored once.
+  - **Datasets:** no per-repository cap. They count against the account's private storage, which is 100 GB for a
+    free user or organization, 1 TB for PRO and 1 TB per seat for Team (docs/hub/storage-limits). The dataset's
+    `used_storage` equalled its file bytes.
+
+### Recommended design: static site, viewer's own OAuth token, fetch shim
+
+No server, no secret and no cold start, on the free plan.
+
+- **Dataset.** Private `HF-ORG/LOGS-DATASET`, holding one copy per log at `RUN/inspect/<name>.eval`
+  (Inspect View's `logs/<name>` maps to it) and live logs at `live/RUN/inspect/<name>.eval`. `listing.json` and
+  every page stay in the Space.
+- **Sign-in.**
+  - A small `signin.html` at the site root runs PKCE against `window.huggingface.variables`, written by us so the
+    site still loads nothing external. It requests `openid profile read-repos` with the organization's
+    `orgIds`.
+  - It stores `{accessToken, expiresAt}` in `localStorage` (`evallog-oauth`); the default lifetime is 8 h
+    (`hf_oauth_expiration_minutes`).
+  - The catalogue and the run pages show "Sign in with HF" when no valid token is stored.
+  - HF's login page cannot be framed, and Chrome partitions an iframe's storage. Sign-in therefore opens a popup
+    that `postMessage`s the token back to the opener iframe. The alternative is to browse at the Space's direct
+    URL.
+  - This must be verified once with a real login.
+- **Fetch shim.**
+  - `evallog-fetch.js` at the site root is injected first into every `inspect-view/index.html`, next to the
+    existing private-space-navigation script.
+  - It carries the dataset id and the dataset commit the run's logs were published at, so links are immutable.
+  - It rewrites same-origin `.eval` requests to `resolve/<commit>/RUN/inspect/<name>` with the bearer token and
+    `redirect: 'follow'`, and returns a 401 "sign in" response when no token is stored.
+  - Access is whatever the viewer's own HF account has: an organization member with Read can read the dataset.
+- **Fallback.** A Docker proxy with OAuth: the prototype works, it needs no secret and it keeps the viewer's
+  token. It needs paid hardware hosting (PRO, or a paid organization plan).
+  - Only with that proxy, a read-only fine-grained token that the owner creates for the dataset and pastes as a
+    Space secret would replace OAuth.
+  - A static Space cannot hold a secret: anything it serves is visible to viewers.
+
+### Changes per script (not implemented)
+
+- `prepare_hf_library.py`:
+  - writes `.eval` files to a separate `logs/RUN/inspect/` bundle with a SHA-256 manifest, and no longer into the
+    Space bundle;
+  - injects the shim tag into each Inspect View `index.html`;
+  - adds `signin.html` and `evallog-fetch.js` at the bundle root;
+  - records the logs in `archive-manifest.json` under `dataset_files` (repository, path, bytes, SHA-256).
+- `publish_hf_library.py`:
+  - commits the logs to the dataset first (pinned `parent_commit`, refused unless the dataset is private), then
+    verifies each with `get_paths_info` (LFS SHA-256 and size equal to the manifest);
+  - then commits the Space with that dataset commit in the shim tags;
+  - refuses any `.eval` path bound for the Space;
+  - applies the same `safe_path`/`screen` checks to both repositories.
+- `maintain_hf_run.py`:
+  - `--scope inspect` writes logs to the dataset;
+  - `--prune-kind eval` works on the dataset;
+  - a new `--scope migrate-logs` handles the migration below.
+- `live_mirror.py`:
+  - live logs go to `live/RUN/inspect/` in the dataset; the live Inspect View gets the shim; the Space's `live/`
+    commits then carry only pages;
+  - superseded live logs are purged with `permanently_delete_lfs_files(..., repo_type="dataset")`;
+  - the order is dataset first, then Space, since no commit spans both repositories.
+- `verify_hosted.py`:
+  - `range_206` reads the dataset resolve URL with the operator's own login;
+  - new checks:
+    - the dataset is private;
+    - the Space stores no `.eval`;
+    - the Inspect View `index.html` carries the shim with the expected dataset and commit;
+    - a preflight from the Space origin allows `authorization,range`.
+
+### Migration of existing runs (guarded, reversible)
+
+`maintain_hf_run.py --scope migrate-logs --commit --receipt FILE --backup-dir DIR`, in stages:
+
+1. **Plan.** List the Space at a pinned head: every `.eval` path, LFS SHA-256 and size. Download each object at
+   that revision and hash it; local `runs/RUN/inspect/` copies are compared when present. Write the
+   before-inventory.
+2. **Copy.** Make one dataset commit adding `RUN/inspect/<name>`, deduplicated. Verify LFS SHA-256 and size per
+   path, plus a ranged read of the first and last 64 bytes through resolve. Nothing in the Space changes.
+3. **Switch.** Make a Space commit pinned to the planned head that adds the shim, `signin.html` and the shim tags.
+   The `.eval` files stay, so this is reverted by re-committing the previous `index.html` files. Then run
+   `verify_hosted.py`, and the owner loads one Inspect View after signing in.
+4. **Delete (separate invocation).** Only after step 3 is verified, delete the Space's `.eval` paths at the
+   head. Their records move from `files` to `dataset_files` in `archive-manifest.json`. Then purge the LFS
+   objects that the new head no longer references, as in "Storage limit and pruning"
+   (`rewrite_history=False`).
+   - This frees about 277 MB of the current 920 MB.
+   - Undoing it means re-uploading from the dataset with SHA-256 checks, which is bounded by the 1 GB cap.
+
+### Owner actions
+
+- Create the private dataset `HF-ORG/LOGS-DATASET` in the organization, and add it with write
+  access to each publisher's fine-grained token. The operator's current token reaches only the Space, and repo
+  creation in the organization returned 403.
+- Sign in once on a test deployment to confirm the browser flow end to end, including granting the
+  organization at consent.
+- Approve the design, then separately approve the deletion step.
+- No token or Space secret is needed for the recommended design. The proxy fallback needs a PRO or paid
+  organization plan; with a token instead of OAuth, the owner would create the read-only token and set it as a
+  secret.
+
 ## Near-live mirror
 
 The owner chose a near-live view of runs on the website while they are going ("option 1 (near-live)",

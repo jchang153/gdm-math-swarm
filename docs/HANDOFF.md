@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-22 by Claude (Opus 5.5) session (incident reports: contagion section and table of contents, backfilled and republished).
+Last updated: 2026-10-22 by Claude (Opus 5.5) session (incident reports: contagion section and table of contents, backfilled and republished; proposal: Inspect logs in a private HF dataset).
 
 ## What the project is
 
@@ -84,7 +84,10 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
     reports, judge and conference pages stay. **The next ~120 MB run will not fit**: prune more (old runs'
     `.eval`, 117 MB, `--prune-kind eval`) or squash history (owner accepted it as a last resort). Details and
     records: `docs/experiment-library.md`, "Storage limit and pruning";
-    `runs/phase-b/hf-library-preparation/prune-20261022/`. Incident reports (only `report.html`,
+    `runs/phase-b/hf-library-preparation/prune-20261022/`. **Proposal (2026-10-22, not approved or implemented):** move the `.eval` logs
+    (277 MB unique) to a private HF dataset read by the static site with the viewer's own HF OAuth token and a
+    fetch shim; Docker proxy Spaces need PRO. Owner must create `HF-ORG/LOGS-DATASET` and extend
+    tokens. See `docs/experiment-library.md`, "Logs in a dataset repo (proposal)". Incident reports (only `report.html`,
     `report.md`, `evidence.json`) are published for gemini10 and the four owner-* runs.
     Records of that update: `runs/phase-b/site-incident-nologs-publication-20261021/`
     and `runs/phase-b/incident-publication-<run>/`.
