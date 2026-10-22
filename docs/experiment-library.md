@@ -631,6 +631,15 @@ published (head `0a4ba2fc`, `used_storage` 918.7 MB). The next run of about 120 
 on October 22, 2026, squash the Space history (`HfApi.super_squash_history`), which makes every earlier revision
 ID cited here stop resolving; write a receipt of the head and its full listing first and record it here.
 
+The behavior judge of glm100-repeat2 (published without it) was then added with `--scope judge` from a fresh
+single-run bundle (`prepare_hf_library.py --run RUN=<the original bundle's inspect-view>`), from `0a4ba2fc` to
+`831c0f59576f8ceb199e4ce35fecd9f37bbc782e`: 240 allowlisted judge files (38,175,746 bytes, all regular Git files,
+none LFS), `results.html`/`results.json` and the catalogue replaced, 14,381 files preserved, receipt `verified`.
+`used_storage` read 918.7 MB right after (at most about 957 MB once the added bytes count). `verify_hosted.py`
+passed at that revision for the catalogue, run page, conference view, Inspect View, incident report, judge report,
+evidence browser and a 206 range on the `.eval` (with `--bundle` only the merged catalogue `index.html` differs, as
+expected). Records: `runs/phase-b/hf-library-preparation/judge-glm100-repeat2-20261022T055342Z-20261022*`.
+
 ## Near-live mirror
 
 The owner chose a near-live view of runs on the website while they are going ("option 1 (near-live)",

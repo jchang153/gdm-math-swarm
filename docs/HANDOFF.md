@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-22 by Claude (Opus 5.5) session (HF Space pruned for storage; glm100-repeat2/3 published).
+Last updated: 2026-10-22 by Claude (Opus 5.5) session (glm100-repeat2 behavior judge added to the HF Space).
 
 ## What the project is
 
@@ -238,9 +238,11 @@ All runs since gemini10 have incident reports at `runs/<id>/analysis/incident/re
 All runs in the table except baseline100 (unlisted) are published on the HF Space with their
 incident reports; glm100-repeat2 and -repeat3 went up at Space revisions `8e71b8cf` and `0a4ba2fc` (2026-10-22;
 `verify_hosted.py` passes for all 16 listed runs and baseline100; receipts in
-`runs/phase-b/hf-library-preparation/publication-repeats-20261022/`). **repeat2 was published without its behavior
-judge** (`run_transcript_judge.py --run-limit 80` was still running); when `runs/glm100-repeat2-20261022T055342Z/analysis/judge/report.json`
-exists, add it with `maintain_hf_run.py --scope judge` (prepare a single-run bundle first); glm10-baseline-2h went up at Space revision `143be456` (2026-10-22, `verify_hosted.py` passes;
+`runs/phase-b/hf-library-preparation/publication-repeats-20261022/`). repeat2 went up without its behavior judge;
+the judge (97 of 100 agents graded, about $59 of the owner's $80 run limit) was then added with
+`maintain_hf_run.py --scope judge` at Space revision `831c0f59` (240 judge files, 38.2 MB, regular Git files; both
+reports replaced; receipt `verified`; `verify_hosted.py` passes incl. the judge report and evidence browser; records in
+`runs/phase-b/hf-library-preparation/judge-glm100-repeat2-20261022T055342Z-20261022*`); glm10-baseline-2h went up at Space revision `143be456` (2026-10-22, `verify_hosted.py` passes;
 its live entry was retired at `476953b1`); the 4 glm-* runs went up at Space revision `53791397` (2026-10-22, all four
 `verify_hosted.py` checks pass).
 
