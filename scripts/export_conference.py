@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Render saved conference records and captured private files, without inference."""
+"""Render saved conference records and captured private files, without inference.
+
+The activity timeline (RUN/analysis/timeline.jsonl) is not embedded (owner, October 23, 2026): it is kept
+only in the private logs dataset, and the view links it there. ``strip_timeline`` turns a published
+conference page that still embeds it into the page this exporter writes now, for
+``maintain_hf_run.py --scope conference``.
+"""
 import argparse
 import base64
 from collections import Counter, defaultdict
@@ -31,6 +37,20 @@ h2,h3{margin:0 0 8px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:
 .row{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.empty{padding:32px;color:var(--muted);border:1px dashed var(--input-line);background:var(--card);border-radius:10px}
 footer{margin:30px 0;color:var(--muted)}[hidden]{display:none!important}
 '''
+
+
+TIMELINE = 'analysis/timeline.jsonl'
+SCHEMA = 'gdm-conference-view/1'
+DATA_KEYS = ('run', 'records', 'counts', 'warnings', 'conference_events', 'timeline_entries', 'captured_files')
+# Static HTML (outside the packed records), so that publication can point the link at the dataset file
+# (dataset_logs.repoint_links) or at the run page's offline notice (dataset_logs.offline_links).
+TIMELINE_NOTE = ('<p id="timeline-note" class="muted">Full activity timeline: stored in the private logs dataset '
+                 '(<a href="../analysis/timeline.jsonl">timeline.jsonl</a>; sign in to huggingface.co with read '
+                 'access). This view does not embed it.</p>')
+TIMELINE_NOTE_OFFLINE = ('<p id="timeline-note" class="muted">Full activity timeline: kept offline by the '
+                         'researchers, not in this Space or the logs dataset (<a href="../analysis/timeline.jsonl">'
+                         'timeline.jsonl</a>). This view does not embed it.</p>')
+TIMELINE_LOCATIONS = ('dataset', 'offline')
 
 
 def json_lines(path):
@@ -84,7 +104,6 @@ def export(run):
         raise ValueError('Conference output must not be a symlink')
     out.mkdir(exist_ok=True)
     events = json_lines(run / 'conference/events.jsonl')
-    timeline = json_lines(run / 'analysis/timeline.jsonl')
     runtime = json_lines(run / 'runtime.jsonl')
     db = sqlite3.connect((run / 'conference/state.sqlite').as_uri() + '?mode=ro', uri=True)
     db.row_factory = sqlite3.Row
@@ -226,19 +245,7 @@ def export(run):
                                'capture_modes': dict(Counter(r['mode'] for r in rows))},
                        links=[['View captured versions', filename]]))
 
-    for entry in timeline:
-        agent = entry.get('agent_id'); ref = entry.get('ref', {})
-        text = entry.get('summary') or ''
-        # Preserve provenance and useful fields; full tool outputs remain in the Inspect logs.
-        detail = {'source': entry['source'], 'reference': ref, 'conference_seq': entry.get('conference_seq'),
-                  'ids': entry.get('ids', {})}
-        if entry['source'] != 'inspect':
-            detail['payload'] = entry.get('payload', {})
-        payload = entry.get('payload', {})
-        task = payload.get('problem_id') or payload.get('task_id') or entry.get('ids', {}).get('problem_id') or ''
-        records.append(record('activity', 'activity-' + str(entry['order']), entry['kind'], text,
-                       entry.get('timestamp'), [agent], task=task, detail=detail))
-    categories = ('board', 'dms', 'library', 'submissions', 'feedback', 'files', 'activity')
+    categories = ('board', 'dms', 'library', 'submissions', 'feedback', 'files')
     if overseer or reversions or proof_checks:  # the Oversight section exists only in overseer runs
         categories = categories[:5] + ('oversight',) + categories[5:]
     counts = {category: 0 for category in categories}
@@ -251,29 +258,48 @@ def export(run):
         warnings.append('No independent evaluation records: evaluations/evaluations.jsonl is absent, so no '
                         'submission was independently evaluated.')
     data = dict(run=run.name, records=records, counts=counts, warnings=warnings,
-                conference_events=len(events), timeline_entries=len(timeline), captured_files=len(versions))
+                conference_events=len(events), timeline_entries=0, timeline_location='dataset',
+                captured_files=len(versions))
+    (out / 'index.html').write_text(render_index(data))
+    manifest = {'schema': SCHEMA, 'run': run.name, 'counts': counts, 'captured_files': len(versions),
+                'conference_events': len(events), 'timeline_entries': 0, 'timeline_location': 'dataset',
+                'warnings': warnings,
+                'sources': {str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else 'absent'
+                            for p in [run/'conference/state.sqlite', run/'conference/events.jsonl',run/'runtime.jsonl',run/'evaluations/evaluations.jsonl']}}
+    (out / 'manifest.json').write_text(json.dumps(manifest, indent=2))
+    return manifest
+
+
+def render_index(data):
+    """The compact, self-contained conference page for the records in ``data``."""
+    if set(data) != {*DATA_KEYS, 'timeline_location'} or data['timeline_location'] not in TIMELINE_LOCATIONS:
+        raise ValueError('Unexpected conference data fields')
+    if data['timeline_entries'] != 0 or 'activity' in data['counts'] \
+            or any(r['category'] == 'activity' for r in data['records']):
+        raise ValueError('The conference view no longer embeds the activity timeline')
     # Script-safe JSON; agent-controlled strings are rendered only with textContent.
     encoded = json.dumps(data, ensure_ascii=True).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
     body = '''<p><a href="../../index.html">Experiment library</a> · <a href="../results.html">Run report</a> · <a href="../inspect-view/index.html">Agent transcripts (Inspect View)</a></p>
 <h1>Inside the conference</h1><p id="run" class="muted"></p>
 <p class="banner">Researcher view: private conversations and captured private files appear here alongside public conference activity. Agents did not have access to this combined view.</p>
 <nav id="tabs" aria-label="Conference sections"></nav><p id="intro"></p>
-<div class="filters"><input id="search" aria-label="Search records" placeholder="Search messages, tasks, sources…"><select id="agent" aria-label="Filter by agent"><option value="">All agents</option></select><select id="task" aria-label="Filter by task"><option value="">All tasks</option></select><select id="kind" aria-label="Filter activity type"><option value="">All activity types</option></select></div>
+<div class="filters"><input id="search" aria-label="Search records" placeholder="Search messages, tasks, sources…"><select id="agent" aria-label="Filter by agent"><option value="">All agents</option></select><select id="task" aria-label="Filter by task"><option value="">All tasks</option></select></div>
 <div class="row"><p id="status" aria-live="polite"></p><div><button id="previous">Previous</button> <button id="next">Next</button></div></div>
-<main id="records"></main><footer>Derived from the saved conference database, event log, runtime snapshots and timeline. <a href="../conference/events.jsonl">Conference events</a> · <a href="../analysis/timeline.jsonl">Full timeline</a> · <a href="manifest.json">Export manifest</a></footer>
-'''
+<main id="records"></main><footer>Derived from the saved conference database, event log and runtime snapshots. <a href="../conference/events.jsonl">Conference events</a> · <a href="manifest.json">Export manifest</a></footer>
+'''.replace('<nav id="tabs"', (TIMELINE_NOTE if data['timeline_location'] == 'dataset' else TIMELINE_NOTE_OFFLINE)
+           + '\n<nav id="tabs"', 1)
     script = r'''
 const data=JSON.parse(document.getElementById('data').textContent);
-const sections={board:['Bulletin board','Posts shown in posting order. The conference did not store a reply-thread relationship.','No bulletin-board posts were recorded.'],dms:['Direct messages','Private conversations grouped by the two participants.','No direct messages were saved in this run. Inbox checks are visible under All activity.'],library:['Shared library','Published artifacts and revisions. Complete accepted proofs were published automatically; private notes required deliberate publication.','No shared artifacts were recorded.'],submissions:['Submissions & judging','Conference outcomes and independently bound evaluations. “problem_closed” does not mean a proof was mathematically rejected.','No submissions were recorded.'],feedback:['Organizer feedback','Private feedback submitted to the conference organizers.','No organizer feedback was recorded.'],oversight:['Oversight','Credits the overseer reverted (with its stated reason) and the proof checks it ran. A reverted credit removed the credit and the library entry and reopened the problem; the original submission stays in the records.','No credit was reverted and no proof check was run.'],files:['Private notes & files','Captured versions of RESEARCH.md and private workspace working files. These are observations, not a complete edit history.','No private workspace file captures were recorded.'],activity:['All activity','Saved timeline in recorded chronological order, followed by entries without known timestamps. Filter by agent, task or event type; open details for provenance.','No timeline records were available.']};
+const sections={board:['Bulletin board','Posts shown in posting order. The conference did not store a reply-thread relationship.','No bulletin-board posts were recorded.'],dms:['Direct messages','Private conversations grouped by the two participants.','No direct messages were saved in this run. Inbox checks appear only in the full activity timeline, which this view does not embed.'],library:['Shared library','Published artifacts and revisions. Complete accepted proofs were published automatically; private notes required deliberate publication.','No shared artifacts were recorded.'],submissions:['Submissions & judging','Conference outcomes and independently bound evaluations. “problem_closed” does not mean a proof was mathematically rejected.','No submissions were recorded.'],feedback:['Organizer feedback','Private feedback submitted to the conference organizers.','No organizer feedback was recorded.'],oversight:['Oversight','Credits the overseer reverted (with its stated reason) and the proof checks it ran. A reverted credit removed the credit and the library entry and reopened the problem; the original submission stays in the records.','No credit was reverted and no proof check was run.'],files:['Private notes & files','Captured versions of RESEARCH.md and private workspace working files. These are observations, not a complete edit history.','No private workspace file captures were recorded.']};
 let selected=sections[location.hash.slice(1)]&&(location.hash.slice(1) in data.counts)?location.hash.slice(1):'board',pageNo=0;const size=40;
 const el=id=>document.getElementById(id);const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n;};
-el('run').textContent=data.run+' · '+data.conference_events+' conference events · '+data.timeline_entries+' timeline entries';
+el('run').textContent=data.run+' · '+data.conference_events+' conference events';
 function timestamp(value){return value==null?'Time unknown':new Date(value*1000).toLocaleString(undefined,{timeZone:'America/Los_Angeles',dateStyle:'medium',timeStyle:'medium'})+' America/Los_Angeles';}
 for(const [id,[label]] of Object.entries(sections)){if(!(id in data.counts))continue;const b=node('button',label+' ('+(data.counts[id]||0)+')');b.onclick=()=>{selected=id;location.hash=id;pageNo=0;options();render();};b.dataset.section=id;el('tabs').append(b);}
-function options(){const rows=data.records.filter(x=>x.category===selected);for(const [id,values,label] of [['agent',rows.flatMap(x=>x.agents),'All agents'],['task',rows.map(x=>x.task).filter(Boolean),'All tasks'],['kind',selected==='activity'?rows.map(x=>x.title):[],'All activity types']]){const old=el(id).value;el(id).replaceChildren(new Option(label,''));for(const v of [...new Set(values)].sort())el(id).append(new Option(v,v));if([...el(id).options].some(o=>o.value===old))el(id).value=old;}el('kind').hidden=selected!=='activity';el('task').hidden=el('task').options.length===1;}
-function render(){document.querySelectorAll('[data-section]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.section===selected)));el('intro').textContent=sections[selected][1];const q=el('search').value.toLowerCase(),agent=el('agent').value,task=el('task').value,kind=el('kind').value;
-let rows=data.records.filter(x=>x.category===selected&&(!agent||x.agents.includes(agent))&&(!task||x.task===task)&&(!kind||x.title===kind)&&(!q||JSON.stringify(x).toLowerCase().includes(q)));
-if(selected!=='activity')rows.sort((a,b)=>(a.timestamp??Infinity)-(b.timestamp??Infinity));
+function options(){const rows=data.records.filter(x=>x.category===selected);for(const [id,values,label] of [['agent',rows.flatMap(x=>x.agents),'All agents'],['task',rows.map(x=>x.task).filter(Boolean),'All tasks']]){const old=el(id).value;el(id).replaceChildren(new Option(label,''));for(const v of [...new Set(values)].sort())el(id).append(new Option(v,v));if([...el(id).options].some(o=>o.value===old))el(id).value=old;}el('task').hidden=el('task').options.length===1;}
+function render(){document.querySelectorAll('[data-section]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.section===selected)));el('intro').textContent=sections[selected][1];const q=el('search').value.toLowerCase(),agent=el('agent').value,task=el('task').value;
+let rows=data.records.filter(x=>x.category===selected&&(!agent||x.agents.includes(agent))&&(!task||x.task===task)&&(!q||JSON.stringify(x).toLowerCase().includes(q)));
+rows.sort((a,b)=>(a.timestamp??Infinity)-(b.timestamp??Infinity));
 pageNo=Math.min(pageNo,Math.max(0,Math.ceil(rows.length/size)-1));el('status').textContent=rows.length+' records · page '+(pageNo+1)+' of '+Math.max(1,Math.ceil(rows.length/size));el('previous').disabled=pageNo===0;el('next').disabled=(pageNo+1)*size>=rows.length;
 const main=el('records');main.replaceChildren();if(!rows.length)main.append(node('p',(data.counts[selected]||0)?'No records match these filters.':sections[selected][2],'empty'));
 for(const r of rows.slice(pageNo*size,(pageNo+1)*size)){const card=node('article');card.id=r.id;card.append(node('h2',r.title),node('p',[timestamp(r.timestamp),...r.agents,r.task].filter(Boolean).join(' · '),'muted'));
@@ -282,15 +308,53 @@ if(selected==='dms'&&r.detail){for(const m of r.detail.messages){const d=node('a
 if(selected==='submissions'){card.append(node('p','Conference judge: '+(r.detail.reason||r.detail.outcome)));if(r.detail.reverted)card.append(node('p','Credit reverted by '+r.detail.reverted.by+': '+r.detail.reverted.reason,'badge'));if(r.detail.compile_status)card.append(node('p','Compilation: '+r.detail.compile_status));const v=r.detail.independent_evaluation;card.append(node('p','Independent validity: '+v.validity,'badge'));if(v.reason)card.append(node('p',v.reason));}
 const links=node('p');for(const [label,url] of r.links){if(!url)continue;const a=node('a',label);a.href=url;links.append(a,document.createTextNode(' · '));}card.append(links);
 if(r.detail){const d=node('details');d.append(node('summary',selected==='submissions'?'Judge feedback & evidence':'Record details & provenance'),node('pre',JSON.stringify(r.detail,null,2)));card.append(d);}main.append(card);}}
-for(const id of ['search','agent','task','kind'])el(id).addEventListener(id==='search'?'input':'change',()=>{pageNo=0;render();});el('previous').onclick=()=>{pageNo--;render();};el('next').onclick=()=>{pageNo++;render();};window.addEventListener('hashchange',()=>{if(sections[location.hash.slice(1)]&&selected!==location.hash.slice(1)){selected=location.hash.slice(1);pageNo=0;options();render();}});options();render();
+for(const id of ['search','agent','task'])el(id).addEventListener(id==='search'?'input':'change',()=>{pageNo=0;render();});el('previous').onclick=()=>{pageNo--;render();};el('next').onclick=()=>{pageNo++;render();};window.addEventListener('hashchange',()=>{if(sections[location.hash.slice(1)]&&selected!==location.hash.slice(1)){selected=location.hash.slice(1);pageNo=0;options();render();}});options();render();
 '''
-    (out / 'index.html').write_text(compact_browser_page(page('Conference · ' + run.name, body + '<script id="data" type="application/json">' + encoded + '</script><script>' + script + '</script>')))
-    manifest = {'schema': 'gdm-conference-view/1', 'run': run.name, 'counts': counts, 'captured_files': len(versions),
-                'conference_events': len(events), 'timeline_entries': len(timeline), 'warnings': warnings,
-                'sources': {str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else 'absent'
-                            for p in [run/'conference/state.sqlite', run/'conference/events.jsonl',run/'runtime.jsonl',run/'analysis/timeline.jsonl',run/'evaluations/evaluations.jsonl']}}
-    (out / 'manifest.json').write_text(json.dumps(manifest, indent=2))
-    return manifest
+    return compact_browser_page(page('Conference · ' + data['run'], body + '<script id="data" type="application/json">' + encoded + '</script><script>' + script + '</script>'))
+
+
+def published_data(document):
+    """The records embedded in a conference page (compact or plain), checked as JSON."""
+    match = re.search(r'<script id="data" type="application/(json|gzip\+base64)">(.*?)</script>', document, re.S)
+    if match is None:
+        raise ValueError('Missing conference data')
+    text = match[2] if match[1] == 'json' else gzip.decompress(base64.b64decode(match[2], validate=True)).decode('utf-8')
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError('Conference data is not an object')
+    return data
+
+
+def strip_timeline(document, manifest, location='dataset'):
+    """(data, manifest) of a published conference view without the embedded activity timeline: every other
+    record, count and field stays exactly as published. ``location`` says where the full timeline is kept
+    ('dataset' or 'offline'). Render the page with ``render_index``."""
+    if location not in TIMELINE_LOCATIONS:
+        raise ValueError('Unknown timeline location: ' + str(location))
+    data = published_data(document)
+    if set(data) - {'timeline_location'} != set(DATA_KEYS):
+        raise ValueError('Unexpected conference data fields: ' + ', '.join(sorted(set(data) ^ set(DATA_KEYS))))
+    if manifest.get('schema') != SCHEMA or manifest.get('run') != data['run']:
+        raise ValueError('Conference manifest does not belong to this page')
+    activity = [r for r in data['records'] if r['category'] == 'activity']
+    if len(activity) != data['timeline_entries'] or data['counts'].get('activity', 0) != len(activity):
+        raise ValueError('Embedded timeline does not match its recorded count')
+    counts = {k: v for k, v in data['counts'].items() if k != 'activity'}
+    if {k: v for k, v in manifest['counts'].items() if k != 'activity'} != counts \
+            or manifest.get('timeline_entries') != data['timeline_entries']:
+        raise ValueError('Conference manifest counts differ from the page')
+    new = dict(run=data['run'], records=[r for r in data['records'] if r['category'] != 'activity'], counts=counts,
+               warnings=data['warnings'], conference_events=data['conference_events'], timeline_entries=0,
+               timeline_location=location, captured_files=data['captured_files'])
+    sources = {k: v for k, v in manifest['sources'].items() if k != TIMELINE}
+    new_manifest = {'schema': SCHEMA, 'run': manifest['run'], 'counts': counts,
+                    'captured_files': manifest['captured_files'], 'conference_events': manifest['conference_events'],
+                    'timeline_entries': 0, 'timeline_location': location, 'warnings': manifest['warnings'],
+                    'sources': sources}
+    extra = set(manifest) - set(new_manifest)
+    if extra:
+        raise ValueError('Unexpected conference manifest fields: ' + ', '.join(sorted(extra)))
+    return new, new_manifest
 
 
 if __name__ == '__main__':

@@ -158,9 +158,17 @@ custom transcript pages. It uses no model calls or running containers.
 
 The conference tabs show board posts, participant-grouped private DMs, shared
 library revisions, submissions with conference and independent judgments,
-organizer feedback, captured workspace working files/notes, and the saved activity
-timeline. Search, agent/task/type filters and pagination operate locally in the
-page. Empty sections are explicit. Board posts have no recorded reply relationship;
+organizer feedback and captured workspace working files/notes. Search, agent/task
+filters and pagination operate locally in the page. The activity timeline is not
+embedded (owner, October 23, 2026: "remove the activity timeline from the website's
+conference view, and keep it only in the private dataset"): a note under the banner
+reads "Full activity timeline: stored in the private logs dataset" and links
+`../analysis/timeline.jsonl`, which publication points at the dataset file (or, for a
+run whose timeline was pruned without a dataset copy, at the run page's "Raw records
+kept offline" notice, with the note saying so). The view's `manifest.json` records
+`timeline_entries: 0` and `timeline_location: dataset` (or `offline`) and no longer
+lists the timeline among its sources. Without the timeline the 90-minute run's page is
+0.49 MB instead of 58 MB, so no split-data export is needed. Empty sections are explicit. Board posts have no recorded reply relationship;
 the viewer does not invent threads. Untimed events remain unknown. File captures
 are observations rather than a complete edit history, and were not automatically
 available to peers. SDK sessions are read in Inspect View;
@@ -523,6 +531,38 @@ catalogue with `maintain_hf_run.py --rerender-catalogue --commit` (index.html on
 compare view), then regenerate each run's `results.html` and replace it per run with the site scope (or
 `--scope results`). `verify_hosted.py` fails a served page that still links a raw `RUN/inspect/*.eval`.
 
+### Conference scope (no embedded timeline)
+
+`--scope conference` (October 23, 2026) re-renders already published conference views without the
+embedded activity timeline. It takes no bundle and no local run files: for each run (`--all-published-runs`,
+every run in `archive-manifest.json` with a conference view, or `--maintain-run RUN`) it decodes the records
+embedded in the published `RUN/conference-view/index.html`, drops the activity records
+(`export_conference.strip_timeline`), renders the page with the current exporter (`render_index`), applies the
+publication steps (shared theme, private-Space navigation, links to moved files pointed at their dataset commit,
+links to offline files at the offline notice) and writes `manifest.json` with `timeline_entries: 0` and
+`timeline_location`. Checks: every non-activity record equals the published one; the published head blocks
+(Space navigation, dataset-link note) are kept verbatim; the timeline link reaches `RUN/analysis/timeline.jsonl`
+in the dataset (or the offline notice; a run with neither is refused); every same-site link resolves; no page is
+or becomes LFS. Only those two files per run and their `archive-manifest.json` digests change, in one guarded
+commit pinned to the planned revision, with backups under `original/`, a receipt and a verified final
+inventory. Captured-file pages, the catalogue and every other file are untouched. Running it again reproduces
+re-rendered pages byte for byte and finds nothing to do. A fresh `export_conference.py` export equals the
+stripped old export byte for byte (checked on the 90-minute run and in the tests).
+
+```bash
+OUT=runs/phase-b/conference-timeline-20261023
+python scripts/maintain_hf_run.py --all-published-runs --scope conference                       # plan only
+python scripts/maintain_hf_run.py --all-published-runs --scope conference --commit \
+  --backup-dir "$OUT/attempt-1" --receipt "$OUT/attempt-1/receipt.json"
+python scripts/verify_hosted.py --run "$RUN_ID" --revision "$REVISION"                          # per run
+```
+
+Plan of October 23, 2026 at Space `fd3cdc33` (`runs/phase-b/conference-timeline-20261023/conference-plan.json`):
+17 runs, 35 files (17 pages, 17 view manifests, `archive-manifest.json`); conference pages 29.9 MB to 2.3 MB
+(27.6 MB saved). The timelines of 14 runs are in the dataset; baseline100, baseline8g100 and cache100 were
+pruned before the dataset existed and are kept offline, so their note says so. baseline100's page predates the
+October 21 site look and gets the current theme; the other 16 heads stay byte for byte.
+
 ## Incident report outputs
 
 The model-written incident report (docs/plan.md, "Incident report per run (October 21, 2026)") writes
@@ -713,6 +753,8 @@ State on October 22, 2026 (records: `runs/phase-b/hf-library-preparation/logs-mi
   report and evidence browser (with its JSON), incident reports, Inspect View (app, `logs/listing.json`), plus
   `signin.html` at the root once switched. `archive-manifest.json` records moved files under `dataset_files`
   (`{repo, path, commit, bytes, sha256, category, moved}`); files pruned earlier stay under `offline_files`.
+- **Conference views** embed no activity timeline (October 23, 2026); their note links `RUN/analysis/timeline.jsonl`
+  in the dataset (see "Conference scope").
 - **Links**: a page link to a moved file points to the dataset file page
   (`huggingface.co/datasets/HF-ORG/LOGS-DATASET/blob/<commit>/RUN/<path>`, new tab) with the note
   "(in the private logs dataset)"; a link to a pruned file without a dataset copy points to the run page's

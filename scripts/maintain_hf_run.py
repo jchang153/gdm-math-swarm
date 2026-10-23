@@ -91,6 +91,11 @@ deletes them, adds a "Raw records kept offline" notice listing them to RUN/resul
 archive-manifest.json records to offline_files; then their LFS objects, no longer referenced at the head, are
 permanently deleted without rewriting history (--no-purge keeps them). Rerunning continues from the current state.
 
+--scope conference (no --bundle; --all-published-runs or --maintain-run RUN) re-renders published conference
+views without the embedded activity timeline (owner, October 23, 2026: the timeline stays only in the private
+logs dataset, linked from the view). Only RUN/conference-view/index.html and its manifest.json change, from the
+records embedded in the published page minus the activity records; see maintain_conference.
+
 Default: read-only plan pinned to the current Space revision. --commit first writes the
 receipt, a before-inventory, backups of the originals and the plan, then uploads in guarded
 batches (catalogue or manifest last), verifies the result against the original pre-maintenance
@@ -105,6 +110,7 @@ import fnmatch
 import html
 import json
 from pathlib import Path
+import posixpath
 import re
 import sys
 import tempfile
@@ -117,8 +123,8 @@ from publish_hf_library import (DEFAULT_REPO, RUN_ID, batches, digest, load_bund
                                 merge_entries, payload, remote_files, validate_lfs_additions)
 
 SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'site', 'unlist', 'snapshots', 'incident', 'prune',
-          'migrate-logs')
-NO_BUNDLE = ('unlist', 'snapshots', 'prune', 'migrate-logs')
+          'migrate-logs', 'conference')
+NO_BUNDLE = ('unlist', 'snapshots', 'prune', 'migrate-logs', 'conference')
 REPLACEABLE = ('results.html', 'results.json')
 INSPECT_VIEW = 'inspect-view/'
 INSPECT_PAGE = INSPECT_VIEW + 'index.html'
@@ -1704,13 +1710,227 @@ def prune_run(api, download, *, run, runs_dir, commit=False, repo=DEFAULT_REPO, 
     return result
 
 
+# --- conference scope -------------------------------------------------------------------------------------
+CONFERENCE_PAGE = CONFERENCE_PREFIX + 'index.html'
+CONFERENCE_MANIFEST = CONFERENCE_PREFIX + 'manifest.json'
+_BODY_START = '<p><a href="../../index.html">'
+# Published head blocks a re-rendered page must keep verbatim (pages published before the October 21 site
+# look lack the theme; they get the current one, as with --scope site).
+_HEAD_BLOCKS = re.compile(r'<style id="dataset-file-note">.*?</style>|<script id="private-space-navigation">.*?</script>',
+                          re.S)
+_HREF = re.compile(r'''\b(?:href|src)=(["'])([^"']*)\1''', re.I)
+
+
+def hosted_conference_page(document, run, archive):
+    """A conference page as publication serves it: the shared theme and the private-Space navigation
+    (prepare_hf_library.py), then links to files moved to the logs dataset pointed at the dataset file of
+    their recorded commit and links to files kept offline at the run page's notice (migrate_dataset.py)."""
+    import dataset_logs
+    from site_style import themed
+    from space_navigation import private_space_navigation
+    page = private_space_navigation(themed(document), [])
+    prefix = run + '/'
+    by_commit = {}
+    for name, record in sorted((archive.get('dataset_files') or {}).items()):
+        if name.startswith(prefix):
+            by_commit.setdefault((record['repo'], record['commit']), set()).add(name[len(prefix):])
+    for (repo, commit), moved in sorted(by_commit.items()):
+        page, _ = dataset_logs.repoint_links(page, CONFERENCE_PAGE, run, moved, commit, repo)
+    offline = {n[len(prefix):] for n in (archive.get(OFFLINE_KEY) or {}) if n.startswith(prefix)}
+    page, _ = dataset_logs.offline_links(page, CONFERENCE_PAGE, offline)
+    return page
+
+
+def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_REPO, receipt=None,
+                        backup_dir=None, operation=None):
+    """--scope conference (owner, October 23, 2026): re-render the published conference views without the
+    embedded activity timeline, which stays only in the private logs dataset (RUN/analysis/timeline.jsonl).
+
+    For each selected run (default: every run in archive-manifest.json with a conference view) only
+    RUN/conference-view/index.html and RUN/conference-view/manifest.json change, plus their digests in
+    archive-manifest.json. The new page is rendered by export_conference.render_index from the records
+    embedded in the published page, minus the activity records (export_conference.strip_timeline), so every
+    other record stays byte for byte as published and no local run file is needed. Its head (theme, Space
+    navigation, dataset-link note) must equal the published page's, its timeline link must reach the
+    dataset file (or the offline notice when the timeline was pruned without a dataset copy), and every
+    same-site link must resolve. Captured-file pages, the catalogue and every other file are untouched.
+    One guarded commit pinned to the planned revision, backups and a receipt; running it again continues
+    from the current state (already re-rendered pages are reproduced byte for byte and skipped).
+    """
+    import dataset_logs
+    import export_conference
+    if runs is not None and (not runs or any(not isinstance(r, str) or not RUN_ID.fullmatch(r) for r in runs)):
+        raise ValueError('Invalid run ID')
+    if commit and (operation is None or receipt is None or backup_dir is None):
+        raise ValueError('--commit requires --receipt, --backup-dir and an upload operation')
+    info = api.repo_info(repo, repo_type='space', files_metadata=True)
+    if not info.private:
+        raise ValueError('Maintenance requires a private Space')
+    base = info.sha
+    remote = remote_files(api, repo, base)
+    current = inventory(remote)
+    cache = {}
+
+    def fetch(name):
+        if name not in cache:
+            data = Path(download(repo, name, repo_type='space', revision=base)).read_bytes()
+            if not matches(data, remote[name]):
+                raise ValueError('Remote metadata mismatch: ' + name)
+            cache[name] = data
+        return cache[name]
+
+    if MANIFEST not in remote:
+        raise ValueError('Remote file required for maintenance is missing: ' + MANIFEST)
+    archive = json.loads(fetch(MANIFEST))
+    if archive.get('schema') != 'gdm-private-space/1':
+        raise ValueError('Unexpected remote archive manifest schema')
+    published = [r for r in archive.get('runs', []) if f'{r}/{CONFERENCE_PAGE}' in remote]
+    selected = published if runs is None else list(runs)
+    for run in selected:
+        if run not in archive.get('runs', []) or not any(n.startswith(run + '/') for n in remote):
+            raise ValueError('Run is not published; use publish_hf_library.py for new runs: ' + run)
+        for name in (CONFERENCE_PAGE, CONFERENCE_MANIFEST):
+            if f'{run}/{name}' not in remote:
+                raise ValueError(f'Remote file required for maintenance is missing: {run}/{name}')
+    datasets, offline = archive.get('dataset_files') or {}, archive.get(OFFLINE_KEY) or {}
+    planned, per_run = {}, {}
+    for run in selected:
+        page_name, manifest_name = f'{run}/{CONFERENCE_PAGE}', f'{run}/{CONFERENCE_MANIFEST}'
+        timeline = f'{run}/{export_conference.TIMELINE}'
+        location = 'dataset' if timeline in datasets else 'offline' if timeline in offline else None
+        if location is None:
+            raise ValueError(f'{timeline} is neither in the logs dataset nor recorded offline; move it to the '
+                             'dataset before removing it from the conference view')
+        old_page = fetch(page_name).decode('utf-8')
+        old_data = export_conference.published_data(old_page)
+        data, manifest = export_conference.strip_timeline(old_page, json.loads(fetch(manifest_name)), location)
+        page = hosted_conference_page(export_conference.render_index(data), run, archive)
+        if export_conference.published_data(page) != data \
+                or data['records'] != [r for r in old_data['records'] if r['category'] != 'activity']:
+            raise ValueError('Re-rendered conference records differ from the published ones: ' + run)
+        head = old_page.find(_BODY_START)
+        old_head, new_head = old_page[:head], page[:page.find(_BODY_START)]
+        kept = _HEAD_BLOCKS.findall(old_head)
+        if head < 0 or not kept or any(block not in new_head for block in kept) or SITE_THEME_MARKER not in new_head:
+            raise ValueError('The re-rendered page head drops the published Space navigation or dataset note, or '
+                             'lacks the site theme: ' + run)
+        if dataset_logs.moved_links(page, CONFERENCE_PAGE, {n[len(run) + 1:] for n in datasets
+                                                            if n.startswith(run + '/')}):
+            raise ValueError('The re-rendered page still links a file moved to the dataset: ' + run)
+        expected_link = (dataset_logs.file_url(datasets[timeline]['path'], datasets[timeline]['commit'],
+                                               datasets[timeline]['repo']) if location == 'dataset'
+                         else '../results.html#raw-records-offline')
+        if f'href="{html.escape(expected_link, quote=True)}"' not in page:
+            raise ValueError('The timeline link does not reach its ' + location + ' copy: ' + run)
+        for _, url in _HREF.findall(page):
+            if not url or url.startswith('#') or re.match(r'[a-z][a-z0-9+.-]*:|//', url, re.I):
+                continue
+            target = posixpath.normpath(posixpath.join(f'{run}/{CONFERENCE_PREFIX}', url.split('#')[0]))
+            if target not in remote:
+                raise ValueError(f'The re-rendered page links a missing file: {run}: {url}')
+        page_bytes = page.encode('utf-8')
+        manifest_bytes = json.dumps(manifest, indent=2).encode('utf-8')
+        planned[page_name], planned[manifest_name] = page_bytes, manifest_bytes
+        per_run[run] = {'timeline_location': location, 'timeline_entries_removed': old_data['timeline_entries'],
+                        'records_kept': len(data['records']),
+                        'head': 'identical' if new_head == old_head else 'current site theme added', 'page_bytes_before': len(fetch(page_name)),
+                        'page_bytes_after': len(page_bytes),
+                        'unchanged': page_bytes == fetch(page_name) and manifest_bytes == fetch(manifest_name)}
+    files = dict(archive['files'])
+    for name, data in planned.items():
+        files[name] = digest(data)
+    new_archive = {**archive, 'files': files, 'total_bytes': sum(x['bytes'] for x in files.values())}
+    planned[MANIFEST] = fetch(MANIFEST) if new_archive == archive else json.dumps(new_archive, indent=2).encode()
+
+    names = sorted(planned)
+    stored_lfs = sorted(n for n in names if remote[n].lfs)
+    ruled = lfs_rule_matches(fetch(ATTRIBUTES), names) if ATTRIBUTES in remote else []
+    large = [f'{n} ({len(planned[n])} bytes)' for n in names if len(planned[n]) >= LFS_SAFE_BYTES]
+    if stored_lfs or ruled or large:
+        raise ValueError('Planned file(s) stored as LFS, named by an LFS rule or close to the size HF stores as '
+                         'LFS: ' + ', '.join([*stored_lfs, *ruled, *large][:EXAMPLES]))
+    uploads = [(n, planned[n]) for n in names if not matches(planned[n], remote[n])]
+    before = sum(r['page_bytes_before'] for r in per_run.values())
+    after = sum(r['page_bytes_after'] for r in per_run.values())
+    result = {'operation': 'maintain-run', 'scope': 'conference', 'repo': repo, 'private': True,
+              'runs': selected, 'base_revision': base, 'committed': False, 'per_run': per_run,
+              'conference_page_bytes': {'before': before, 'after': after, 'saved': before - after},
+              'to_replace': [n for n, _ in uploads], 'to_add': [],
+              'archive_manifest': {'changed_digests': sorted(n for n in files if archive['files'].get(n) != files[n]),
+                                   'total_bytes_before': archive.get('total_bytes'),
+                                   'total_bytes_after': new_archive['total_bytes']},
+              'uploads': len(uploads), 'already_applied': not uploads}
+    if not commit or not uploads:
+        return result
+
+    backup_dir, receipt = Path(backup_dir), Path(receipt)
+    revision = base
+
+    def write_receipt(status):
+        write_json(receipt, {**result, 'last_revision': revision, 'status': status})
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    write_receipt('writing backups; nothing uploaded')
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        write_json(backup_dir / INVENTORY, {'operation': 'maintain-run', 'scope': 'conference', 'repo': repo,
+                                            'runs': selected, 'revision': base, 'origin_revision': base,
+                                            'resume_from': None, 'files': current})
+        saved = sorted(n for n in [*planned, ATTRIBUTES] if n in remote)
+        for name in saved:
+            target = backup_dir / ORIGINAL / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(fetch(name))
+        write_json(backup_dir / PLAN, result)
+        result.update(backup_dir=str(backup_dir), backups=saved)
+        write_receipt('backups written; nothing uploaded')
+        latest = api.repo_info(repo, repo_type='space')
+        if not latest.private or latest.sha != base:
+            raise ValueError('Space changed concurrently or is no longer private; rerun the dry run '
+                             'against the latest revision')
+        response = api.create_commit(
+            repo_id=repo, repo_type='space', parent_commit=base,
+            commit_message=f'Conference views without the embedded activity timeline ({len(selected)} run(s); '
+                           'the timeline stays in the private logs dataset)',
+            operations=[operation(path_in_repo=n, path_or_fileobj=d) for n, d in uploads])
+        revision = response.oid
+        write_receipt('committed; verifying')
+        final = api.repo_info(repo, repo_type='space', files_metadata=True)
+        if not final.private or final.sha != revision:
+            raise ValueError('Space changed before verification; inspect the latest revision')
+        final_files = remote_files(api, repo, revision)
+        state = inventory(final_files)
+        if set(state) != set(current):
+            raise ValueError(f'Remote file inventory changed unexpectedly: missing '
+                             f'{sorted(set(current) - set(state))[:EXAMPLES]}, unexpected '
+                             f'{sorted(set(state) - set(current))[:EXAMPLES]}')
+        for name in current:
+            if name not in planned and not same(current[name], state[name]):
+                raise ValueError('Unrelated remote file changed: ' + name)
+        for name, data in planned.items():
+            if final_files[name].lfs or not matches(data, final_files[name]):
+                raise ValueError('File mismatch or stored as LFS after maintenance: ' + name)
+    except Exception as error:
+        try:
+            write_receipt('failed: ' + type(error).__name__ + (': ' + str(error) if isinstance(error, ValueError) else ''))
+        except Exception as receipt_error:  # never hide the original error
+            print(f'Could not record the failure in the receipt {receipt}: {type(receipt_error).__name__}: '
+                  f'{receipt_error}', file=sys.stderr)
+        raise
+    result.update(committed=True, final_revision=revision, status='verified', verification={
+        'final_files': len(state), 'changed_files': sorted(n for n in current if not same(current[n], state[n])),
+        'verified_planned_files': len(planned), 'verified_preserved_files': len(set(current) - set(planned))})
+    write_receipt('verified')
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument('--maintain-run', metavar='RUN_ID',
                         help='The already-published run whose results and judge files (or transcripts) are updated')
     target.add_argument('--all-published-runs', action='store_true',
-                        help='migrate-logs scope: every run recorded in the published archive-manifest.json')
+                        help='migrate-logs or conference scope: every run recorded in the published '
+                             'archive-manifest.json (conference: every one with a conference view)')
     target.add_argument('--rerender-catalogue', action='store_true',
                         help='Rebuild only index.html from the published experiments.json with the current '
                              'catalogue generator (after a catalogue page change); no entry or run file changes')
@@ -1729,7 +1949,9 @@ def main(argv=None):
                              'RUN/analysis/incident/{report.html,report.md,evidence.json}, the Incident report tab '
                              'of the published RUN/results.html and the Incident report link of the catalogue entry; '
                              'prune: remove the run\'s large raw LFS files (kept offline, verified against --runs-dir), '
-                             'add the offline notice to RUN/results.html and purge the freed LFS objects')
+                             'add the offline notice to RUN/results.html and purge the freed LFS objects; '
+                             'conference: re-render RUN/conference-view/index.html and its manifest.json without the '
+                             'embedded activity timeline (kept in the private logs dataset), from the published records')
     parser.add_argument('--prune-kind', action='append', choices=sorted(PRUNE_KINDS),
                         help='prune scope: file kinds to remove (repeatable; default jsonl and snapshots; eval also '
                              'removes the Inspect logs, after which Inspect View cannot load the run)')
@@ -1771,6 +1993,18 @@ def main(argv=None):
         print(json.dumps(unlist_run(HfApi(), hf_hub_download, run=None, rerender=True, commit=args.commit,
                                     repo=args.repo_id, receipt=args.receipt, backup_dir=args.backup_dir,
                                     operation=CommitOperationAdd), indent=2))
+        return
+    if args.scope == 'conference':
+        if args.bundle is not None or args.resume_from is not None or args.replace_judge:
+            parser.error('--scope conference takes no --bundle, --resume-from or --replace-judge')
+        if args.commit and (args.receipt is None or args.backup_dir is None):
+            parser.error('--commit requires --receipt and --backup-dir')
+        from huggingface_hub import HfApi, CommitOperationAdd, hf_hub_download
+        result = maintain_conference(HfApi(), hf_hub_download,
+                                     runs=None if args.all_published_runs else [args.maintain_run],
+                                     commit=args.commit, repo=args.repo_id, receipt=args.receipt,
+                                     backup_dir=args.backup_dir, operation=CommitOperationAdd)
+        print(json.dumps(result, indent=2))
         return
     if args.scope == 'migrate-logs' or args.all_published_runs:
         if args.scope != 'migrate-logs' or args.bundle is not None or args.resume_from is not None:
