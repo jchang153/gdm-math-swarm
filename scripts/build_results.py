@@ -81,6 +81,9 @@ TABS = (('Report', '#report', 'This page: facts computed from the run\'s own rec
          'verified by a second model call); researcher-only.'),
         ('Inspect', 'inspect-view/index.html', 'Agent transcripts and the raw Inspect evaluation logs '
          '(authoritative), read in the native Inspect log viewer.'))
+# The Timeline link is local here; the timeline lives only in the private logs dataset (owner, October 23, 2026):
+# prepare_hf_library.py moves RUN/analysis/timeline.md to the dataset (dataset_logs category 'timeline') and
+# repoints this link to the dataset file page, so the Space never stores it.
 OTHER_RECORDS = (('Timeline', 'analysis/timeline.md'), ('Settings', 'settings.json'))
 # Plain explanations of the status labels this report shows (only labels present are listed).
 STOP_REASONS = {

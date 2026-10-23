@@ -18,7 +18,9 @@ Stages, each recorded in the receipt and the backup directory:
    ``delete_eval``). After stage 2 is verified, one
    Space commit pinned to the planned head (or to a later head that differs only under ``live/``) deletes
    the moved files, repoints every page link to them to the dataset file page and moves their
-   ``archive-manifest.json`` records from ``files`` to ``dataset_files``. The result is verified, then the
+   ``archive-manifest.json`` records from ``files`` to ``dataset_files``; when the catalogue page links a moved
+   file (its Timeline links), it is re-rendered from the published ``experiments.json`` (``_root_catalogue``).
+   The result is verified, then the
    LFS objects the new head no longer references are permanently deleted without rewriting history
    (as ``--scope prune`` does). Originals of every changed page are backed up first.
 """
@@ -213,6 +215,36 @@ def copy(api, result, *, operation, session, headers, dataset=DATASET_REPO, prog
             'checks': checks}
 
 
+def _root_catalogue(download, repo, base, remote, moved, cache_dir=None):
+    """{'index.html': (old, new, [linked space paths])} when the Space's catalogue page links a moved file
+    (the catalogue's Timeline links to RUN/analysis/timeline.md), else {}. The page is re-rendered from the
+    published experiments.json with the current build_experiment_index.write_index (what the next publish
+    uploads; catalogue_page.HIDDEN_LINKS no longer shows those links). Refused when the re-render would change
+    experiments.json or still links a moved file."""
+    if 'index.html' not in remote or 'experiments.json' not in remote:
+        return {}
+    fetched = {}
+    for name in ('index.html', 'experiments.json'):
+        data = Path(download(repo, name, repo_type='space', revision=base, cache_dir=cache_dir)).read_bytes()
+        if not matches(data, remote[name]):
+            raise ValueError('Remote page differs from its record: ' + name)
+        fetched[name] = data
+    linked = dataset_logs.moved_links(fetched['index.html'].decode('utf-8', 'replace'), 'index.html', moved)
+    if not linked:
+        return {}
+    from build_experiment_index import write_index
+    catalogue = json.loads(fetched['experiments.json'])
+    with tempfile.TemporaryDirectory() as tmp:
+        write_index(tmp, catalogue['experiments'], catalogue.get('warnings', []), hosted=True)
+        index, entries = (Path(tmp) / 'index.html').read_bytes(), (Path(tmp) / 'experiments.json').read_bytes()
+    if entries != fetched['experiments.json']:
+        raise ValueError('Re-rendering the catalogue would change experiments.json; publish the catalogue first')
+    still = dataset_logs.moved_links(index.decode('utf-8'), 'index.html', moved)
+    if still:
+        raise ValueError('The re-rendered catalogue still links moved files: ' + ', '.join(sorted(set(still))[:20]))
+    return {'index.html': (fetched['index.html'], index, sorted(set(linked)))}
+
+
 def delete(api, download, result, copied, *, operation, delete_operation, backup_dir, repo=DEFAULT_REPO,
            dataset=DATASET_REPO, purge=True, cache_dir=None, now=None, retries=3, pages_dir=None):
     """Stage 3 for download-only categories (see the module docstring)."""
@@ -259,6 +291,8 @@ def delete(api, download, result, copied, *, operation, delete_operation, backup
         new, noted = dataset_logs.offline_links(new, rel, kept_offline.get(run, set()))
         if changed or noted:
             pages[name] = (data, new.encode('utf-8'), sorted(set(changed + noted)))
+    catalogue = _root_catalogue(download, repo, base, remote, set(moved) | set(offline) | unavailable, cache_dir)
+    pages.update(catalogue)
     root = result['_root']
     files = {n: d for n, d in root['files'].items() if n not in moved}
     for name, (_, new, _) in pages.items():

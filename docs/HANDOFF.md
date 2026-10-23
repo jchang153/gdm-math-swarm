@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-23 by Claude (Opus 5.5) session (90-min run published; timeline removed from conference views).
+Last updated: 2026-10-23 by Claude (Opus 5.5) session (timeline.md moves to the dataset: code on main, operator commit pending).
 
 ## What the project is
 
@@ -304,8 +304,12 @@ is being merged into main via `collab-env`.
      published runs (Space `2e312df8`, verified 17/17; pages 29.9 MB → 2.29 MB). The 90-min page went 58 MB → 0.49 MB.
      baseline100, baseline8g100 and cache100 link a "kept offline" notice, since their timelines were pruned before the
      dataset existed.
-   - **Open decision:** each run's report still links `analysis/timeline.md` (a Markdown copy of the timeline, 9 MB for
-     the 90-min run), which stays in the Space. Moving it to the dataset too needs the owner's call.
+   - **Decided (owner, 2026-10-23): activity timelines live only in the private dataset**, including the Markdown
+     copy `RUN/analysis/timeline.md`. Code on main: dataset category `timeline` (prepare/publish send it to the
+     dataset and repoint the run page's Timeline link; the catalogue no longer shows Timeline links;
+     `verify_hosted.py` checks `no_space_timeline` and `timeline_link`). **Pending operator commit** for the 18
+     Space copies (42.2 MB, plan at Space `3fe9e737`): commands in docs/experiment-library.md, "Timeline
+     migration"; records `runs/phase-b/timeline-md-20261023/`.
    - Records: `runs/phase-b/conference-timeline-20261023/`.
 2. **DONE 2026-10-22: large files moved from the HF Space to the private dataset `HF-ORG/LOGS-DATASET`.**
    - **Space:** about **101 MB** of `used_storage` (was 920 MB), revision `fd3cdc33`. It holds only browsable pages:

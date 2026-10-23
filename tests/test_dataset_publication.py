@@ -96,6 +96,10 @@ def make_dataset_run(root):
         '<a href="../results.html">Run report</a></body></html>')
     (run / 'snapshots' / 'agent-001').mkdir(parents=True)
     (run / 'snapshots' / 'agent-001' / ('a' * 64)).write_text('snapshot')
+    (run / 'analysis').mkdir(exist_ok=True)
+    (run / 'analysis' / 'timeline.md').write_text('# Timeline\n\n- 00:00 start\n')
+    (run / 'results.html').write_text('<!doctype html><html><head></head><body><h1>R</h1><p>'
+                                      '<a href="analysis/timeline.md">Timeline</a></p></body></html>')
     viewer = make_viewer(root)
     (viewer / 'logs' / LOG).write_bytes(eval_bytes())
     return run, viewer
@@ -126,7 +130,7 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(sorted(files[log]['sources']), [f'inspect-view/logs/{LOG}', f'inspect/{LOG}'])
         self.assertEqual(files[log]['category'], 'eval')
         for name in (f'{RUN}/runtime.jsonl', f'{RUN}/conference/events.jsonl', f'{RUN}/conference/state.sqlite',
-                     f'{RUN}/snapshots.tar.gz', f'{RUN}/snapshots.manifest.json'):
+                     f'{RUN}/snapshots.tar.gz', f'{RUN}/snapshots.manifest.json', f'{RUN}/analysis/timeline.md'):
             self.assertIn(name, files)
             self.assertTrue((output / 'dataset-files' / name).is_file(), name)
         manifest = json.loads((output / 'archive-manifest.json').read_text())
@@ -137,6 +141,15 @@ class PrepareTests(unittest.TestCase):
         # The catalogue entry keeps its (hidden) Inspect log link, as published entries have it.
         entry = json.loads((output / 'experiments.json').read_text())['experiments'][0]
         self.assertIn(f'{RUN}/inspect/{LOG}', entry['links'].values())
+        # The timeline lives only in the dataset (owner, October 23, 2026): the run page links the dataset file;
+        # the catalogue entry keeps its Timeline link as data, but the catalogue page no longer shows it.
+        self.assertEqual(files[f'{RUN}/analysis/timeline.md']['category'], 'timeline')
+        self.assertFalse((output / RUN / 'analysis' / 'timeline.md').exists())
+        report = (output / RUN / 'results.html').read_text()
+        self.assertIn(f'/blob/{dataset_logs.COMMIT_PLACEHOLDER}/{RUN}/analysis/timeline.md"', report)
+        self.assertEqual(dataset_logs.moved_links(report, 'results.html', {'analysis/timeline.md'}), [])
+        self.assertEqual(entry['links']['Timeline'], f'{RUN}/analysis/timeline.md')
+        self.assertNotIn('analysis/timeline.md">', (output / 'index.html').read_text())
         with ZSTD:
             load_bundle(output)
 
@@ -197,8 +210,10 @@ class PublishTests(unittest.TestCase):
         dataset = self.hub.repos['dataset'].files
         space = self.hub.repos['space'].files
         self.assertIn(f'{RUN}/inspect/{LOG}', dataset)
-        self.assertFalse([n for n in space if n.endswith(('.eval', '.jsonl', '.sqlite'))])
+        self.assertFalse([n for n in space if n.endswith(('.eval', '.jsonl', '.sqlite', 'timeline.md'))])
+        self.assertIn(f'{RUN}/analysis/timeline.md', dataset)
         commit = result['dataset']['revision']
+        self.assertIn(f'/blob/{commit}/{RUN}/analysis/timeline.md"', space[f'{RUN}/results.html'].decode())
         page = space[f'{RUN}/inspect-view/index.html'].decode()
         self.assertEqual(dataset_logs.shim_settings(page)[1], commit)
         self.assertNotIn(dataset_logs.COMMIT_PLACEHOLDER, page)
@@ -360,6 +375,36 @@ class VerifyTests(unittest.TestCase):
         self.dataset[f'{RUN}/inspect/{LOG}'] = b'Y' * len(self.log)
         record = self.verify()
         self.assertIn(('range_206', f'{RUN}/inspect/{LOG}'), self.failed(record))
+
+    def timeline_link(self):
+        url = dataset_logs.file_url(f'{RUN}/analysis/timeline.md', self.COMMIT)
+        return (f'<a href="{url}" target="_blank" rel="noopener noreferrer" data-dataset-file="analysis/timeline.md" '
+                f'title="Stored in the private logs dataset (sign in to huggingface.co with read access)">Timeline</a>')
+
+    def test_timeline_in_the_dataset_passes(self):
+        self.space[f'{RUN}/results.html'] += self.timeline_link().encode()
+        self.dataset[f'{RUN}/analysis/timeline.md'] = b'# t\n'
+        record = self.verify()
+        self.assertTrue(record['ok'], self.failed(record))
+        check = next(c for c in record['checks'] if c['check'] == 'timeline_link')
+        self.assertEqual((check['links'], check['dataset']), (1, 1))
+
+    def test_timeline_left_in_the_space_or_linked_directly_fails(self):
+        self.space[f'{RUN}/analysis/timeline.md'] = b'# t\n'
+        self.space[f'{RUN}/results.html'] += b'<a href="analysis/timeline.md">Timeline</a>'
+        record = self.verify()
+        self.assertEqual({c for c, _ in self.failed(record)}, {'no_space_timeline', 'timeline_link'})
+
+    def test_timeline_link_missing_from_the_dataset_fails(self):
+        self.space[f'{RUN}/results.html'] += self.timeline_link().encode()
+        record = self.verify()
+        self.assertEqual({c for c, _ in self.failed(record)}, {'dataset_links_resolve'})
+
+    def test_timeline_kept_offline_links_the_notice(self):
+        self.space[f'{RUN}/results.html'] += (b'<aside id="raw-records-offline"></aside><a href="results.html#raw-records-'
+                                             b'offline" data-offline-file="analysis/timeline.md">Timeline</a>')
+        record = self.verify()
+        self.assertTrue(record['ok'], self.failed(record))
 
 
 if __name__ == '__main__':

@@ -111,7 +111,7 @@ class CataloguePageTests(unittest.TestCase):
         page, index = self.write([older])
         self.assertEqual(json.loads(index)['experiments'][0]['links'], older['links'])  # entry unchanged
         self.assertNotIn('href="a-old/transcripts/index.html"', page)
-        self.assertIn("HIDDEN_LINKS=['Transcripts','Inspect logs']", page)
+        self.assertIn("HIDDEN_LINKS=['Transcripts','Inspect logs','Timeline']", page)
 
     def test_inspect_log_links_are_kept_as_data_but_not_shown(self):
         """site-nologs: the raw .eval links were only downloads; the entry keeps them, no page shows them."""

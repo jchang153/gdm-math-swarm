@@ -755,6 +755,14 @@ State on October 22, 2026 (records: `runs/phase-b/hf-library-preparation/logs-mi
   (`{repo, path, commit, bytes, sha256, category, moved}`); files pruned earlier stay under `offline_files`.
 - **Conference views** embed no activity timeline (October 23, 2026); their note links `RUN/analysis/timeline.jsonl`
   in the dataset (see "Conference scope").
+- **Activity timelines live only in the dataset** (owner, October 23, 2026). The Markdown copy
+  `RUN/analysis/timeline.md` (up to 9 MB) is the download-only category `timeline`, kept at the same path in the
+  dataset, next to `RUN/analysis/timeline.jsonl` (category `jsonl`). The run page's "Timeline" link
+  (`build_results.py`, `OTHER_RECORDS`) is local in `runs/RUN/results.html`; `prepare_hf_library.py` moves the file
+  to `dataset-files/` and repoints the link to the dataset file page, so `publish_hf_library.py` never sends it to
+  the Space (and refuses a bundle that does). The catalogue entry keeps its `Timeline` link as data (published
+  entries never change), but the catalogue page no longer shows it (`catalogue_page.HIDDEN_LINKS`). Existing runs:
+  "Timeline migration" below.
 - **Links**: a page link to a moved file points to the dataset file page
   (`huggingface.co/datasets/HF-ORG/LOGS-DATASET/blob/<commit>/RUN/<path>`, new tab) with the note
   "(in the private logs dataset)"; a link to a pruned file without a dataset copy points to the run page's
@@ -795,14 +803,17 @@ State on October 22, 2026 (records: `runs/phase-b/hf-library-preparation/logs-mi
 - Live runs: `live_mirror.py` commits live logs to `live/RUN/inspect/` in the dataset, then the pages-only Space
   `live/` commit; superseded live logs are purged from the dataset (`repo_type="dataset"`).
 - Existing runs: `maintain_hf_run.py --all-published-runs --scope migrate-logs [--migrate-category eval|jsonl|
-  snapshots|database|transcripts ...] [--commit --receipt FILE --backup-dir DIR [--delete-moved]]`
+  snapshots|database|transcripts|timeline ...] [--commit --receipt FILE --backup-dir DIR [--delete-moved]]`
   (`scripts/migrate_dataset.py`): plan (pinned Space head, every file downloaded, checked against its record,
   credential-screened and compared with `runs/RUN/` when readable; iCloud placeholders get `brctl download`,
   and after two that do not download the rest are left to the Space copy), copy (verified dataset commits, one
   per run; size and LFS SHA-256 or Git blob id per path; first and last 64 bytes of each log through resolve,
   206), and with `--delete-moved` (never `eval`) one Space commit that deletes the moved files, repoints links,
   moves their manifest records to `dataset_files`, is verified, and then purges the freed LFS objects without
-  rewriting history. Other maintenance scopes refuse to re-add a file recorded in `dataset_files`.
+  rewriting history. When the catalogue page links a moved file (its Timeline links), the delete commit also
+  re-renders `index.html` from the published `experiments.json` with the current `write_index` (what the next
+  publish uploads); it is refused if that would change `experiments.json` or still link a moved file. Other
+  maintenance scopes refuse to re-add a file recorded in `dataset_files`.
 - Switch and delete (Inspect logs of existing runs): `migrate_dataset.py switch --dataset-commit SHA [--commit
   --receipt FILE --backup-dir DIR] [--keep-test]` checks every Space log copy against the dataset at SHA (size
   and LFS SHA-256), requires each page to differ by the shim alone, then makes one guarded commit (rebased only
@@ -815,7 +826,43 @@ State on October 22, 2026 (records: `runs/phase-b/hf-library-preparation/logs-mi
   only `logs-test/` (landing page, `signin.html`, `evallog-fetch.js`, the run's Inspect View without `.eval`).
 - Verify: `verify_hosted.py --run RUN --revision SHA` (dataset checks run automatically when the run's Inspect
   View has a shim: `dataset_private`, `inspect_shim`, `range_206` per log via the dataset, `preflight`,
-  `no_moved_links`, `no_broken_links`, `dataset_links_resolve`; `--expect-no-space-logs` after stage 4).
+  `no_moved_links`, `no_broken_links`, `dataset_links_resolve`, `no_space_timeline` (no `RUN/analysis/timeline.md`
+  in the Space) and `timeline_link` (every Timeline link of `RUN/results.html` points to the dataset file
+  `RUN/analysis/timeline.md`, resolved by `dataset_links_resolve`, or to the "Raw records kept offline" notice);
+  `--expect-no-space-logs` after stage 4).
+
+### Timeline migration (October 23, 2026)
+
+Owner decision of October 23, 2026: activity timelines live only in the private dataset. The conference views
+were done first ("Conference scope"); the remaining Space copies are the 18 `RUN/analysis/timeline.md` files.
+The move uses the migrate-logs flow with the `timeline` category: the plan downloads each Space copy at the pinned
+head (the source; local copies may be iCloud placeholders), checks it against its record and the credential
+screen and compares it with `runs/RUN/` when readable; `--commit` adds each at `RUN/analysis/timeline.md` in the
+dataset (size and SHA-256 or Git blob id verified); `--delete-moved` deletes the Space copies, repoints each
+`RUN/results.html` Timeline link to the dataset file page (a run without a copy anywhere would get the
+"kept offline" notice), re-renders the catalogue without its Timeline links, records the files under
+`dataset_files` (category `timeline`) and purges any freed LFS objects (none: all 18 are regular Git files).
+
+Plan of October 23, 2026 at Space `3fe9e737` (read-only, `runs/phase-b/timeline-md-20261023/plan.json`): 18 runs,
+18 files, 42,196,929 bytes (42.2 MB), all regular Git files (0 LFS bytes), largest 8,972,387 bytes (the 90-minute
+run); all 18 local copies matched the Space copies byte for byte; none offline. The delete commit changes the 18
+`results.html` pages, `index.html` and `archive-manifest.json` (`experiments.json` is unchanged): a dry run of the
+delete stage with the commit intercepted (`dry-run-repointed.json` in the records) repointed exactly
+`analysis/timeline.md` on each run page and dropped the catalogue's 17 Timeline anchors. The delete stage reads
+every published page (11,183 HTML files) to find links; the first pass took about 30 minutes, later ones reuse
+the HF download cache.
+
+```bash
+OUT=runs/phase-b/timeline-md-20261023
+python scripts/maintain_hf_run.py --all-published-runs --scope migrate-logs --migrate-category timeline   # plan
+python scripts/maintain_hf_run.py --all-published-runs --scope migrate-logs --migrate-category timeline \
+  --delete-moved --commit --receipt "$OUT/receipt.json" --backup-dir "$OUT/backup"
+REV=$(python -c 'import json;print(json.load(open("'"$OUT"'/receipt.json"))["delete"]["space_revision"])')
+for RUN in $(python -c 'import json;print(" ".join(json.load(open("'"$OUT"'/receipt.json"))["runs"]))'); do
+  python scripts/verify_hosted.py --run "$RUN" --revision "$REV" --expect-no-space-logs \
+    --output "$OUT/verify-$RUN.json" > /dev/null || echo "FAILED $RUN"
+done
+```
 
 ### Proposal record (October 22, 2026)
 

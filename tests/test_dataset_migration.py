@@ -182,6 +182,68 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(state['delete']['offline_copied'], [f'{RUN}/analysis/timeline.jsonl'])
         self.assertEqual(state['delete']['offline_linked_to_notice'], [f'{RUN}/conference/events.jsonl'])
 
+    def test_timeline_md_moves_to_the_dataset_and_the_catalogue_stops_linking_it(self):
+        """Owner, October 23, 2026: the timeline lives only in the private dataset. The Space copy is the source
+        (the local one may be an iCloud placeholder); the run page's Timeline link reaches the dataset file and the
+        re-rendered catalogue no longer shows a Timeline link."""
+        from build_experiment_index import write_index
+        from test_catalogue import entry
+        space = self.hub.repos['space'].files
+        timeline = b'# Timeline\n\n- 00:00 start\n'
+        space[f'{RUN}/analysis/timeline.md'] = timeline
+        space[f'{RUN}/results.html'] = (b'<html><head></head><body><p><a href="analysis/timeline.md">Timeline</a> '
+                                        b'<a href="settings.json">Settings</a></p></body></html>')
+        catalogue = self.root / 'catalogue'
+        write_index(catalogue, [entry(RUN, 1, links={'Report': f'{RUN}/results.html',
+                                                     'Timeline': f'{RUN}/analysis/timeline.md'})], hosted=True)
+        published = (catalogue / 'index.html').read_text()
+        # The catalogue as published before the change still showed the link.
+        space['index.html'] = published.replace(
+            f'<a href="{RUN}/results.html">Report</a>',
+            f'<a href="{RUN}/results.html">Report</a> · <a href="{RUN}/analysis/timeline.md">Timeline</a>').encode()
+        space['experiments.json'] = (catalogue / 'experiments.json').read_bytes()
+        self.assertIn(b'analysis/timeline.md">Timeline', space['index.html'])
+        manifest = json.loads(space['archive-manifest.json'])
+        manifest['files'] = {n: dataset_logs.digest(d) for n, d in space.items()
+                             if not n.startswith('live/') and n != 'archive-manifest.json'}
+        space['archive-manifest.json'] = json.dumps(manifest).encode()
+        state = self.migrate(commit=False, categories=('timeline',))
+        self.assertEqual(list(state['dataset_files']), [f'{RUN}/analysis/timeline.md'])
+        self.assertEqual(state['files'][0]['local'], 'absent')  # copied from the Space copy
+        state = self.migrate(commit=True, delete_moved=True, categories=('timeline',))
+        commit = self.hub.repos['dataset'].sha
+        self.assertEqual(self.hub.repos['dataset'].files[f'{RUN}/analysis/timeline.md'], timeline)
+        self.assertNotIn(f'{RUN}/analysis/timeline.md', space)
+        page = space[f'{RUN}/results.html'].decode()
+        self.assertIn(f'href="https://huggingface.co/datasets/{dataset_logs.DATASET_REPO}/blob/{commit}/{RUN}/'
+                      f'analysis/timeline.md"', page)
+        self.assertIn('data-dataset-file="analysis/timeline.md"', page)
+        self.assertIn('href="settings.json"', page)
+        index = space['index.html'].decode()
+        self.assertNotIn('timeline.md"', index.split('<script')[0])
+        self.assertEqual(index, published)  # what the next publish renders
+        self.assertEqual(space['experiments.json'], (catalogue / 'experiments.json').read_bytes())
+        self.assertEqual(sorted(state['delete']['repointed_pages']), ['index.html', f'{RUN}/results.html'])
+        recorded = json.loads(space['archive-manifest.json'])
+        self.assertEqual(recorded['dataset_files'][f'{RUN}/analysis/timeline.md']['category'], 'timeline')
+        self.assertNotIn(f'{RUN}/analysis/timeline.md', recorded['files'])
+        self.assertEqual(recorded['files']['index.html'], dataset_logs.digest(space['index.html']))
+        self.assertTrue((self.root / 'out' / 'backup' / 'original' / 'index.html').is_file())
+
+    def test_catalogue_rerender_that_changes_experiments_json_is_refused(self):
+        from build_experiment_index import write_index
+        from test_catalogue import entry
+        space = self.hub.repos['space'].files
+        space[f'{RUN}/analysis/timeline.md'] = b'# t\n'
+        catalogue = self.root / 'catalogue'
+        write_index(catalogue, [entry(RUN, 1, links={'Timeline': f'{RUN}/analysis/timeline.md'})], hosted=True)
+        space['index.html'] = f'<a href="{RUN}/analysis/timeline.md">Timeline</a>'.encode()
+        space['experiments.json'] = (catalogue / 'experiments.json').read_bytes() + b' '
+        before = dict(space)
+        with self.assertRaisesRegex(ValueError, 'would change experiments.json'):
+            self.migrate(commit=True, delete_moved=True, categories=('timeline',))
+        self.assertEqual({n: d for n, d in space.items()}, before)
+
     def test_deploy_test_adds_only_the_test_area(self):
         before = dict(self.hub.repos['space'].files)
         result = migrate_dataset.deploy_test(self.hub, self.hub.download, run=RUN, dataset_commit='b' * 40,
@@ -328,8 +390,10 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(c('snapshots.tar.gz'), 'snapshots')
         self.assertEqual(c('snapshots/agent-001/abc'), 'snapshots')
         self.assertEqual(c('transcripts/index.html'), 'transcripts')
+        self.assertEqual(c('analysis/timeline.md'), 'timeline')  # owner, October 23, 2026: dataset only
+        self.assertIn('timeline', dataset_logs.DOWNLOAD_ONLY)
         for kept in ('results.html', 'results.json', 'conference-view/index.html', 'analysis/judge/report.json',
-                     'inspect-view/logs/listing.json', 'analysis/timeline.md'):
+                     'inspect-view/logs/listing.json', 'timeline.md', 'analysis/judge/timeline.md'):
             self.assertIsNone(c(kept), kept)
         self.assertEqual(dataset_logs.dataset_path('R', 'inspect-view/logs/a.eval'), 'R/inspect/a.eval')
         self.assertEqual(dataset_logs.dataset_path('R', 'inspect/a.eval', live=True), 'live/R/inspect/a.eval')

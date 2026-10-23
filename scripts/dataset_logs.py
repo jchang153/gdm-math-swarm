@@ -16,6 +16,10 @@ The Space hits HF's 1 GB repository cap, so (owner, October 22, 2026):
 - **The resume bundle** (``RUN/resume/``, research_swarm.resume_bundle: agent session transcripts, workspace
   archives, the resume manifest) is private raw state (owner, October 22, 2026): it never goes to the Space;
   when a run is published it goes to the private dataset at ``RUN/resume/...``.
+- **The activity timeline** (owner, October 23, 2026: timelines live only in the private dataset): the
+  Markdown copy ``RUN/analysis/timeline.md`` (category ``timeline``, up to 9 MB) goes to the dataset at the
+  same path, like ``RUN/analysis/timeline.jsonl`` (category ``jsonl``). The run page's "Timeline" link points
+  to the dataset file page; the catalogue no longer shows a Timeline link (catalogue_page.HIDDEN_LINKS).
 
 Everything here uses the operator's own HF login only through ``huggingface_hub``; no token value is
 read, printed or embedded.
@@ -47,8 +51,10 @@ CATEGORIES = {
     'database': 'database file',
     'transcripts': 'custom transcript export (replaced by Inspect View)',
     'resume': 'resume bundle (private agent state for continuing a run)',
+    'timeline': 'activity timeline (Markdown copy of analysis/timeline.jsonl)',
 }
-DOWNLOAD_ONLY = ('jsonl', 'snapshots', 'database', 'transcripts', 'resume')
+DOWNLOAD_ONLY = ('jsonl', 'snapshots', 'database', 'transcripts', 'resume', 'timeline')
+TIMELINE_MD = 'analysis/timeline.md'
 
 
 def category(relative):
@@ -63,6 +69,8 @@ def category(relative):
         return 'transcripts'
     if parts[0] == 'resume':  # RUN/resume/ (research_swarm.resume_bundle): private raw state, never the Space
         return 'resume'
+    if '/'.join(parts) == TIMELINE_MD:  # the timeline lives only in the dataset (owner, October 23, 2026)
+        return 'timeline'
     if parts[0] == 'snapshots' or name in ('snapshots.tar.gz', 'snapshots.manifest.json'):
         return 'snapshots'
     if name.endswith('.jsonl'):

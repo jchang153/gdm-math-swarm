@@ -23,7 +23,10 @@ Space copy when one exists; a CORS preflight from the Space origin allows author
 checked page links a file recorded as moved to the dataset (archive-manifest.json dataset_files or
 offline_files) directly, every repointed link (data-dataset-file) names a file present in the dataset at
 its commit, and every same-site link of a checked page names a file stored in the Space
-(no_broken_links). --expect-no-space-logs also requires that the Space stores no .eval for the run.
+(no_broken_links). No RUN/analysis/timeline.md stays in the Space (no_space_timeline; the timeline lives
+only in the dataset, owner, October 23, 2026) and every Timeline link of RUN/results.html points to the
+dataset file at RUN/analysis/timeline.md (resolved by dataset_links_resolve) or to the page's "Raw records
+kept offline" notice (timeline_link). --expect-no-space-logs also requires that the Space stores no .eval for the run.
 Exits 1 when any check fails; the record lists every check.
 """
 import argparse
@@ -200,6 +203,22 @@ def verify_dataset(api, session, headers, repo, run, info, check, settings, serv
                                                        cache_dir=cache_dir)).read_bytes())
         for key in ("dataset_files", "offline_files"):
             moved |= {n[len(run) + 1:] for n in (manifest.get(key) or {}) if n.startswith(run + "/")}
+    # The activity timeline lives only in the private dataset (owner, October 23, 2026): no Space copy, and the
+    # run page's Timeline link reaches the dataset file (resolved below) or the offline notice.
+    timeline = f"{run}/{dataset_logs.TIMELINE_MD}"
+    check("no_space_timeline", timeline not in tree, path=timeline)
+    results_page = f"{run}/results.html"
+    if results_page in served:
+        text = served[results_page].decode("utf-8", "replace")
+        anchors = [a for a in re.findall(r"<a\b[^>]*>", text) if dataset_logs.TIMELINE_MD in a]
+        to_dataset = [a for a in anchors if f'data-dataset-file="{dataset_logs.TIMELINE_MD}"' in a
+                      and re.search(r'href="https://huggingface\.co/datasets/' + re.escape(dataset_repo) + r'/blob/'
+                                    r'[0-9a-f]{40}/' + re.escape(timeline) + '"', a)]
+        offline = [a for a in anchors if f'data-offline-file="{dataset_logs.TIMELINE_MD}"' in a
+                   and 'href="results.html#raw-records-offline"' in a]
+        ok = len(to_dataset) + len(offline) == len(anchors) and (not offline or "id=\"raw-records-offline\"" in text)
+        check("timeline_link", ok, path=results_page, links=len(anchors), dataset=len(to_dataset),
+              offline=len(offline), examples=[a for a in anchors if a not in to_dataset + offline][:3])
     repointed = {}
     for page, body in served.items():
         text = body.decode("utf-8", "replace")

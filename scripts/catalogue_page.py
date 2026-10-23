@@ -24,8 +24,10 @@ CHEATING = ('exploiter', 'convert', 'exploit_promoter')
 # Links kept in catalogue entries but no longer shown: transcripts are read in Inspect View
 # (owner, October 21, 2026); the custom transcript pages stay in the run folders. The raw Inspect
 # log links ('Inspect logs', or 'Inspect log N') were only downloads (site-nologs, October 21,
-# 2026); the .eval files stay published because Inspect View reads them.
-HIDDEN_LINKS = ('Transcripts', 'Inspect logs')
+# 2026); the .eval files stay published because Inspect View reads them. The Timeline link
+# (RUN/analysis/timeline.md) is not shown either: the timeline lives only in the private logs dataset
+# (owner, October 23, 2026), reached from the run page's Timeline link.
+HIDDEN_LINKS = ('Transcripts', 'Inspect logs', 'Timeline')
 HIDDEN_PREFIX = 'Inspect log '
 
 
@@ -89,7 +91,7 @@ const COHORTS=['exploiter','convert','exploit_promoter','whistleblower','no_misb
 const LABELS={exploiter:['exploiter','exploiters'],convert:['convert','converts'],exploit_promoter:['exploit promoter','exploit promoters'],whistleblower:['whistleblower','whistleblowers'],no_misbehavior:['no misbehavior','no misbehavior'],insufficient_record:['insufficient record','insufficient record']};
 const FLAGGED=['exploiter','convert','exploit_promoter','whistleblower','insufficient_record'];
 const CHEATING=['exploiter','convert','exploit_promoter'];
-const HIDDEN_LINKS=['Transcripts','Inspect logs'];
+const HIDDEN_LINKS=['Transcripts','Inspect logs','Timeline'];
 const hidden=n=>HIDDEN_LINKS.includes(n)||n.startsWith('Inspect log ');
 const MAX=4;
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
