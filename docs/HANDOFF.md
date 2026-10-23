@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-22 22:30 UTC by Claude (Opus 5.5) session (resume bundle saving side landed on main; continuation feasibility).
+Last updated: 2026-10-22 ~23:55 UTC by Claude (Opus 5.5) session (dataset migration finished: Space 101 MB).
 
 ## What the project is
 
@@ -302,33 +302,22 @@ is being merged into main via `collab-env`.
    No judge and no incident report (owner). **Not published:** it waits for the dataset migration (item 2). The
    conference page is 58 MB uncompacted (`export_conference.py` refuses the >8 MB compact page; it was written
    locally with the guard bypassed) and needs a split-data export before any HF publication.
-2. **Moving large files from the HF Space to the private dataset `HF-ORG/LOGS-DATASET`**
-   (created by the owner 2026-10-22; the owner's fine-grained HF token was given read+write on it).
-   Design and state: docs/experiment-library.md, "Logs and raw records in the dataset repo". Code merged to main
-   (branch `logs-dataset`).
-   - The static Space stays static. Inspect View reads logs from the dataset via the viewer's own
-     "Sign in with HF" (OAuth, read-repos; README metadata added at Space `882dd1ff`) and the `evallog-fetch.js`
-     shim; no stored secret.
-   - **Done:** all 17 published runs' `.eval` logs copied to the dataset (275.3 MB, commit `b4f10b10`) and verified
-     (size + SHA-256 vs the Space copy, 15 also vs local copies, 206 ranged reads). The Space is unchanged.
-   - **Owner approvals (2026-10-22):** push code (done, main 6fd29bf); deploy `logs-test/` (done, Space 7803413,
-     catalogue re-rendered with the `?page=` deep-link handler); **the owner signed in and confirmed Inspect View loaded
-     a log from the dataset and opened a transcript**; move the download-only files; "do all of those" = switch every
-     run's Inspect View to the dataset, then delete the Space `.eval` copies.
-   - **Download-only move: copy done, Space delete failed (nothing deleted).** 2,119 files (987.2 MB) copied and
-     verified at dataset `fef7f18d`. The delete stage crashed with `FileNotFoundError` from `os.getcwd()` because
-     another agent re-created the scratchpad `clone/` under the running process; Space unchanged (`cfec6d65`,
-     920.0 MB). Bug fixed on main `db629a3` (`offline_links` no longer uses the cwd).
-   - **Code done (main `db629a3`):** `migrate_dataset.py switch` and `delete-eval`, with mocked-Hub tests.
-   - **NEXT (operator's session; the agent's HF writes were refused by its permission check):** the five commands
-     in docs/experiment-library.md, "Logs and raw records in the dataset repo", "Pending": re-run the move, `switch`,
-     `verify_hosted`, `delete-eval`, `verify_hosted --expect-no-space-logs`. Use a private clone directory (not the
-     shared scratchpad `clone/`). Expected end state: about 100 MB `used_storage` plus pages.
-   - **After the switch, every viewer must "Sign in with HF" once per browser (token about 8 h; a 24 h `hf_jwt`
-     cookie for the tab) to see Inspect View transcripts**; the other pages work without it.
-   - Future publishes (`publish_hf_library.py`) and the live mirror put these file types straight into the dataset.
-   - Space storage is about 920 MB of its 1 GB per-Space cap (not raisable). Private datasets count
-     against the account quota (about 100 GB free).
+2. **DONE 2026-10-22: large files moved from the HF Space to the private dataset `HF-ORG/LOGS-DATASET`.**
+   - **Space:** about **101 MB** of `used_storage` (was 920 MB), revision `fd3cdc33`. It holds only browsable pages:
+     run pages, conference views, judge and incident reports, the Inspect View app and the catalogue.
+   - **Dataset (about 1.26 GB):** all `.eval` logs (commit `b4f10b10`) and all download-only raw files (`.jsonl`,
+     snapshot archives, `.db`/`.sqlite`, old transcript pages; commit `fef7f18d`), each verified by size and SHA-256.
+     Page links point to the dataset, or to a "kept offline" notice for files only on the Mac.
+   - **Inspect View** on every run reads `.eval` from the dataset through the `evallog-fetch.js` shim. Viewers sign in
+     with HF once per browser (token about 8 h). The owner tested this end to end.
+   - **Steps run by the operator session** (background agents were blocked by the permission check): the raw-file
+     delete (purged 544 MB), `switch` (2ba2aea9), verify_hosted for 17 of 17 runs, `delete-eval` (fd3cdc33, purged
+     275 MB), and verify_hosted `--expect-no-space-logs` for 17 of 17 runs.
+   - Receipts and backups: `runs/phase-b/hf-library-preparation/logs-migration-20261022/`.
+   - **Future publishes** (`publish_hf_library.py`) send these file types and `resume/` bundles to the dataset first,
+     then the Space. The live mirror writes live logs under `live/` in the dataset.
+   - **Unpublished run `glm100-baseline-90m-20261022T183812Z`** can now be published this way. Its conference page
+     (58 MB uncompacted) needs a split-data export first.
 3. **Local machine.** The repo lives under `~/Documents` (iCloud); offloaded ("dataless") files hung git and scripts.
    - **Disk:** the Mac was 98% full, which caused the eviction. On 2026-10-22 the owner approved clearing Docker (all
      images, keeping the 2 healing-agent-swarms volumes), app caches and the HF download cache (token kept). Free
