@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-23 ~18:15 UTC by Claude (Opus 5.5) session (conference views without the timeline: code on main, plan and 90-min bundle ready for the operator).
+Last updated: 2026-10-23 by Claude (Opus 5.5) session (90-min run published; timeline removed from conference views).
 
 ## What the project is
 
@@ -295,40 +295,18 @@ is being merged into main via `collab-env`.
 
 ## In flight as of 2026-10-23 ~17:00 UTC (check status before redoing anything)
 
-1. **`glm100-baseline-90m-20261022T183812Z`: done 2026-10-22** (headline under "Runs so far"). Retrieved to the
-   Mac with checksums (`runs/phase-b/retrieval-glm100-baseline-90m/`), VM owner-vm stopped and set back to
-   **n2-standard-64** (TERMINATED). results, transcripts, conference view and host-only contagion figures
-   (`runs/<run>/analysis/contagion/contagion.html`, `outbreak.svg`, `transmission-tree-answer-field.svg`) are built.
-   No judge and no incident report (owner; the owner may change the judge pipeline first).
-   - **Not published yet.** Owner decision (2026-10-23): **remove the activity timeline from the website's conference
-     view; keep it only in the private dataset** (timeline.jsonl is already there). The 90-min conference page was 58 MB
-     because it embedded 62,265 timeline entries.
-   - **Code on main (2026-10-23):** `export_conference.py` no longer embeds the timeline; a note under the banner
-     links `analysis/timeline.jsonl` in the dataset; view manifest `timeline_entries: 0`, `timeline_location`.
-     Other sections and captured-file pages are unchanged (a fresh export equals the stripped old export byte for
-     byte). The 90-min page is now **0.49 MB** (was 58 MB), so no split-data export was needed. New guarded
-     `maintain_hf_run.py --scope conference` re-renders published views from their own embedded records (no local
-     files). Docs: `docs/experiment-library.md`, "Conference scope (no embedded timeline)".
-   - **Ready for the operator (agents' HF writes are refused); records `runs/phase-b/conference-timeline-20261023/`:**
-     (a) conference plan at Space `fd3cdc33`: 17 runs, 35 files, conference pages 29.9 MB -> 2.3 MB (27.6 MB saved);
-     baseline100, baseline8g100 and cache100 timelines are offline-only (pruned before the dataset), so their note
-     links the offline notice. (b) 90-min bundle
-     `runs/phase-b/hf-library-preparation/publish-glm100-baseline-90m-20261022T183812Z-20261023` (Inspect View from
-     `runs/phase-b/inspect-glm100-baseline-90m-20261022T183812Z`, shim pinned on publish): Space 2,202 run files,
-     55.7 MB; dataset 12 files, 307.6 MB (log, raw `.jsonl` incl. timeline, database, snapshot archive). Preview
-     passed. The standalone contagion figures go to `RUN/analysis/contagion/` but no page links them (the site
-     shows contagion only inside incident reports; reachable as `?page=RUN/analysis/contagion/contagion.html`).
-     Commands, from a clean clone at main with `PYTHONPATH=scripts:src`, `PY=<repo>/.venv/bin/python`,
-     `M=<repo>/runs`:
-     1. `$PY scripts/maintain_hf_run.py --all-published-runs --scope conference --commit --backup-dir
-        $M/phase-b/conference-timeline-20261023/attempt-1 --receipt $M/phase-b/conference-timeline-20261023/attempt-1/receipt.json`
-     2. `$PY scripts/verify_hosted.py --run RUN --revision REV` for each of the 17 runs (REV from the receipt).
-     3. `$PY scripts/publish_hf_library.py --bundle $M/phase-b/hf-library-preparation/publish-glm100-baseline-90m-20261022T183812Z-20261023`
-        (preview at the new head), then the same with `--commit --receipt
-        $M/phase-b/conference-timeline-20261023/publish-90m-receipt.json`.
-     4. `$PY scripts/verify_hosted.py --run glm100-baseline-90m-20261022T183812Z --revision REV --bundle <bundle>`.
-   - **Open question for the owner:** `analysis/timeline.md` (the Markdown timeline, 9 MB for the 90-min run) is
-     still a Space page linked from each run report; it is not a dataset category. Moving it too needs a decision.
+1. **DONE 2026-10-23: `glm100-baseline-90m-20261022T183812Z` published** (Space `3fe9e737`, verify_hosted OK; 2,205
+   Space files; 12 large files, 307.6 MB, in the dataset). There is no judge and no incident report (owner; the owner may change the
+   judge pipeline first). The contagion figures are uploaded but not linked from a page; open them with
+   `?page=glm100-baseline-90m-20261022T183812Z/analysis/contagion/contagion.html`.
+   - **Conference views no longer embed the activity timeline** (owner, 2026-10-23: keep it only in the dataset).
+     `export_conference.py` links the dataset's `analysis/timeline.jsonl`; `--scope conference` re-rendered all 17
+     published runs (Space `2e312df8`, verified 17/17; pages 29.9 MB → 2.29 MB). The 90-min page went 58 MB → 0.49 MB.
+     baseline100, baseline8g100 and cache100 link a "kept offline" notice, since their timelines were pruned before the
+     dataset existed.
+   - **Open decision:** each run's report still links `analysis/timeline.md` (a Markdown copy of the timeline, 9 MB for
+     the 90-min run), which stays in the Space. Moving it to the dataset too needs the owner's call.
+   - Records: `runs/phase-b/conference-timeline-20261023/`.
 2. **DONE 2026-10-22: large files moved from the HF Space to the private dataset `HF-ORG/LOGS-DATASET`.**
    - **Space:** about **101 MB** of `used_storage` (was 920 MB), revision `fd3cdc33`. It holds only browsable pages:
      run pages, conference views, judge and incident reports, the Inspect View app and the catalogue.
