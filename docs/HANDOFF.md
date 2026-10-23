@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-22 ~23:55 UTC by Claude (Opus 5.5) session (dataset migration finished: Space 101 MB).
+Last updated: 2026-10-23 ~17:00 UTC by Claude (Opus 5.5) session (90-min publish pending; conference timeline moving to dataset; iCloud status).
 
 ## What the project is
 
@@ -293,15 +293,21 @@ rule (originally rule 6; the old rule 7 becomes 6).
 The configs and multi-model harness fixes are on branch `owner-multimodel`, which
 is being merged into main via `collab-env`.
 
-## In flight as of 2026-10-22 23:40 UTC (check status before redoing anything)
+## In flight as of 2026-10-23 ~17:00 UTC (check status before redoing anything)
 
 1. **`glm100-baseline-90m-20261022T183812Z`: done 2026-10-22** (headline under "Runs so far"). Retrieved to the
    Mac with checksums (`runs/phase-b/retrieval-glm100-baseline-90m/`), VM owner-vm stopped and set back to
    **n2-standard-64** (TERMINATED). results, transcripts, conference view and host-only contagion figures
    (`runs/<run>/analysis/contagion/contagion.html`, `outbreak.svg`, `transmission-tree-answer-field.svg`) are built.
-   No judge and no incident report (owner). **Not published:** it waits for the dataset migration (item 2). The
-   conference page is 58 MB uncompacted (`export_conference.py` refuses the >8 MB compact page; it was written
-   locally with the guard bypassed) and needs a split-data export before any HF publication.
+   No judge and no incident report (owner; the owner may change the judge pipeline first).
+   - **Not published yet.** Owner decision (2026-10-23): **remove the activity timeline from the website's conference
+     view; keep it only in the private dataset** (timeline.jsonl is already there). The 90-min conference page was 58 MB
+     because it embedded 62,265 timeline entries.
+   - **IN PROGRESS (an agent, clean clone `scratchpad/clone-conf`):** `export_conference.py` drops the embedded timeline
+     and links to the dataset copy; if it's still over 8 MB, submission sources and compiler outputs load on demand.
+     The agent prepares (without HF writes): (a) a guarded maintenance plan to re-render every published run's
+     conference view without the timeline; (b) the glm100-baseline-90m publication bundle and preview. **The operator
+     session runs the `--commit` steps:** background agents' HF writes are refused by the auto-mode permission check.
 2. **DONE 2026-10-22: large files moved from the HF Space to the private dataset `HF-ORG/LOGS-DATASET`.**
    - **Space:** about **101 MB** of `used_storage` (was 920 MB), revision `fd3cdc33`. It holds only browsable pages:
      run pages, conference views, judge and incident reports, the Inspect View app and the catalogue.
@@ -322,8 +328,13 @@ is being merged into main via `collab-env`.
    - **Disk:** the Mac was 98% full, which caused the eviction. On 2026-10-22 the owner approved clearing Docker (all
      images, keeping the 2 healing-agent-swarms volumes), app caches and the HF download cache (token kept). Free
      space went from 11 GB to 66 GB.
-   - **Download backlog:** about 170k files across `~/Documents/GitHub`, `Codex` and `Codex Projects` were still
-     cloud-only at 21:30 UTC. A read-only counter is running; the owner asked for no other download operations.
+   - **Download backlog (2026-10-23 ~16:00 UTC):** `Codex` and `Codex Projects` are fully downloaded. `GitHub`
+     still had about 48k cloud-only files: gdm-math-swarm 32k (mostly `runs/phase-b` staging copies and run folders;
+     published runs' raw files and logs are also safe in the HF dataset), LLF 6.6k, healing-agent-swarms 4.7k,
+     EigenBench 3.4k, cheat-swarm-bench 1.2k, 4 others 0.4k; the other 25 repos are complete. iCloud stalled for
+     hours, then resumed on its own; about 1–4k files/hour. A read-only hourly counter is running (24 h); the owner
+     asked for no other download operations. Option offered and not yet chosen: move the 25 complete repos plus
+     Codex folders now and the rest later.
    - **Planned move (approved):** `~/Documents/GitHub/*`, `~/Documents/Codex` and `~/Documents/Codex Projects` go to
      `~/code/` once all files are downloaded and no agent works in the repo. Afterwards: `git worktree repair`,
      check `.venv`, update absolute paths in docs, copy Claude memory to the new project path, and remind the owner
