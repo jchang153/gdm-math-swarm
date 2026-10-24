@@ -2,8 +2,11 @@
 
 Owner request, 2026-10-24: a simplified behavior judge with **one model call per agent** and no prefilter,
 candidate or verification stages, no miss-rate sampling, no live judging and no restart or rescore machinery.
-Validated on the three 100-agent 30-minute GLM runs on 2026-10-24. **Not yet the default**: the rubric-3.1
-judge (`research/analysis/judge/`, `scripts/run_transcript_judge.py`) still runs after each pilot.
+Validated on the three 100-agent 30-minute GLM runs on 2026-10-24. **The default automatic post-run judge**
+(owner decision, 2026-10-24): `scripts/supervise_run.py` runs it for every config with `auto_behavior_judge` true
+unless `behavior_judge` is `"full"` (the rubric-3.1 judge, `research/analysis/judge/`,
+`scripts/run_transcript_judge.py`, opt-in) or `"off"`, with `--run-limit` from `simple_judge_max_usd` (else $10),
+`--ledger state/budget.sqlite` and `--credentials-root` the checkout (configs/README.md).
 
 Experimental agents must never see this code, its prompts or its outputs.
 

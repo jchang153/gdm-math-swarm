@@ -6,6 +6,7 @@ import sys
 import tempfile
 import types
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from unittest import mock
 
@@ -250,7 +251,26 @@ if '--stage' in sys.argv:          # the early model stages: slow, and they spen
     time.sleep(4)
     open(os.path.join(root, 'early-finished'), 'w').write('done')
 """
-JUDGE_CONFIG = {"auto_behavior_judge": True, "behavior_judge_max_usd": 50}
+# The full (rubric-3.1) judge, opt-in since the owner's decision of October 24, 2026 (the simplified
+# judge is the default: SimpleBehaviorJudgeTests).
+JUDGE_CONFIG = {"auto_behavior_judge": True, "behavior_judge": "full", "behavior_judge_max_usd": 50}
+# scripts/run_simple_judge.py: logs to order.log, writes RUN/analysis/simple_judge/ and names a route record.
+STUB_SIMPLE_JUDGE = STUB_ORDER + """assert 'OPENROUTER_API_KEY' not in os.environ, 'provider key leaked to the judge child'
+run = sys.argv[sys.argv.index('--run-dir') + 1]
+mode = open(os.path.join(root, 'judge-mode')).read().strip() if os.path.exists(os.path.join(root, 'judge-mode')) else 'ok'
+if mode == 'refuse':
+    print('refused: no room under this run budget', file=sys.stderr)
+    raise SystemExit(2)
+if mode == 'crash':
+    raise RuntimeError('simple judge crashed')
+out = os.path.join(run, 'analysis', 'simple_judge')
+os.makedirs(out, exist_ok=True)
+route = os.path.join(root, 'data', 'validation', 'simple-judge-route-x.json')
+os.makedirs(os.path.dirname(route), exist_ok=True)
+open(route, 'w').write('{}')
+open(os.path.join(out, 'report.json'), 'w').write('{"route_record": "%s"}' % route)
+open(os.path.join(out, 'agents.jsonl'), 'w').write('')
+"""
 # The post-run incident report (docs/plan.md, "Incident report per run (October 21, 2026)"): a fake
 # that logs to incident.log (not order.log, so the judge's step order checks stay unchanged).
 STUB_INCIDENT = """import json, os, sys
@@ -293,6 +313,7 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         for name in ("scripts/reconcile_ledger.py", "scripts/evaluate_run.py", "research/analysis/timeline.py"):
             (self.tmp / name).write_text(STUB_ORDER)
         (self.tmp / "scripts" / "run_transcript_judge.py").write_text(STUB_JUDGE)
+        (self.tmp / "scripts" / "run_simple_judge.py").write_text(STUB_SIMPLE_JUDGE)
         (self.tmp / "scripts" / "run_incident_report.py").write_text(STUB_INCIDENT)
         self.write_config()
 
@@ -333,7 +354,7 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         console = io.StringIO()
         with contextlib.redirect_stdout(console):
             self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
-        self.assertIn("Behavior judge budget: $", console.getvalue())
+        self.assertIn("Behavior judge budget (full judge): $", console.getvalue())
         self.assertIn("judge_budget_usd", json.loads((self.phase / "launch-budget.json").read_text()))
         self.assertEqual(self.follow_up_order(), ["reconcile_ledger.py", "evaluate_run.py", "evaluate_run.py",
                                                   "timeline.py", "run_transcript_judge.py"])  # the judge refreshes pricing itself
@@ -408,6 +429,7 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
 
     def test_skips(self):
         cases = (({"behavior_judge_max_usd": "abc"}, (), "invalid judge settings"),
+                 ({"behavior_judge": "rubric"}, (), "invalid judge settings"),
                  ({"behavior_judge_max_usd": 0}, (), "invalid judge settings"),
                  ({"live_behavior_judge": "yes"}, (), "invalid judge settings"),
                  ({}, ("--no-postrun",), "--no-postrun"))
@@ -696,6 +718,199 @@ if '--live' in sys.argv:
     test_idle_shutdown_blocked_by_other_users_containers_or_sessions = None
     test_a_failed_reconciliation_never_stops_the_other_follow_ups = None
     test_missing_ledger_is_not_an_error = None
+
+
+
+class SimpleBehaviorJudgeTests(SuperviseRunTests):
+    """Owner decision (October 24, 2026): the simplified one-pass judge (scripts/run_simple_judge.py) is
+    the default automatic behavior judge; the rubric-3.1 judge is opt-in (``behavior_judge: "full"``);
+    ``"off"`` runs no judge but still the incident report. Fake judges: no paid call."""
+
+    def setUp(self):
+        super().setUp()
+        for name in ("scripts/reconcile_ledger.py", "scripts/evaluate_run.py", "research/analysis/timeline.py"):
+            (self.tmp / name).write_text(STUB_ORDER)
+        for name, stub in (("run_transcript_judge.py", STUB_JUDGE), ("run_simple_judge.py", STUB_SIMPLE_JUDGE),
+                           ("run_incident_report.py", STUB_INCIDENT)):
+            (self.tmp / "scripts" / name).write_text(stub)
+        self.write_config()
+
+    order = AutoBehaviorJudgeTests.order
+    lines = AutoBehaviorJudgeTests.lines
+    judge_record = AutoBehaviorJudgeTests.judge_record
+    incident_record = AutoBehaviorJudgeTests.incident_record
+    packaged = AutoBehaviorJudgeTests.packaged
+
+    def write_config(self, **changes):  # no behavior_judge key: the default
+        config = dict({"auto_behavior_judge": True}, run_dir="runs/run-x", **changes)
+        self.config.write_text(json.dumps({k: v for k, v in config.items() if v is not None}))
+
+    def run_supervisor(self, *extra):
+        import contextlib
+        import io
+        console = io.StringIO()
+        with contextlib.redirect_stdout(console):
+            code = supervise.Supervisor(self.args("--no-shutdown", "--poll-seconds", "0.1", *extra)).main()
+        return code, console.getvalue()
+
+    def test_auto_judge_config_without_behavior_judge_gets_the_simple_judge(self):
+        code, console = self.run_supervisor()
+        self.assertEqual(code, 0)
+        self.assertIn("Behavior judge budget (simple judge): $10 (default; set simple_judge_max_usd", console)
+        self.assertIn("Incident report budget: $20", console)
+        budget = json.loads((self.phase / "launch-budget.json").read_text())
+        self.assertEqual((budget["judge"], budget["judge_budget_usd"]), ("simple", "10"))
+        self.assertEqual(self.order(), ["reconcile_ledger.py", "evaluate_run.py", "evaluate_run.py", "timeline.py",
+                                        "run_simple_judge.py"])
+        self.assertEqual(self.lines(), [])   # no live pass, no early stages, no full judge
+        line = self.lines("run_simple_judge.py")[0]
+        root = self.tmp.resolve()
+        for text in ("--run-dir " + str(root / "runs" / "run-x"), "--run-limit 10",
+                     "--ledger " + str(root / "state" / "budget.sqlite"), "--credentials-root " + str(root)):
+            self.assertIn(text, line)
+        self.assertNotIn("--output-dir", line)   # its default, RUN/analysis/simple_judge
+        self.assertFalse((self.phase / "live-judge.json").exists())
+        record = self.judge_record()
+        self.assertEqual((record["judge"], record["outcome"], record["exit"], record["budget_usd"],
+                          record["budget_source"], record["budget_key"]),
+                         ("simple", "complete", 0, "10", "default", "simple_judge_max_usd"))
+        self.assertNotIn("live", record)
+        self.assertNotIn("early", record)
+        self.assertEqual(self.incident_record()["outcome"], "complete")   # after the simple judge
+        self.assertLessEqual(record["finished_utc"], self.incident_record()["utc"])
+        phase, run = self.packaged()
+        self.assertIn("runs/run-x/analysis/simple_judge/report.json", run)
+        self.assertIn("simple-judge-route/simple-judge-route-x.json", phase)
+        self.assertTrue({"behavior-judge.json", "behavior-judge.log", "behavior-judge.exit"} <= phase)
+
+    def test_simple_judge_budget_and_explicit_mode(self):
+        self.write_config(behavior_judge="simple", simple_judge_max_usd=3.5, behavior_judge_max_usd=80)
+        code, console = self.run_supervisor()
+        self.assertEqual(code, 0)
+        self.assertIn("Behavior judge budget (simple judge): $3.5 (config simple_judge_max_usd)", console)
+        self.assertIn("--run-limit 3.5", self.lines("run_simple_judge.py")[0])
+        self.assertEqual(self.judge_record()["budget_source"], "config simple_judge_max_usd")
+
+    def test_simple_judge_never_starts_live_early_or_shadow_judging(self):
+        """Even with live_behavior_judge true or "mock", the simple judge has no live passes."""
+        (self.tmp / "scripts" / "run_pilot.py").write_text(STUB_LIVE_PILOT.replace("SECONDS", "1.0"))
+        for n, live in enumerate((True, "mock")):
+            self.phase = self.tmp / "runs" / "phase-b" / f"run-{n}"
+            self.phase.mkdir(parents=True)
+            self.config = self.phase / "launch-config.json"
+            self.write_config(live_behavior_judge=live, behavior_judge_live_interval_seconds=60)
+            self.assertEqual(self.run_supervisor()[0], 0)
+            self.assertEqual(self.lines(), [], live)
+            self.assertFalse((self.phase / "live-judge.json").exists())
+            self.assertFalse((self.phase / supervise.SHADOW_DIR).exists())
+            self.assertEqual(self.judge_record()["judge"], "simple")
+
+    def test_full_judge_is_opt_in(self):
+        self.write_config(behavior_judge="full", live_behavior_judge=False)
+        code, console = self.run_supervisor()
+        self.assertEqual(code, 0)
+        self.assertIn("Behavior judge budget (full judge): $50 (default; set behavior_judge_max_usd", console)
+        self.assertEqual(self.order()[-1], "run_transcript_judge.py")
+        self.assertNotIn("run_simple_judge.py", self.order())
+        record = self.judge_record()
+        self.assertEqual((record["judge"], record["budget_usd"], record["outcome"]), ("full", "50", "complete"))
+
+    def test_off_runs_no_judge_but_the_incident_report(self):
+        self.write_config(behavior_judge="off")
+        code, console = self.run_supervisor()
+        self.assertEqual(code, 0)
+        self.assertIn('Behavior judge: off', console)
+        self.assertIn("Incident report budget: $20", console)
+        self.assertEqual(self.order(), ["reconcile_ledger.py", "evaluate_run.py", "evaluate_run.py", "timeline.py"])
+        record = self.judge_record()
+        self.assertEqual((record["judge"], record["outcome"], record["budget_usd"]), ("off", "skipped", None))
+        self.assertIn('"off"', record["reason"])
+        self.assertEqual(self.incident_record()["outcome"], "complete")
+        self.assertEqual(len((self.tmp / "incident.log").read_text().splitlines()), 1)
+
+    def test_auto_incident_report_key(self):
+        cases = (({"auto_behavior_judge": None, "auto_incident_report": True}, True, False),
+                 ({"auto_incident_report": False}, False, True),
+                 ({"auto_behavior_judge": False}, False, False))
+        for n, (changes, report, judged) in enumerate(cases):
+            self.phase = self.tmp / "runs" / "phase-b" / f"run-{n}"
+            self.phase.mkdir(parents=True)
+            self.config = self.phase / "launch-config.json"
+            self.write_config(**changes)
+            (self.tmp / "incident.log").unlink(missing_ok=True)
+            (self.tmp / "order.log").unlink(missing_ok=True)
+            self.assertEqual(self.run_supervisor()[0], 0, changes)
+            self.assertEqual((self.phase / "incident-report.json").exists(), report, changes)
+            self.assertEqual((self.tmp / "incident.log").exists(), report, changes)
+            self.assertEqual((self.phase / "behavior-judge.json").exists(), judged, changes)
+            self.assertEqual("run_simple_judge.py" in self.order(), judged, changes)
+
+    def test_simple_judge_refusal_or_crash_never_fails_the_run(self):
+        for n, (mode, outcome, code) in enumerate((("refuse", "refused_or_failed", 2), ("crash", "failed", 1))):
+            self.phase = self.tmp / "runs" / "phase-b" / f"run-{n}"
+            self.phase.mkdir(parents=True)
+            self.config = self.phase / "launch-config.json"
+            self.write_config()
+            (self.tmp / "judge-mode").write_text(mode)
+            self.assertEqual(self.run_supervisor()[0], 0, mode)
+            record = self.judge_record()
+            self.assertEqual((record["outcome"], record["exit"]), (outcome, code))
+            if mode == "refuse":
+                self.assertIn("refused:", record["reason"])
+            self.assertEqual(self.incident_record()["outcome"], "complete")
+            self.assertTrue((self.phase / "completed-checksums.json").exists())
+            self.assertEqual(json.loads((self.phase / "worker.exit").read_text()), 0)
+
+    def test_failed_follow_up_skips_the_simple_judge(self):
+        (self.tmp / "research" / "analysis" / "timeline.py").write_text("raise SystemExit(7)\n")
+        self.assertEqual(self.run_supervisor()[0], 7)
+        record = self.judge_record()
+        self.assertEqual((record["judge"], record["outcome"]), ("simple", "skipped"))
+        self.assertNotIn("run_simple_judge.py", self.order())
+
+    # The inherited runs use the base config and stub follow-ups.
+    test_full_cycle_without_shutdown = None
+    test_refuses_config_without_run_dir = None
+    test_failed_run_skips_follow_ups = None
+    test_track_config_uses_its_own_ledger = None
+    test_ledger_option_and_missing_track_ledger = None
+    test_evaluation_deferred_while_comparators_run = None
+    test_idle_shutdown_blocked_by_other_users_containers_or_sessions = None
+    test_a_failed_reconciliation_never_stops_the_other_follow_ups = None
+    test_missing_ledger_is_not_an_error = None
+
+
+class JudgeModeTests(unittest.TestCase):
+    def test_resolution_budgets_and_validation(self):
+        from research_swarm import auto_judge as aj
+        self.assertEqual(aj.judge_mode({"auto_behavior_judge": True}), "simple")
+        self.assertEqual(aj.judge_mode({"auto_behavior_judge": True, "behavior_judge": "full"}), "full")
+        self.assertEqual(aj.judge_mode({"auto_behavior_judge": True, "behavior_judge": "off"}), "off")
+        self.assertEqual(aj.judge_mode({"behavior_judge": "full"}), "off")   # auto_behavior_judge is the switch
+        self.assertEqual(aj.judge_mode({}), "off")
+        self.assertEqual(aj.active_judge_budget({"auto_behavior_judge": True}),
+                         ("simple", Decimal("10"), "default", "simple_judge_max_usd"))
+        self.assertEqual(aj.active_judge_budget({"auto_behavior_judge": True, "behavior_judge": "full"}),
+                         ("full", Decimal("50"), "default", "behavior_judge_max_usd"))
+        self.assertEqual(aj.active_judge_budget({"auto_behavior_judge": True, "behavior_judge": "off"}),
+                         ("off", None, None, None))
+        for config, mode in (({"auto_behavior_judge": True}, None),
+                             ({"auto_behavior_judge": True, "behavior_judge": "simple"}, None),
+                             ({"auto_behavior_judge": True, "behavior_judge": "off"}, None),
+                             ({"auto_behavior_judge": True, "behavior_judge": "full"}, "paid"),
+                             ({"auto_behavior_judge": True, "behavior_judge": "full", "live_behavior_judge": "mock"},
+                              "mock")):
+            self.assertEqual(aj.live_mode(config), mode, config)
+        for bad in ({"behavior_judge": "rubric"}, {"behavior_judge": True}, {"simple_judge_max_usd": 0},
+                    {"simple_judge_max_usd": "abc"}, {"auto_incident_report": "yes"}):
+            self.assertTrue(aj.judge_config_problems(dict(bad, auto_behavior_judge=True)), bad)
+        self.assertEqual(aj.judge_config_problems({"auto_behavior_judge": True, "behavior_judge": "simple",
+                                                   "simple_judge_max_usd": "2.5", "auto_incident_report": False}), [])
+        self.assertTrue(aj.incident_enabled({"auto_behavior_judge": True}))
+        self.assertTrue(aj.incident_enabled({"auto_behavior_judge": True, "behavior_judge": "off"}))
+        self.assertTrue(aj.incident_enabled({"auto_incident_report": True}))
+        self.assertFalse(aj.incident_enabled({"auto_behavior_judge": True, "auto_incident_report": False}))
+        self.assertFalse(aj.incident_enabled({}))
 
 
 if __name__ == "__main__":

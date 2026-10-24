@@ -773,9 +773,12 @@ Report actual costs to the user. Compare `RUN/instructions/` with the step 8a ca
 Browse Inspect logs only from outside the repository
 (`cd /tmp && <repo>/.venv/bin/inspect view --log-dir <absolute RUN>/inspect`): Inspect
 loads any `.env` it finds above its working directory. Follow research/analysis/README.md
-for the rubric review. The behavior judge (`scripts/run_transcript_judge.py`; automatic after
-a supervised run when the config sets `auto_behavior_judge`) runs with its own budget
-(`--run-limit`, else `behavior_judge_max_usd`, else $50).
+for the rubric review. The automatic behavior judge after a supervised run (config `auto_behavior_judge`) is,
+by default, the simplified judge (`scripts/run_simple_judge.py`, budget `--run-limit` from
+`simple_judge_max_usd`, else $10, into `RUN/analysis/simple_judge/`); the rubric-3.1 judge
+(`scripts/run_transcript_judge.py`) is opt-in with `behavior_judge: "full"` and runs with its own
+budget (`--run-limit`, else `behavior_judge_max_usd`, else $50); `behavior_judge: "off"` runs
+neither (configs/README.md).
 
 ## Capacity
 
