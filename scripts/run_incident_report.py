@@ -11,6 +11,11 @@ October 21, 2026), written to RUN/analysis/incident/ (report.html, report.md, ev
   # insert them into the existing report.html, report.md and evidence.json.
   PYTHONPATH=src:. .venv/bin/python scripts/run_incident_report.py --run-dir runs/<run> --rerender-contagion
 
+Behavior findings (owner decision, October 24, 2026): the digest and the contagion section read the
+simplified one-pass judge (RUN/analysis/simple_judge/agents.jsonl) when present, else the rubric-3.1
+judge (RUN/analysis/judge/), else none (deterministic detectors); --judge-source simple|full|none forces
+one (refused when its outputs are missing). The report names the source it used.
+
 One spending control (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)"):
 this run's incident reporting has its own budget, --run-limit USD (default $20). Every invocation
 into the same output directory counts what the earlier ones committed (its run-budgets.json ledger
@@ -62,7 +67,13 @@ def parse_args(argv=None):
     parser.add_argument("--run-limit", type=Decimal, default=None,
                         help=f"this run's incident-report budget in USD (default {DEFAULT_RUN_LIMIT_USD})")
     parser.add_argument("--output-dir", type=Path, help="default RUN/analysis/incident")
-    parser.add_argument("--judge-dir", type=Path, help="behavior judge outputs (default RUN/analysis/judge)")
+    parser.add_argument("--judge-dir", type=Path, help="rubric-3.1 behavior judge outputs (default RUN/analysis/judge)")
+    parser.add_argument("--simple-judge-dir", type=Path,
+                        help="simplified one-pass judge outputs (default RUN/analysis/simple_judge)")
+    parser.add_argument("--judge-source", choices=("auto", "simple", "full", "none"), default="auto",
+                        help="whose behavior findings the digest and the contagion section read: auto (default; the "
+                             "simplified judge when its agents.jsonl exists, else the rubric-3.1 judge, else none), "
+                             "simple, full (rubric-3.1) or none (deterministic detectors only)")
     parser.add_argument("--mock", action="store_true", help="offline deterministic model (no network, no key)")
     parser.add_argument("--ledger", type=Path, help="ledger to bill (default this checkout's state/budget.sqlite)")
     parser.add_argument("--credentials-root", type=Path, default=ROOT,
@@ -155,6 +166,13 @@ def main(argv=None):
         log(f"refused: another incident-report invocation holds {out_dir / '.incident.lock'}; nothing was sent")
         return 2
     with lock:
+        from research.analysis.incident.judge_source import resolve
+        chosen = resolve(run_dir, preference=args.judge_source, judge_dir=args.judge_dir,
+                         simple_judge_dir=args.simple_judge_dir)
+        if chosen["problem"]:
+            log(f"refused: --judge-source {args.judge_source}: {chosen['problem']}; nothing was done")
+            return 2
+        log(chosen["statement"])
         if args.rerender_contagion:
             return _rerender(args, run_dir, out_dir, log)
         return _run(args, run_dir, out_dir, log)
@@ -163,8 +181,10 @@ def main(argv=None):
 def _rerender(args, run_dir, out_dir, log):
     """--rerender-contagion: host-computed section and table of contents only (no model, no ledger)."""
     from research.analysis.incident.contagion import rerender
-    record, written = rerender(run_dir, out_dir, judge_dir=args.judge_dir)
-    summary = {"status": "rerendered", "source": record["source"], "exploit_users": record["exploit_users_total"],
+    record, written = rerender(run_dir, out_dir, judge_dir=args.judge_dir, simple_judge_dir=args.simple_judge_dir,
+                               judge_source=args.judge_source)
+    summary = {"status": "rerendered", "source": record["source"], "behavior_findings": record["judge_source_label"],
+               "exploit_users": record["exploit_users_total"],
                "techniques": [{"family": t["family"], **t["counts"]} for t in record["techniques"]],
                "written": written}
     print(json.dumps(summary, indent=1))
@@ -246,7 +266,7 @@ def _run(args, run_dir, out_dir, log):
     clients = {role: made[key] for role, key in roles.items()}
     pipeline = IncidentPipeline(run_dir, out_dir, run, clients=clients, mode="mock" if args.mock else "paid",
                                 models=models, epochs=epochs, judge_dir=args.judge_dir, repair=not args.no_repair,
-                                log=log)
+                                log=log, simple_judge_dir=args.simple_judge_dir, judge_source=args.judge_source)
     code = 0
     try:
         summary = asyncio.run(pipeline.run())

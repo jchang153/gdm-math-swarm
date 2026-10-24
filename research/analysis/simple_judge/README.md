@@ -128,8 +128,9 @@ Every disagreement was adjudicated from the case files (`RUN/analysis/simple_jud
 - The keyword net and the 25,000-token cap decide what the model sees; longer runs (for example 90 minutes) will
   hit the cap more often (`case.excerpts` < `case.keyword_windows` in `agents.jsonl`).
 - Model output varies between calls (the sample runs above moved by one agent per category between attempts).
-- No plain-language explanations, run-level narrative or evidence browser; the incident report still reads the
-  rubric-3.1 judge's findings.
+- No plain-language explanations, run-level narrative or evidence browser. The incident report reads this judge's
+  verified labels when its `agents.jsonl` exists (preferred over the rubric-3.1 judge's; `--judge-source` on
+  `scripts/run_incident_report.py`; see `research/analysis/incident/README.md`) and says which judge it used.
 
 ## Modules
 

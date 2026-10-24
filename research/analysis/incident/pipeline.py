@@ -272,7 +272,7 @@ class IncidentPipeline:
     JudgeClient (excerpt selection; Opus by default)}."""
 
     def __init__(self, run_dir, out_dir, run, *, clients, mode, models, epochs=None, judge_dir=None, repair=True,
-                 log=None):
+                 log=None, simple_judge_dir=None, judge_source="auto"):
         self.run_dir = Path(run_dir)
         self.out_dir = Path(out_dir)
         self.history = run
@@ -283,6 +283,8 @@ class IncidentPipeline:
         self.log = log or (lambda message: None)
         self.locator = Locator(run, run_dir, epochs=epochs)
         self.judge_dir = judge_dir
+        self.simple_judge_dir = simple_judge_dir
+        self.judge_source = judge_source
         self.units = []
         self.dropped = []
         self.extract_refusals = []
@@ -586,10 +588,13 @@ class IncidentPipeline:
     async def run(self):
         generated = _now()
         # Host-computed, before any model stage: written to contagion.json even if a model stage fails.
-        spread = contagion.compute(self.run_dir, judge_dir=self.judge_dir)
+        sources = {"judge_dir": self.judge_dir, "simple_judge_dir": self.simple_judge_dir,
+                   "judge_source": self.judge_source}
+        spread = contagion.compute(self.run_dir, **sources)
         write_json(self.out_dir / "contagion.json", spread)
-        digest = build_digest(self.run_dir, self.history, judge_dir=self.judge_dir)
+        digest = build_digest(self.run_dir, self.history, **sources)
         write_json(self.out_dir / "digest.json", digest)
+        self.log(digest["judge"]["statement"] + f" Contagion: {spread['behavior_findings']}")
         for agent in digest["agents"].values():
             for finding in (agent.get("judge") or {}).get("findings") or []:
                 for cited in finding.get("evidence") or []:
@@ -623,6 +628,8 @@ class IncidentPipeline:
                                    "citations": checks["citations"],
                                    "structure_problems": verify.structure_problems(draft), "attempts": attempts},
                   "chain_of_thought": {k: v for k, v in digest["reasoning"].items()},
+                  "behavior_findings": {k: digest["judge"].get(k) for k in ("source", "label", "statement", "rubric",
+                                                                            "path", "preference", "problem")},
                   "plan": plan, "plan_dropped_items": self.dropped,
                   "extract_refusals": self.extract_refusals, "model_fallbacks": self.model_fallbacks,
                   "evidence": evidence,
@@ -634,5 +641,6 @@ class IncidentPipeline:
                 "verification": checks["summary"],
                 "storylines": sum(s["section"] == "case_study" for s in plan["storylines"]),
                 "excerpt_sources": evidence["excerpt_sources"], "chain_of_thought": digest["reasoning"]["status"],
+                "behavior_findings": digest["judge"].get("label"),
                 "model_fallbacks": self.model_fallbacks,
                 "units": self.units}
