@@ -353,6 +353,15 @@ class VerifyTests(unittest.TestCase):
         self.assertEqual(verify_hosted.CREATOR_SCRIPT.sub(b'', script + b'<p>x</p>', count=1), b'<p>x</p>')
         old = b'<script>window.huggingface={variables:{"SPACE_CREATOR_USER_ID":"0a1b"}};</script>'
         self.assertEqual(verify_hosted.CREATOR_SCRIPT.sub(b'', old), b'')
+        social = (b'<style>x</style><meta property="og:title" content="GDM Math Swarm Experiments">'
+                  b'<meta property="og:image" content="https://cdn-thumbnails.huggingface.co/social-thumbnails/a.png">'
+                  b'<meta name="twitter:card" content="summary_large_image">'
+                  b'<meta name="twitter:image" content="https://cdn-thumbnails.huggingface.co/social-thumbnails/a.png"></head><body>')
+        self.assertEqual(verify_hosted.SOCIAL_META.sub(b'', social, count=1), b'<style>x</style></head><body>')
+        headless = social[len(b'<style>x</style>'):].replace(b'</head><body>', b'<meta name="referrer" content="no-referrer">')
+        self.assertEqual(verify_hosted.SOCIAL_META.sub(b'', headless, count=1), b'<meta name="referrer" content="no-referrer">')
+        own = b'<meta property="og:title" content="mine"><p>body</p>'  # no HF thumbnail: kept
+        self.assertEqual(verify_hosted.SOCIAL_META.sub(b'', own, count=1), own)
 
     def test_all_dataset_checks_pass(self):
         record = self.verify(dataset_commit='ccc')

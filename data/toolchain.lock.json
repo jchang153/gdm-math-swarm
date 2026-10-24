@@ -1,7 +1,0 @@
-{
-  "formal_conjectures_revision": "7a41db3d761324599812d6ca6cb6a9f311046dc7",
-  "formal_conjectures_tag": "bench-v1-lean4.27.0",
-  "lean_toolchain": "leanprover/lean4:v4.27.0",
-  "mathlib_revision": "a3a10db0e9d66acbebf76c5e6a135066525ac900",
-  "source_tree_sha256": "0769386b35964695b060fb1895bff3808d24ba7226a44b2489998c7b563cd322"
-}

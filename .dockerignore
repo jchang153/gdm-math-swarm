@@ -1,5 +1,0 @@
-# Guard: no image builds from the repository root. Every image uses a dedicated
-# context (data/vendor for deps; an empty directory for lean/agent; docker/ for the
-# comparator), so a mistaken root context sends nothing: no .env, research/, runs/,
-# state/, tests/, docs/ or data/. This file does not affect those other contexts.
-*

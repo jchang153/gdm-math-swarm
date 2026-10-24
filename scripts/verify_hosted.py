@@ -58,6 +58,12 @@ PAGES = ("index.html", "{run}/results.html", "{run}/conference-view/index.html",
 # HF injects this one script into served HTML; remove only it before comparing bytes. With hf_oauth (Space
 # revision 882dd1ff and later) it also carries OAUTH_CLIENT_ID, OAUTH_SCOPES and OPENID_PROVIDER_URL.
 CREATOR_SCRIPT = re.compile(rb'<script>window\.huggingface=\{variables:\{(?:"[A-Z_]+":"[^"<\\]*",?)+\}\};</script>')
+# A PUBLIC Space (owner, October 24, 2026) also gets HF's social-preview tags: one run of og:/twitter: meta tags,
+# inserted before </head> (or at the start of a page without a head). Remove only the first such run that
+# names HF's own social thumbnail.
+SOCIAL_META = re.compile(rb'(?:<meta (?:property="og:[a-z_:]+"|name="twitter:[a-z_:]+") content="[^"<>]*">)*'
+                         rb'<meta property="og:image" content="https://cdn-thumbnails\.huggingface\.co/social-thumbnails/[^"<>]*">'
+                         rb'(?:<meta (?:property="og:[a-z_:]+"|name="twitter:[a-z_:]+") content="[^"<>]*">)*')
 LFS_POINTER = b"version https://git-lfs.github.com/spec/"
 PATHS_INFO_BATCH = 200
 # A link to a raw Inspect log under RUN/inspect/ (the catalogue's and run page's former download links).
@@ -115,7 +121,7 @@ def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, 
         response = session.get(f"{info.host}/{page}", headers=headers, timeout=45, follow_redirects=True)
         kind = response.headers.get("content-type", "")
         disposition = response.headers.get("content-disposition", "")
-        body = CREATOR_SCRIPT.sub(b"", response.content, count=1)
+        body = SOCIAL_META.sub(b"", CREATOR_SCRIPT.sub(b"", response.content, count=1), count=1)
         served[page] = body
         check("served_html", response.status_code == 200 and kind.startswith("text/html")
               and "attachment" not in disposition.lower() and not response.content.startswith(LFS_POINTER),
