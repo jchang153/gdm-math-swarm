@@ -598,17 +598,20 @@ class _Gates:
                  "spontaneous track; no seeded-contagion configuration present")
 
     def behavior_judge(self):
-        from .auto_judge import enabled, judge_budget, judge_config_problems, live_settings
+        from .auto_judge import active_judge_budget, enabled, judge_config_problems, live_settings
         problems = judge_config_problems(self.config)
         if problems or not enabled(self.config):
             return self.add("behavior_judge", not problems, "; ".join(problems) or "no automatic post-run behavior judge")
-        amount, source = judge_budget(self.config)
+        mode, amount, source, _ = active_judge_budget(self.config)
+        if mode == "off":
+            return self.add("behavior_judge", True, 'automatic post-run behavior judge off (behavior_judge "off")',
+                            judge=mode, live_mode=None)
         live = live_settings(self.config)
         during = {"paid": f"; live judging during the run every {live['interval_seconds']} s, from the same budget",
                   "mock": "; free mock shadow of live judging during the run"}
-        self.add("behavior_judge", True, f"automatic post-run behavior judge enabled; its budget for the run is "
-                 f"${amount} ({source})" + during.get(live["mode"], ""), budget_usd=str(amount), budget_source=source,
-                 live_mode=live["mode"])
+        self.add("behavior_judge", True, f"automatic post-run behavior judge enabled ({mode} judge); its budget for "
+                 f"the run is ${amount} ({source})" + during.get(live["mode"], ""), budget_usd=str(amount),
+                 budget_source=source, judge=mode, live_mode=live["mode"])
 
     def run_budget(self):
         """The run's budget, the one spending control: ``run_budget_usd`` when present (it must be a

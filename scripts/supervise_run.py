@@ -9,8 +9,8 @@ ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
 2. backs up the budget ledger the run reserves against (always the config's ledger,
    ``budget.ledger_path_for``: a budget track's own ledger such as state/gemini-budget.sqlite,
    otherwise state/budget.sqlite; a --ledger naming any other file is refused), prints the
-   run's budget on its own console (and the behavior
-   judge's, when enabled; also ``launch-budget.json``), then launches ``scripts/run_pilot.py
+   run's budget on its own console (and the active behavior
+   judge's and the incident report's, when enabled; also ``launch-budget.json``), then launches ``scripts/run_pilot.py
    --config CONFIG --launch-paid-pilot`` with a minimal environment (the provider key is never
    passed on; the runtime loads it from the operator's private .env). The run's budget is CONFIG's
    ``run_budget_usd`` (else $100), the one spending control (docs/plan.md, "One per-run budget,
@@ -23,21 +23,30 @@ ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
    timeline.py (evaluate_run.py is deferred, follow-ups stop with exit 4, while any comparator
    container, label gdm-evaluator=1, runs: its start-up cleanup removes every comparator
    container, including another checkout's; rerun it later); then, when CONFIG has
-   ``auto_behavior_judge`` true, the PAID behavior judge
-   (scripts/run_transcript_judge.py --run-config CONFIG: its budget is CONFIG's
-   ``behavior_judge_max_usd``, else $50, for the run's judging into RUN/analysis/judge, live passes
-   and early stages included; this checkout's state/budget.sqlite and .env; it refreshes its own
-   route pricing record when needed and keeps a copy in RUN/analysis/judge/route-pricing/, also
-   packaged as judge-route-pricing/ in completed-phase.tgz). Its outputs land in
-   RUN/analysis/judge/ (packaged with the run); its outcome is recorded in behavior-judge.json and
-   never changes the worker exit or stops the packaging; then, for the same configs, the PAID
-   incident report (scripts/run_incident_report.py, docs/plan.md "Incident report per run (October
-   21, 2026)": a model-written, verified account of the run into RUN/analysis/incident/, packaged
-   with the run; its own budget, CONFIG's ``incident_report_max_usd``, else $20; this checkout's
-   state/budget.sqlite and .env). Its outcome is recorded in incident-report.json; a failure, stop
-   or skip never changes the worker exit or the packaging;
-   With ``auto_behavior_judge`` true the judge also runs DURING the run (docs/plan.md, "Live behavior
-   judge during the run (October 20, 2026)"; ``live_behavior_judge``, default true): while the pilot
+   ``auto_behavior_judge`` true, the PAID behavior judge CONFIG's ``behavior_judge`` selects
+   (research_swarm.auto_judge; owner decision October 24, 2026):
+   - ``"simple"``, the DEFAULT: the one-pass simplified judge (scripts/run_simple_judge.py --run-limit
+     USD --ledger state/budget.sqlite --credentials-root CHECKOUT; its budget is CONFIG's
+     ``simple_judge_max_usd``, else $10) into RUN/analysis/simple_judge/ (packaged with the run; the
+     route record its report names is also packaged as simple-judge-route/ in completed-phase.tgz);
+   - ``"full"``, opt-in: the rubric-3.1 judge (scripts/run_transcript_judge.py --run-config CONFIG: its
+     budget is CONFIG's ``behavior_judge_max_usd``, else $50, for the run's judging into
+     RUN/analysis/judge, live passes and early stages included; it refreshes its own route pricing
+     record when needed and keeps a copy in RUN/analysis/judge/route-pricing/, also packaged as
+     judge-route-pricing/ in completed-phase.tgz);
+   - ``"off"``: no behavior judge.
+   Both bill this checkout's state/budget.sqlite and read its .env. The outcome (which judge ran and
+   its budget) is recorded in behavior-judge.json and never changes the worker exit or stops the
+   packaging. Then the PAID incident report (scripts/run_incident_report.py, docs/plan.md "Incident
+   report per run (October 21, 2026)": a model-written, verified account of the run into
+   RUN/analysis/incident/, packaged with the run; its own budget, CONFIG's ``incident_report_max_usd``,
+   else $20; this checkout's state/budget.sqlite and .env) for every config with
+   ``auto_incident_report`` true (default: the value of ``auto_behavior_judge``, whichever judge ran,
+   ``"off"`` included). Its outcome is recorded in incident-report.json; a failure, stop or skip never
+   changes the worker exit or the packaging;
+   With the full judge the judge also runs DURING the run (docs/plan.md, "Live behavior
+   judge during the run (October 20, 2026)"; ``live_behavior_judge``, default true; never for the
+   simple judge or "off"): while the pilot
    runs, one live screening pass (``run_transcript_judge.py --live``) every
    ``behavior_judge_live_interval_seconds`` (default 300) after the common start, at most one at a
    time, with a small Haiku concurrency (the pilot's provider key is shared), at nice 19,
@@ -101,7 +110,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 FOLLOW_UPS = ("reconcile", "evaluate-dry", "evaluate", "timeline")
 NONBLOCKING_FOLLOW_UPS = ("reconcile",)  # bookkeeping: a failure is recorded, the others still run
-JUDGE_STEPS = ("behavior-judge", "incident-report")  # after FOLLOW_UPS, only with auto_behavior_judge true
+JUDGE_STEPS = ("behavior-judge", "incident-report")  # after FOLLOW_UPS (auto_behavior_judge, auto_incident_report)
+SIMPLE_JUDGE_OUTCOMES = {0: "complete", 2: "refused_or_failed"}  # scripts/run_simple_judge.py exits
+SIMPLE_ROUTE_DIR = "simple-judge-route"  # completed-phase.tgz: the simple judge's route record
 INCIDENT_OUTCOMES = {0: "complete", 2: "failed_or_refused", 3: "stopped"}
 JUDGE_OUTCOMES = {0: "complete", 2: "errors_or_held_agents", 3: "stopped", 4: "refused"}
 EVALUATOR_LABEL = "gdm-evaluator=1"  # evaluator.CONTAINER_LABEL (comparator containers)
@@ -597,23 +608,45 @@ class Supervisor:
         self.shadow_record = record
         return record
 
+    def simple_judge_command(self, amount):
+        """The simplified judge (scripts/run_simple_judge.py) with its one per-run budget, into its
+        default output directory RUN/analysis/simple_judge/."""
+        return ["scripts/run_simple_judge.py", "--run-dir", str(self.run), "--run-limit", str(amount),
+                "--ledger", str(self.judge_ledger), "--credentials-root", str(self.root)]
+
     def behavior_judge(self, worker_code):
-        """The paid behavior judge with CONFIG's judge budget, or a recorded skip. Never raises and
-        never changes the worker exit; returns the record (also behavior-judge.json)."""
+        """The paid behavior judge CONFIG selects (``behavior_judge``: "simple", the default, or "full")
+        with its budget, or a recorded skip ("off" included). Never raises and never changes the worker
+        exit; returns the record (also behavior-judge.json), or None without ``auto_behavior_judge``."""
         record = {"utc": now(), "config": str(self.config_path), "run_dir": str(self.run)}
         try:
             config = json.loads(self.config_path.read_text())
             sys.path.insert(0, str(ROOT / "src"))
-            from research_swarm.auto_judge import enabled, judge_config_problems
+            from research_swarm.auto_judge import active_judge_budget, enabled, judge_config_problems
             if not enabled(config):
                 return None  # not configured: no judge, no record
             problems = judge_config_problems(config)
+            if not problems:
+                mode, amount, source, key = active_judge_budget(config)
+                record.update(judge=mode, budget_usd=None if amount is None else str(amount),
+                              budget_source=source, budget_key=key)
             if problems:
                 record.update(outcome="skipped", reason="invalid judge settings: " + "; ".join(problems))
             elif self.args.no_postrun:
                 record.update(outcome="skipped", reason="--no-postrun")
+            elif record["judge"] == "off":
+                record.update(outcome="skipped", reason='behavior_judge is "off"')
             elif worker_code != 0:
                 record.update(outcome="skipped", reason=f"the run or its follow-ups did not complete (exit {worker_code})")
+            elif record["judge"] == "simple":
+                code = self.step("behavior-judge", self.simple_judge_command(amount))
+                record.update(exit=code, outcome=SIMPLE_JUDGE_OUTCOMES.get(code, "failed"),
+                              output_dir=str(self.run / "analysis" / "simple_judge"))
+                if code == 2:
+                    refused = [line for line in (self.phase / "behavior-judge.log").read_text().splitlines()
+                               if line.startswith("refused:")]
+                    if refused:
+                        record["reason"] = refused[-1]
             else:
                 code = self.step("behavior-judge", self.judge_command(*self.paid_judge_args()))
                 record.update(exit=code, outcome=JUDGE_OUTCOMES.get(code, "failed"))
@@ -639,13 +672,14 @@ class Supervisor:
         """The paid incident report (scripts/run_incident_report.py) after the behavior judge, with its own
         budget (CONFIG's ``incident_report_max_usd``, else $20), or a recorded skip. Never raises and never
         changes the worker exit; returns the record (also incident-report.json), or None when the config
-        does not enable the automatic judge."""
+        does not request it (``auto_incident_report``, default ``auto_behavior_judge``). It runs whichever
+        behavior judge ran, "off" included."""
         record = {"utc": now(), "config": str(self.config_path), "run_dir": str(self.run)}
         try:
             config = json.loads(self.config_path.read_text())
             sys.path.insert(0, str(ROOT / "src"))
-            from research_swarm.auto_judge import enabled, incident_budget
-            if not enabled(config):
+            from research_swarm.auto_judge import incident_budget, incident_enabled
+            if not incident_enabled(config):
                 return None
             amount, source = incident_budget(config)
             record.update(budget_usd=str(amount), budget_source=source)
@@ -678,13 +712,14 @@ class Supervisor:
         return record
 
     def announce_budget(self):
-        """Print the run's budget (and the behavior judge's, when enabled) on the supervisor's own
+        """Print the run's budget (and the active behavior judge's and the incident report's, when
+        enabled) on the supervisor's own
         console before the launch: run_pilot.py prints it too, but only into pilot.log. Recorded in
         ``launch-budget.json``. Never raises (an invalid budget is refused by the launch itself)."""
         lines, record = [], {"utc": now(), "config": str(self.config_path)}
         try:
             sys.path.insert(0, str(self.root / "src"))
-            from research_swarm.auto_judge import enabled, incident_budget, judge_budget
+            from research_swarm.auto_judge import active_judge_budget, enabled, incident_budget, incident_enabled
             from research_swarm.budget import describe_budget, run_budget
             config = json.loads(self.config_path.read_text())
             try:
@@ -696,12 +731,17 @@ class Supervisor:
                 record["run_budget_error"] = str(error)
             if enabled(config):
                 try:
-                    amount, source = judge_budget(config)
-                    lines.append(describe_budget(amount, source, key="behavior_judge_max_usd")
-                                 .replace("Run budget", "Behavior judge budget"))
-                    record.update(judge_budget_usd=str(amount), judge_budget_source=source)
+                    mode, amount, source, key = active_judge_budget(config)
+                    record["judge"] = mode
+                    if mode == "off":
+                        lines.append('Behavior judge: off (behavior_judge "off")')
+                    else:
+                        lines.append(describe_budget(amount, source, key=key)
+                                     .replace("Run budget", f"Behavior judge budget ({mode} judge)"))
+                        record.update(judge_budget_usd=str(amount), judge_budget_source=source)
                 except ValueError as error:
                     lines.append(f"Behavior judge budget: invalid ({error})")
+            if incident_enabled(config):
                 try:
                     amount, source = incident_budget(config)
                     lines.append(describe_budget(amount, source, key="incident_report_max_usd")
@@ -789,6 +829,10 @@ class Supervisor:
             # invocation keeps a copy of the record it used in RUN/analysis/judge/route-pricing/).
             for record in self.judge_pricing_records():
                 tar.add(record, arcname="judge-route-pricing/" + record.name)
+            # The simple judge's route record (data/validation/, outside the run), as its report names it.
+            route = self.simple_judge_route_record()
+            if route is not None:
+                tar.add(route, arcname=SIMPLE_ROUTE_DIR + "/" + route.name)
         hashes = {name: hashlib.sha256((self.phase / name).read_bytes()).hexdigest()
                   for name in ("completed-run.tgz", "completed-phase.tgz")}
         (self.phase / "completed-checksums.json").write_text(json.dumps(hashes, indent=2))
@@ -823,6 +867,15 @@ class Supervisor:
         """The judge route pricing records the run's judging used (``RUN/analysis/judge/route-pricing/``)."""
         folder = self.run / "analysis" / "judge" / "route-pricing"
         return sorted(p for p in folder.glob("*.json") if p.is_file()) if folder.is_dir() else []
+
+    def simple_judge_route_record(self):
+        """The route record RUN/analysis/simple_judge/report.json names, when it is a file; else None."""
+        try:
+            name = json.loads((self.run / "analysis" / "simple_judge" / "report.json").read_text()).get("route_record")
+            path = Path(name) if name else None
+            return path if path is not None and path.is_file() else None
+        except (OSError, ValueError, AttributeError, TypeError):
+            return None
 
     def idle_shutdown(self, code):
         """Shut down only an idle VM; never kill processes or remove containers to get there."""

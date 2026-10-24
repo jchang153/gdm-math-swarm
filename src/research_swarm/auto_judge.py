@@ -1,41 +1,49 @@
-"""Automatic behavior judge: the run config's keys (researcher-only).
+"""Automatic post-run behavior judge and incident report: the run config's keys (researcher-only).
 
 docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20, 2026)" and
-"One per-run budget, no manual approvals (October 20, 2026)": the misbehavior judge
-(research/analysis/judge, scripts/run_transcript_judge.py) runs automatically after a run whose
-config enables it (scripts/supervise_run.py). It applies to every run whose config enables it,
-on any budget track (the owner's and the collaborator's alike). A config opts in with:
+"One per-run budget, no manual approvals (October 20, 2026)": a behavior judge runs automatically
+after a run whose config enables it (scripts/supervise_run.py), on any budget track (the owner's
+and the collaborator's alike). A config opts in with:
 
 - ``auto_behavior_judge``: ``true`` to judge the run after its unpaid follow-ups;
-- ``behavior_judge_max_usd``: the judge's budget for the run in USD (any positive amount; $50,
-  ``budget.DEFAULT_JUDGE_RUN_BUDGET_USD``, when absent). It holds for the judging run, the run's
-  judge directory (live passes, early stages and the post-run judge together, and any resume of
-  them: ``client.committed_for_judging``). The judge stops cleanly when its next request would push
-  that committed spend past this budget. It is the judge's only spending control.
+- ``behavior_judge``: which judge (owner decision, October 24, 2026):
+  - ``"simple"`` (the DEFAULT when ``auto_behavior_judge`` is true and the key is absent): the
+    validated one-pass simplified judge (scripts/run_simple_judge.py, research/analysis/simple_judge/;
+    one call per agent, Gemini 3.8 Flash with a GPT 5.6 Terra fallback, about $2 per 100-agent run)
+    into RUN/analysis/simple_judge/. No live judging. Its budget:
+    ``simple_judge_max_usd`` (any positive amount; $10 when absent), passed as ``--run-limit``;
+  - ``"full"`` (opt-in): the rubric-3.1 judge (research/analysis/judge,
+    scripts/run_transcript_judge.py) into RUN/analysis/judge/, with live judging (below). Its budget:
+    ``behavior_judge_max_usd`` (any positive amount; $50, ``budget.DEFAULT_JUDGE_RUN_BUDGET_USD``,
+    when absent). It holds for the judging run, the run's judge directory (live passes, early stages
+    and the post-run judge together, and any resume of them: ``client.committed_for_judging``);
+  - ``"off"``: no behavior judge (the incident report below still runs).
+  Each judge stops cleanly when its next request would not fit its budget, its only spending control.
+  Configs written before October 24, 2026 that set only ``auto_behavior_judge`` now get the simple
+  judge; a config that wants the rubric-3.1 judge sets ``behavior_judge: "full"``.
 
-No approval note is needed (``behavior_judge_approval`` from older configs is ignored). The
-judge bills the analysis scope of the checkout's ledger (state/budget.sqlite, or ``--ledger``),
-each invocation registered as one ledger run with the room left under this budget. Its
-research-integrity checks stay (route pricing record valid for the frozen route, judge directory
-bindings, label checks, held agents).
+No approval note is needed (``behavior_judge_approval`` from older configs is ignored). Both judges
+bill the analysis scope of the checkout's ledger (state/budget.sqlite, or ``--ledger``), each
+invocation registered as one ledger run with the room left under its budget.
 
-Live behavior judge (docs/plan.md, "Live behavior judge during the run (October 20, 2026)"; the
-owner: "Judge during the run, not after"): with ``auto_behavior_judge`` true the judge also screens
-transcript windows while the run is going (research/analysis/judge/live.py), so only the last
-windows, verification and the run-level summary remain after the clock stops. Three optional keys:
+Live behavior judge (docs/plan.md, "Live behavior judge during the run (October 20, 2026)"): only
+for the full judge (``behavior_judge: "full"``). The judge then also screens transcript windows while
+the run is going (research/analysis/judge/live.py). Two optional keys, read only for the full judge:
 
-- ``live_behavior_judge``: ``true`` (the default when ``auto_behavior_judge`` is true), ``false``
-  (post-run judging only), or ``"mock"`` (a free shadow: live passes and a post-run pass with the
-  deterministic mock model into the phase folder, beside the unchanged paid post-run judge);
+- ``live_behavior_judge``: ``true`` (the default for the full judge), ``false`` (post-run judging
+  only), or ``"mock"`` (a free shadow: live passes and a post-run pass with the deterministic mock
+  model into the phase folder, beside the unchanged paid post-run judge);
 - ``behavior_judge_live_interval_seconds``: seconds between live passes (default 300, 60 to 3600).
 
-Incident report (docs/plan.md, "Incident report per run (October 21, 2026)"): after the post-run
-judge, the supervisor writes the run's model-written incident report (scripts/run_incident_report.py
-into RUN/analysis/incident/) for every ``auto_behavior_judge`` config. Its budget is its own:
+Incident report (docs/plan.md, "Incident report per run (October 21, 2026)"): after the behavior
+judge (whichever ran, or none), the supervisor writes the run's model-written incident report
+(scripts/run_incident_report.py into RUN/analysis/incident/). Two keys:
 
-- ``incident_report_max_usd``: the incident report's budget for the run in USD (any positive amount;
-  $20 when absent). Every incident-report invocation for the run counts against it. A failure or
-  a stop never changes the worker exit or the packaging.
+- ``auto_incident_report``: optional boolean, default the value of ``auto_behavior_judge``; ``true``
+  requests the report even without the judge keys, ``false`` turns it off;
+- ``incident_report_max_usd``: its budget for the run in USD (any positive amount; $20 when absent).
+  Every incident-report invocation for the run counts against it. A failure or a stop never changes
+  the worker exit or the packaging.
 
 ``behavior_judge_live_max_usd`` (a separate live share in earlier versions) is no longer read: the
 live passes use the judging run's one budget (owner decision "one spending control only",
@@ -53,7 +61,14 @@ LIVE_KEY = "live_behavior_judge"
 LIVE_INTERVAL_KEY = "behavior_judge_live_interval_seconds"
 INCIDENT_MAX_USD_KEY = "incident_report_max_usd"
 DEFAULT_INCIDENT_RUN_BUDGET_USD = "20"
-KEYS = (AUTO_JUDGE_KEY, MAX_USD_KEY, INCIDENT_MAX_USD_KEY)
+# Which behavior judge runs (owner decision, October 24, 2026): the simplified judge by default.
+JUDGE_MODE_KEY = "behavior_judge"
+JUDGE_MODES = ("simple", "full", "off")
+DEFAULT_JUDGE_MODE = "simple"
+SIMPLE_MAX_USD_KEY = "simple_judge_max_usd"
+DEFAULT_SIMPLE_RUN_BUDGET_USD = "10"
+AUTO_INCIDENT_KEY = "auto_incident_report"
+KEYS = (AUTO_JUDGE_KEY, JUDGE_MODE_KEY, MAX_USD_KEY, SIMPLE_MAX_USD_KEY, AUTO_INCIDENT_KEY, INCIDENT_MAX_USD_KEY)
 LIVE_KEYS = (LIVE_KEY, LIVE_INTERVAL_KEY)
 # Superseded (a separate live share of the judge's budget); not read, reported by the run_budget gate.
 OBSOLETE_LIVE_MAX_USD_KEY = "behavior_judge_live_max_usd"
@@ -78,7 +93,11 @@ def judge_config_problems(config):
     problems = []
     if AUTO_JUDGE_KEY in config and type(config[AUTO_JUDGE_KEY]) is not bool:
         problems.append(f"{AUTO_JUDGE_KEY} must be a boolean")
-    for key in (MAX_USD_KEY, INCIDENT_MAX_USD_KEY):
+    if AUTO_INCIDENT_KEY in config and type(config[AUTO_INCIDENT_KEY]) is not bool:
+        problems.append(f"{AUTO_INCIDENT_KEY} must be a boolean")
+    if JUDGE_MODE_KEY in config and config[JUDGE_MODE_KEY] not in JUDGE_MODES:
+        problems.append(f'{JUDGE_MODE_KEY} must be "simple", "full" or "off"')
+    for key in (MAX_USD_KEY, SIMPLE_MAX_USD_KEY, INCIDENT_MAX_USD_KEY):
         if config.get(key) is not None:
             try:
                 budget_amount(config[key], key)
@@ -88,11 +107,51 @@ def judge_config_problems(config):
 
 
 def enabled(config):
+    """Whether the config enables the automatic post-run work (``auto_behavior_judge`` true)."""
     return (config or {}).get(AUTO_JUDGE_KEY) is True
 
 
+def judge_mode(config):
+    """Which automatic behavior judge runs: ``"simple"`` (the default with ``auto_behavior_judge``
+    true), ``"full"`` (``behavior_judge: "full"``, the rubric-3.1 judge) or ``"off"`` (no automatic
+    judge: ``auto_behavior_judge`` not true, or ``behavior_judge: "off"``). An invalid value counts
+    as ``"off"`` here (``judge_config_problems`` reports it)."""
+    config = config or {}
+    if not enabled(config):
+        return "off"
+    value = config.get(JUDGE_MODE_KEY, DEFAULT_JUDGE_MODE)
+    return value if value in JUDGE_MODES else "off"
+
+
+def incident_enabled(config):
+    """Whether the post-run incident report runs: ``auto_incident_report`` when it is a boolean, else
+    ``auto_behavior_judge`` (independent of which behavior judge runs, ``"off"`` included)."""
+    config = config or {}
+    value = config.get(AUTO_INCIDENT_KEY)
+    return value if type(value) is bool else enabled(config)
+
+
+def simple_judge_budget(config):
+    """``(budget, source)`` of the simplified judge: ``simple_judge_max_usd``, else $10."""
+    value = (config or {}).get(SIMPLE_MAX_USD_KEY)
+    if value is None:
+        return Decimal(DEFAULT_SIMPLE_RUN_BUDGET_USD), "default"
+    return budget_amount(value, SIMPLE_MAX_USD_KEY), f"config {SIMPLE_MAX_USD_KEY}"
+
+
+def active_judge_budget(config):
+    """``(mode, budget, source, key)`` of the judge ``judge_mode`` selects (budget, source and key
+    None for ``"off"``). Raises ValueError for an invalid amount."""
+    mode = judge_mode(config)
+    if mode == "simple":
+        return (mode, *simple_judge_budget(config), SIMPLE_MAX_USD_KEY)
+    if mode == "full":
+        return (mode, *judge_budget(config), MAX_USD_KEY)
+    return mode, None, None, None
+
+
 def judge_budget(config):
-    """``(budget, source)`` of the automatic judge: ``behavior_judge_max_usd``, else $50."""
+    """``(budget, source)`` of the full (rubric-3.1) judge: ``behavior_judge_max_usd``, else $50."""
     value = (config or {}).get(MAX_USD_KEY)
     if value is None:
         return Decimal(DEFAULT_JUDGE_RUN_BUDGET_USD), "default"
@@ -123,10 +182,10 @@ def live_problems(config):
 
 def live_mode(config):
     """``"paid"`` (live passes billed against the judge's budget for the run), ``"mock"`` (a free
-    shadow) or None (post-run judging only). Live judging is on by default for
-    ``auto_behavior_judge`` configs."""
+    shadow) or None (post-run judging only). Live judging exists only for the full judge
+    (``behavior_judge: "full"``), where it is on by default; None for the simple judge and "off"."""
     config = config or {}
-    if not enabled(config):
+    if judge_mode(config) != "full":
         return None
     value = config.get(LIVE_KEY, True)
     return "paid" if value is True else "mock" if value == "mock" else None
@@ -149,6 +208,9 @@ def judge_settings(config, config_path=None, *, live=False):
     problems = judge_config_problems(config)
     if live and not problems and not enabled(config):
         problems.append(f"{AUTO_JUDGE_KEY} is not true (a paid live pass judges a run whose config enables it)")
+    elif live and not problems and judge_mode(config) != "full":
+        problems.append(f'{JUDGE_MODE_KEY} is not "full" (live judging exists only for the full judge; '
+                        f'the default is the simple judge)')
     elif live and not problems and live_mode(config) != "paid":
         problems.append(f"{LIVE_KEY} is not true (a paid live pass needs it; \"mock\" runs free shadow passes)")
     if problems:

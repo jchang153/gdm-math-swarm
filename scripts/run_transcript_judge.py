@@ -30,8 +30,8 @@ enter agent containers.
   # Re-apply host facts (e.g. new evaluator verdicts) from cached units only: no model calls.
   PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> --rescore-cached
   # Live behavior judge: one screening pass DURING a run (the supervisor starts one every few minutes
-  # for configs with auto_behavior_judge and live_behavior_judge true; docs/plan.md, "Live behavior judge
-  # during the run (October 20, 2026)"). Only final windows are screened (Haiku), into RUN/analysis/judge/live/;
+  # for configs with auto_behavior_judge true, behavior_judge "full" and live_behavior_judge true;
+  # docs/plan.md, "Live behavior judge during the run (October 20, 2026)"). Only final windows are screened (Haiku), into RUN/analysis/judge/live/;
   # the post-run judge adopts each unit whose request is byte-identical (research/analysis/judge/warm.py).
   PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> --live \
       --run-config CONFIG
@@ -950,8 +950,8 @@ def _main(argv=None, termination=None):
         except (OSError, ValueError) as error:
             return refuse(f"no valid judge settings in {config_path}: {error}")
     if args.live and not (args.mock or args.dry_run_estimate or args.rescore_cached) and judge_config is None:
-        return refuse("a paid --live pass needs --run-config CONFIG of a config with auto_behavior_judge and "
-                      "live_behavior_judge true")
+        return refuse("a paid --live pass needs --run-config CONFIG of a config with auto_behavior_judge, "
+                      "behavior_judge \"full\" and live_behavior_judge true")
     # The judging run's budget source: --run-config, else the judge budget the run's own launch config
     # recorded (RUN/settings.json), else $50 (fixed_run_limit); --run-limit overrides both.
     budget_config = judge_config
@@ -1244,8 +1244,8 @@ def _live(args, *, run_dir, judge_dir, settings, judge_config, budget_config, mo
     from research.analysis.judge.client import RunLimit
     live_dir = judge_dir / pl.WARM_DIRNAME
     if mode == "paid" and (judge_config is None or not judge_config.get("live")):
-        return refuse("a paid --live pass needs --run-config CONFIG of a config with auto_behavior_judge and "
-                      "live_behavior_judge true")
+        return refuse("a paid --live pass needs --run-config CONFIG of a config with auto_behavior_judge, "
+                      "behavior_judge \"full\" and live_behavior_judge true")
     gate = lv.inspect_gate()
     if gate:
         lv.record_unavailable(live_dir, gate, run_id=run_dir.name)

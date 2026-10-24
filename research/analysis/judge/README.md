@@ -823,9 +823,13 @@ estimate remain preconditions.
 
 ### Automatic judge after a run (October 20, 2026)
 
+Owner decision, October 24, 2026: the automatic post-run judge is now the simplified judge
+(`research/analysis/simple_judge/`) by default; this judge runs automatically only for configs with
+`behavior_judge: "full"` (configs/README.md). For those configs:
+
 docs/plan.md, "Automatic post-run behavior judge for the owner's runs (October 20, 2026)" and "One
 per-run budget, no manual approvals (October 20, 2026)": a run config with `auto_behavior_judge: true`
-(any track; `behavior_judge_max_usd`, any positive amount, is the judging run's budget, $50 when
+and `behavior_judge: "full"` (any track; `behavior_judge_max_usd`, any positive amount, is the judging run's budget, $50 when
 absent; no approval note; `research_swarm.auto_judge`, launch gate `behavior_judge`) makes
 `scripts/supervise_run.py` judge the run after its follow-ups (reconcile, evaluate, timeline) with
 `scripts/run_transcript_judge.py --run-dir RUN --run-config CONFIG --ledger state/budget.sqlite
@@ -843,8 +847,8 @@ report (`scripts/build_results.py`) still excludes judge content.
 ### Live judging during the run (October 20, 2026)
 
 docs/plan.md, "Live behavior judge during the run (October 20, 2026)" (the owner: "Judge during the
-run, not after"). For configs with `auto_behavior_judge` and `live_behavior_judge` true (the
-default), most of the judge runs before the clock stops. Only the last windows, verification and
+run, not after"). For configs with `auto_behavior_judge` true, `behavior_judge: "full"` and
+`live_behavior_judge` true (the default for the full judge), most of the judge runs before the clock stops. Only the last windows, verification and
 the run level remain after it. Judge revision v3, the rubric, the Sonnet/Opus prompts and the
 model allocation are unchanged.
 
@@ -899,7 +903,9 @@ by recorded settings and its configuration, never by timing: a judge directory's
 (a resume), else the setting `RUN/analysis/judge` recorded (a re-judge into another `--output-dir`
 reproduces the original judgment), else `false` exactly when the run's own launch config
 (`RUN/settings.json` "config", written at the run's start) has paid live judging
-(`auto_behavior_judge` true, `live_behavior_judge` not false or "mock"), else the v3 bytes. A run whose live passes never got far (a run shorter than one
+(`auto_behavior_judge` true, `behavior_judge: "full"`, `live_behavior_judge` not false or "mock"; a
+launch config written before October 24, 2026 without `behavior_judge` now reads as the simple judge,
+so a re-judge of such a run relies on the recorded settings above), else the v3 bytes. A run whose live passes never got far (a run shorter than one
 interval, an unavailable Inspect buffer, a busy lock) and a later re-judge of the saved run into
 another `--output-dir` therefore send the same bytes as one whose passes screened everything.
 Everything else in a window's

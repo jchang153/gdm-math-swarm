@@ -491,7 +491,7 @@ the ledger opened read-only and `docker image inspect`. A gate that raises is a 
 | `approved_settings` | `configs/pilot.json` | every `APPROVED_SETTINGS` key equals the plan value with the same type (track, seeding and mitigations off, 20 agents from `runtime.APPROVED_AGENT_COUNT`, 14 tasks, 5400 s, 600 s, 120 s, replace prompt, auto-memory, no internet, OpenRouter, model id), and `max_connections` is present, a positive integer and equal to `agent_count` (S2) |
 | `seeded_track` | config | track `spontaneous`, `seeded_contagion_enabled` false and no `seeded` block at all, enabled or not (S3) |
 | `run_budget` | config | `run_budget_usd` absent (the $100 default) or a positive amount; superseded spending keys are reported as a warning |
-| `behavior_judge` | config | `auto_behavior_judge` a boolean and `behavior_judge_max_usd`, when present, a positive amount |
+| `behavior_judge` | config | `auto_behavior_judge` and `auto_incident_report` booleans, `behavior_judge` one of `"simple"` (default), `"full"`, `"off"`, and `behavior_judge_max_usd`, `simple_judge_max_usd`, `incident_report_max_usd`, when present, positive amounts |
 | `route_pricing` | `route-pricing-<UTC>.json` + `catalog-snapshots/<sha256>.json` | `valid`, `credential_used: false`, frozen settings equal `frozen_fields(settings_from_config(config))`, archived catalog re-validates offline; an age above `route_pricing_max_age_hours` (72) is a warning (the paid launchers refresh it automatically) |
 | `declarations`, `judge`, `timing` | `<prefix>-<UTC>.json` | `all_required_passed`, lean image ID current, `complete: true`, `limits` equal the config's judge limits (X5) |
 | `reuse` | `reuse-<UTC>.json` | `all_required_passed`, lean image ID current |

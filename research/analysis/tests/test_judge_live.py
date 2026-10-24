@@ -1042,7 +1042,7 @@ class CommandLineTests(unittest.TestCase):
 
     def config(self, **changes):
         path = self.tmp / "launch-config.json"
-        path.write_text(json.dumps(dict({"auto_behavior_judge": True, "behavior_judge_max_usd": 50,
+        path.write_text(json.dumps(dict({"auto_behavior_judge": True, "behavior_judge": "full", "behavior_judge_max_usd": 50,
                                          "run_dir": "runs/x"}, **changes)))
         return path
 
@@ -1082,7 +1082,7 @@ class CommandLineTests(unittest.TestCase):
 
     def launch_config(self, **changes):
         """RUN/settings.json as the runtime writes it at the run's start ("config": the launch config)."""
-        config = dict({"auto_behavior_judge": True, "behavior_judge_max_usd": 50, "run_dir": "runs/x"}, **changes)
+        config = dict({"auto_behavior_judge": True, "behavior_judge": "full", "behavior_judge_max_usd": 50, "run_dir": "runs/x"}, **changes)
         (self.run_dir / "settings.json").write_text(json.dumps({"config": config, "effective": {}}))
 
     def test_window_count_setting(self):
@@ -1502,7 +1502,7 @@ class ReviewFixTests(unittest.TestCase):
         ledger = self.tmp / "budget.sqlite"
         BudgetLedger(ledger).start_run(tjp.RUN_ID, "pilot", "50")   # the running pilot's own budget
         config = self.tmp / "launch-config.json"
-        config.write_text(json.dumps({"auto_behavior_judge": True, "behavior_judge_max_usd": 50, "run_dir": "runs/x"}))
+        config.write_text(json.dumps({"auto_behavior_judge": True, "behavior_judge": "full", "behavior_judge_max_usd": 50, "run_dir": "runs/x"}))
 
         class Client:
             def __init__(self, outcome):
@@ -1748,7 +1748,7 @@ with mock.patch("research.analysis.judge.history.sample_index", return_value=ind
 
 
 class LiveConfigTests(unittest.TestCase):
-    CONFIG = {"auto_behavior_judge": True, "behavior_judge_max_usd": 50}
+    CONFIG = {"auto_behavior_judge": True, "behavior_judge": "full", "behavior_judge_max_usd": 50}
 
     def test_live_is_on_by_default_for_auto_judge_configs(self):
         self.assertEqual(auto_judge.live_mode(self.CONFIG), "paid")
@@ -1759,7 +1759,15 @@ class LiveConfigTests(unittest.TestCase):
         settings = auto_judge.judge_settings(self.CONFIG, live=True)
         self.assertEqual((settings["live"], settings["max_usd"]), (True, "50"))
         self.assertNotIn("live_max_usd", settings)   # no live share: one budget for the judging run
-        self.assertEqual(auto_judge.judge_settings({"auto_behavior_judge": True}, live=True)["max_usd"], "50")
+        self.assertEqual(auto_judge.judge_settings({"auto_behavior_judge": True, "behavior_judge": "full"},
+                                                   live=True)["max_usd"], "50")
+        # Live judging exists only for the full judge (the simplified judge is the default, October 24, 2026).
+        for mode in (None, "simple", "off"):
+            config = {k: v for k, v in dict(self.CONFIG, behavior_judge=mode).items() if v is not None}
+            self.assertIsNone(auto_judge.live_mode(config), mode)
+            self.assertIsNone(auto_judge.live_settings(config)["mode"], mode)
+            with self.assertRaises(ValueError):
+                auto_judge.judge_settings(config, live=True)
 
     def test_live_key_problems(self):
         for changes, text in (({"live_behavior_judge": "yes"}, 'true, false or "mock"'),

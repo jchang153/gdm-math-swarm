@@ -838,7 +838,7 @@ class LaunchGateTests(GateFixture):
         shipped = json.loads((ROOT / "configs" / "pilot.json").read_text())
         self.assertEqual(auto_judge.judge_config_problems(shipped), [])
         self.assertEqual(Decimal(auto_judge.judge_settings(shipped)["max_usd"]), Decimal(50))
-        judge = {"auto_behavior_judge": True, "behavior_judge_max_usd": 50}
+        judge = {"auto_behavior_judge": True, "behavior_judge": "full", "behavior_judge_max_usd": 50}
         config = {k: v for k, v in pilot_config().items() if k not in judge}
         self.assertTrue(self.evaluate(config)["evidence"]["behavior_judge"]["passed"])  # absent: no automatic judge
         for good in (judge, dict(judge, budget_track="gemini"), dict(judge, budget_track="ablation"),
@@ -847,8 +847,18 @@ class LaunchGateTests(GateFixture):
                      dict(judge, behavior_judge_approval="")):
             result = self.evaluate(dict(config, **good))
             self.assertTrue(result["evidence"]["behavior_judge"]["passed"], (good, result["evidence"]["behavior_judge"]))
+        # Owner decision (October 24, 2026): the simplified judge is the default, $10, no live judging.
         default = self.evaluate(dict(config, auto_behavior_judge=True))["evidence"]["behavior_judge"]
-        self.assertEqual((default["budget_usd"], default["budget_source"]), ("50", "default"))
+        self.assertEqual((default["judge"], default["budget_usd"], default["budget_source"], default["live_mode"]),
+                         ("simple", "10", "default", None))
+        simple = self.evaluate(dict(config, auto_behavior_judge=True, behavior_judge="simple",
+                                    simple_judge_max_usd=4))["evidence"]["behavior_judge"]
+        self.assertEqual((simple["budget_usd"], simple["budget_source"]), ("4", "config simple_judge_max_usd"))
+        off = self.evaluate(dict(config, auto_behavior_judge=True, behavior_judge="off"))["evidence"]["behavior_judge"]
+        self.assertTrue(off["passed"])
+        self.assertEqual((off["judge"], off["live_mode"]), ("off", None))
+        default = self.evaluate(dict(config, auto_behavior_judge=True, behavior_judge="full"))["evidence"]["behavior_judge"]
+        self.assertEqual((default["judge"], default["budget_usd"], default["budget_source"]), ("full", "50", "default"))
         # Live judging (docs/plan.md, "Live behavior judge during the run (October 20, 2026)") is on by
         # default and spends from the same budget: there is no live share (one spending control only).
         self.assertEqual(default["live_mode"], "paid")
@@ -866,7 +876,11 @@ class LaunchGateTests(GateFixture):
                           (dict(judge, behavior_judge_max_usd=True), "not an amount"),
                           (dict(judge, behavior_judge_max_usd="abc"), "not an amount"),
                           (dict(judge, auto_behavior_judge="yes"), "must be a boolean"),
-                          (dict(judge, live_behavior_judge="yes"), 'true, false or "mock"')):
+                          (dict(judge, live_behavior_judge="yes"), 'true, false or "mock"'),
+                          (dict(judge, behavior_judge="rubric"), '"simple", "full" or "off"'),
+                          (dict(judge, behavior_judge=None), '"simple", "full" or "off"'),
+                          (dict(judge, simple_judge_max_usd=0), "positive"),
+                          (dict(judge, auto_incident_report="yes"), "must be a boolean")):
             self.assertBlocked(self.evaluate(dict(config, **bad)), "behavior_judge", text)
             with self.assertRaises(ValueError):
                 auto_judge.judge_settings(bad)
