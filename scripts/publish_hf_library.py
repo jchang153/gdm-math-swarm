@@ -218,8 +218,14 @@ def load_bundle(bundle):
                 or dataset_logs.dataset_path(run, rel) != record['path'] or rel not in info.get('sources', [])
                 or (record.get('bytes'), record.get('sha256')) != (info['bytes'], info['sha256'])):
             raise ValueError('archive-manifest.json dataset_files record does not match the dataset files: ' + name)
+    from simple_judge_site import SJ_DIR, SPACE_FILES as SJ_SPACE_FILES
     for name, info in manifest['files'].items():
         safe_path(name)
+        rest = name.split('/', 1)[1] if '/' in name else ''
+        if rest.startswith(SJ_DIR + '/') and rest[len(SJ_DIR) + 1:] not in SJ_SPACE_FILES:
+            # Simplified judge: only report.html and report.json in the Space; agents.jsonl goes to the dataset,
+            # cases.jsonl, raw/, run-budgets.json and the other working files never leave the machine.
+            raise ValueError('Simplified judge file not allowed in the Space: ' + name)
         if '/' in name and dataset_logs.category(name.split('/', 1)[1]) is not None \
                 and manifest.get('layout') != 'records-in-space':
             raise ValueError('File bound for the logs dataset, not the Space: ' + name)

@@ -20,6 +20,9 @@ from build_experiment_index import build
 import dataset_logs
 from dataset_logs import COMMIT_PLACEHOLDER, DATASET_REPO, DATASET_SCHEMA, category, dataset_path
 from incident_site import INCIDENT_DIR, add_incident_tab, incident_excluded, incident_files, unpublished_links
+from simple_judge_site import (DATASET_FILES as SJ_DATASET_FILES, SJ_DIR, SPACE_FILES as SJ_SPACE_FILES,
+                               add_simple_judge_tab, simple_judge_excluded, simple_judge_files, site_page,
+                               space_report_json)
 from publish_hf_library import SECRET
 from space_navigation import private_space_navigation
 from site_style import themed
@@ -147,7 +150,29 @@ def run_excluded(relative, transcript_export=False):
     allowlist."""
     parts = Path(relative).parts
     return ((not transcript_export and bool(parts) and parts[0] in LOCAL_ONLY_DIRS) or judge_excluded(relative)
-            or incident_excluded(relative))
+            or incident_excluded(relative) or simple_judge_excluded(relative))
+
+
+def simple_judge_publication(source, judge_plan=None):
+    """None when a run has no completed simplified judge; else where its files go (scripts/simple_judge_site.py):
+    report.html (re-rendered by site_page, returned as 'page') and report.json to the Space, agents.jsonl to the
+    private dataset, every other file of analysis/simple_judge/ ('excluded') stays local. Each published file
+    is screened for credential-like content."""
+    names = simple_judge_files(source)
+    if not names:
+        return None
+    data = {name: (source / SJ_DIR / name).read_bytes() for name in names if name != 'report.html'}
+    old_judge = bool(judge_plan) and 'analysis/judge/report.html' in judge_plan['included']
+    page = site_page(data['report.json'], data['agents.jsonl'], source.name, old_judge=old_judge).encode('utf-8')
+    for name, content in {**data, 'report.html': page}.items():
+        if SECRET.search(content):
+            raise ValueError(f'Credential-like content in {SJ_DIR}/{name}; not published')
+    published = {f'{SJ_DIR}/{name}' for name in (*SJ_SPACE_FILES, *SJ_DATASET_FILES)}
+    folder = source / SJ_DIR
+    excluded = sorted(p.relative_to(source).as_posix() for p in folder.rglob('*')
+                      if (p.is_file() or p.is_symlink()) and p.relative_to(source).as_posix() not in published)
+    return {'space': [f'{SJ_DIR}/{name}' for name in SJ_SPACE_FILES],
+            'dataset': [f'{SJ_DIR}/{name}' for name in SJ_DATASET_FILES], 'excluded': excluded, 'page': page}
 
 
 def incident_publication(source):
@@ -399,7 +424,7 @@ def main():
                              'records in the Space bundle (no dataset-files/, no sign-in shim); only for maintenance '
                              'scopes that compare a bundle with such a run. publish_hf_library.py refuses it.')
     args = parser.parse_args()
-    selected, judge_plans, incident_plans = [], {}, {}
+    selected, judge_plans, incident_plans, simple_plans = [], {}, {}, {}
     for specification in args.run:
         run_id, bundle = specification.split('=', 1)
         if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]*', run_id):
@@ -414,6 +439,7 @@ def main():
             raise ValueError(f'Incomplete Inspect bundle for {run_id}')
         judge_plans[run_id] = judge_publication(source)
         incident_plans[run_id] = incident_publication(source)
+        simple_plans[run_id] = simple_judge_publication(source, judge_plans[run_id])
         selected.append((run_id, source, viewer))
     if len({row[0] for row in selected}) != len(selected):
         raise ValueError('Duplicate run IDs')
@@ -436,6 +462,13 @@ def main():
                 raise ValueError(f'{run_id}/{page.relative_to(output / run_id).as_posix()} links loose snapshot '
                                  'files, which are published only inside snapshots.tar.gz; link the conference '
                                  "view's captured-file pages instead")
+        if simple_plans[run_id] is not None:  # the simplified judge's page and the run page's Behavior judge tab
+            (output / run_id / SJ_DIR).mkdir(parents=True, exist_ok=True)
+            (output / run_id / SJ_DIR / 'report.html').write_bytes(simple_plans[run_id]['page'])
+            (output / run_id / SJ_DIR / 'report.json').write_bytes(
+                space_report_json((source / SJ_DIR / 'report.json').read_bytes()))  # no host paths on the Space
+            page = output / run_id / 'results.html'
+            page.write_text(add_simple_judge_tab(page.read_text(encoding='utf-8')), encoding='utf-8')
         if incident_plans[run_id] is not None:  # the run page's Incident report tab (navigation only)
             page = output / run_id / 'results.html'
             page.write_text(add_incident_tab(page.read_text(encoding='utf-8')), encoding='utf-8')
@@ -518,12 +551,23 @@ private Hugging Face dataset (Sign in with HF for read access). Do not upload cr
                 raise ValueError(f'{run}/{name} is missing from the bundle or has credential-like content')
     if incidents:  # which incident files are published; the rest of analysis/incident/ stays local
         manifest['incident_report'] = incidents
+    simple = {run: {'space': plan['space'], 'dataset': plan['dataset'], 'excluded': len(plan['excluded'])}
+              for run, plan in simple_plans.items() if plan is not None}
+    for run, plan in simple.items():  # Space copies present and screened again, agents.jsonl in the dataset part
+        for name in plan['space']:
+            if f'{run}/{name}' not in files or SECRET.search((output / run / name).read_bytes()):
+                raise ValueError(f'{run}/{name} is missing from the bundle or has credential-like content')
+        for name in plan['dataset']:
+            if not args.records_in_space and f'{run}/{name}' not in space_records:
+                raise ValueError(f'{run}/{name} is not bound for the private dataset')
+    if simple:  # where the simplified judge's files went; its working files stay local
+        manifest['simple_judge'] = simple
     (output / 'archive-manifest.json').write_text(json.dumps(manifest, indent=2))
     print(json.dumps({'output': str(output), 'runs': manifest['runs'],
                       'files': len(files), 'bytes': manifest['total_bytes'],
                       'dataset_files': len(dataset_files),
                       'dataset_bytes': sum(f['bytes'] for f in dataset_files.values()),
-                      'behavior_judge': judged, 'incident_report': incidents}))
+                      'behavior_judge': judged, 'incident_report': incidents, 'simple_judge': simple}))
 
 
 if __name__ == '__main__':

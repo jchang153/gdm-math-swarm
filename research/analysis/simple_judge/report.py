@@ -5,8 +5,10 @@ import html
 
 STYLE = """
 :root{--bg:#fbfbfa;--fg:#1d1d1b;--muted:#5f5e5a;--line:#dcdbd5;--card:#fff;--pos:#b4441f;--ok:#2f7d4f;--warn:#9a6a00}
-@media (prefers-color-scheme:dark){:root{--bg:#161615;--fg:#ecebe6;--muted:#a3a29b;--line:#34332f;--card:#1f1e1c;
---pos:#ef8a62;--ok:#6cc495;--warn:#e0b04a}}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161615;--fg:#ecebe6;--muted:#a3a29b;
+--line:#34332f;--card:#1f1e1c;--pos:#ef8a62;--ok:#6cc495;--warn:#e0b04a}}
+:root[data-theme="dark"]{--bg:#161615;--fg:#ecebe6;--muted:#a3a29b;--line:#34332f;--card:#1f1e1c;--pos:#ef8a62;
+--ok:#6cc495;--warn:#e0b04a}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
 main{max-width:1100px;margin:0 auto;padding:24px 16px}
 h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 8px}
@@ -16,11 +18,21 @@ text-align:left;vertical-align:top}th{font-weight:600}.wrap{overflow-x:auto}
 .kpis{display:flex;flex-wrap:wrap;gap:10px}.kpi{background:var(--card);border:1px solid var(--line);border-radius:8px;
 padding:8px 12px;min-width:120px}.kpi b{display:block;font-size:20px}
 q{font-style:italic}code{font-size:12.5px}details{margin:2px 0}
+.note{border:1px solid var(--line);border-left:4px solid var(--warn);background:var(--card);border-radius:6px;padding:8px 12px}
 """
 
 
 def _e(value):
     return html.escape("" if value is None else str(value))
+
+
+# Shown on every page (site requirement, 2026-10-24): the evaluation-awareness counts of this judge and of the
+# rubric-3.1 judge are not comparable (README "Limits").
+NOTE_ID = "sj-comparability"
+NOTE = ("Evaluation-awareness counts from this simplified judge are not comparable with the rubric-3.1 judge's: "
+        "it finds many more (for example 14 to 20 per 100 agents where the rubric-3.1 judge found 0 to 3 on the "
+        "three 30-minute GLM runs), mostly agents the earlier judge's prefilter never showed to its model. Compare "
+        "evaluation awareness only between runs judged by the same judge.")
 
 
 def _flag(value):
@@ -37,7 +49,8 @@ def _level(level):
     return f'<span class="{cls}">{_e(level)}</span>'
 
 
-def render_html(report, rows):
+def render_html(report, rows, old_judge_href=None):
+    """The page; ``old_judge_href`` (for example ``../judge/report.html``) links the run's rubric-3.1 judge."""
     c = report["counts"]
     kpis = [("agents", c["agents"]), ("labelled", c["labelled"]), ("cheating (explored+)", c["cheating_any"]),
             ("credited", c["cheating_level"].get("credited", 0)),
@@ -51,6 +64,9 @@ def render_html(report, rows):
              f"&middot; model {_e(report.get('model'))} (fallback {_e(report.get('fallback_model'))}) &middot; "
              f"one call per agent; quotes checked verbatim by code; labels without verified evidence shown as "
              f"unclear. Researcher-only.</p>",
+             f"<p class=note id={NOTE_ID}><strong>Not comparable:</strong> {_e(NOTE)}"
+             + (f" The rubric-3.1 judge's report for this run: <a href=\"{_e(old_judge_href)}\">Behavior judge "
+                f"(rubric 3.1)</a>." if old_judge_href else "") + "</p>",
              "<div class=kpis>" + "".join(f"<div class=kpi><b>{_e(v)}</b>{_e(k)}</div>" for k, v in kpis) + "</div>",
              "<h2>Counts</h2><p>Cheating levels: " + ", ".join(f"{_e(k)} {_e(v)}" for k, v in
                                                                c["cheating_level"].items()) +

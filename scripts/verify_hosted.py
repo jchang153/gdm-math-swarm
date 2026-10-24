@@ -28,6 +28,13 @@ its commit, and every same-site link of a checked page names a file stored in th
 only in the dataset, owner, October 23, 2026) and every Timeline link of RUN/results.html points to the
 dataset file at RUN/analysis/timeline.md (resolved by dataset_links_resolve) or to the page's "Raw records
 kept offline" notice (timeline_link). --expect-no-space-logs also requires that the Space stores no .eval for the run.
+
+Simplified behavior judge (scripts/simple_judge_site.py; with the default pages): none of its local-only working
+files (cases.jsonl, raw/, run-budgets.json, adjudication.json) nor agents.jsonl (private dataset only) is stored in
+the Space (simple_judge_local_only). When RUN/analysis/simple_judge/report.html is stored, it is checked like the
+other pages, carries the comparability note (simple_judge_note), and RUN/results.html has the simplified judge's
+Behavior judge tab (simple_judge_tab) and, when the run also has the rubric-3.1 judge, its "Behavior judge
+(rubric 3.1)" tab (simple_judge_rubric_3_1_tab).
 Exits 1 when any check fails; the record lists every check.
 """
 import argparse
@@ -43,6 +50,7 @@ from publish_hf_library import DEFAULT_REPO  # noqa: E402
 import dataset_logs  # noqa: E402
 from dataset_logs import DATASET_REPO  # noqa: E402
 import hf_visibility  # noqa: E402
+import simple_judge_site  # noqa: E402
 
 # Runs published before October 21, 2026 also carry {run}/transcripts/index.html; pass it with --page
 # to check it. New runs have no custom transcript pages (read agent transcripts in Inspect View).
@@ -62,6 +70,7 @@ def sha256(data):
 
 def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, range_path=None, cache_dir=None,
            dataset_repo=DATASET_REPO, dataset_commit=None, dataset_checks=None, expect_no_space_logs=False):
+    simple_judge_checks = pages is None
     pages = [page.format(run=run) for page in (pages or PAGES)]
     served = {}
     record = {"repo": repo, "run": run, "requested_revision": revision, "checks": [], "ok": False}
@@ -77,6 +86,18 @@ def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, 
     if not check("current_revision", bool(revision) and str(info.sha).startswith(revision), current=info.sha):
         record["note"] = "The hosted app serves the current revision; pages were not compared."
         return record
+    sj = f"{run}/{simple_judge_site.SJ_DIR}/"
+    sj_page, old_judge = sj + "report.html", f"{run}/{simple_judge_site.OLD_REPORT}"
+    sj_present = set()
+    if simple_judge_checks:
+        local_only = [sj + name for name in ("cases.jsonl", "raw", "run-budgets.json", "adjudication.json",
+                                             *simple_judge_site.DATASET_FILES)]
+        sj_present = {entry.path for entry in api.get_paths_info(repo, [sj_page, old_judge, *local_only],
+                                                                 repo_type="space", revision=info.sha)}
+        stray = sorted(sj_present & set(local_only))
+        check("simple_judge_local_only", not stray, examples=stray)
+        if sj_page in sj_present and sj_page not in pages:
+            pages.append(sj_page)
     names = pages + ([range_path] if range_path else [])
     lfs = {}
     for start in range(0, len(names), PATHS_INFO_BATCH):  # the Hub refuses very long path lists (HTTP 413)
@@ -101,6 +122,13 @@ def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, 
               path=page, status=response.status_code, content_type=kind, content_disposition=disposition or None)
         check("served_exact", body == stored, path=page, served_sha256=sha256(body), stored_sha256=sha256(stored))
         check("no_log_download_link", not LOG_DOWNLOAD_LINK.search(body), path=page)
+    if sj_page in sj_present:
+        results = served.get(f"{run}/results.html", b"").decode("utf-8", "replace")
+        check("simple_judge_tab", simple_judge_site.TAB in results, path=f"{run}/results.html")
+        if old_judge in sj_present:
+            check("simple_judge_rubric_3_1_tab", simple_judge_site.OLD_TAB in results, path=f"{run}/results.html")
+        check("simple_judge_note", 'id=sj-comparability' in served.get(sj_page, b"").decode("utf-8", "replace"),
+              path=sj_page)
     if range_path:
         response = session.get(f"{info.host}/{range_path}", headers={**headers, "Range": "bytes=0-63"}, timeout=45,
                                follow_redirects=True)
