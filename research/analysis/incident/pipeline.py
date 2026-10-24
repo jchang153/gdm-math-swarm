@@ -370,6 +370,15 @@ class IncidentPipeline:
             plan = parse_json_object(reply)
         return self.clean_plan(plan)
 
+
+    def _run_relative(self, path):
+        """A path inside the run as a run-relative string (published evidence carries no host paths)."""
+        if not path:
+            return path
+        try:
+            return Path(path).resolve().relative_to(self.run_dir.resolve()).as_posix()
+        except ValueError:
+            return Path(path).name
     def clean_plan(self, plan):
         stories, total = [], 0
         planned = [s for s in plan.get("storylines") or [] if isinstance(s, dict)][:MAX_STORYLINES]
@@ -628,8 +637,9 @@ class IncidentPipeline:
                                    "citations": checks["citations"],
                                    "structure_problems": verify.structure_problems(draft), "attempts": attempts},
                   "chain_of_thought": {k: v for k, v in digest["reasoning"].items()},
-                  "behavior_findings": {k: digest["judge"].get(k) for k in ("source", "label", "statement", "rubric",
-                                                                            "path", "preference", "problem")},
+                  "behavior_findings": {**{k: digest["judge"].get(k) for k in ("source", "label", "statement", "rubric",
+                                                                               "preference", "problem")},
+                                        "path": self._run_relative(digest["judge"].get("path"))},
                   "plan": plan, "plan_dropped_items": self.dropped,
                   "extract_refusals": self.extract_refusals, "model_fallbacks": self.model_fallbacks,
                   "evidence": evidence,

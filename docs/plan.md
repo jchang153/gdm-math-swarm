@@ -38,6 +38,9 @@ judge.
   Live judging during a run exists only for `"full"`.
 - The incident report is decoupled from the judge: it runs after whichever judge ran, and also with the judge
   off (`incident_report_max_usd`, $20), and prefers the simple judge's findings when they exist.
+  Optional `auto_incident_report` (boolean, default the value of `auto_behavior_judge`) turns the report on or
+  off independently of the judge. The report names the findings it used (simple judge, rubric-3.1 judge, or
+  none with the deterministic detectors; `--judge-source auto|simple|full|none`).
 - The website gets a "Behavior judge" tab with the simple judge's report, with a note that its
   evaluation-awareness counts are not comparable with the old judge's.
 

@@ -236,6 +236,17 @@ def entry_diff(old, new):
     return diff
 
 
+def link_present(target, final_names, archive):
+    """A catalogue link's target exists: a Space file (or folder), or a file the archive manifest records as
+    moved to the private logs dataset (dataset_files) or kept offline (offline_files); the catalogue and run
+    pages point those links at the dataset or at a "kept offline" notice."""
+    if target.endswith('/'):
+        return any(n.startswith(target) for n in final_names)
+    archive = archive or {}
+    return (target in final_names or target in (archive.get('dataset_files') or {})
+            or target in (archive.get('offline_files') or {}))
+
+
 def inspect_links_entry(entry, run, remote_names):
     """The published catalogue entry with only its Inspect log link(s) pointing at the published
     .eval files (a static host cannot list RUN/inspect/); other links keep their order."""
@@ -608,8 +619,7 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
                     or not record_matches((bundle / name).read_bytes(), origin_files[name])]
     final_names = set(remote) | targets
     for label, target in incoming[0]['links'].items():
-        if not (any(n.startswith(target) for n in final_names) if target.endswith('/')
-                else target in final_names):
+        if not link_present(target, final_names, old_archive):
             raise ValueError(f'Catalogue link {label} would point to a missing file: {target}')
 
     # Everything else stays as published: report local differences, never upload them.
@@ -1203,7 +1213,7 @@ def maintain_incident(bundle, api, download, *, run, commit=False, repo=DEFAULT_
     planned[MANIFEST] = fetch(MANIFEST) if new_archive == archive else json.dumps(new_archive, indent=2).encode()
     final_names = set(remote) | set(planned)
     for label, target in new_entry['links'].items():
-        if not (any(n.startswith(target) for n in final_names) if target.endswith('/') else target in final_names):
+        if not link_present(target, final_names, archive):
             raise ValueError(f'Catalogue link {label} would point to a missing file: {target}')
 
     # No planned file may be (or become) LFS: HF serves LFS-tracked HTML as a download.
@@ -1425,7 +1435,7 @@ def maintain_simple_judge(api, download, *, run, runs_dir, commit=False, repo=DE
     planned[MANIFEST] = fetch(MANIFEST) if new_archive == archive else json.dumps(new_archive, indent=2).encode()
     final_names = set(remote) | set(planned)
     for label, target in new_entry['links'].items():
-        if not (any(n.startswith(target) for n in final_names) if target.endswith('/') else target in final_names):
+        if not link_present(target, final_names, archive):
             raise ValueError(f'Catalogue link {label} would point to a missing file: {target}')
 
     names = sorted(planned)

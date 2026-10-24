@@ -685,6 +685,13 @@ the Space (`simple_judge_local_only`) and, when the simplified judge's page is p
 other pages plus its comparability note (`simple_judge_note`) and the run page's tabs (`simple_judge_tab`,
 `simple_judge_rubric_3_1_tab`).
 
+
+Catalogue checks (2026-10-24): `--scope incident`, `--scope simple-judge` and the run scopes require the current
+generator to reproduce the published catalogue byte for byte; after the public-Space note changed, run
+`maintain_hf_run.py --rerender-catalogue --commit ...` once first. A catalogue link may point to a file the archive
+manifest records under `dataset_files` (for example the activity timeline, moved to the dataset on 2026-10-23) or
+`offline_files`; such links are accepted (`maintain_hf_run.link_present`).
+
 ## Snapshot archives (HF file limit)
 
 HF limits a repository to 20,000 files, and the Space reached it (19,937 files at revision
