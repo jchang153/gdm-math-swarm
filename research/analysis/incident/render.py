@@ -75,8 +75,7 @@ def appendix_markdown(evidence, locator, digest):
            "the behavior judge history's stable ids (`research/analysis/judge/history.py`). Inspect View links "
            "open the agent's transcript at the model event that produced the record.", "",
            "Run records: `results.json`, `results.html` (deterministic results report), "
-           + ("`analysis/judge/report.html` and `analysis/judge/agents/<agent>.json` (behavior judge), "
-              if digest["judge"]["available"] else "")
+           + judge_records_phrase(digest)
            + "`evaluations/evaluations.jsonl` (independent proof checker), `conference/state.sqlite` (board, DMs, "
            "library, submissions), `analysis/timeline.jsonl`, " + ", ".join(f"`{s}`" for s in digest["sources"]["inspect"])
            + " (raw Inspect log).", ""]
@@ -91,7 +90,7 @@ def appendix_markdown(evidence, locator, digest):
     out += ["", "Per agent:", ""]
     for agent_id in digest["agents"]:
         url = locator.sample_url(agent_id)
-        judge = f"; judge record `analysis/judge/agents/{agent_id}.json`" if digest["judge"]["available"] else ""
+        judge = judge_agent_phrase(digest, agent_id)
         out.append(f"- **{agent_id}**: " + (f"[Inspect View transcript]({url})" if url else "no Inspect sample") + judge)
     out += ["", "To read any record in full from a checkout (offline, no model):", "",
             "```",
@@ -397,7 +396,7 @@ def render_html(markdown, checks, locator, digest, *, generated_at, models, evid
                 f"{summary['verified']} of {summary['quotes']} quotes verified verbatim"
                 + (f" · <strong>{summary['unverified']} unverified</strong>" if summary["unverified"] else "")
                 + ' · <a href="../../results.html">Results report</a>'
-                + (' · <a href="../judge/report.html">Behavior judge</a>' if digest["judge"]["available"] else "")
+                + (f' · <a href="{judge_report_href(digest)}">Behavior judge</a>' if digest["judge"]["available"] else "")
                 + ' · <a href="../../inspect-view/index.html">Inspect View</a>'
                 + ' · <a href="evidence.json">evidence.json</a> · <a href="report.md">report.md</a>')
     if title_match:
@@ -471,6 +470,52 @@ def reader_markdown(markdown, checks, locator, evidence):
 HOST_NOTE_LEAD = "**Note from the program (not the model).**"
 
 
+def _simple(digest):
+    judge = digest.get("judge") or {}
+    return judge.get("available") and judge.get("source") == "simple"
+
+
+def judge_records_phrase(digest):
+    if not (digest.get("judge") or {}).get("available"):
+        return ""
+    if _simple(digest):
+        return ("`analysis/simple_judge/report.html` and `analysis/simple_judge/agents.jsonl` (simplified behavior "
+                "judge, one row per agent), ")
+    return "`analysis/judge/report.html` and `analysis/judge/agents/<agent>.json` (behavior judge), "
+
+
+def judge_agent_phrase(digest, agent_id):
+    if not (digest.get("judge") or {}).get("available"):
+        return ""
+    if _simple(digest):
+        return f"; judge row `{agent_id}` in `analysis/simple_judge/agents.jsonl`"
+    return f"; judge record `analysis/judge/agents/{agent_id}.json`"
+
+
+def judge_report_href(digest):
+    return "../simple_judge/report.html" if _simple(digest) else "../judge/report.html"
+
+
+def behavior_findings_statement(digest):
+    """Which behavior judge the report's findings come from (host-written), e.g. "Behavior findings:
+    simplified one-pass judge (gdm-simple-judge/1)."; with the simplified judge, also that its
+    evaluation-awareness counts are not comparable with the rubric-3.1 judge's."""
+    judge = digest.get("judge") or {}
+    if judge.get("statement"):
+        line = judge["statement"]
+    elif judge.get("available"):
+        line = "Behavior findings: rubric-3.1 judge."
+    else:
+        line = "Behavior findings: none, deterministic detectors."
+    if _simple(digest):
+        line += (" That judge labels each agent in one model call, checks its quotes and labels by code and writes "
+                 "no run-level summary; its evaluation-awareness counts are much higher than the rubric-3.1 judge's "
+                 "and are not comparable with reports that used that judge.")
+    elif not judge.get("available"):
+        line += " No behavior judge output was used; exploit counts come from the program's detectors."
+    return line
+
+
 def host_note_markdown(digest, evidence, refusals, units, draft="", *, model_fallbacks=()):
     """The host-written note added to "How sure we are": whether the chain of thought was readable, who
     chose each excerpt shown, and how many extraction requests the model provider refused."""
@@ -481,7 +526,7 @@ def host_note_markdown(digest, evidence, refusals, units, draft="", *, model_fal
     model = sum(e["source"] == "model" for e in rows)
     fallback = [e for e in rows if e["source"] == "host_fallback"]
     refused_units = [u for u in units or [] if u.get("status") == "ungraded"]
-    parts = [HOST_NOTE_LEAD, (digest.get("reasoning") or {}).get("statement") or ""]
+    parts = [HOST_NOTE_LEAD, behavior_findings_statement(digest), (digest.get("reasoning") or {}).get("statement") or ""]
     parts.append(f"This report shows {len(rows)} excerpts: {whole} are whole short records, {model} are passages the "
                  f"extraction model picked out of longer records, and {len(fallback)} "
                  + ("were" if len(fallback) != 1 else "was") + " chosen by the program itself"
