@@ -57,8 +57,11 @@ Use scripts/export_transcripts.py --run-dir runs/<run-id> for the offline HTML
 transcript view and scripts/build_experiment_index.py after saving results.json and
 results.html. The local experiment library is runs/index.html. Preserve raw records;
 exports are derived views. Raw runs are Git-ignored and require separate backup.
-The user also authorized a private shared HF library at
-https://huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments.
+The user also authorized a shared HF library at
+https://huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments; the owner
+made this Space public on October 24, 2026. Its Inspect logs and raw records stay in
+the private dataset HF-ORG/LOGS-DATASET. scripts/hf_visibility.py records
+both visibilities; tools refuse to write when either differs and never make anything public.
 Follow docs/experiment-library.md for preparation, privacy and guarded updates;
 preserve other collaborators' runs and never upload host credentials or auth caches.
 Use scripts/publish_hf_library.py --bundle PREPARED_DIRECTORY for a read-only

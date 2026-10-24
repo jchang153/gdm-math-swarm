@@ -1,7 +1,7 @@
 """Offline tests of per-run snapshot archives (owner, October 21, 2026: HF's 20,000-files-per-repository
 limit): prepare_hf_library.py archives RUN/snapshots/ deterministically, publish refuses loose snapshot
 files and screens archive members, and maintain_hf_run.py --scope snapshots replaces published loose
-files with the archive in guarded batches. In-memory private Space; no HF login, network or credentials.
+files with the archive in guarded batches (legacy: refused for the public Space). In-memory Space; no HF login, network or credentials.
 """
 import hashlib
 import json
@@ -19,7 +19,7 @@ from maintain_hf_run import archive_snapshots  # noqa: E402
 from publish_hf_library import digest, load_bundle, publish  # noqa: E402
 import prepare_hf_library  # noqa: E402
 from prepare_hf_library import check_snapshot_archive, snapshot_archive  # noqa: E402
-from test_hf_maintenance import RULE, Hub, operation  # noqa: E402
+from test_hf_maintenance import RULE, Hub, legacy_publish, operation, private_space_record  # noqa: E402
 from test_judge_publication import make_run, make_viewer  # noqa: E402
 
 RUN, OTHER = 'snap-run', 'a-old'
@@ -42,7 +42,13 @@ def add_snapshots(run, count=5):
 
 
 class SnapshotArchiveTests(unittest.TestCase):
+    """--scope snapshots is a legacy scope of the private-Space era: it adds snapshot archives to the Space, so it
+    is refused for the public Space (test_public_space_refuses_snapshot_archives) and tested here against a Space
+    recorded as private."""
     def setUp(self):
+        record = private_space_record()
+        record.__enter__()
+        self.addCleanup(record.__exit__, None, None, None)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
@@ -52,8 +58,9 @@ class SnapshotArchiveTests(unittest.TestCase):
         self.blobs = add_snapshots(make_run(self.runs, RUN))
         self.hub = Hub(self.root)
         self.hub.history['0']['.gitattributes'] += TAR_RULE  # as in the Space's HF default rules
-        publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
+        legacy_publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
                 operation=operation, records_in_space=True)
+        self.hub.private = True  # as recorded for this class
         self.archived = dict(self.hub.files)
         self.legacy()
 
@@ -202,6 +209,18 @@ class SnapshotArchiveTests(unittest.TestCase):
             self.scope(commit=True, attempt='attempt-2')
         self.assertEqual(set(self.hub.files), set(self.published))
         self.assertEqual(sum(c is not None and c['message'].startswith('Archive') for c in self.hub.commits), 0)
+
+
+
+class PublicSpaceSnapshotTests(unittest.TestCase):
+    def test_public_space_refuses_snapshot_archives(self):
+        """Snapshot archives belong to the private logs dataset; the public Space never receives them."""
+        with tempfile.TemporaryDirectory() as tmp:
+            hub = Hub(Path(tmp))
+            with self.assertRaisesRegex(ValueError, 'never uploaded to the public Space'):
+                archive_snapshots(hub, hub.download, run=RUN, runs_dir=Path(tmp), commit=True,
+                                  operation=operation, delete_operation=delete)
+            self.assertEqual(hub.commits, [])
 
 
 if __name__ == '__main__':

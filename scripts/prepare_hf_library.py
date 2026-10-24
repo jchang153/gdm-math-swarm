@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Prepare an offline, private static-Space archive of explicitly selected runs.
+"""Prepare an offline static-Space archive of explicitly selected runs for the results Space (public by owner
+decision, October 24, 2026; scripts/hf_visibility.py). Inspect logs and raw records are moved to dataset-files/,
+bound for the private logs dataset, never the Space.
 
 Does not authenticate, upload, read host credentials, or change original records.
 Pass a locally generated Inspect View bundle for each selected run.
@@ -472,12 +474,13 @@ app_file: index.html
 pinned: false
 ---
 
-Private researcher archive of completed GDM Math Swarm experiments.
+Researcher archive of completed GDM Math Swarm experiments.
 Open the app for experiment reports, the conference view, native Inspect View
 (agent transcripts) and original run records. Operational acceptance and independent proof validity
 are distinct; see each report for limitations. No model or experiment runs here.
 
-This archive must be hosted in a **private** Space. Do not upload credentials.
+This Space is public by owner decision (October 24, 2026). Inspect logs and raw records are kept in a
+private Hugging Face dataset (Sign in with HF for read access). Do not upload credentials.
 ''')
     (output / 'robots.txt').write_text('User-agent: *\nDisallow: /\n')
     for page in output.rglob('*.html'):

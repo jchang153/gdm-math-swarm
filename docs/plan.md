@@ -1,5 +1,46 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Public results Space, private logs dataset (October 24, 2026)
+
+The owner made the HF Space `gdm-math-swarm/gdm-math-swarm-experiments` public themselves on October 24, 2026.
+The logs dataset `HF-ORG/LOGS-DATASET` (Inspect logs, raw JSONL records, snapshots, databases,
+old custom transcript pages, activity timelines, resume bundles) stays private. Decisions:
+
+- The expected visibility of both repositories is recorded in one place, `scripts/hf_visibility.py` (Space:
+  public by owner decision 2026-10-24; dataset: private; any other repository: expected private). The guards no
+  longer require a private Space: every write path (`publish_hf_library.py`, every `maintain_hf_run.py` scope,
+  `live_mirror.py`, `migrate_dataset.py`, `dataset_logs.commit_files`) compares the ACTUAL visibility with the
+  record before any write and at every revision re-check, and refuses on any difference, including a Space that
+  turned private again unexpectedly. Space-only writes also check the dataset, since every page links to it. If
+  the owner changes a visibility again, the record and this section are updated first.
+- The tooling never makes anything public: no code calls `update_repo_settings`/`update_repo_visibility`, and any
+  repository it might create is created private (`tests/test_hf_visibility.py`).
+- No credential or private raw data goes to the Space: every Space commit passes `publish_hf_library.space_commit`
+  (dataset visibility re-check plus `space_gate`: credential screen, host-only file names, and no file of a
+  dataset category). The existing screens are unchanged. The legacy records-in-space layout and
+  `--scope snapshots` are refused for the public Space.
+- Inspect View keeps its "Sign in with HF" flow, because the logs it reads are in the private dataset.
+- Note: the Space's pages, judge reports and judge input packages are now readable by anyone, including from
+  any experimental agent with web access; reference solutions and researcher reports must still stay
+  inaccessible to experimental agents (AGENTS.md).
+
+## Simplified behavior judge is the default (October 24, 2026)
+
+The validated one-pass judge (`scripts/run_simple_judge.py`: Gemini 3.8 Flash at medium reasoning, with GPT 5.6
+Terra as the fallback for a refused request; about $2 per 100-agent run) becomes the default post-run behavior
+judge.
+
+- Config key `behavior_judge`: `"simple"` | `"full"` | `"off"`; the default is `"simple"` when
+  `auto_behavior_judge` is true.
+- Budget: `simple_judge_max_usd`, default $10, is its one per-run limit (docs/plan.md, "One per-run budget, no
+  manual approvals").
+- The rubric-3.1 judge stays available with `behavior_judge: "full"` (its budget `behavior_judge_max_usd`, $50).
+  Live judging during a run exists only for `"full"`.
+- The incident report is decoupled from the judge: it runs after whichever judge ran, and also with the judge
+  off (`incident_report_max_usd`, $20), and prefers the simple judge's findings when they exist.
+- The website gets a "Behavior judge" tab with the simple judge's report, with a note that its
+  evaluation-awareness counts are not comparable with the old judge's.
+
 ## Dataset revision 2: native evaluation removed from templates, October 21, 2026
 
 Owner (chat, 2026-10-21): "yes go ahead and do that", approving the proposed fix. The template

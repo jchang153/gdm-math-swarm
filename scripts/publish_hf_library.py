@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Publish a prepared run bundle to the shared private HF library.
+"""Publish a prepared run bundle to the shared HF library: the results Space (public by owner decision,
+October 24, 2026) and the private logs dataset.
 
 Default: read-only planning. --commit uploads with optimistic revision guards.
 Uses the publisher's own HF SDK login; never loads a model credential or starts
 an experiment. Existing runs are merged into the chronological catalogue.
+Both repositories' actual visibility must equal the record in scripts/hf_visibility.py
+before any write and at every revision re-check; nothing here ever changes visibility.
+Every Space upload passes ``space_gate`` (credential screen, host-only filenames, and no
+file of a dataset category: Inspect logs, raw JSONL, snapshots, databases, transcripts,
+timeline, resume bundle) immediately before its commit.
 """
 import argparse
 import datetime
@@ -17,8 +23,9 @@ import zipfile
 from build_experiment_index import newest_first, unlisted_runs, write_index
 import dataset_logs
 from dataset_logs import COMMIT_PLACEHOLDER, DATASET_REPO, DATASET_SCHEMA
+import hf_visibility
 
-DEFAULT_REPO = 'gdm-math-swarm/gdm-math-swarm-experiments'
+DEFAULT_REPO = hf_visibility.SPACE_REPO
 ROOT_FILES = {'README.md', 'robots.txt', 'index.html', 'experiments.json', dataset_logs.SIGNIN_FILE}
 # Root files that are Space configuration: an existing copy is preserved, never replaced.
 CONFIG_FILES = {'README.md', 'robots.txt'}
@@ -100,6 +107,56 @@ def screen(path):
             for name in archive.namelist():
                 if SECRET.search(archive.read(name)):
                     raise ValueError('Credential-like content in Inspect archive; upload refused')
+
+
+def _operation_bytes(operation):
+    """The bytes an add operation uploads (None for a deletion)."""
+    data = getattr(operation, 'path_or_fileobj', None)
+    if data is None or getattr(operation, 'delete', False) or getattr(operation, 'kind', 'add') == 'delete':
+        return None
+    if isinstance(data, (bytes, bytearray)):
+        return bytes(data)
+    if isinstance(data, (str, Path)):
+        return Path(data).read_bytes()
+    if hasattr(data, 'getvalue'):
+        return data.getvalue()
+    raise ValueError('Unscreenable Space upload: ' + str(getattr(operation, 'path_in_repo', '?')))
+
+
+def space_gate(repo, operations):
+    """The last screen before ANY commit to a Space (publication, every maintenance scope, the live mirror, the
+    dataset migration): every uploaded file must pass the credential screen (SECRET, host-only and credential
+    filenames) and, in a Space recorded as public (scripts/hf_visibility.py), must not be a file of a logs
+    dataset category (dataset_logs.category: Inspect logs, raw JSONL, snapshots, databases, transcripts,
+    timeline, resume bundle). Deletions are not screened. Returns the operations unchanged."""
+    public = not hf_visibility.expected_private(repo, 'space')
+    for operation in operations:
+        data = _operation_bytes(operation)
+        if data is None:
+            continue
+        name = operation.path_in_repo
+        if PurePosixPath(name).name.lower() in {'.env', 'host.env'} or name.lower().endswith(('.pem', '.key')):
+            raise ValueError('Host-only or credential filename in a Space upload')
+        if name != '.gitattributes':
+            safe_path(name)
+        if SECRET.search(data):
+            raise ValueError('Credential-like content in a Space upload; refused: ' + name)
+        parts = name.split('/')
+        if parts[0] == 'live':
+            parts = parts[1:]
+        if public and len(parts) > 1 and dataset_logs.category('/'.join(parts[1:])) is not None:
+            raise ValueError(f'{name} belongs to the private logs dataset and is never uploaded to the public Space')
+    return operations
+
+
+def space_commit(api, *, dataset_repo=DATASET_REPO, **commit):
+    """``api.create_commit`` for a Space: the logs dataset must still have its recorded (private) visibility
+    (every page links to it) and every operation passes ``space_gate``, immediately before the commit."""
+    if commit.get('repo_type') != 'space':
+        raise ValueError('space_commit is for Space commits only')
+    hf_visibility.check_dataset(api, dataset_repo)
+    commit['operations'] = space_gate(commit['repo_id'], list(commit['operations']))
+    return api.create_commit(**commit)
 
 
 def load_dataset_files(bundle, runs):
@@ -280,6 +337,9 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
     if manifest.get('layout') == 'records-in-space' and not records_in_space:
         raise ValueError('Legacy records-in-space bundle refused: Inspect logs and raw records go to the logs '
                          'dataset (prepare without --records-in-space)')
+    if manifest.get('layout') == 'records-in-space' and not hf_visibility.expected_private(repo, 'space'):
+        raise ValueError('Legacy records-in-space bundle refused: the Space is public and its raw records belong to '
+                         'the private logs dataset')
     dataset_files = manifest.pop('dataset')
     if dataset_files and dataset_repo != DATASET_REPO:
         raise ValueError('The prepared bundle records the dataset ' + DATASET_REPO)
@@ -289,9 +349,9 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
         raise ValueError('Run(s) unlisted by data/library-unlisted.json; remove the record to publish them: '
                          + ', '.join(hidden))
     bundle = Path(bundle)
-    info = api.repo_info(repo, repo_type='space', files_metadata=True)
-    if not info.private:
-        raise ValueError('Publication requires a private Space')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
+    # The pages link to the logs dataset: it must stay private even when this bundle adds nothing to it.
+    dataset_info = hf_visibility.check_dataset(api, dataset_repo)
     remote = remote_files(api, repo, info.sha)
     def read_json(name, empty):
         if name not in remote:
@@ -317,9 +377,6 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
     dataset_result = None
     pinned = {}
     if dataset_files:
-        dataset_info = api.repo_info(dataset_repo, repo_type='dataset')
-        if not dataset_info.private:
-            raise ValueError('The logs dataset must be private')
         dataset_result = {'repo': dataset_repo, 'files': len(dataset_files),
                           'bytes': sum(x['bytes'] for x in dataset_files.values()),
                           'base_revision': dataset_info.sha, 'committed': False}
@@ -382,7 +439,7 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
             for n, r in manifest['dataset_files'].items()}}
     root_uploads.append(('archive-manifest.json', json.dumps(merged_manifest, indent=2).encode()))
     root_uploads = [(n, d) for n, d in root_uploads if n not in remote or not matches(d, remote[n])]
-    result = {'repo': repo, 'private': True, 'base_revision': info.sha,
+    result = {'repo': repo, **hf_visibility.record(repo, 'space'), 'base_revision': info.sha,
               'runs': [x['run'] for x in entries], 'new_run_files': len(uploads),
               'catalogue_files': len(root_uploads), 'committed': False,
               **({'dataset': dataset_result} if dataset_result else {})}
@@ -397,9 +454,10 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
     revision = info.sha
     for batch in [*batches(uploads), *([root_uploads] if root_uploads else [])]:
         current = api.repo_info(repo, repo_type='space')
-        if not current.private or current.sha != revision:
-            raise ValueError('Space changed concurrently; rerun to merge the latest catalogue')
-        response = api.create_commit(repo_id=repo, repo_type='space', parent_commit=revision,
+        if not hf_visibility.unchanged(current, repo, 'space', revision):
+            raise ValueError('Space changed concurrently or its visibility differs from the record; rerun to merge '
+                             'the latest catalogue')
+        response = space_commit(api, dataset_repo=dataset_repo, repo_id=repo, repo_type='space', parent_commit=revision,
             commit_message='Publish shared experiment library: ' + ', '.join(manifest['runs']),
             operations=[operation(path_in_repo=n, path_or_fileobj=str(d) if isinstance(d, Path) else d) for n, d in batch])
         revision = response.oid
@@ -407,8 +465,9 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
             Path(receipt).write_text(json.dumps({**result, 'last_revision': revision,
                 'status': 'uploading; catalogue may be pending'}, indent=2))
     final = api.repo_info(repo, repo_type='space', files_metadata=True)
-    if not final.private or final.sha != revision:
-        raise ValueError('Space changed before verification; inspect the latest revision')
+    if not hf_visibility.unchanged(final, repo, 'space', revision):
+        raise ValueError('Space changed before verification (or its visibility differs from the record); inspect '
+                         'the latest revision')
     final_files = remote_files(api, repo, final.sha)
     changed = dict(uploads + root_uploads)
     if set(final_files) != set(remote) | set(changed):
@@ -439,7 +498,7 @@ def main():
     parser.add_argument('--commit', action='store_true', help='Upload; otherwise only plan')
     parser.add_argument('--receipt', type=Path, help='Host-only receipt outside the prepared bundle')
     parser.add_argument('--dataset-repo', default=DATASET_REPO,
-                        help='private dataset for Inspect logs and raw records (default %(default)s)')
+                        help='the private logs dataset for Inspect logs and raw records (default %(default)s)')
     args = parser.parse_args()
     if args.receipt and args.receipt.resolve().is_relative_to(args.bundle.resolve()):
         parser.error('--receipt must be outside the immutable prepared bundle')

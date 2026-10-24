@@ -36,7 +36,8 @@ import tempfile
 
 import dataset_logs
 from dataset_logs import CATEGORIES, DATASET_REPO, category, dataset_path, digest, write_json
-from publish_hf_library import DEFAULT_REPO, matches, remote_files, screen
+import hf_visibility
+from publish_hf_library import DEFAULT_REPO, matches, remote_files, screen, space_commit
 
 DATALESS = getattr(stat, 'SF_DATALESS', 0x40000000)
 MANIFEST = 'archive-manifest.json'
@@ -88,9 +89,8 @@ def plan(api, download, *, runs, categories, runs_dir, repo=DEFAULT_REPO, datase
     unknown = sorted(set(categories) - set(CATEGORIES))
     if not categories or unknown:
         raise ValueError('Unknown categories: ' + ', '.join(unknown or ['(none)']))
-    info = api.repo_info(repo, repo_type='space', files_metadata=True)
-    if not info.private:
-        raise ValueError('Maintenance requires a private Space')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
+    hf_visibility.check_dataset(api, dataset)
     base = info.sha
     remote = remote_files(api, repo, base)
     root = json.loads(Path(download(repo, MANIFEST, repo_type='space', revision=base,
@@ -153,7 +153,7 @@ def plan(api, download, *, runs, categories, runs_dir, repo=DEFAULT_REPO, datase
         row['space_bytes'] += f['bytes']
         row['lfs_bytes'] += f['bytes'] if f['lfs'] else 0
     return {'operation': 'maintain-run', 'scope': 'migrate-logs', 'repo': repo, 'dataset': dataset,
-            'private': True, 'space_revision': base, 'used_storage_before': getattr(info, 'used_storage', None),
+            **hf_visibility.record(repo, 'space'), 'space_revision': base, 'used_storage_before': getattr(info, 'used_storage', None),
             'runs': selected_runs, 'categories': sorted(categories), 'files': files,
             'dataset_files': {t: {'bytes': r['bytes'], 'sha256': r['sha256'], 'space_paths': r['space_paths']}
                               for t, r in sorted(targets.items())},
@@ -324,8 +324,7 @@ def delete(api, download, result, copied, *, operation, delete_operation, backup
     parent = base
     for attempt in range(retries + 1):
         latest = api.repo_info(repo, repo_type='space')
-        if not latest.private:
-            raise ValueError('The Space is no longer private')
+        hf_visibility.check(latest, repo, 'space')
         if latest.sha != parent:
             newer = remote_files(api, repo, latest.sha)
             changed = sorted(n for n in set(newer) | set(remote) if not n.startswith('live/') and (
@@ -334,8 +333,8 @@ def delete(api, download, result, copied, *, operation, delete_operation, backup
                 raise ValueError('The Space changed outside live/ since the plan; plan again: ' + ', '.join(changed[:20]))
             parent = latest.sha
         try:
-            response = api.create_commit(
-                repo_id=repo, repo_type='space', parent_commit=parent,
+            response = space_commit(
+                api, dataset_repo=dataset, repo_id=repo, repo_type='space', parent_commit=parent,
                 commit_message=(f'Move {len(moved)} download-only run file(s) to the private logs dataset '
                                 f'{dataset}@{commit[:8]} ({", ".join(result["categories"])}); repoint '
                                 f'{len(pages)} page(s)'),
@@ -429,14 +428,13 @@ def migrate(api, download, *, runs=None, categories=('eval',), runs_dir, commit=
 SWITCH_KEY = 'dataset_switch'
 
 
-def _commit_guarded(api, repo, base, remote, operations, message, retries=3):
+def _commit_guarded(api, repo, base, remote, operations, message, retries=3, dataset=DATASET_REPO):
     """One Space commit pinned to ``base``, rebased only onto a later head that differs from ``remote`` under
     ``live/`` alone (the live mirror may commit meanwhile). Returns (revision, parent)."""
     parent = base
     for attempt in range(retries + 1):
         latest = api.repo_info(repo, repo_type='space')
-        if not latest.private:
-            raise ValueError('The Space is no longer private')
+        hf_visibility.check(latest, repo, 'space')
         if latest.sha != parent:
             newer = remote_files(api, repo, latest.sha)
             changed = sorted(n for n in set(newer) | set(remote) if not n.startswith('live/') and (
@@ -446,8 +444,8 @@ def _commit_guarded(api, repo, base, remote, operations, message, retries=3):
                 raise ValueError('The Space changed outside live/ since the plan; plan again: ' + ', '.join(changed[:20]))
             parent = latest.sha
         try:
-            response = api.create_commit(repo_id=repo, repo_type='space', parent_commit=parent,
-                                         commit_message=message, operations=operations)
+            response = space_commit(api, dataset_repo=dataset, repo_id=repo, repo_type='space', parent_commit=parent,
+                                    commit_message=message, operations=operations)
             return response.oid, parent
         except Exception as error:  # a concurrent live/ commit: retry on the new head
             if attempt == retries or 'parent' not in str(error).lower() and '412' not in str(error):
@@ -497,11 +495,8 @@ def switch(api, download, *, dataset_commit, operation, delete_operation=None, r
     from space_navigation import private_space_navigation
     if not re.fullmatch(r'[0-9a-f]{40}', dataset_commit or ''):
         raise ValueError('Expected a full dataset commit')
-    info = api.repo_info(repo, repo_type='space', files_metadata=True)
-    if not info.private:
-        raise ValueError('Requires a private Space')
-    if not api.repo_info(dataset, repo_type='dataset').private:
-        raise ValueError('The logs dataset must be private')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
+    hf_visibility.check_dataset(api, dataset)
     base = info.sha
     remote = remote_files(api, repo, base)
     root = json.loads(Path(download(repo, MANIFEST, repo_type='space', revision=base,
@@ -609,7 +604,8 @@ def switch(api, download, *, dataset_commit, operation, delete_operation=None, r
         revision, parent = _commit_guarded(
             api, repo, base, remote, operations,
             f'Switch {len(switched)} run(s) Inspect View to read logs from the private dataset '
-            f'{dataset}@{dataset_commit[:8]}; add signin.html' + (f'; remove {TEST_PREFIX}/' if removed else ''))
+            f'{dataset}@{dataset_commit[:8]}; add signin.html' + (f'; remove {TEST_PREFIX}/' if removed else ''),
+            dataset=dataset)
         _verify_commit(api, repo, revision, parent, base, remote, uploads, removed)
     except Exception as error:
         write_json(receipt, {**result, 'status': 'failed: ' + type(error).__name__ + ': ' + str(error)[:500]})
@@ -632,11 +628,8 @@ def delete_eval(api, download, *, switch_receipt, delete_operation, operation, r
     switched = json.loads(Path(switch_receipt).read_text())
     if switched.get('operation') != 'switch' or switched.get('status') != 'verified':
         raise ValueError('The switch receipt is not a verified switch; run and verify the switch first')
-    info = api.repo_info(repo, repo_type='space', files_metadata=True)
-    if not info.private:
-        raise ValueError('Requires a private Space')
-    if not api.repo_info(dataset, repo_type='dataset').private:
-        raise ValueError('The logs dataset must be private')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
+    hf_visibility.check_dataset(api, dataset)
     base = info.sha
     remote = remote_files(api, repo, base)
     root = json.loads(Path(download(repo, MANIFEST, repo_type='space', revision=base,
@@ -711,7 +704,7 @@ def delete_eval(api, download, *, switch_receipt, delete_operation, operation, r
             [*(delete_operation(path_in_repo=n) for n in sorted(records)),
              operation(path_in_repo=MANIFEST, path_or_fileobj=manifest)],
             f'Delete {len(records)} Inspect log copies of {len(result["runs"])} run(s) from the Space; Inspect View '
-            f'reads them from the private dataset {dataset}')
+            f'reads them from the private dataset {dataset}', dataset=dataset)
         final = _verify_commit(api, repo, revision, parent, base, remote, {MANIFEST: manifest}, records)
         result.update(committed=True, revision=revision, parent=parent, status='committed and verified; purging')
         write_json(receipt, result)
@@ -763,9 +756,8 @@ def deploy_test(api, download, *, run, dataset_commit, operation, receipt=None, 
     index.html reads the logs from the dataset at ``dataset_commit``. One guarded commit adds only logs-test/
     paths; nothing else in the Space changes (verified)."""
     from space_navigation import private_space_navigation
-    info = api.repo_info(repo, repo_type='space', files_metadata=True)
-    if not info.private:
-        raise ValueError('Requires a private Space')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
+    hf_visibility.check_dataset(api, dataset)
     base = info.sha
     remote = remote_files(api, repo, base)
     prefix = f'{run}/inspect-view/'
@@ -793,7 +785,7 @@ def deploy_test(api, download, *, run, dataset_commit, operation, receipt=None, 
     result = {'repo': repo, 'base_revision': base, 'run': run, 'dataset': dataset, 'dataset_commit': dataset_commit,
               'files': len(uploads), 'uploads': sorted(changed)}
     if changed:
-        response = api.create_commit(repo_id=repo, repo_type='space', parent_commit=base,
+        response = space_commit(api, dataset_repo=dataset, repo_id=repo, repo_type='space', parent_commit=base,
                                      commit_message=f'Test area {TEST_PREFIX}/: {run} Inspect View reading logs from '
                                                     f'the private dataset (production pages unchanged)',
                                      operations=[operation(path_in_repo=n, path_or_fileobj=d) for n, d in changed.items()])

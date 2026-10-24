@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from maintain_hf_run import OFFLINE_KEY, OFFLINE_MARKER, prune_run  # noqa: E402
 from publish_hf_library import digest, publish  # noqa: E402
-from test_hf_maintenance import RULE, Hub, operation  # noqa: E402
+from test_hf_maintenance import RULE, Hub, legacy_publish, operation  # noqa: E402
 import test_hf_snapshots  # noqa: E402
 from test_hf_snapshots import TAR_RULE, add_snapshots, delete  # noqa: E402
 from test_judge_publication import make_run, make_viewer  # noqa: E402
@@ -59,7 +59,7 @@ class PruneTests(unittest.TestCase):
         self.hub.history['0']['.gitattributes'] += TAR_RULE + b'*.jsonl' + RULE + b'\n'
         bundle = test_hf_snapshots.SnapshotArchiveTests.prepare(SimpleNamespace(root=self.root, runs=self.runs, viewer=viewer),
                                               'published', RUN, OTHER)
-        publish(bundle, self.hub, self.hub.download, commit=True, operation=operation, records_in_space=True)
+        legacy_publish(bundle, self.hub, self.hub.download, commit=True, operation=operation, records_in_space=True)
         self.published = dict(self.hub.files)
 
     def scope(self, commit=False, attempt='attempt-1', **kwargs):

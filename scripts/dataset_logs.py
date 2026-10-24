@@ -30,7 +30,9 @@ import json
 from pathlib import Path, PurePosixPath
 import re
 
-DATASET_REPO = 'HF-ORG/LOGS-DATASET'
+import hf_visibility
+
+DATASET_REPO = hf_visibility.DATASET_REPO  # private; its expected visibility is recorded in hf_visibility.py
 # The organization the sign-in asks the viewer to grant (HF "orgIds"); its public ID, not a secret.
 ORG_IDS = '6ad1650e6daadd58425fcb95'
 HUB = 'https://huggingface.co'
@@ -272,9 +274,7 @@ def commit_files(api, files, *, operation, message, repo=DATASET_REPO, progress=
     head, then verify every path (size and LFS SHA-256, or the Git blob id of a small file). Files already
     present with identical bytes are skipped; a present file with other bytes is refused (dataset files
     are immutable). Returns {revision, added, already_present, verified}."""
-    info = api.repo_info(repo, repo_type='dataset')
-    if not info.private:
-        raise ValueError('The logs dataset must be private')
+    info = hf_visibility.check_dataset(api, repo)
     records = {}
     for name, data in files.items():
         if PurePosixPath(name).is_absolute() or any(p in ('', '.', '..') or p.startswith('.')
@@ -305,8 +305,9 @@ def commit_files(api, files, *, operation, message, repo=DATASET_REPO, progress=
         groups.append(batch)
     for number, group in enumerate(groups, 1):
         current = api.repo_info(repo, repo_type='dataset')
-        if not current.private or current.sha != revision:
-            raise ValueError('Dataset changed concurrently or is no longer private; run again')
+        if not hf_visibility.unchanged(current, repo, 'dataset', revision):
+            raise ValueError('Dataset changed concurrently or its visibility differs from the record (it must stay '
+                             'private); run again')
         operations = [operation(path_in_repo=n, path_or_fileobj=str(files[n]) if isinstance(files[n], Path)
                                 else files[n]) for n in group]
         response = api.create_commit(repo_id=repo, repo_type='dataset', parent_commit=revision,

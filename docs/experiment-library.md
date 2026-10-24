@@ -1,11 +1,13 @@
 # Shared experiment library
 
-The private library is https://huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments.
+The library is https://huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments, a **public** Space
+since October 24, 2026 (see "Visibility and privacy" below); its Inspect logs and raw records are in the
+**private** dataset https://huggingface.co/datasets/HF-ORG/LOGS-DATASET.
 The user authorized the initial private publication on October 15, 2026 and later
 approved creating the `gdm-math-swarm` organization and transferring the library
 there for collaboration. The organization uses the free plan. The transfer
 preserved all 6204 files and revision `8e0bc9de448c8b878476c5ef2388c669209826c1`;
-private visibility and authenticated SDK access were verified. The former
+private visibility (at the time) and authenticated SDK access were verified. The former
 `jchang153/gdm-math-swarm-experiments` Hub URL redirects to this destination.
 Use `gdm-math-swarm/gdm-math-swarm-experiments` as the publishing repository ID.
 
@@ -34,6 +36,35 @@ the site no longer links them. Inspect View renders the saved
 Inspect logs; it does not run or judge agents. The independent evaluator records
 remain separate from conference acceptance. No VM, Docker, model key or inference
 is required to browse. Local originals and host ledger backups are retained.
+
+### Visibility and privacy (October 24, 2026)
+
+The owner made the results Space public themselves on October 24, 2026; the logs dataset stays private
+(docs/plan.md, "Public results Space, private logs dataset (October 24, 2026)"). The expected visibility of both
+is recorded in one place, `scripts/hf_visibility.py`:
+
+- Every tool that writes to the Space or the dataset (`publish_hf_library.py`, every `maintain_hf_run.py` scope,
+  `live_mirror.py`, `migrate_dataset.py`, `dataset_logs.commit_files`) compares the **actual** visibility of the
+  Space and of the dataset with the record before any write and again at every revision re-check, and refuses
+  on any difference: a dataset that became public, but also a Space that became private again. Space-only
+  writes check the dataset too, since every page links to it. If the owner changes a visibility, update
+  `scripts/hf_visibility.py` and docs/plan.md first. A repository not in the record is expected private.
+  `verify_hosted.py` reports the same comparison (`visibility`, `dataset_private`).
+- The tools never change visibility: nothing calls `update_repo_settings`/`update_repo_visibility` or creates a
+  repository that is not private (`tests/test_hf_visibility.py`).
+- Nothing private reaches the public Space. Every Space commit goes through `publish_hf_library.space_commit`,
+  which re-checks the dataset's visibility and runs `space_gate` on every uploaded file immediately before the
+  commit: the credential screen (`SECRET`; only the exact public Inspect SWE placeholder is exempt), host-only and
+  credential file names, and no file of a dataset category (`dataset_logs.category`: Inspect `.eval` logs, raw
+  `.jsonl`, snapshots, databases, custom transcript pages, the timeline Markdown, the resume bundle). This adds to
+  the existing bundle screens (`load_bundle`, `screen`, `prepare_hf_library.screen_bytes`, the live mirror's
+  bundle screen), which are unchanged. Consequently the legacy `--records-in-space` layout, `--scope snapshots`
+  (snapshot archives in the Space) and any maintenance bundle that would add raw records to the Space are
+  refused; prepare bundles without `--records-in-space` and keep raw records in the dataset.
+- Reading the Inspect logs still needs "Sign in with HF" with read access to the organization (the dataset is
+  private); the rest of the site is readable by anyone. Experiment pages, judge reports and judge input packages
+  in the Space (see "Behavior judge outputs") are therefore public. Credentials and auth caches are never
+  included anywhere.
 
 ## Tools
 
@@ -249,9 +280,9 @@ current browser, and a `results.html` judge section without its judge directory.
 `behavior_judge`, notably `raw/` provider request/response archives, `units/`, any ledger
 copy and any other file under `review/` (for example marks files left by the withdrawn
 spot-check design). The library already publishes each run's complete raw records (Inspect
-logs with returned reasoning, private-file snapshots, conference database), so judge input
-packages add no new transcript exposure; their host-only evaluator and statement-defect
-context is researcher material for this private Space. Raw provider archives duplicate the
+logs with returned reasoning, private-file snapshots, conference database) in the private logs dataset;
+judge input packages are in the Space, which is public since October 24, 2026, so their transcript excerpts
+and host-only evaluator and statement-defect context are public too (see "Visibility and privacy"). Raw provider archives duplicate the
 packages and add provider request metadata, which the library does not publish. Credentials
 and auth caches are never included.
 
@@ -1140,8 +1171,10 @@ You only need to prepare **your new runs**. The publisher merges their catalogue
 entries with all existing remote entries and lists them newest first by actual start time
 (owner request, October 21, 2026; the local `runs/index.html` uses the same order). It
 preserves existing Space configuration and run files, refuses conflicting run IDs,
-requires a private Space, verifies bundle hashes, and screens obvious credential
-filenames and token patterns (including compressed Inspect logs). A token pattern counts only at a
+requires the Space (public) and the logs dataset (private) to have their recorded visibility
+(`scripts/hf_visibility.py`), verifies bundle hashes, and screens obvious credential
+filenames and token patterns (including compressed Inspect logs), again in `space_gate` immediately before
+every Space commit. A token pattern counts only at a
 token boundary: GPT runs' encrypted reasoning blobs contain `sk-`/`hf_` runs mid-token, which are not keys. Pattern scanning
 is not a universal secret-detection guarantee; review new data sources before upload.
 

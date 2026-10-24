@@ -63,11 +63,12 @@ class FakeRunner:
 
 
 class Hub:
-    """A private Space in memory (the HfApi calls the mirror makes). Calls with repo_type='dataset' go to
-    ``self.dataset``, a separate in-memory private logs dataset; ``order`` records every commit of both as
+    """A Space in memory, public as recorded in scripts/hf_visibility.py (the HfApi calls the mirror makes). Calls
+    with repo_type='dataset' go to ``self.dataset``, a separate in-memory private logs dataset; ``order`` records every commit of both as
     (repo_type, message, operations)."""
 
-    def __init__(self, private=True, repo_type='space', order=None):
+    def __init__(self, private=None, repo_type='space', order=None):
+        private = (repo_type == 'dataset') if private is None else private   # Space public, dataset private
         self.files, self.revision, self.private, self.commits = {}, 0, private, []
         self.repo_type, self.order = repo_type, [] if order is None else order
         self.last_modified = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
@@ -526,15 +527,15 @@ class PassTests(unittest.TestCase):
         self.assertFalse([argv for argv, _ in self.runner.calls if 'start' in argv])
         self.assertEqual(json.loads(self.hub.files['live/index.json'])['runs'][0]['state'], 'vm_stopped')
 
-    def test_pass_defers_to_a_recent_publication_and_refuses_a_public_space(self):
+    def test_pass_defers_to_a_recent_publication_and_refuses_a_space_that_differs_from_its_record(self):
         self.hub.revision += 1   # another publisher just committed
         self.hub.last_modified = datetime.datetime.now(datetime.timezone.utc)
         report = self.run_pass(quiet_seconds=600)
         self.assertIn('deferred', report['upload'])
         self.assertEqual(self.hub.commits, [])
-        self.hub.private = False
+        self.hub.private = True   # recorded as public (owner, October 24, 2026)
         report = self.run_pass()
-        self.assertIn('private Space', report['upload'])
+        self.assertIn('is private, but its recorded visibility is public', report['upload'])
         self.assertEqual(self.hub.commits, [])
 
     def test_credential_like_content_is_refused_before_upload(self):
@@ -636,9 +637,21 @@ class SyncGuardTests(unittest.TestCase):
     def test_a_public_logs_dataset_is_refused_before_any_commit(self):
         hub = Hub()
         hub.dataset.private = False
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, 'dataset .* is public, but its recorded visibility is private'):
             live_mirror.sync(hub, hub.download, updates={}, add=add, delete=delete, quiet_seconds=0)
         self.assertEqual(hub.order, [])
+
+    def test_space_commit_passes_the_gate(self):
+        """The live Space commit goes through publish_hf_library.space_commit: credential-like bytes in a page
+        that reached sync() are refused before the Space commit (the bundle screen runs earlier too)."""
+        hub = Hub()
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp)
+            (bundle / 'index.html').write_bytes(b'<html>key sk-' + b'Q' * 30 + b'</html>')
+            with self.assertRaisesRegex(ValueError, 'Credential-like'):
+                live_mirror.sync(hub, hub.download, updates={RUN: {'bundle': bundle, 'entry': {'run': RUN}}},
+                                 add=add, delete=delete, quiet_seconds=0)
+        self.assertEqual(hub.commits, [])
 
     def test_dataset_commit_is_verified(self):
         hub = Hub()

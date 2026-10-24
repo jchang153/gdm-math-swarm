@@ -1,4 +1,5 @@
-"""Offline publication tests: no HF login, network, model calls or VM required."""
+"""Offline publication tests: no HF login, network, model calls or VM required. The fake Space is public and
+the fake logs dataset private, as recorded in scripts/hf_visibility.py (owner, October 24, 2026)."""
 import hashlib
 import json
 from pathlib import Path
@@ -10,7 +11,9 @@ from unittest.mock import patch
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from publish_hf_library import SECRET, publish, digest, load_bundle, merge_entries, validate_lfs_additions
+from publish_hf_library import (SECRET, publish, digest, load_bundle, merge_entries, space_commit, space_gate,
+                                validate_lfs_additions)
+import hf_visibility
 from build_experiment_index import write_index
 
 
@@ -24,16 +27,19 @@ def entry(run, hour):
 
 
 class Hub:
-    def __init__(self, root, private=True):
+    def __init__(self, root, private=False, dataset_private=True):
         self.root = root
         self.files = {}
         self.revision = 0
         self.private = private
+        self.dataset_private = dataset_private
         self.commits = []
         self.concurrent = False
         self.fail_after = None
 
     def repo_info(self, *args, **kwargs):
+        if kwargs.get('repo_type') == 'dataset':
+            return SimpleNamespace(private=self.dataset_private, sha='dataset-head', siblings=[])
         if self.concurrent and not kwargs.get('files_metadata'):
             self.revision += 1
         return SimpleNamespace(private=self.private, sha=str(self.revision), siblings=[
@@ -163,10 +169,86 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_lfs_additions(old, new, {'a-new'}, changed, files)
 
-    def test_public_space_refused(self):
-        self.hub.private = False
-        with self.assertRaisesRegex(ValueError, 'private Space'):
+    def test_public_space_accepted(self):
+        result = self.run_publish(commit=True)
+        self.assertTrue(result['committed'])
+        self.assertEqual((result['visibility'], result['expected_visibility']), ('public', 'public'))
+        self.assertNotIn('private', result)
+
+    def test_private_space_refused(self):
+        """The Space is recorded as public: a Space that turned private again differs from the record."""
+        self.hub.private = True
+        with self.assertRaisesRegex(ValueError, 'is private, but its recorded visibility is public.*update '
+                                                'scripts/hf_visibility.py'):
             self.run_publish(commit=True)
+        self.assertEqual(self.hub.commits, [])
+
+    def test_public_dataset_refused_even_for_a_space_only_bundle(self):
+        self.hub.dataset_private = False
+        with self.assertRaisesRegex(ValueError, 'dataset .* is public, but its recorded visibility is private'):
+            self.run_publish()
+        self.assertEqual(self.hub.commits, [])
+
+    def test_space_turning_private_between_batches_refused(self):
+        original = self.hub.create_commit
+        def commit_then_privatize(**kwargs):
+            response = original(**kwargs)
+            self.hub.private = True
+            return response
+        self.hub.create_commit = commit_then_privatize
+        with self.assertRaisesRegex(ValueError, 'visibility differs from the record'):
+            self.run_publish(commit=True)
+
+    def test_unknown_visibility_refused(self):
+        self.hub.private = None
+        with self.assertRaisesRegex(ValueError, 'unknown visibility'):
+            self.run_publish()
+
+    def test_unrecorded_repositories_are_expected_private(self):
+        self.assertTrue(hf_visibility.expected_private('someone/another-space', 'space'))
+        self.assertTrue(hf_visibility.expected_private(hf_visibility.SPACE_REPO, 'dataset'))
+        self.assertFalse(hf_visibility.expected_private(hf_visibility.SPACE_REPO, 'space'))
+        self.assertTrue(hf_visibility.expected_private(hf_visibility.DATASET_REPO, 'dataset'))
+
+    def test_space_gate_refuses_credentials_and_dataset_files(self):
+        op = lambda name, data: SimpleNamespace(path_in_repo=name, path_or_fileobj=data)  # noqa: E731
+        repo = hf_visibility.SPACE_REPO
+        page = op('run/results.html', b'<html>fine sk-ant-api03-DOq5tyLPrk9M4hPE</html>')  # the public placeholder
+        self.assertEqual(len(space_gate(repo, [page, SimpleNamespace(path_in_repo='run/old.jsonl', delete=True)])), 2)
+        for name in ('run/inspect/log.eval', 'run/inspect-view/logs/log.eval', 'run/runtime.jsonl',
+                     'run/analysis/judge/labels.jsonl', 'run/snapshots.tar.gz', 'run/snapshots/agent-001/x',
+                     'run/conference/state.sqlite', 'run/transcripts/agent-001.html', 'run/resume/manifest.json',
+                     'run/analysis/timeline.md', 'live/run/inspect-view/logs/live.eval'):
+            with self.subTest(name), self.assertRaisesRegex(ValueError, 'never uploaded to the public Space'):
+                space_gate(repo, [page, op(name, b'raw')])
+        for name, data in (('run/results.html', b'key=hf_' + b'A' * 32), ('run/page.html', b'sk-' + b'B' * 30),
+                           ('run/token.json', b'{}'), ('run/host.env', b'x'), ('run/k.pem', b'x')):
+            with self.subTest(name), self.assertRaises(ValueError):
+                space_gate(repo, [op(name, data)])
+        # A Space recorded as private (none today) may hold dataset categories; credentials never.
+        space_gate('someone/private-space', [op('run/runtime.jsonl', b'raw')])
+        with self.assertRaisesRegex(ValueError, 'Credential-like'):
+            space_gate('someone/private-space', [op('run/runtime.jsonl', b'hf_' + b'A' * 32)])
+
+    def test_space_commit_checks_the_dataset_and_screens_every_upload(self):
+        self.hub.dataset_private = False
+        commit = dict(repo_id=hf_visibility.SPACE_REPO, repo_type='space', parent_commit='0', commit_message='m',
+                      operations=[SimpleNamespace(path_in_repo='run/results.html', path_or_fileobj=b'ok')])
+        with self.assertRaisesRegex(ValueError, 'dataset'):
+            space_commit(self.hub, **commit)
+        self.hub.dataset_private = True
+        with self.assertRaisesRegex(ValueError, 'Credential-like'):
+            space_commit(self.hub, **{**commit, 'operations': [
+                SimpleNamespace(path_in_repo='run/results.html', path_or_fileobj=b'sk-' + b'C' * 30)]})
+        self.assertEqual(self.hub.commits, [])
+        space_commit(self.hub, **commit)
+        self.assertEqual(self.hub.files['run/results.html'], b'ok')
+
+    def test_records_in_space_layout_refused_for_the_public_space(self):
+        manifest = json.loads((self.bundle / 'archive-manifest.json').read_text())
+        (self.bundle / 'archive-manifest.json').write_text(json.dumps({**manifest, 'layout': 'records-in-space'}))
+        with self.assertRaisesRegex(ValueError, 'the Space is public'):
+            self.run_publish(commit=True, records_in_space=True)
         self.assertEqual(self.hub.commits, [])
 
     def test_concurrent_revision_refused_before_write(self):

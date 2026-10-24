@@ -166,7 +166,7 @@ class VerifyHostedTest(unittest.TestCase):
         self.assertTrue(record["ok"], record)
         self.assertEqual(record["revision"], "abc123")
         self.assertEqual({c["check"] for c in record["checks"]},
-                         {"private", "current_revision", "stored", "not_lfs", "bundle_match", "served_html",
+                         {"visibility", "current_revision", "stored", "not_lfs", "bundle_match", "served_html",
                           "served_exact", "no_log_download_link", "range_206"})
 
     def test_detects_raw_inspect_log_download_link(self):
@@ -188,7 +188,7 @@ class VerifyHostedTest(unittest.TestCase):
         self.assertEqual(failed, {("not_lfs", page), ("served_html", page), ("served_exact", page)})
         moved = self.run_verify(revision="fff")
         self.assertFalse(moved["ok"])
-        self.assertEqual([c["check"] for c in moved["checks"]], ["private", "current_revision"])
+        self.assertEqual([c["check"] for c in moved["checks"]], ["visibility", "current_revision"])
 
     def test_long_page_lists_are_queried_in_batches(self):
         api, sizes = FakeApi(self.root), []
@@ -208,9 +208,19 @@ class VerifyHostedTest(unittest.TestCase):
         self.assertTrue(record["ok"])
         self.assertEqual(sizes, [verify_hosted.PATHS_INFO_BATCH, verify_hosted.PATHS_INFO_BATCH, 1])
 
-    def test_detects_public_space(self):
+    def test_detects_visibility_differing_from_the_record(self):
+        # "org/space" is not recorded in scripts/hf_visibility.py, so it is expected private.
         record = self.run_verify(FakeApi(self.root, private=False))
-        self.assertEqual([c["check"] for c in record["checks"] if not c["ok"]], ["private"])
+        self.assertEqual([c["check"] for c in record["checks"] if not c["ok"]], ["visibility"])
+
+    def test_results_space_is_expected_public(self):
+        """The results Space is public by owner decision (October 24, 2026); a private one differs from the record."""
+        import hf_visibility
+        for private, ok in ((False, True), (True, False)):
+            record = verify_hosted.verify(FakeApi(self.root, private=private), FakeSession(self.root), {},
+                                          hf_visibility.SPACE_REPO, "demo-run", "abc")
+            check = next(c for c in record["checks"] if c["check"] == "visibility")
+            self.assertEqual((check["ok"], record["expected_visibility"]), (ok, "public"))
 
 
 if __name__ == "__main__":

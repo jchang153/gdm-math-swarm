@@ -291,8 +291,12 @@ class ConferenceScopeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'page head'):
             self.maintain(runs=[RUN])
         self.hub.push(self.published)
+        self.hub.private = True  # the Space is recorded as public (owner, October 24, 2026)
+        with self.assertRaisesRegex(ValueError, 'is private, but its recorded visibility is public'):
+            self.maintain()
         self.hub.private = False
-        with self.assertRaisesRegex(ValueError, 'private Space'):
+        self.hub.dataset_private = False
+        with self.assertRaisesRegex(ValueError, 'dataset .* is public, but its recorded visibility is private'):
             self.maintain()
 
     def test_cli_takes_no_bundle(self):

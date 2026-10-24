@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Near-live mirror of running experiments to the private HF library (owner choice "option 1", October 21, 2026).
+"""Near-live mirror of running experiments to the HF library (owner choice "option 1", October 21, 2026): pages to
+the results Space (public by owner decision, October 24, 2026), Inspect logs to the private logs dataset. Both
+repositories' actual visibility must equal the record in scripts/hf_visibility.py before every commit; every Space
+commit passes publish_hf_library.space_commit (credential and dataset-category gate).
 
 Runs on the operator's own computer, never on a VM:
 
@@ -79,7 +82,8 @@ for _path in (SCRIPTS, ROOT / 'src', ROOT):
 
 import dataset_logs  # noqa: E402
 from dataset_logs import DATASET_REPO  # noqa: E402
-from publish_hf_library import DEFAULT_REPO, SECRET, matches, safe_path, screen  # noqa: E402
+import hf_visibility  # noqa: E402
+from publish_hf_library import DEFAULT_REPO, SECRET, matches, safe_path, screen, space_commit  # noqa: E402
 from site_style import MARKER as THEME_MARKER, themed  # noqa: E402
 from space_navigation import private_space_navigation  # noqa: E402
 
@@ -791,9 +795,7 @@ def sync_dataset(api, *, files, refresh, retire, add, delete, repo=DATASET_REPO,
     snapshot no longer has them); ``retire``: runs whose live/RUN/ files are all removed (published). Pinned
     to the planned head, then verified: every wanted file by size and SHA-256 (or Git blob id), removed files
     absent, nothing else changed. Returns {revision (the head to pin pages to), committed, uploads, ...}."""
-    info = api.repo_info(repo, repo_type='dataset')
-    if not info.private:
-        raise ValueError('The live mirror requires a private logs dataset')
+    info = hf_visibility.check_dataset(api, repo)
     present = dataset_logs.dataset_inventory(api, repo, info.sha)
     records = {n: {**dataset_logs.digest(d), 'git_sha1': dataset_logs._git_sha1(d)} for n, d in files.items()}
     adds = {n: d for n, d in files.items() if n not in present or not dataset_logs.remote_matches(records[n], present[n])}
@@ -837,9 +839,8 @@ def sync(api, download, *, updates, add, delete, repo=DEFAULT_REPO, dataset_repo
     still committing. The result's ``live_log_uploads`` lists the synthesized live Inspect logs this pass
     uploaded to the dataset (candidates for pruning once superseded)."""
     now = time.time() if now is None else now
-    info = api.repo_info(repo, repo_type='space')
-    if not info.private:
-        raise ValueError('The live mirror requires a private Space')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space'), repo, 'space')
+    hf_visibility.check_dataset(api, dataset_repo)  # the live pages link to the private logs dataset
     modified = getattr(info, 'last_modified', None)
     if info.sha not in set(own_revisions) and modified is not None:
         age = now - modified.timestamp()
@@ -920,9 +921,10 @@ def sync(api, download, *, updates, add, delete, repo=DEFAULT_REPO, dataset_repo
     if not commit or not (adds or deletes):
         return result
     message = COMMIT_PREFIX + ', '.join([*(f'update {r}' for r in changed), *(f'retire {r}' for r in removed)])
-    response = api.create_commit(repo_id=repo, repo_type='space', parent_commit=info.sha, commit_message=message,
-                                 operations=[*(add(path_in_repo=n, path_or_fileobj=d) for n, d in sorted(adds.items())),
-                                             *(delete(path_in_repo=n) for n in sorted(deletes))])
+    response = space_commit(api, dataset_repo=dataset_repo, repo_id=repo, repo_type='space', parent_commit=info.sha,
+                            commit_message=message,
+                            operations=[*(add(path_in_repo=n, path_or_fileobj=d) for n, d in sorted(adds.items())),
+                                        *(delete(path_in_repo=n) for n in sorted(deletes))])
     result.update(committed=True, revision=response.oid)
     return result
 

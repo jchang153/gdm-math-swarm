@@ -134,8 +134,15 @@ class MigrationTests(unittest.TestCase):
 
     def test_dataset_must_be_private(self):
         self.hub.repos['dataset'].private = False
-        with self.assertRaisesRegex(ValueError, 'private'):
+        with self.assertRaisesRegex(ValueError, 'dataset .* is public, but its recorded visibility is private'):
             self.migrate(commit=True)
+        self.assertEqual(self.hub.repos['dataset'].files, {})
+
+    def test_space_must_have_its_recorded_visibility(self):
+        self.hub.repos['space'].private = True
+        with self.assertRaisesRegex(ValueError, 'space .* is private, but its recorded visibility is public'):
+            self.migrate(commit=True)
+        self.assertEqual(self.hub.repos['dataset'].files, {})
 
     def test_delete_stage_refuses_eval(self):
         with self.assertRaisesRegex(ValueError, 'never removes Inspect logs'):

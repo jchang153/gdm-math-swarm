@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Read-only check that a published run's pages are served as HTML by the private HF Space.
+"""Read-only check that a published run's pages are served as HTML by the HF Space.
 
     python scripts/verify_hosted.py --run RUN_ID --revision SHA [--bundle PREPARED_BUNDLE] [--output FILE]
 
 Uses the operator's own HF login through the SDK; nothing is uploaded or changed. It checks that
-the Space is private and its current revision is ``--revision`` (the hosted app serves the current
+the Space's visibility equals its record in scripts/hf_visibility.py (public by owner decision,
+October 24, 2026) and its current revision is ``--revision`` (the hosted app serves the current
 revision only), that each page is stored as a regular Git file, not LFS (HF serves LFS-tracked HTML
 as a download), and that each hosted page returns HTTP 200 as ``text/html``, not as an attachment,
 with exactly the bytes stored at that revision once HF's injected creator-metadata script is
@@ -15,7 +16,7 @@ only a download; the logs stay published for Inspect View). Pages published earl
 until they are re-rendered.
 
 Dataset checks (on when the run's Inspect View carries the dataset fetch shim, or with --dataset-checks;
-docs/experiment-library.md, "Logs and raw records in the dataset repo"): the logs dataset is private;
+docs/experiment-library.md, "Logs and raw records in the dataset repo"): the logs dataset is private (its record in scripts/hf_visibility.py);
 the shim names the expected dataset, the folder RUN/inspect and a full commit (--dataset-commit if
 given); every log of the run's inspect-view/logs/listing.json answers a Range read of its first and last
 64 bytes through the dataset's resolve URL (operator's own login) with 206, compared with --bundle or the
@@ -41,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from publish_hf_library import DEFAULT_REPO  # noqa: E402
 import dataset_logs  # noqa: E402
 from dataset_logs import DATASET_REPO  # noqa: E402
+import hf_visibility  # noqa: E402
 
 # Runs published before October 21, 2026 also carry {run}/transcripts/index.html; pass it with --page
 # to check it. New runs have no custom transcript pages (read agent transcripts in Inspect View).
@@ -69,8 +71,9 @@ def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, 
         return ok
 
     info = api.space_info(repo)
-    record.update(revision=info.sha, private=info.private, host=getattr(info, "host", None))
-    check("private", info.private is True)
+    record.update(revision=info.sha, private=info.private, host=getattr(info, "host", None),
+                  expected_visibility=hf_visibility.label(hf_visibility.expected_private(repo, "space")))
+    check("visibility", hf_visibility.matches(info, repo, "space"), private=info.private)
     if not check("current_revision", bool(revision) and str(info.sha).startswith(revision), current=info.sha):
         record["note"] = "The hosted app serves the current revision; pages were not compared."
         return record
@@ -144,7 +147,7 @@ def verify_dataset(api, session, headers, repo, run, info, check, settings, serv
     if not dataset_checks:
         return
     dataset = api.repo_info(dataset_repo, repo_type="dataset")
-    check("dataset_private", dataset.private is True, dataset=dataset_repo)
+    check("dataset_private", hf_visibility.matches(dataset, dataset_repo, "dataset"), dataset=dataset_repo)
     expected_path = f"{run}/inspect"
     ok = (settings is not None and settings[0] == dataset_repo and settings[2] == expected_path
           and re.fullmatch(r"[0-9a-f]{40}", settings[1] or "") is not None

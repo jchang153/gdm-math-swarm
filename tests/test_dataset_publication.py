@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 sys.path.insert(0, str(ROOT / 'tests'))
 import dataset_logs  # noqa: E402
 import prepare_hf_library  # noqa: E402
-from publish_hf_library import digest, load_bundle, publish  # noqa: E402
+from publish_hf_library import DEFAULT_REPO, digest, load_bundle, publish  # noqa: E402
 import verify_hosted  # noqa: E402
 from test_judge_publication import make_run, make_viewer  # noqa: E402
 
@@ -46,11 +46,12 @@ class Repo:
 
 
 class TwoRepoHub:
-    """A Space and a dataset; every call names its repo_type."""
+    """A Space (public) and a dataset (private), as recorded in scripts/hf_visibility.py; every call names its
+    repo_type."""
 
     def __init__(self, root):
         self.root = root
-        self.repos = {'space': Repo('space'), 'dataset': Repo('dataset')}
+        self.repos = {'space': Repo('space', private=False), 'dataset': Repo('dataset')}
         self.order = []
 
     def repo_info(self, repo, repo_type='model', **kwargs):
@@ -238,7 +239,13 @@ class PublishTests(unittest.TestCase):
 
     def test_public_dataset_refused_before_any_write(self):
         self.hub.repos['dataset'].private = False
-        with self.assertRaisesRegex(ValueError, 'must be private'):
+        with self.assertRaisesRegex(ValueError, 'dataset .* is public, but its recorded visibility is private'):
+            self.publish(commit=True)
+        self.assertEqual(self.hub.order, [])
+
+    def test_private_space_refused_before_any_write(self):
+        self.hub.repos['space'].private = True
+        with self.assertRaisesRegex(ValueError, 'space .* is private, but its recorded visibility is public'):
             self.publish(commit=True)
         self.assertEqual(self.hub.order, [])
 
@@ -290,7 +297,7 @@ class VerifyTests(unittest.TestCase):
 
         class Api:
             def space_info(self, repo):
-                return SimpleNamespace(sha='rev1', private=True, host='https://space.hf.space')
+                return SimpleNamespace(sha='rev1', private=False, host='https://space.hf.space')
 
             def repo_info(self, repo, repo_type):
                 assert repo_type == 'dataset'
@@ -335,7 +342,7 @@ class VerifyTests(unittest.TestCase):
         return Session()
 
     def verify(self, **kwargs):
-        return verify_hosted.verify(self.api(), self.session(), {}, 'org/space', RUN, 'rev1', **kwargs)
+        return verify_hosted.verify(self.api(), self.session(), {}, DEFAULT_REPO, RUN, 'rev1', **kwargs)
 
     def failed(self, record):
         return sorted({(c['check'], c.get('path')) for c in record['checks'] if not c['ok']})

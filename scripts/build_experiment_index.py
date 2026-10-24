@@ -252,8 +252,9 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
     # The compare view and the filters read the same entries; '<' is escaped so the JSON
     # can never close its script element.
     blob = json.dumps(entries, separators=(',', ':'), ensure_ascii=False).replace('<', '\\u003c')
-    note = ('This private archive contains saved experiment records and derived views. Access requires permission '
-            'to this Hugging Face Space. Preserve the original records when moving a run.' if hosted else
+    note = ('This Hugging Face Space (public by owner decision, October 24, 2026) holds the experiment reports and '
+            'derived views. Inspect logs and raw records are kept in a private Hugging Face dataset that needs '
+            'read access (Sign in with HF). Preserve the original records when moving a run.' if hosted else
             'These files are stored on this computer. Raw runs and transcripts are excluded from Git; the code '
             'repository alone is not a backup or a shared results library. Keep the full experiment folder when '
             'backing up or moving a run.')
@@ -269,7 +270,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             '<title>GDM Math Swarm experiments</title><style>' + STYLE + '</style></head><body>'
             '<h1>GDM Math Swarm experiments</h1>'
-            '<p>A private library of saved runs: results, agent transcripts in Inspect View, independent evaluations and timelines.</p>'
+            '<p>A library of saved runs: results, agent transcripts in Inspect View, independent evaluations and timelines.</p>'
             f'<p><strong>{len(entries)} saved experiment(s)</strong>, newest first. Tick 2 to 4 runs to compare them side by side.</p>'
             + (live_section(entries) if hosted else '') +
             '<div class="toolbar"><label class="grow">Find<input id="filter" type="search" placeholder="Date, run, model, condition…"></label>'

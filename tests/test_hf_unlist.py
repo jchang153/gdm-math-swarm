@@ -108,10 +108,14 @@ class UnlistTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'LFS'):
             self.unlist(commit=True)
         self.hub.push(self.published)
-        self.hub.private = False
-        with self.assertRaisesRegex(ValueError, 'private'):
+        self.hub.private = True  # the Space is recorded as public (owner, October 24, 2026)
+        with self.assertRaisesRegex(ValueError, 'is private, but its recorded visibility is public'):
             self.unlist()
-        self.hub.private = True
+        self.hub.private = False
+        self.hub.dataset_private = False  # the pages link to the logs dataset, which must stay private
+        with self.assertRaisesRegex(ValueError, 'dataset .* is public, but its recorded visibility is private'):
+            self.unlist()
+        self.hub.dataset_private = True
         self.hub.concurrent = True  # another collaborator commits between the plan and the upload
         with self.assertRaisesRegex(ValueError, 'concurrently'):
             self.unlist(commit=True, attempt='attempt-3')

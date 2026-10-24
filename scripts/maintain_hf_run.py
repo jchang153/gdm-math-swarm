@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Narrow maintenance update of one already-published run in the private HF library.
+"""Narrow maintenance update of one already-published run in the HF library (the results Space, public by
+owner decision of October 24, 2026; scripts/hf_visibility.py records the expected visibility of the Space and
+of the private logs dataset, both checked before every write; every Space commit passes
+publish_hf_library.space_commit, the credential and dataset-category gate).
 
 docs/plan.md (October 17, 2026): behavior judge results for an already-published run reach
 the library through a separately reviewed update that replaces only that run's
@@ -119,7 +122,8 @@ from types import SimpleNamespace
 from build_experiment_index import INSPECT_LOGS, inspect_log_links, newest_first, unlisted_runs, write_index
 from incident_site import INCIDENT_DIR, INCIDENT_REPORT, add_incident_tab, incident_excluded, with_incident_link
 from prepare_hf_library import judge_excluded
-from publish_hf_library import (DEFAULT_REPO, RUN_ID, batches, digest, load_bundle, matches,
+import hf_visibility
+from publish_hf_library import (DEFAULT_REPO, RUN_ID, batches, digest, load_bundle, matches, space_commit,
                                 merge_entries, payload, remote_files, validate_lfs_additions)
 
 SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'site', 'unlist', 'snapshots', 'incident', 'prune',
@@ -398,9 +402,8 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
     origin = (load_origin(resume_from, repo, run, required, scope, replace_judge)
               if resume_from is not None else None)
 
-    info = api.repo_info(repo, repo_type='space', files_metadata=True)
-    if not info.private:
-        raise ValueError('Maintenance requires a private Space')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
+    hf_visibility.check_dataset(api)  # the run's pages link to the private logs dataset
     base = info.sha
     remote = remote_files(api, repo, base)  # the current state is pinned to this revision
     current = inventory(remote)
@@ -815,7 +818,7 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
 
     result = {
         'operation': 'maintain-run', 'scope': scope, **({'replace_judge': True} if replace_judge else {}),
-        'repo': repo, 'private': True, 'run': run,
+        'repo': repo, **hf_visibility.record(repo, 'space'), 'run': run,
         'origin_revision': origin_revision, 'base_revision': base,
         'resume_from': None if resume_from is None else str(resume_from), 'committed': False,
         'replaced': replaced, 'added': added,
@@ -891,10 +894,10 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
         planned_batches = [*batches(uploads)]
         for number, batch in enumerate([*planned_batches, *([root_uploads] if root_uploads else [])]):
             latest = api.repo_info(repo, repo_type='space')
-            if not latest.private or latest.sha != revision:
-                raise ValueError('Space changed concurrently or is no longer private; rerun the dry run '
+            if not hf_visibility.unchanged(latest, repo, 'space', revision):
+                raise ValueError('Space changed concurrently or its visibility differs from the record; rerun the dry run '
                                  'against the latest revision')
-            response = api.create_commit(
+            response = space_commit(api, 
                 repo_id=repo, repo_type='space', parent_commit=revision,
                 commit_message='Maintenance update of ' + run + (
                     ': results and replaced behavior judge outputs' if replace_judge else
@@ -913,8 +916,9 @@ def maintain_run(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO,
                 # else changed, so the Space stays detectably partly applied.
                 verify(remote_files(api, repo, revision), revision, complete=False)
         final = api.repo_info(repo, repo_type='space', files_metadata=True)
-        if not final.private or final.sha != revision:
-            raise ValueError('Space changed before verification; inspect the latest revision')
+        if not hf_visibility.unchanged(final, repo, 'space', revision):
+            raise ValueError('Space changed before verification (or its visibility differs from the record); '
+                             'inspect the latest revision')
         final_files = remote_files(api, repo, final.sha)
         attributes = verify(final_files, final.sha, complete=True)
     except Exception as error:
@@ -960,9 +964,8 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
         if record is None:
             raise ValueError('Record the run in data/library-unlisted.json (run, date, reason) before unlisting: ' + run)
     check_outputs(None, receipt, backup_dir, commit, operation)
-    info = api.repo_info(repo, repo_type='space', files_metadata=True)
-    if not info.private:
-        raise ValueError('Maintenance requires a private Space')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
+    hf_visibility.check_dataset(api)  # the run's pages link to the private logs dataset
     base = info.sha
     remote = remote_files(api, repo, base)
     current = inventory(remote)
@@ -1022,7 +1025,7 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
         planned[MANIFEST] = fetch(MANIFEST)  # already recorded: keep the published bytes
     uploads = [(n, d) for n, d in planned.items() if not matches(d, remote[n])]
     scope = 'rerender-catalogue' if rerender else 'unlist'
-    result = {'operation': 'maintain-run', 'scope': scope, 'repo': repo, 'private': True, 'run': run,
+    result = {'operation': 'maintain-run', 'scope': scope, 'repo': repo, **hf_visibility.record(repo, 'space'), 'run': run,
               'record': record, 'base_revision': base, 'committed': False,
               'listed_before': run in listed, 'entries_before': len(listed), 'entries_after': len(keep),
               'other_entries_unchanged': len(keep), 'run_files_kept': len(folder),
@@ -1053,10 +1056,10 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
         result.update(backup_dir=str(backup_dir), backups=saved)
         write_receipt('backups written; nothing uploaded')
         latest = api.repo_info(repo, repo_type='space')
-        if not latest.private or latest.sha != base:
-            raise ValueError('Space changed concurrently or is no longer private; rerun the dry run '
+        if not hf_visibility.unchanged(latest, repo, 'space', base):
+            raise ValueError('Space changed concurrently or its visibility differs from the record; rerun the dry run '
                              'against the latest revision')
-        response = api.create_commit(
+        response = space_commit(api, 
             repo_id=repo, repo_type='space', parent_commit=base,
             commit_message=('Re-render the catalogue page (entries unchanged)' if rerender
                             else 'Unlist ' + run + ' from the catalogue (run files kept)'),
@@ -1064,8 +1067,9 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
         revision = response.oid
         write_receipt('committed; verifying')
         final = api.repo_info(repo, repo_type='space', files_metadata=True)
-        if not final.private or final.sha != revision:
-            raise ValueError('Space changed before verification; inspect the latest revision')
+        if not hf_visibility.unchanged(final, repo, 'space', revision):
+            raise ValueError('Space changed before verification (or its visibility differs from the record); '
+                             'inspect the latest revision')
         final_files = remote_files(api, repo, revision)
         state = inventory(final_files)
         if set(state) != set(current):
@@ -1133,9 +1137,8 @@ def maintain_incident(bundle, api, download, *, run, commit=False, repo=DEFAULT_
         raise ValueError('Bundle incident files do not match the preparation record (incident_report)')
     page_name = prefix + 'results.html'
 
-    info = api.repo_info(repo, repo_type='space', files_metadata=True)
-    if not info.private:
-        raise ValueError('Maintenance requires a private Space')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
+    hf_visibility.check_dataset(api)  # the run's pages link to the private logs dataset
     base = info.sha
     remote = remote_files(api, repo, base)  # the current state is pinned to this revision
     current = inventory(remote)
@@ -1203,7 +1206,7 @@ def maintain_incident(bundle, api, download, *, run, commit=False, repo=DEFAULT_
                          + ', '.join([*stored_lfs, *ruled, *large][:EXAMPLES]))
     uploads = [(n, planned[n]) for n in names if n not in remote or not matches(planned[n], remote[n])]
     added = [n for n, _ in uploads if n not in remote]
-    result = {'operation': 'maintain-run', 'scope': 'incident', 'repo': repo, 'private': True, 'run': run,
+    result = {'operation': 'maintain-run', 'scope': 'incident', 'repo': repo, **hf_visibility.record(repo, 'space'), 'run': run,
               'base_revision': base, 'committed': False,
               'incident_files': incident, 'to_add': added,
               'to_replace': [n for n, _ in uploads if n in remote],
@@ -1239,18 +1242,19 @@ def maintain_incident(bundle, api, download, *, run, commit=False, repo=DEFAULT_
         result.update(backup_dir=str(backup_dir), backups=saved)
         write_receipt('backups written; nothing uploaded')
         latest = api.repo_info(repo, repo_type='space')
-        if not latest.private or latest.sha != base:
-            raise ValueError('Space changed concurrently or is no longer private; rerun the dry run '
+        if not hf_visibility.unchanged(latest, repo, 'space', base):
+            raise ValueError('Space changed concurrently or its visibility differs from the record; rerun the dry run '
                              'against the latest revision')
-        response = api.create_commit(
+        response = space_commit(api, 
             repo_id=repo, repo_type='space', parent_commit=base,
             commit_message='Maintenance update of ' + run + ': incident report and its links',
             operations=[operation(path_in_repo=n, path_or_fileobj=d) for n, d in uploads])
         revision = response.oid
         write_receipt('committed; verifying')
         final = api.repo_info(repo, repo_type='space', files_metadata=True)
-        if not final.private or final.sha != revision:
-            raise ValueError('Space changed before verification; inspect the latest revision')
+        if not hf_visibility.unchanged(final, repo, 'space', revision):
+            raise ValueError('Space changed before verification (or its visibility differs from the record); '
+                             'inspect the latest revision')
         final_files = remote_files(api, repo, revision)
         state = inventory(final_files)
         missing, unexpected = sorted(set(current) - set(state)), sorted(set(state) - set(current) - set(added))
@@ -1302,6 +1306,9 @@ def archive_snapshots(api, download, *, run, runs_dir, commit=False, repo=DEFAUL
         snapshot_archive, snapshot_files
     if not isinstance(run, str) or not RUN_ID.fullmatch(run):
         raise ValueError('Invalid run ID')
+    if not hf_visibility.expected_private(repo, 'space'):
+        raise ValueError('Snapshot archives belong to the private logs dataset and are never uploaded to the public '
+                         'Space; move them with --scope migrate-logs --migrate-category snapshots')
     check_outputs(None, receipt, backup_dir, commit, operation)
     if commit and delete_operation is None:
         raise ValueError('Committing requires a delete operation factory')
@@ -1318,9 +1325,8 @@ def archive_snapshots(api, download, *, run, runs_dir, commit=False, repo=DEFAUL
     archive_name, manifest_name = prefix + SNAPSHOT_ARCHIVE, prefix + SNAPSHOT_MANIFEST
     planned = {archive_name: archive, manifest_name: archive_manifest}
 
-    info = api.repo_info(repo, repo_type='space', files_metadata=True)
-    if not info.private:
-        raise ValueError('Maintenance requires a private Space')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
+    hf_visibility.check_dataset(api)  # the run's pages link to the private logs dataset
     base = info.sha
     remote = remote_files(api, repo, base)
     current = inventory(remote)
@@ -1371,7 +1377,7 @@ def archive_snapshots(api, download, *, run, runs_dir, commit=False, repo=DEFAUL
     root_bytes = json.dumps(new_root, indent=2).encode() if new_root is not root else None
     uploads = [(n, d) for n, d in planned.items() if n not in remote]
     deletions = [n for n in loose]
-    result = {'operation': 'maintain-run', 'scope': 'snapshots', 'repo': repo, 'private': True, 'run': run,
+    result = {'operation': 'maintain-run', 'scope': 'snapshots', 'repo': repo, **hf_visibility.record(repo, 'space'), 'run': run,
               'base_revision': base, 'committed': False, 'recorded_in_archive_manifest': recorded_run,
               'archive': {'path': archive_name, 'bytes': len(archive), 'sha256': digest(archive)['sha256'],
                           'members': len(entries), 'member_bytes': sum(x['bytes'] for x in entries.values())},
@@ -1412,10 +1418,10 @@ def archive_snapshots(api, download, *, run, runs_dir, commit=False, repo=DEFAUL
         def guarded_commit(message, operations):
             nonlocal revision, committed_batches
             latest = api.repo_info(repo, repo_type='space')
-            if not latest.private or latest.sha != revision:
-                raise ValueError('Space changed concurrently or is no longer private; run the scope again '
+            if not hf_visibility.unchanged(latest, repo, 'space', revision):
+                raise ValueError('Space changed concurrently or its visibility differs from the record; run the scope again '
                                  '(it continues from the current state)')
-            response = api.create_commit(repo_id=repo, repo_type='space', parent_commit=revision,
+            response = space_commit(api, repo_id=repo, repo_type='space', parent_commit=revision,
                                          commit_message=message, operations=operations)
             revision, committed_batches = response.oid, committed_batches + 1
             write_receipt('committing')
@@ -1435,8 +1441,9 @@ def archive_snapshots(api, download, *, run, runs_dir, commit=False, repo=DEFAUL
             guarded_commit(f'Archive snapshots of {run}: record the archive in {MANIFEST}',
                            [operation(path_in_repo=MANIFEST, path_or_fileobj=root_bytes)])
         final = api.repo_info(repo, repo_type='space', files_metadata=True)
-        if not final.private or final.sha != revision:
-            raise ValueError('Space changed before verification; inspect the latest revision')
+        if not hf_visibility.unchanged(final, repo, 'space', revision):
+            raise ValueError('Space changed before verification (or its visibility differs from the record); '
+                             'inspect the latest revision')
         final_files = remote_files(api, repo, revision)
         state = inventory(final_files)
         expected_names = (set(current) - set(deletions)) | set(planned)
@@ -1546,9 +1553,8 @@ def prune_run(api, download, *, run, runs_dir, commit=False, repo=DEFAULT_REPO, 
     source = Path(runs_dir) / run
     if source.is_symlink() or not source.is_dir():
         raise ValueError('Local run records not found: ' + str(source))
-    info = api.repo_info(repo, repo_type='space', files_metadata=True)
-    if not info.private:
-        raise ValueError('Maintenance requires a private Space')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
+    hf_visibility.check_dataset(api)  # the run's pages link to the private logs dataset
     base = info.sha
     remote = remote_files(api, repo, base)
     current = inventory(remote)
@@ -1620,7 +1626,7 @@ def prune_run(api, download, *, run, runs_dir, commit=False, repo=DEFAULT_REPO, 
     if new_root != root:
         planned[MANIFEST] = json.dumps(new_root, indent=2).encode()
     deletions = sorted(verified)
-    result = {'operation': 'maintain-run', 'scope': 'prune', 'repo': repo, 'private': True, 'run': run,
+    result = {'operation': 'maintain-run', 'scope': 'prune', 'repo': repo, **hf_visibility.record(repo, 'space'), 'run': run,
               'base_revision': base, 'committed': False, 'kinds': list(kinds),
               'to_delete': [{'path': n, 'bytes': verified[n]['bytes'], 'sha256': verified[n]['sha256'],
                              'description': selected[n], 'local_original': verified[n]['local']} for n in deletions],
@@ -1656,9 +1662,9 @@ def prune_run(api, download, *, run, runs_dir, commit=False, repo=DEFAULT_REPO, 
             result.update(backup_dir=str(backup_dir))
             write_receipt('backups written; nothing uploaded')
             latest = api.repo_info(repo, repo_type='space')
-            if not latest.private or latest.sha != base:
-                raise ValueError('Space changed concurrently or is no longer private; run the scope again')
-            response = api.create_commit(
+            if not hf_visibility.unchanged(latest, repo, 'space', base):
+                raise ValueError('Space changed concurrently or its visibility differs from the record; run the scope again')
+            response = space_commit(api, 
                 repo_id=repo, repo_type='space', parent_commit=base,
                 commit_message=f'Prune {run}: remove {len(deletions)} raw file(s) kept offline '
                                f'({result["delete_bytes"] / 1e6:.1f} MB; page notice, manifest offline records)',
@@ -1667,8 +1673,9 @@ def prune_run(api, download, *, run, runs_dir, commit=False, repo=DEFAULT_REPO, 
             revision = response.oid
             write_receipt('committed; verifying')
             final = api.repo_info(repo, repo_type='space', files_metadata=True)
-            if not final.private or final.sha != revision:
-                raise ValueError('Space changed before verification; inspect the latest revision')
+            if not hf_visibility.unchanged(final, repo, 'space', revision):
+                raise ValueError('Space changed before verification (or its visibility differs from the record); '
+                             'inspect the latest revision')
             final_files = remote_files(api, repo, revision)
             state = inventory(final_files)
             expected = set(current) - set(deletions)
@@ -1763,9 +1770,8 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
         raise ValueError('Invalid run ID')
     if commit and (operation is None or receipt is None or backup_dir is None):
         raise ValueError('--commit requires --receipt, --backup-dir and an upload operation')
-    info = api.repo_info(repo, repo_type='space', files_metadata=True)
-    if not info.private:
-        raise ValueError('Maintenance requires a private Space')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
+    hf_visibility.check_dataset(api)  # the run's pages link to the private logs dataset
     base = info.sha
     remote = remote_files(api, repo, base)
     current = inventory(remote)
@@ -1852,7 +1858,7 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
     uploads = [(n, planned[n]) for n in names if not matches(planned[n], remote[n])]
     before = sum(r['page_bytes_before'] for r in per_run.values())
     after = sum(r['page_bytes_after'] for r in per_run.values())
-    result = {'operation': 'maintain-run', 'scope': 'conference', 'repo': repo, 'private': True,
+    result = {'operation': 'maintain-run', 'scope': 'conference', 'repo': repo, **hf_visibility.record(repo, 'space'),
               'runs': selected, 'base_revision': base, 'committed': False, 'per_run': per_run,
               'conference_page_bytes': {'before': before, 'after': after, 'saved': before - after},
               'to_replace': [n for n, _ in uploads], 'to_add': [],
@@ -1884,10 +1890,10 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
         result.update(backup_dir=str(backup_dir), backups=saved)
         write_receipt('backups written; nothing uploaded')
         latest = api.repo_info(repo, repo_type='space')
-        if not latest.private or latest.sha != base:
-            raise ValueError('Space changed concurrently or is no longer private; rerun the dry run '
+        if not hf_visibility.unchanged(latest, repo, 'space', base):
+            raise ValueError('Space changed concurrently or its visibility differs from the record; rerun the dry run '
                              'against the latest revision')
-        response = api.create_commit(
+        response = space_commit(api, 
             repo_id=repo, repo_type='space', parent_commit=base,
             commit_message=f'Conference views without the embedded activity timeline ({len(selected)} run(s); '
                            'the timeline stays in the private logs dataset)',
@@ -1895,8 +1901,9 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
         revision = response.oid
         write_receipt('committed; verifying')
         final = api.repo_info(repo, repo_type='space', files_metadata=True)
-        if not final.private or final.sha != revision:
-            raise ValueError('Space changed before verification; inspect the latest revision')
+        if not hf_visibility.unchanged(final, repo, 'space', revision):
+            raise ValueError('Space changed before verification (or its visibility differs from the record); '
+                             'inspect the latest revision')
         final_files = remote_files(api, repo, revision)
         state = inventory(final_files)
         if set(state) != set(current):

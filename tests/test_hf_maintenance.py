@@ -1,6 +1,7 @@
 """Offline tests of the narrow maintenance update of one published run (maintain_hf_run.py).
 
-An in-memory private Space with per-revision snapshots and HF-like automatic LFS rules stands
+An in-memory public Space (as recorded in scripts/hf_visibility.py since October 24, 2026; the logs dataset
+stays private) with per-revision snapshots and HF-like automatic LFS rules stands
 in for the Hub. No HF login, network, model calls, credentials or real SDK.
 """
 import contextlib
@@ -22,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import maintain_hf_run  # noqa: E402
 from maintain_hf_run import main, maintain_run  # noqa: E402
 from publish_hf_library import digest, publish  # noqa: E402
+import hf_visibility  # noqa: E402
 import prepare_hf_library  # noqa: E402
 from test_judge_publication import make_run, make_viewer, write_judge  # noqa: E402
 
@@ -38,14 +40,43 @@ def operation(**kwargs):
     return SimpleNamespace(**kwargs)
 
 
+@contextlib.contextmanager
+def private_space_record():
+    """Fixture: the Space recorded as private, as it was before the owner made it public (October 24, 2026)."""
+    with patch.dict(hf_visibility.EXPECTED, {('space', hf_visibility.SPACE_REPO): (True, 'test fixture: private')}):
+        yield
+
+
+def use_private_space_record(test):
+    """setUp helper for the legacy classes: their bundles are prepared --records-in-space, whose raw records
+    (Inspect logs, JSONL, custom transcript pages) were published while the Space was private. They exercise the
+    maintenance logic against a Space recorded (and faked) as private; the public Space refuses those uploads
+    (MaintenanceTests.PUBLIC_RECORD_TESTS)."""
+    record = private_space_record()
+    record.__enter__()
+    test.addCleanup(record.__exit__, None, None, None)
+
+
+def legacy_publish(bundle, api, download, **kwargs):
+    """Fixture: a records-in-space publication as made while the Space was still private (the layout is refused
+    for the public Space); afterwards the fake Space has its recorded visibility again."""
+    api.private = True
+    with private_space_record():
+        result = publish(bundle, api, download, **kwargs)
+    api.private = hf_visibility.expected_private(hf_visibility.SPACE_REPO, 'space')
+    return result
+
+
 class Hub:
-    """Private Space fake: every commit is a new revision snapshot; reads may name any revision."""
+    """Space fake (public, as recorded): every commit is a new revision snapshot; reads may name any revision.
+    repo_info(repo_type='dataset') answers for the logs dataset (``dataset_private``, private as recorded)."""
 
     def __init__(self, root):
         self.root = root
         self.history = {'0': {'.gitattributes': b'*.eval' + RULE + b'\n'}}
         self.revision = 0
-        self.private = True
+        self.private = hf_visibility.expected_private(hf_visibility.SPACE_REPO, 'space')  # as recorded
+        self.dataset_private = True
         self.commits = []
         self.concurrent = False
         self.fail_after = None
@@ -66,6 +97,8 @@ class Hub:
         self.history[self.sha] = dict(files)
 
     def repo_info(self, repo, *, repo_type, files_metadata=False):
+        if repo_type == 'dataset':
+            return SimpleNamespace(private=self.dataset_private, sha='dataset-head')
         if self.concurrent and not files_metadata:
             self.push(self.files)
         return SimpleNamespace(private=self.private, sha=self.sha)
@@ -114,7 +147,13 @@ class Hub:
 
 
 class MaintenanceTests(unittest.TestCase):
+    # These run against the actual record (public Space, private dataset); the others use a private record.
+    PUBLIC_RECORD_TESTS = {'test_private_space_refused', 'test_public_space_accepted', 'test_public_dataset_refused',
+                           'test_public_space_refuses_raw_judge_records'}
+
     def setUp(self):
+        if self._testMethodName not in MaintenanceTests.PUBLIC_RECORD_TESTS:
+            use_private_space_record(self)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
@@ -123,7 +162,7 @@ class MaintenanceTests(unittest.TestCase):
         make_run(self.runs, OTHER)
         make_run(self.runs, RUN)
         self.hub = Hub(self.root)
-        publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
+        legacy_publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
                 operation=operation, records_in_space=True)
         # After publication: judge outputs and report sections added, transcripts regenerated.
         run = self.runs / RUN
@@ -344,9 +383,29 @@ class MaintenanceTests(unittest.TestCase):
             self.maintain(commit=True)
         self.assert_no_maintenance_commit()
 
-    def test_public_space_refused(self):
-        self.hub.private = False
-        with self.assertRaisesRegex(ValueError, 'private Space'):
+    def test_private_space_refused(self):
+        """The Space is recorded as public (owner, October 24, 2026): a Space that is private again differs from
+        the record and is refused until the record is updated."""
+        self.hub.private = True
+        with self.assertRaisesRegex(ValueError, 'is private, but its recorded visibility is public'):
+            self.maintain(commit=True)
+        self.assert_no_maintenance_commit()
+
+    def test_public_space_accepted(self):
+        self.assertFalse(self.hub.private)
+        self.assertEqual(self.maintain()['visibility'], 'public')
+
+    def test_public_space_refuses_raw_judge_records(self):
+        """The judge scope with a --records-in-space bundle would add the raw labels.jsonl: refused by the Space
+        gate before that commit; the public Space never holds it."""
+        with self.assertRaisesRegex(ValueError, 'labels.jsonl belongs to the private logs dataset'):
+            self.maintain(commit=True)
+        self.assertFalse(any(n.endswith('.jsonl') and n.startswith(RUN + '/analysis/judge/') for n in self.hub.files))
+
+    def test_public_dataset_refused(self):
+        """Space-only maintenance refuses too when the logs dataset its pages link to is public."""
+        self.hub.dataset_private = False
+        with self.assertRaisesRegex(ValueError, 'dataset .* is public, but its recorded visibility is private'):
             self.maintain(commit=True)
         self.assert_no_maintenance_commit()
 
@@ -369,11 +428,11 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(receipt['committed_batches'], 1)
         self.assertTrue(receipt['status'].startswith('failed: ValueError: Space changed concurrently'))
 
-    def test_space_turning_public_between_batches_refused(self):
-        def publicize(hub):
+    def test_space_visibility_changing_between_batches_refused(self):
+        def change(hub):  # this class records the Space as private; any change from the record is refused
             hub.private = False
-        self.hub.after_commit = publicize
-        with self.assertRaisesRegex(ValueError, 'no longer private'):
+        self.hub.after_commit = change
+        with self.assertRaisesRegex(ValueError, 'visibility differs from the record'):
             self.maintain(commit=True)
         self.assertEqual(len(self.hub.commits), self.publish_commits + 1)
 
@@ -396,7 +455,7 @@ class MaintenanceTests(unittest.TestCase):
                     self.maintain(commit=True, attempt=label)
                 self.assert_no_maintenance_commit()
         self.hub = Hub(self.root / 'other-hub')
-        publish(self.prepare('other-only', OTHER), self.hub, self.hub.download, commit=True, operation=operation, records_in_space=True)
+        legacy_publish(self.prepare('other-only', OTHER), self.hub, self.hub.download, commit=True, operation=operation, records_in_space=True)
         commits = len(self.hub.commits)
         with self.assertRaisesRegex(ValueError, 'not published'):
             self.maintain(commit=True, attempt='unpublished')
@@ -465,7 +524,7 @@ class MaintenanceTests(unittest.TestCase):
             'catalogue bytes differ': (lambda hub: hub.files.__setitem__('archive-manifest.json', b'{}'),
                                        'hash mismatch after maintenance: archive-manifest.json'),
             'revision moved after last batch': (lambda hub: hub.push(hub.files), 'changed before verification'),
-            'turned public after last batch': (lambda hub: setattr(hub, 'private', False),
+            'visibility changed after last batch': (lambda hub: setattr(hub, 'private', False),
                                                'changed before verification')}
         for label, (change, message) in cases.items():
             with self.subTest(label):
@@ -690,6 +749,7 @@ class TranscriptMaintenanceTests(unittest.TestCase):
         MaintenanceTests.edit_remote, MaintenanceTests.restart, MaintenanceTests.assert_no_maintenance_commit)
 
     def setUp(self):
+        use_private_space_record(self)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
@@ -700,7 +760,7 @@ class TranscriptMaintenanceTests(unittest.TestCase):
         for name in TRANSCRIPTS:
             (run / 'transcripts' / name).write_text(f'<!doctype html><html><head></head><body>final {name}</body></html>')
         self.hub = Hub(self.root)
-        publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
+        legacy_publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
                 operation=operation, records_in_space=True)
         # After publication: full-history exports for three pages (agent-003 unchanged by the
         # exporter) and local report changes that do not alter the catalogue entry.
@@ -1114,6 +1174,7 @@ class EvaluatorMaintenanceTests(unittest.TestCase):
         MaintenanceTests.edit_remote, MaintenanceTests.restart, MaintenanceTests.assert_no_maintenance_commit)
 
     def setUp(self):
+        use_private_space_record(self)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
@@ -1125,7 +1186,7 @@ class EvaluatorMaintenanceTests(unittest.TestCase):
         (run / 'evaluations/queue.jsonl').write_text('{"submission": "sub-1"}\n')
         (run / 'conference-view/file-1.html').write_text('<!doctype html><html><head></head><body>f</body></html>')
         self.hub = Hub(self.root)
-        publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
+        legacy_publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
                 operation=operation, records_in_space=True)
         # After publication: evaluator records, a rebuilt conference index with verdicts, a report with
         # one verified task, and a regenerated transcript (skipped by this scope).
@@ -1321,6 +1382,7 @@ class EvaluatorMaintenanceTests(unittest.TestCase):
         MaintenanceTests.edit_remote, MaintenanceTests.restart, MaintenanceTests.assert_no_maintenance_commit)
 
     def setUp(self):
+        use_private_space_record(self)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
@@ -1332,7 +1394,7 @@ class EvaluatorMaintenanceTests(unittest.TestCase):
         (run / 'evaluations/queue.jsonl').write_text('{"submission": "sub-1"}\n')
         (run / 'conference-view/file-1.html').write_text('<!doctype html><html><head></head><body>f</body></html>')
         self.hub = Hub(self.root)
-        publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
+        legacy_publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
                 operation=operation, records_in_space=True)
         # After publication: evaluator records, a rebuilt conference index with verdicts, a report with
         # one verified task, and a regenerated transcript (skipped by this scope).
@@ -1667,7 +1729,7 @@ class InspectMaintenanceTests(unittest.TestCase):
         old_links = lambda run, names: {'Inspect logs': run + '/inspect/'}  # noqa: E731
         with patch.object(space_navigation, 'FOLLOW_LOG_REDIRECTS', ''), \
                 patch.object(build_experiment_index, 'inspect_log_links', old_links):
-            publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
+            legacy_publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
                     operation=operation, records_in_space=True)
         # Since publication the local report changed; the inspect scope must not publish it.
         results = json.loads((self.runs / RUN / 'results.json').read_text())
@@ -1781,7 +1843,7 @@ class SiteMaintenanceTests(unittest.TestCase):
         (run / 'evaluations/evaluations.jsonl').write_text('{"validity": "genuine"}\n')
         (run / 'conference-view/file-1.html').write_text('<!doctype html><html><head></head><body>f</body></html>')
         self.hub = Hub(self.root)
-        publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
+        legacy_publish(self.prepare('published', RUN, OTHER), self.hub, self.hub.download, commit=True,
                 operation=operation, records_in_space=True)
         # Regenerated by newer generators: report page, conference index and judge report page (data unchanged).
         (run / 'results.html').write_text('<!doctype html><html><head></head><body>summary card</body></html>')
