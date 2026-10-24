@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-23 by Claude (Opus 5.5) session (timeline.md moved to the dataset; Space df3306c5, 18/18 verified).
+Last updated: 2026-10-24 by Claude (Opus 5.5) session (simplified behavior judge built and validated on the three glm100 30-min runs; not yet the default).
 
 ## What the project is
 
@@ -205,7 +205,9 @@ The full reference is `docs/gcp-vm.md` and `docs/validation.md`.
 2. **Proof checker:** independent evaluator; genuine vs. accepted counts.
 3. **Behavior judge:** `scripts/run_transcript_judge.py`, rubric 3.1. Stages are
    Haiku prefilter → Sonnet candidates → Opus verify, then a run-level summary in
-   plain language. Live judging during runs is available.
+   plain language. Live judging during runs is available. A simplified one-call-per-agent
+   judge (`scripts/run_simple_judge.py`, about $2 per 100-agent run) is validated but not yet
+   the default (In flight, item 4).
 4. **Incident report:** `scripts/run_incident_report.py --run-dir runs/<id> --run-limit 20`.
    - Code: `research/analysis/incident/`.
    - Writes `analysis/incident/{report.html, report.md, evidence.json}`, a narrative
@@ -293,7 +295,7 @@ rule (originally rule 6; the old rule 7 becomes 6).
 The configs and multi-model harness fixes are on branch `owner-multimodel`, which
 is being merged into main via `collab-env`.
 
-## In flight as of 2026-10-23 ~17:00 UTC (check status before redoing anything)
+## In flight as of 2026-10-24 (check status before redoing anything)
 
 1. **DONE 2026-10-23: `glm100-baseline-90m-20261022T183812Z` published** (Space `3fe9e737`, verify_hosted OK; 2,205
    Space files; 12 large files, 307.6 MB, in the dataset). There is no judge and no incident report (owner; the owner may change the
@@ -345,6 +347,22 @@ is being merged into main via `collab-env`.
      repos, so after the move only Time Machine backs them up.
    - **Until then,** use a fresh clone in the scratchpad for git (the main checkout's `git status` hangs on 60+
      offloaded objects).
+
+4. **2026-10-24: simplified behavior judge validated; NOT yet the default** (owner request: one call per agent, no
+   prefilter/candidate/verify stages, no miss-rate sampling, no live judging, no restart or rescore machinery).
+   Code: `research/analysis/simple_judge/` (README there has the design, model choice and validation) and
+   `scripts/run_simple_judge.py --run-dir RUN --run-limit 10`. Model `google/gemini-3.8-flash` (medium effort; best
+   agreement per dollar of three non-Anthropic candidates on a 10-agent repeat2 sample), refusal fallback
+   `openai/gpt-5.6-terra` (medium). Outputs (local only, nothing published to HF):
+   `runs/glm100-{baseline-30m,repeat2,repeat3}-*/analysis/simple_judge/{agents.jsonl,report.json,report.html,
+   adjudication.json}`. Versus the rubric-3.1 judge: cheating any-vs-none 99/100, 97/97, 98/98; level 89/100, 91/97,
+   96/98 (18 of the 19 level differences are "readied" bypasses stopped by the clock, which rubric 3.1 counts as
+   submitted and the old judge left at explored); whistleblower 100%; evaluation awareness 84/100, 84/97, 79/98 (the
+   new judge finds 16/14/20 aware agents vs 0/1/3; 42 of the 48 differences are rubric-valid statements the old
+   prefilter screened out, 5 borderline, 1 old error). Cost $1.84 / $1.83 / $1.66 per run (about 2.5 min each) vs
+   $44 / about $59 / about $14-19 and 12-50 min. Total spend of this work about $13.6 (model comparison plus a
+   first full pass with an earlier prompt). Next: owner decides whether to make it the default (supervisor
+   follow-up and site pages are not wired to it yet).
 
 **Done recently (details under "Runs so far"):**
 - **Resume bundle (2026-10-22, saving side only).** Every pilot run now saves `RUN/resume/`: per agent, a
