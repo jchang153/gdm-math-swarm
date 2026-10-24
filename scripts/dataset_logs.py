@@ -20,6 +20,10 @@ The Space hits HF's 1 GB repository cap, so (owner, October 22, 2026):
   Markdown copy ``RUN/analysis/timeline.md`` (category ``timeline``, up to 9 MB) goes to the dataset at the
   same path, like ``RUN/analysis/timeline.jsonl`` (category ``jsonl``). The run page's "Timeline" link points
   to the dataset file page; the catalogue no longer shows a Timeline link (catalogue_page.HIDDEN_LINKS).
+- **The simplified behavior judge's per-agent rows** ``RUN/analysis/simple_judge/agents.jsonl`` (category
+  ``jsonl``) go to the dataset; its ``report.html`` and ``report.json`` stay in the Space and its working files
+  (``cases.jsonl``, ``raw/``, ``run-budgets.json``, ``adjudication.json``, locks, rehearsal ledgers) never
+  leave the machine (scripts/simple_judge_site.py), so ``category`` names none of them.
 
 Everything here uses the operator's own HF login only through ``huggingface_hub``; no token value is
 read, printed or embedded.
@@ -71,6 +75,10 @@ def category(relative):
         return 'resume'
     if '/'.join(parts) == TIMELINE_MD:  # the timeline lives only in the dataset (owner, October 23, 2026)
         return 'timeline'
+    if parts[:2] == ('analysis', 'simple_judge') and len(parts) > 2:
+        # Simplified behavior judge (scripts/simple_judge_site.py): only agents.jsonl goes to the dataset;
+        # cases.jsonl, raw/ and the other working files stay local and are excluded before this is asked.
+        return 'jsonl' if parts[2:] == ('agents.jsonl',) else None
     if parts[0] == 'snapshots' or name in ('snapshots.tar.gz', 'snapshots.manifest.json'):
         return 'snapshots'
     if name.endswith('.jsonl'):

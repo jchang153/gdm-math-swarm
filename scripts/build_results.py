@@ -20,7 +20,9 @@ evidence browser, linked separately from the catalogue); the report carries only
 link line ("Behavior judge: see analysis/judge/report.html" or "Behavior judge: not run").
 
 Page layout: a summary card (model, prompt variant, agents, duration, accepted and genuine tasks,
-cost, judge status), tabs Report / Conference / Behavior judge / Incident report (only when
+cost, judge status), tabs Report / Conference / Behavior judge (the simplified judge's
+RUN/analysis/simple_judge/report.html when the run has one, followed by "Behavior judge (rubric 3.1)" when it
+also has the earlier judge; scripts/simple_judge_site.py) / Incident report (only when
 RUN/analysis/incident/report.html exists; scripts/incident_site.py) / Inspect with one-line
 explanations (agent transcripts are read in Inspect View; the site has no custom transcript viewer), the facts sections, and plain explanations of every status label shown. Raw Inspect
 logs are not linked (they were only downloads); Inspect View reads them. Light and dark mode, phone width.
@@ -64,6 +66,7 @@ if str(Path(__file__).resolve().parent) not in sys.path:  # shared site theme li
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 from site_style import themed  # noqa: E402
 from incident_site import add_incident_tab, has_incident_report  # noqa: E402
+from simple_judge_site import add_simple_judge_tab, has_simple_judge  # noqa: E402
 from site_theme import BASE as STYLE, badge_class  # noqa: E402
 
 NANO = Decimal('1e-9')
@@ -543,6 +546,8 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
         results['oversight'] = overseen
         results['reverted_submissions'] = overseen['reverted_submissions']
     page = render(results, title, inspect_logs(run))
+    if has_simple_judge(run):  # navigation only: the simplified judge becomes the Behavior judge tab
+        page = add_simple_judge_tab(page)
     if has_incident_report(run):  # navigation only: the incident report lives on its own page
         page = add_incident_tab(page)
     return json.dumps(results, indent=1) + '\n', page
@@ -862,7 +867,9 @@ def main(argv=None):
         if source.is_symlink() or not source.is_file():
             raise SystemExit(f'No results.json to re-render: {source}')
         page = render(json.loads(source.read_text(encoding='utf-8')), args.title, inspect_logs(run))
-        if has_incident_report(run):  # same navigation as a full build
+        if has_simple_judge(run):  # same navigation as a full build
+            page = add_simple_judge_tab(page)
+        if has_incident_report(run):
             page = add_incident_tab(page)
         target = (args.output_dir or run).resolve() / 'results.html'
         if (target.exists() or target.is_symlink()) and not args.overwrite:

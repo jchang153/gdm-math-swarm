@@ -96,6 +96,17 @@ views without the embedded activity timeline (owner, October 23, 2026: the timel
 logs dataset, linked from the view). Only RUN/conference-view/index.html and its manifest.json change, from the
 records embedded in the published page minus the activity records; see maintain_conference.
 
+--scope simple-judge (no --bundle; --runs-dir, default runs/) adds or replaces a published run's simplified
+behavior judge (owner, October 24, 2026: the default judge; scripts/simple_judge_site.py). It reads only
+RUN/analysis/simple_judge/report.json and agents.jsonl (iCloud placeholders are downloaded first), never the
+rest of the run. Space: RUN/analysis/simple_judge/report.html (re-rendered) and report.json, the Behavior judge
+tab of the published RUN/results.html (the rubric-3.1 judge's tab, if any, stays as "Behavior judge (rubric
+3.1)"), the "Simple behavior judge" link of the published catalogue entry and archive-manifest.json; private
+logs dataset: RUN/analysis/simple_judge/agents.jsonl (added first, verified). cases.jsonl, raw/,
+run-budgets.json, adjudication.json, locks and rehearsal ledgers stay local; any other Space file under
+RUN/analysis/simple_judge/ is refused. One guarded Space commit pinned to the planned revision; rerunning
+continues from the current state (no --resume-from).
+
 Default: read-only plan pinned to the current Space revision. --commit first writes the
 receipt, a before-inventory, backups of the originals and the plan, then uploads in guarded
 batches (catalogue or manifest last), verifies the result against the original pre-maintenance
@@ -123,8 +134,8 @@ from publish_hf_library import (DEFAULT_REPO, RUN_ID, batches, digest, load_bund
                                 merge_entries, payload, remote_files, validate_lfs_additions)
 
 SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'site', 'unlist', 'snapshots', 'incident', 'prune',
-          'migrate-logs', 'conference')
-NO_BUNDLE = ('unlist', 'snapshots', 'prune', 'migrate-logs', 'conference')
+          'migrate-logs', 'conference', 'simple-judge')
+NO_BUNDLE = ('unlist', 'snapshots', 'prune', 'migrate-logs', 'conference', 'simple-judge')
 REPLACEABLE = ('results.html', 'results.json')
 INSPECT_VIEW = 'inspect-view/'
 INSPECT_PAGE = INSPECT_VIEW + 'index.html'
@@ -1279,6 +1290,244 @@ def maintain_incident(bundle, api, download, *, run, commit=False, repo=DEFAULT_
     return result
 
 
+def _read_local(path):
+    """Bytes of one local original (an iCloud placeholder is downloaded first, with a timeout)."""
+    from migrate_dataset import local_copy
+    data, note = local_copy(path)
+    if data is None:
+        raise ValueError(f'Cannot read {path}: {note}')
+    return data
+
+
+def maintain_simple_judge(api, download, *, run, runs_dir, commit=False, repo=DEFAULT_REPO, dataset_repo=None,
+                          receipt=None, backup_dir=None, operation=None, reader=None):
+    """--scope simple-judge (no --bundle): add or replace one published run's simplified behavior judge
+    (scripts/simple_judge_site.py). Reads only RUN/analysis/simple_judge/report.json and agents.jsonl under
+    ``runs_dir`` (never the rest of the run, whose records may be iCloud placeholders) and the published
+    Space files. Plans:
+
+    - Space: RUN/analysis/simple_judge/report.html (re-rendered from the two files with the current
+      generator, site theme and navigation) and report.json; the published RUN/results.html plus the
+      simplified judge's Behavior judge tab (add_simple_judge_tab, never a local page); the published
+      catalogue entry plus its "Simple behavior judge" link (only that entry changes); archive-manifest.json
+      digests of exactly those files, a dataset_files record of agents.jsonl and simple_judge[RUN].
+    - Private logs dataset: RUN/analysis/simple_judge/agents.jsonl (dataset files are immutable: different
+      bytes already there are refused).
+    - Never: cases.jsonl, raw/, run-budgets.json, adjudication.json, locks or rehearsal ledgers; a Space file
+      under RUN/analysis/simple_judge/ other than report.html and report.json is refused (nothing is deleted).
+
+    Default: read-only plan pinned to the current Space revision. --commit writes the receipt and backups,
+    adds agents.jsonl to the dataset (guarded, verified), then makes one guarded Space commit pinned to the
+    planned revision and verifies it. No planned Space file may be or become LFS. Running it again after a
+    failure continues from the current state (every change is idempotent).
+    """
+    import dataset_logs
+    from simple_judge_site import (CATALOGUE_LABEL, DATASET_FILES as SJ_DATASET, SJ_DIR, SPACE_FILES as SJ_SPACE,
+                                   add_simple_judge_tab, simple_judge_files, site_page, with_simple_judge_link)
+    from site_style import themed
+    from space_navigation import private_space_navigation
+    from publish_hf_library import SECRET
+    dataset_repo = dataset_repo or dataset_logs.DATASET_REPO
+    reader = reader or _read_local
+    if not isinstance(run, str) or not RUN_ID.fullmatch(run):
+        raise ValueError('Invalid run ID')
+    if run in unlisted_runs():
+        raise ValueError('Run is unlisted by data/library-unlisted.json; its catalogue entry is not maintained: '
+                         + str(run))
+    if commit and (receipt is None or backup_dir is None):
+        raise ValueError('--commit requires a receipt and a backup directory')
+    source = Path(runs_dir) / run
+    if source.is_symlink() or not source.is_dir():
+        raise ValueError('No local run directory: ' + str(source))
+    if not simple_judge_files(source):
+        raise ValueError(f'{run} has no completed simplified judge ({SJ_DIR}/report.json and agents.jsonl)')
+    folder = source / SJ_DIR
+    local = {name: reader(folder / name) for name in ('report.json', 'agents.jsonl')}
+    prefix = run + '/'
+    page_name = prefix + 'results.html'
+    space_names = [prefix + SJ_DIR + '/' + name for name in SJ_SPACE]
+    agents_rel = SJ_DIR + '/' + SJ_DATASET[0]
+    agents_path = dataset_logs.dataset_path(run, agents_rel)
+
+    info = api.repo_info(repo, repo_type='space', files_metadata=True)
+    base = info.sha
+    remote = remote_files(api, repo, base)  # the current state is pinned to this revision
+    current = inventory(remote)
+    cache = {}
+
+    def fetch(name, revision=base, listing=None):
+        listing = remote if listing is None else listing
+        if (name, revision) not in cache:
+            data = Path(download(repo, name, repo_type='space', revision=revision)).read_bytes()
+            if not matches(data, listing[name]):
+                raise ValueError('Remote metadata mismatch: ' + name)
+            cache[name, revision] = data
+        return cache[name, revision]
+
+    if not any(name.startswith(prefix) for name in remote):
+        raise ValueError('Run is not published; use publish_hf_library.py for new runs: ' + run)
+    for name in [page_name, *REGENERATED, MANIFEST]:
+        if name not in remote:
+            raise ValueError('Remote file required for maintenance is missing: ' + name)
+    stray = sorted(n for n in remote if n.startswith(prefix + SJ_DIR + '/') and n not in space_names)
+    if stray:
+        raise ValueError(f'{len(stray)} Space file(s) under {SJ_DIR}/ are not allowed there (only report.html and '
+                         'report.json); review them, nothing is deleted automatically: ' + ', '.join(stray[:EXAMPLES]))
+
+    old_judge = prefix + 'analysis/judge/report.html' in remote
+    page = site_page(local['report.json'], local['agents.jsonl'], run, old_judge=old_judge)
+    sj_page = private_space_navigation(themed(page), []).encode('utf-8')  # as prepare_hf_library.py does
+    for name, data in (('report.json', local['report.json']), ('agents.jsonl', local['agents.jsonl']),
+                       ('report.html', sj_page)):
+        if SECRET.search(data):
+            raise ValueError(f'Credential-like content in {SJ_DIR}/{name}; not published')
+
+    index_bytes, catalogue_html = fetch('experiments.json'), fetch('index.html')
+    index, archive = json.loads(index_bytes), json.loads(fetch(MANIFEST))
+    if index.get('warnings') or archive.get('warnings'):
+        raise ValueError('Remote catalogue or manifest has warnings; review before maintenance')
+    if archive.get('schema') != 'gdm-private-space/1' or run not in archive.get('runs', []):
+        raise ValueError('Remote archive manifest does not list the run: ' + run)
+    listed = [x.get('run') for x in index.get('experiments', [])]
+    if listed.count(run) != 1 or len(set(listed)) != len(listed):
+        raise ValueError('Remote catalogue must list the run exactly once among unique entries')
+    if regenerate(index['experiments']) != {'experiments.json': index_bytes, 'index.html': catalogue_html}:
+        raise ValueError('The current generator does not reproduce the remote catalogue byte for byte; '
+                         'regenerating it would change other catalogue entries')
+    old_entry = next(x for x in index['experiments'] if x['run'] == run)
+    new_entry = {**old_entry, 'links': with_simple_judge_link(old_entry['links'], run)}
+    regenerated = regenerate(merge_entries(others(index, run), [new_entry]))
+    new_index = json.loads(regenerated['experiments.json'])
+    if (others(new_index, run) != others(index, run) or len(new_index['experiments']) != len(listed)
+            or [x for x in new_index['experiments'] if x['run'] == run] != [new_entry]):
+        raise ValueError('Another catalogue entry would change')
+
+    results_page = add_simple_judge_tab(fetch(page_name).decode('utf-8')).encode('utf-8')  # published page + tab
+    planned = {space_names[0]: sj_page, space_names[1]: local['report.json'], page_name: results_page,
+               **regenerated}
+    files = dict(archive['files'])
+    for name, data in planned.items():
+        files[name] = digest(data)
+    agents_record = {'repo': dataset_repo, 'path': agents_path, **digest(local['agents.jsonl'])}
+    excluded = sorted(p.relative_to(source).as_posix() for p in folder.rglob('*')
+                      if (p.is_file() or p.is_symlink()) and p.name not in (*SJ_SPACE, *SJ_DATASET))
+    new_archive = {**archive, 'files': files, 'total_bytes': sum(x['bytes'] for x in files.values()),
+                   'dataset_repo': archive.get('dataset_repo', dataset_repo),
+                   'dataset_files': {**(archive.get('dataset_files') or {}), prefix + agents_rel: agents_record},
+                   'simple_judge': {**(archive.get('simple_judge') or {}), run: {
+                       'space': [SJ_DIR + '/' + n for n in SJ_SPACE], 'dataset': [agents_rel],
+                       'excluded': len(excluded)}}}
+    planned[MANIFEST] = fetch(MANIFEST) if new_archive == archive else json.dumps(new_archive, indent=2).encode()
+    final_names = set(remote) | set(planned)
+    for label, target in new_entry['links'].items():
+        if not (any(n.startswith(target) for n in final_names) if target.endswith('/') else target in final_names):
+            raise ValueError(f'Catalogue link {label} would point to a missing file: {target}')
+
+    names = sorted(planned)
+    stored_lfs = sorted(n for n in names if n in remote and remote[n].lfs)
+    ruled = lfs_rule_matches(fetch(ATTRIBUTES), names) if ATTRIBUTES in remote else []
+    large = [f'{n} ({len(planned[n])} bytes)' for n in names if len(planned[n]) >= LFS_SAFE_BYTES]
+    if stored_lfs or ruled or large:
+        raise ValueError('Planned file(s) stored as LFS, named by an LFS rule or close to the size HF stores as '
+                         'LFS; the simple-judge scope uploads only regular files: '
+                         + ', '.join([*stored_lfs, *ruled, *large][:EXAMPLES]))
+
+    dataset = api.repo_info(dataset_repo, repo_type='dataset')
+    found = {e.path: (e.size, e.lfs.sha256 if getattr(e, 'lfs', None) else None, e.blob_id)
+             for e in api.get_paths_info(dataset_repo, [agents_path], repo_type='dataset', revision=dataset.sha)}
+    wanted = {**digest(local['agents.jsonl']), 'git_sha1': dataset_logs._git_sha1(local['agents.jsonl'])}
+    if agents_path in found and not dataset_logs.remote_matches(wanted, found[agents_path]):
+        raise ValueError('The logs dataset already holds different bytes at ' + agents_path + ' (dataset files are '
+                         'immutable; a re-judged run needs a reviewed dataset change first)')
+    dataset_state = 'already present' if agents_path in found else 'to add'
+
+    uploads = [(n, planned[n]) for n in names if n not in remote or not matches(planned[n], remote[n])]
+    added = [n for n, _ in uploads if n not in remote]
+    result = {'operation': 'maintain-run', 'scope': 'simple-judge', 'repo': repo, 'private': info.private,
+              'run': run, 'base_revision': base, 'committed': False,
+              'space_files': space_names, 'to_add': added, 'to_replace': [n for n, _ in uploads if n in remote],
+              'results_page_tab': 'added' if page_name in dict(uploads) else 'already present',
+              'rubric_3_1_tab': old_judge,
+              'dataset': {'repo': dataset_repo, 'revision': dataset.sha, 'path': agents_path,
+                          'bytes': wanted['bytes'], 'state': dataset_state},
+              'catalogue': {'entry_diff': entry_diff(old_entry, new_entry),
+                            'other_entries_unchanged': len(listed) - 1},
+              'archive_manifest': {'changed_digests': sorted(n for n in files if archive['files'].get(n) != files[n]),
+                                   'total_bytes_before': archive.get('total_bytes'),
+                                   'total_bytes_after': new_archive['total_bytes']},
+              'local_only': {'files': len(excluded), 'examples': excluded[:10]},
+              'uploads': len(uploads), 'already_applied': not uploads and dataset_state == 'already present'}
+    if CATALOGUE_LABEL not in new_entry['links']:
+        raise ValueError('The catalogue entry would lack its simplified judge link')
+    if not commit or result['already_applied']:
+        return result
+
+    backup_dir, receipt = Path(backup_dir), Path(receipt)
+    revision = base
+
+    def write_receipt(status):
+        write_json(receipt, {**result, 'last_revision': revision, 'status': status})
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    write_receipt('writing backups; nothing uploaded')  # an unwritable receipt fails before any upload
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        write_json(backup_dir / INVENTORY, {'operation': 'maintain-run', 'scope': 'simple-judge', 'repo': repo,
+                                            'run': run, 'revision': base, 'origin_revision': base,
+                                            'resume_from': None, 'files': current})
+        saved = sorted(n for n in [*planned, ATTRIBUTES] if n in remote)
+        for name in saved:
+            target = backup_dir / ORIGINAL / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(fetch(name))
+        write_json(backup_dir / PLAN, result)
+        result.update(backup_dir=str(backup_dir), backups=saved)
+        write_receipt('backups written; nothing uploaded')
+        if dataset_state == 'to add':
+            outcome = dataset_logs.commit_files(api, {agents_path: local['agents.jsonl']}, operation=operation,
+                                                message='Simplified behavior judge rows of ' + run, repo=dataset_repo)
+            result['dataset'].update(revision=outcome['revision'], state='added and verified')
+            write_receipt('dataset file added and verified; Space not yet changed')
+        if uploads:
+            latest = api.repo_info(repo, repo_type='space')
+            if latest.sha != base:
+                raise ValueError('Space changed concurrently; rerun the dry run against the latest revision')
+            response = api.create_commit(
+                repo_id=repo, repo_type='space', parent_commit=base,
+                commit_message='Maintenance update of ' + run + ': simplified behavior judge and its links',
+                operations=[operation(path_in_repo=n, path_or_fileobj=d) for n, d in uploads])
+            revision = response.oid
+            write_receipt('committed; verifying')
+        final = api.repo_info(repo, repo_type='space', files_metadata=True)
+        if final.sha != revision:
+            raise ValueError('Space changed before verification; inspect the latest revision')
+        final_files = remote_files(api, repo, revision)
+        state = inventory(final_files)
+        missing, unexpected = sorted(set(current) - set(state)), sorted(set(state) - set(current) - set(added))
+        if missing or unexpected or not set(added) <= set(state):
+            raise ValueError(f'Remote file inventory changed unexpectedly: missing {missing[:EXAMPLES]}, '
+                             f'unexpected {unexpected[:EXAMPLES]}')
+        for name in current:
+            if name not in planned and not same(current[name], state[name]):
+                raise ValueError('Unrelated remote file changed: ' + name + (
+                    ' (was a planned file stored as LFS?)' if name == ATTRIBUTES else ''))
+        for name, data in planned.items():
+            if final_files[name].lfs or not matches(data, final_files[name]):
+                raise ValueError('File mismatch or stored as LFS after maintenance: ' + name)
+    except Exception as error:
+        try:
+            write_receipt('failed: ' + type(error).__name__ + (': ' + str(error) if isinstance(error, ValueError) else ''))
+        except Exception as receipt_error:  # never hide the original error
+            print(f'Could not record the failure in the receipt {receipt}: {type(receipt_error).__name__}: '
+                  f'{receipt_error}', file=sys.stderr)
+        raise
+    result.update(committed=True, final_revision=revision, status='verified', verification={
+        'final_files': len(state), 'changed_files': sorted(n for n in current if not same(current[n], state[n])),
+        'added_files': added, 'verified_planned_files': len(planned),
+        'verified_preserved_files': len(set(current) - set(planned))})
+    write_receipt('verified')
+    return result
+
+
 DELETE_BATCH = 1000  # loose snapshot deletions per guarded commit
 
 
@@ -1951,7 +2200,10 @@ def main(argv=None):
                              'prune: remove the run\'s large raw LFS files (kept offline, verified against --runs-dir), '
                              'add the offline notice to RUN/results.html and purge the freed LFS objects; '
                              'conference: re-render RUN/conference-view/index.html and its manifest.json without the '
-                             'embedded activity timeline (kept in the private logs dataset), from the published records')
+                             'embedded activity timeline (kept in the private logs dataset), from the published records; '
+                             'simple-judge: RUN/analysis/simple_judge/{report.html,report.json} and the Behavior judge '
+                             'tab of the published RUN/results.html, the catalogue link, agents.jsonl to the private '
+                             'logs dataset, read from --runs-dir (working files stay local)')
     parser.add_argument('--prune-kind', action='append', choices=sorted(PRUNE_KINDS),
                         help='prune scope: file kinds to remove (repeatable; default jsonl and snapshots; eval also '
                              'removes the Inspect logs, after which Inspect View cannot load the run)')
@@ -1963,7 +2215,8 @@ def main(argv=None):
     parser.add_argument('--delete-moved', action='store_true',
                         help='migrate-logs scope: after the verified copy, delete the moved download-only files from '
                              'the Space, repoint page links and purge their LFS objects (never eval)')
-    parser.add_argument('--dataset-repo', default=None, help='migrate-logs scope: the private logs dataset')
+    parser.add_argument('--dataset-repo', default=None,
+                        help='migrate-logs and simple-judge scopes: the private logs dataset')
     parser.add_argument('--pages-dir', type=Path,
                         help='migrate-logs scope: a local copy of the Space pages (used only where byte-identical)')
     parser.add_argument('--replace-judge', action='store_true',
@@ -1974,7 +2227,7 @@ def main(argv=None):
                         help='prepare_hf_library.py bundle containing exactly this run (not used by unlist or '
                              'snapshots)')
     parser.add_argument('--runs-dir', type=Path, default=Path(__file__).resolve().parents[1] / 'runs',
-                        help='snapshots scope: local run records the archive is built from (default runs/)')
+                        help='snapshots, prune and simple-judge scopes: local run records (default runs/)')
     parser.add_argument('--repo-id', default=DEFAULT_REPO)
     parser.add_argument('--commit', action='store_true', help='Upload; otherwise only print the plan')
     parser.add_argument('--receipt', type=Path, help='New host-only receipt path outside the bundle')
@@ -2024,6 +2277,19 @@ def main(argv=None):
             purge=not args.no_purge, pages_dir=args.pages_dir)
         summary = {k: v for k, v in result.items() if k not in ('files', 'checks', 'dataset_files')}
         print(json.dumps(summary, indent=2, default=str))
+        return
+    if args.scope == 'simple-judge':
+        if (args.bundle is not None or args.resume_from is not None or args.replace_judge or args.migrate_category
+                or args.delete_moved or args.pages_dir or args.prune_kind or args.no_purge):
+            parser.error('--scope simple-judge takes only --maintain-run, --runs-dir, --dataset-repo, --repo-id, '
+                         '--commit, --receipt and --backup-dir')
+        if args.commit and (args.receipt is None or args.backup_dir is None):
+            parser.error('--commit requires --receipt and --backup-dir')
+        from huggingface_hub import HfApi, CommitOperationAdd, hf_hub_download
+        print(json.dumps(maintain_simple_judge(HfApi(), hf_hub_download, run=args.maintain_run,
+                                               runs_dir=args.runs_dir, commit=args.commit, repo=args.repo_id,
+                                               dataset_repo=args.dataset_repo, receipt=args.receipt,
+                                               backup_dir=args.backup_dir, operation=CommitOperationAdd), indent=2))
         return
     if args.migrate_category or args.delete_moved or args.dataset_repo or args.pages_dir:
         parser.error('--migrate-category, --delete-moved and --dataset-repo apply only to --scope migrate-logs')

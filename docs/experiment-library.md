@@ -45,7 +45,8 @@ All in `scripts/`; each is documented in its own `--help` and below.
 - `maintain_hf_run.py`: guarded updates of an already published run, `--scope judge` (default),
   `transcripts`, `evaluator`, `results`, `inspect`, `site` or `incident` (`--replace-judge` replaces an already
   published judge build; `site` republishes only regenerated page presentation, see "Site scope" below;
-  `incident` publishes incident reports, see "Incident report outputs"; `prune` removes a run's large raw
+  `incident` publishes incident reports, see "Incident report outputs"; `simple-judge` (no `--bundle`) publishes
+  the simplified behavior judge, see "Simplified behavior judge outputs"; `prune` removes a run's large raw
   files to free storage, see "Storage limit and pruning"). `--scope unlist` (no `--bundle`) removes a run's catalogue row without deleting files,
   after the run is recorded in the tracked `data/library-unlisted.json`
   (run, date, reason). `build_experiment_index.py` and `publish_hf_library.py` leave recorded runs out
@@ -596,6 +597,63 @@ python scripts/maintain_hf_run.py --maintain-run "$RUN_ID" --scope incident --bu
   --backup-dir "$OUT/attempt-1" --receipt "$OUT/attempt-1/maintenance-receipt.json"
 ```
 
+## Simplified behavior judge outputs
+
+The simplified one-pass behavior judge (`research/analysis/simple_judge/`, the default judge by owner decision,
+October 24, 2026) writes `RUN/analysis/simple_judge/`. Where its files go (`scripts/simple_judge_site.py`):
+
+| File | Goes to |
+|---|---|
+| `report.html` (re-rendered at publication from `report.json` and `agents.jsonl` with the current `report.py`), `report.json` | Space |
+| `agents.jsonl` (one row per agent, about 200 KB) | private logs dataset, same path (`dataset_logs` category `jsonl`) |
+| `cases.jsonl` (13 to 42 MB of full record text), `raw/`, `run-budgets.json`, `adjudication.json`, `.simple-judge.lock`, rehearsal ledgers, anything else | local only, never the Space or the dataset |
+
+A run counts as judged when `report.json` and `agents.jsonl` exist (an interrupted judge with only `cases.jsonl`
+and `raw/` is not published); a `report.json` of another run, another schema or `mode` other than `paid` is
+refused. `publish_hf_library.py` refuses any Space file under `RUN/analysis/simple_judge/` other than
+`report.html` and `report.json` (so `cases.jsonl`, `raw/` and `agents.jsonl` never reach the Space), and
+`dataset_logs.category()` names no simplified-judge file except `agents.jsonl`, so the dataset part refuses the
+working files too.
+
+**Run page tabs.** On a run with the simplified judge, the **Behavior judge** tab opens
+`analysis/simple_judge/report.html`; when the run also has the rubric-3.1 judge, that judge stays reachable as
+the next tab, **Behavior judge (rubric 3.1)** (`analysis/judge/report.html`), and from a link in the
+simplified judge's page. A "not run" placeholder is replaced, the tab help explains both judges and the
+summary tile names the simplified judge; the facts of `results.html` (including its `behavior_judge` field,
+which still means the rubric-3.1 judge) are unchanged. `build_results.py` adds the tab itself
+(`add_simple_judge_tab`), as does `prepare_hf_library.py` for the bundle's page. The simplified judge's page
+(counts, per-agent labels, every quote marked verified or not; no scripts; light and dark, following the site
+toggle) carries a visible note: **its evaluation-awareness counts are not comparable with the rubric-3.1
+judge's** (it finds many more; research/analysis/simple_judge/README.md, "Limits"). The local and hosted
+catalogues gain a "Simple behavior judge" link after "Behavior judge"; the catalogue's Behavior judge column
+keeps reading the rubric-3.1 judge's `report.json`. `archive-manifest.json` records the split under
+`simple_judge` (Space files, dataset files, count of local files left out).
+
+For already published runs, `maintain_hf_run.py --scope simple-judge` needs **no bundle**: it reads only
+`RUN/analysis/simple_judge/report.json` and `agents.jsonl` under `--runs-dir` (iCloud placeholders are downloaded
+first; the rest of the run, whose raw records may be "dataless", is never read) plus the published Space
+files. It adds `agents.jsonl` to the private dataset (verified; dataset files are immutable, so different bytes
+already there are refused), then in one guarded Space commit pinned to the planned revision adds or replaces
+`report.html` (re-rendered, themed, with the Space navigation) and `report.json`, adds the tab to the
+**published** `results.html`, adds the link to the **published** catalogue entry (only that entry changes) and
+updates `archive-manifest.json` (digests, a `dataset_files` record of `agents.jsonl`, `simple_judge`). Any other
+Space file under `RUN/analysis/simple_judge/` is refused (nothing is deleted); no planned file may be or become
+LFS. Running it again continues from the current state (no `--resume-from`). Per run:
+
+```bash
+RUN_ID=glm100-repeat2-20261022T055342Z
+OUT=runs/phase-b/simple-judge-publication-$RUN_ID
+PYTHONPATH=scripts:src:. .venv/bin/python scripts/maintain_hf_run.py --maintain-run "$RUN_ID" --scope simple-judge   # plan only
+PYTHONPATH=scripts:src:. .venv/bin/python scripts/maintain_hf_run.py --maintain-run "$RUN_ID" --scope simple-judge \
+  --commit --backup-dir "$OUT/attempt-1" --receipt "$OUT/attempt-1/maintenance-receipt.json"
+python scripts/verify_hosted.py --run "$RUN_ID" --revision FINAL_REVISION
+```
+
+`verify_hosted.py` (default pages) fails when any simplified-judge working file or `agents.jsonl` is stored in
+the Space (`simple_judge_local_only`) and, when the simplified judge's page is published, checks it like the
+other pages plus its comparability note (`simple_judge_note`) and the run page's tabs (`simple_judge_tab`,
+`simple_judge_rubric_3_1_tab`).
+
 ## Snapshot archives (HF file limit)
 
 HF limits a repository to 20,000 files, and the Space reached it (19,937 files at revision
@@ -750,7 +808,8 @@ State on October 22, 2026 (records: `runs/phase-b/hf-library-preparation/logs-mi
   (and `-shm`/`-wal`), and the old custom transcript pages `RUN/transcripts/`. Dataset files are immutable: a
   commit refuses a path that already holds other bytes.
 - **Space**: every page and what pages load: the catalogue, run pages, `results.json`, conference views, judge
-  report and evidence browser (with its JSON), incident reports, Inspect View (app, `logs/listing.json`), plus
+  report and evidence browser (with its JSON), incident reports, the simplified judge's `report.html` and
+  `report.json` (its `agents.jsonl` is in the dataset, its working files stay local), Inspect View (app, `logs/listing.json`), plus
   `signin.html` at the root once switched. `archive-manifest.json` records moved files under `dataset_files`
   (`{repo, path, commit, bytes, sha256, category, moved}`); files pruned earlier stay under `offline_files`.
 - **Conference views** embed no activity timeline (October 23, 2026); their note links `RUN/analysis/timeline.jsonl`

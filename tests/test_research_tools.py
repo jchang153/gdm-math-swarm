@@ -167,7 +167,26 @@ class VerifyHostedTest(unittest.TestCase):
         self.assertEqual(record["revision"], "abc123")
         self.assertEqual({c["check"] for c in record["checks"]},
                          {"private", "current_revision", "stored", "not_lfs", "bundle_match", "served_html",
-                          "served_exact", "no_log_download_link", "range_206"})
+                          "served_exact", "no_log_download_link", "range_206", "simple_judge_local_only"})
+
+    def test_simple_judge_tab_note_and_local_only_files(self):
+        import simple_judge_site
+        run = self.root / "demo-run"
+        (run / "analysis/simple_judge").mkdir(parents=True)
+        (run / "analysis/simple_judge/report.html").write_bytes(b"<!doctype html><p class=note id=sj-comparability>")
+        (run / "results.html").write_text("<!doctype html><nav>" + simple_judge_site.TAB + "</nav>")
+        record = self.run_verify()
+        self.assertTrue(record["ok"], record)
+        checks = {c["check"] for c in record["checks"]}
+        self.assertTrue({"simple_judge_tab", "simple_judge_note", "simple_judge_local_only"} <= checks)
+        self.assertIn(("served_exact", "demo-run/analysis/simple_judge/report.html"),
+                      {(c["check"], c.get("path")) for c in record["checks"]})
+        (run / "analysis/judge").mkdir(parents=True)
+        (run / "analysis/judge/report.html").write_text("<!doctype html>")
+        (run / "analysis/simple_judge/cases.jsonl").write_text("{}")
+        (run / "results.html").write_text("<!doctype html><nav>Behavior judge</nav>")
+        failed = {c["check"] for c in self.run_verify()["checks"] if not c["ok"]}
+        self.assertEqual(failed, {"simple_judge_local_only", "simple_judge_tab", "simple_judge_rubric_3_1_tab"})
 
     def test_detects_raw_inspect_log_download_link(self):
         page = self.root / "index.html"

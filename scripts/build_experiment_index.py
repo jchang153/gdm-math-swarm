@@ -14,6 +14,7 @@ import re
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 from incident_site import has_incident_report, with_incident_link
+from simple_judge_site import has_simple_judge, with_simple_judge_link
 from catalogue_page import CHEATING, COHORT_GLOSS, COHORT_LABELS, COHORTS, FLAGGED, SCRIPT, STYLE, hidden_link
 from site_style import themed
 from space_navigation import private_space_navigation
@@ -109,6 +110,9 @@ def build(runs, hosted=False, unlisted=None):
             if logs.is_dir():
                 entry['links'].update(inspect_log_links(path.parent.name, [
                     p.name for p in logs.iterdir() if p.is_file() and not p.is_symlink()]))
+            # Simplified behavior judge (default judge, October 24, 2026; scripts/simple_judge_site.py).
+            if has_simple_judge(path.parent):
+                entry['links'] = with_simple_judge_link(entry['links'], path.parent.name)
             # Model-written incident report (docs/plan.md, October 21, 2026); only its allowlisted files are published.
             if has_incident_report(path.parent):
                 entry['links'] = with_incident_link(entry['links'], path.parent.name)
