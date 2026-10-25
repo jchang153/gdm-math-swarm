@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-25 by Claude (Opus 5.5) session (website: run clock everywhere, simple judge on the run list, simple-judge filters, shorter incident reports; code on main, local pages rebuilt, HF update prepared but NOT committed; main restored after an accidental mass deletion).
+Last updated: 2026-10-25 by Claude (Opus 5.5) session (website run-clock update published, 18/18 verified; seeded-overseer experiment in preparation).
 
 ## What the project is
 
@@ -381,7 +381,7 @@ is being merged into main via `collab-env`.
      `research/analysis/judge/README.md`). The supervisor still runs the incident report before `build_results.py`
      (Known gotchas).
 
-5. **2026-10-25: website update (owner requests); code on main, HF NOT yet committed.**
+5. **DONE 2026-10-25: website update (owner requests) published.** The operator ran `runs/phase-b/web-clock-20261025/operator-commands.sh` from a fresh clone of main (5ab8e38): catalogue, site, simple-judge (4 runs), incident (14 runs), conference with capture pages (18 runs). verify_hosted `--expect-no-space-logs --expect-run-clock` passed for 18 of 18 runs. Space `used_storage` is 101.0 MB. Log: `runs/phase-b/web-clock-20261025/operator-run.log`.
    - **Main was restored first:** commit `cd3bee7` (2026-10-24) had deleted 744 of 747 tracked files on main by accident
      (only verify_hosted.py, one test and HANDOFF.md survived). `9b6cff4` restored the tree of `bf30865` plus the three
      intended changes. Check `git ls-files | wc -l` (about 750) after any commit from a sparse or broken checkout.
