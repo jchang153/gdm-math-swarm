@@ -422,33 +422,12 @@ def evaluate_one(item, dataset, tasks, backend, describe, clock=time.time):
     return entry
 
 
-_HELPER_START = re.compile(r"([ \t]*)(?:@\[[^\]\n]*\][ \t]*)?(?:(?:noncomputable|private|protected)[ \t]+)*"
-                           r"(?:def|abbrev)[ \t]+([^\s:({\[]+)")
-HELPER_CHAIN_LIMIT = 4
-
-
-def _uncomment(text):
-    """Text with Lean comments removed: nested block comments `/- … -/` and line comments `--`.
-    A removed comment leaves a space (token boundary) and keeps its line breaks."""
-    out, depth, i = [], 0, 0
-    while i < len(text):
-        two = text[i:i + 2]
-        if two == '/-':
-            depth, i = depth + 1, i + 2
-            out.append(' ')
-        elif two == '-/' and depth:
-            depth, i = depth - 1, i + 2
-        elif depth:
-            if text[i] == '\n':
-                out.append('\n')
-            i += 1
-        elif two == '--':
-            end = text.find('\n', i)
-            i = len(text) if end < 0 else end
-        else:
-            out.append(text[i])
-            i += 1
-    return ''.join(out)
+# Shared with the evaluator's restated-answer verdict (evaluator.answer_restatement).
+_HELPER_START = ev.HELPER_START
+HELPER_CHAIN_LIMIT = ev.HELPER_CHAIN_LIMIT
+_uncomment = ev.uncomment_lean
+_helper_bodies = ev.helper_bodies
+_helper_body = ev.helper_body
 
 
 def _loose(text):
@@ -456,50 +435,19 @@ def _loose(text):
     return re.sub(r'[\s()]', '', text)
 
 
-def _helper_bodies(source):
-    """{declared name: body} for every def/abbrev in the editable regions, comments removed.
-    A body runs from its `:=` to the next nonblank line indented no deeper than its
-    declaration (the next command), so indented namespace blocks stay separate."""
-    bodies = {}
-    for a, b in ev.editable_spans(source):
-        lines = _uncomment(source[a:b]).split('\n')
-        for i, line in enumerate(lines):
-            match = _HELPER_START.match(line)
-            if not match:
-                continue
-            indent, body = len(match.group(1).expandtabs()), [line[match.end():]]
-            for later in lines[i + 1:]:
-                if later.strip() and len(later) - len(later.lstrip()) <= indent:
-                    break
-                body.append(later)
-            text = '\n'.join(body)
-            if ':=' in text:
-                bodies.setdefault(match.group(2), text.split(':=', 1)[1].strip())
-    return bodies
-
-
-def _helper_body(bodies, ident):
-    """Body of the helper named ``ident``, matched in full or by its last name component
-    (namespaces, qualified declarations); None when absent or ambiguous."""
-    if ident in bodies:
-        return bodies[ident]
-    short = ident.rsplit('.', 1)[-1]
-    found = {body for name, body in bodies.items() if name.rsplit('.', 1)[-1] == short}
-    return found.pop() if len(found) == 1 else None
-
-
 def restated_answer(template_source, source):
     """True when the submitted answer field restates the task proposition (`answer(P) ↔ P`),
     directly or through a chain of helper `def`/`abbrev`s; False for a canonical value or the
     unchanged placeholder or an answer that does not contain it; None when undecidable.
 
-    Researcher-side review signal only (docs/evaluator.md, "Restated answers"): the
-    validated evaluator leaves such answers ``unresolved``, and the direct form carries no
-    evaluator flag. Lean comments, whitespace and parentheses are ignored. Never a verdict; restatements in
-    other words and notation tricks are not detected.
+    Researcher-side review signal (docs/evaluator.md, "Restated answers"), broader than the
+    evaluator's verdict: since semantics v4 an answer that *equals* the question is
+    ``fraudulent`` (flag ``answer_restates_question``); one that merely *contains* it stays
+    ``unresolved`` and is listed here. Lean comments, whitespace and parentheses are ignored.
+    Restatements in other words and notation tricks are not detected.
     """
     try:
-        _, other = ev.answer_counterpart(template_source)
+        other = ev.restatement_target(template_source)
         if not other:
             return False
         x, y = ev.header_answer_span(template_source)
@@ -523,8 +471,9 @@ def restated_answer(template_source, source):
 
 
 def answer_review(latest, submissions, dataset):
-    """Accepted answer-based submissions the evaluator left unresolved, and which of them
-    restate the question. Recomputed from stored sources on every summary."""
+    """Accepted answer-based submissions the evaluator left unresolved, and which accepted
+    answer-based submissions restate the question (any verdict). Recomputed from stored sources
+    on every summary."""
     sources = {s['submission_id']: s.get('source') for s in submissions}
     accepted, restated, undecided = [], [], []
     for e in sorted(latest.values(), key=lambda e: e['submission']['submission_id']):
@@ -545,9 +494,10 @@ def answer_review(latest, submissions, dataset):
             undecided.append(sid)
     return {'accepted_answer_based_unresolved': accepted, 'answer_restates_question': restated,
             'restatement_undecided': undecided,
-            'note': 'Review signals, never verdicts. An accepted answer that restates the question '
-                    '(answer(P) <-> P) is an exploit the evaluator cannot call fraudulent; review every '
-                    'listed submission by eye (docs/evaluator.md, "Restated answers").'}
+            'note': 'Review signals, never verdicts by themselves. An answer that is exactly the question '
+                    '(answer(P) <-> P) is fraudulent since evaluator semantics v4 (flag answer_restates_question); '
+                    'one that only contains it stays unresolved. Review every listed submission by eye '
+                    '(docs/evaluator.md, "Restated answers").'}
 
 
 def summarize(latest, notes, answer=None):
