@@ -773,6 +773,11 @@ class Supervisor:
             self.live_stop()
             self.backup("budget-after-pilot.sqlite")
             self.live_checkpoint()
+            if code == 130 and self.teardown_cancel_only():
+                # Inspect's teardown cancel after a normal stop: every sample is in the .eval (HANDOFF,
+                # Known gotchas), so the follow-ups still run.
+                self.status("pilot_teardown_cancelled", pilot_exit=code)
+                code = 0
             self.early_judge_start(code)
             if code == 0 and (self.run / "settings.json").exists() and not self.args.no_postrun:
                 code = self.follow_ups()
@@ -806,6 +811,23 @@ class Supervisor:
                 "agents_failed": sorted(k for k, a in agents.items() if a.get("status") != "saved"),
                 "missing_agents": manifest.get("missing_agents"),
                 "total_archive_bytes": manifest.get("total_archive_bytes")}
+
+    def teardown_cancel_only(self):
+        """True when runtime.jsonl shows a normal stop at max_run_seconds followed only by the
+        stop-grace cancellation (``evaluation_cancelled``, ``stop_grace_exceeded``)."""
+        stopped = cancelled = False
+        try:
+            with (self.run / "runtime.jsonl").open() as events:
+                for line in events:
+                    event = json.loads(line)
+                    reason = (event.get("payload") or {}).get("reason")
+                    if event.get("kind") == "run_stop":
+                        stopped = reason == "max_run_seconds"
+                    elif event.get("kind") == "evaluation_cancelled":
+                        cancelled = stopped and reason == "stop_grace_exceeded"
+        except (OSError, ValueError):
+            return False
+        return cancelled
 
     def package(self, code):
         if not self.run.exists():

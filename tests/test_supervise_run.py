@@ -120,6 +120,21 @@ class SuperviseRunTests(unittest.TestCase):
         self.assertFalse((self.phase / "evaluate.exit").exists())
         self.assertTrue((self.phase / "budget-final.sqlite").exists())
 
+    def test_teardown_cancel_after_normal_stop_still_runs_follow_ups(self):
+        # Inspect's exit 130 after a stop at max_run_seconds and stop_grace_exceeded: every sample is logged.
+        stop = ("import json\nopen(run + '/runtime.jsonl', 'a').write(''.join(json.dumps(e) + '\\n' for e in ["
+                "{'kind': 'run_stop', 'payload': {'reason': 'max_run_seconds'}}, "
+                "{'kind': 'evaluation_cancelled', 'payload': {'reason': 'stop_grace_exceeded'}}]))\n")
+        (self.tmp / "scripts" / "run_pilot.py").write_text(STUB_PILOT + stop + "raise SystemExit(130)\n")
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        self.assertEqual((self.phase / "pilot.exit").read_text().strip(), "130")
+        self.assertEqual((self.phase / "evaluate.exit").read_text().strip(), "0")
+
+    def test_other_interrupt_skips_follow_ups(self):
+        (self.tmp / "scripts" / "run_pilot.py").write_text(STUB_PILOT + "raise SystemExit(130)\n")
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 130)
+        self.assertFalse((self.phase / "evaluate.exit").exists())
+
     def test_a_failed_reconciliation_never_stops_the_other_follow_ups(self):
         (self.tmp / "scripts" / "reconcile_ledger.py").write_text("raise SystemExit(1)\n")
         self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
