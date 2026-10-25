@@ -1090,6 +1090,10 @@ def load_host(run_dir, runtime, conf, problems):
         effective = settings.get("effective") or {}
         host["roles"] = dict(effective.get("roles") or {})
         host["overseer"] = effective.get("overseer") or (settings.get("config") or {}).get("overseer")
+        # Seeded runs: the planted seed participant (role "seed"; research/analysis/roles.py).
+        from research.analysis.roles import SEED, seed_agents
+        for agent in seed_agents(settings):
+            host["roles"][agent] = SEED
     except (OSError, ValueError):
         problems.append({"file": "settings.json", "error": "missing_or_invalid"})
     for line, record in enumerate(runtime, 1):
@@ -1274,11 +1278,12 @@ def build_agent(sample, run, *, include_files=True, log_name=None):
 
 
 def agent_role(host, agent):
-    """"overseer" for an overseer run's monitoring agent; None for every other agent (solvers keep the
-    package shape of runs without an overseer)."""
+    """"overseer" for an overseer run's monitoring agent, "seed" for a seeded run's planted participant
+    (which has no Inspect sample, so it normally never gets a history); None for every other agent (solvers
+    keep the package shape of runs without an overseer)."""
     overseer = (host.get("overseer") or {}).get("agent_id")
     role = (host.get("roles") or {}).get(agent) or ("overseer" if agent == overseer else None)
-    return role if role == "overseer" else None
+    return role if role in ("overseer", "seed") else None
 
 
 def run_item_turn(item_id):

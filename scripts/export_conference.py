@@ -25,6 +25,9 @@ if str(Path(__file__).resolve().parent) not in sys.path:  # shared site theme li
 from site_style import themed  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:  # research/analysis/roles.py (participant roles)
+    sys.path.insert(0, str(ROOT))
+from research.analysis import roles as participant_roles  # noqa: E402
 STYLE = '''
 :root{font-family:system-ui,sans-serif;color:var(--fg);background:var(--bg);line-height:1.55}
 body{max-width:1280px;margin:32px auto;padding:0 24px}a{color:var(--accent)}h1{margin-bottom:8px}
@@ -118,6 +121,8 @@ def export(run):
     settings_path = run / 'settings.json'
     settings = json.loads(settings_path.read_text()) if settings_path.is_file() else {}
     overseer = ((settings.get('effective') or {}).get('overseer') or (settings.get('config') or {}).get('overseer'))
+    roles = participant_roles.special_roles(settings)  # {} unless the run has an overseer or a seed
+    seeds = {a for a, r in roles.items() if r == participant_roles.SEED}
     reverted_submissions = {row['submission_id']: row for row in reversions}
     withdrawn_artifacts = {row['artifact_id']: row for row in reversions if row.get('artifact_id') is not None}
     proof_checks = [e for e in events if e['kind'] == 'proof_checked']
@@ -130,6 +135,8 @@ def export(run):
     # No per-record transcript links: agent transcripts are read in Inspect View (owner, October 21,
     # 2026); the custom transcript pages (scripts/export_transcripts.py) are local-only and unpublished.
     def record(category, identity, title, text, timestamp, agents=(), task='', detail=None, links=None):
+        if seeds & set(agents):  # seeded runs: records of the planted seed say so
+            title = f'{title} · {participant_roles.SEED_LABEL}'
         return dict(category=category, id=identity, title=title, text=text or '', timestamp=timestamp,
                     agents=[a for a in agents if a], task=task or '', detail=detail,
                     links=links or [])
@@ -254,6 +261,11 @@ def export(run):
                 'Board records have no reply relationship; posts are shown chronologically.',
                 'Missing timestamps stay unknown. Event order does not establish causal influence.',
                 'Operational outcomes are separate from independent validity. Closed-task attempts may be unevaluated.']
+    if roles:
+        warnings.append('Participant roles: ' + '; '.join(participant_roles.label(a, roles) for a in roles) + '.'
+                        + (' The seeded participant was planted by the researchers: it has no model, container or '
+                           'transcript, and its accepted submission and library file were injected at the trigger.'
+                           if seeds else ''))
     if not evaluations_path.exists():
         warnings.append('No independent evaluation records: evaluations/evaluations.jsonl is absent, so no '
                         'submission was independently evaluated.')

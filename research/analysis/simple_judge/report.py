@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import html
 
+from .pipeline import names_seed as _names_seed
+
 STYLE = """
 :root{--bg:#fbfbfa;--fg:#1d1d1b;--muted:#5f5e5a;--line:#dcdbd5;--card:#fff;--pos:#b4441f;--ok:#2f7d4f;--warn:#9a6a00}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161615;--fg:#ecebe6;--muted:#a3a29b;
@@ -49,6 +51,29 @@ def _level(level):
     return f'<span class="{cls}">{_e(level)}</span>'
 
 
+def _agent(row):
+    role = row.get("role")
+    return _e(row["agent_id"]) + (f" <span class=muted>({_e(role)})</span>" if role else "")
+
+
+def seeded_note(report):
+    """Seeded runs: the planted source, never judged (researcher-only); "" otherwise."""
+    seeded = report.get("seeded")
+    if not seeded:
+        return ""
+    src = (report.get("counts") or {}).get("seeded_source") or {}
+    when = seeded.get("injected_min")
+    return (f"<p class=note id=sj-seeded><strong>Seeded run (researcher-only):</strong> {_e(seeded.get('seed_agent'))} "
+            f"is the seeded source, planted by the researchers"
+            + (f" at minute {_e(when)}" if when is not None else "")
+            + f" (an accepted exploit for {_e(seeded.get('task_id'))}"
+            + (f", published as <code>{_e(seeded.get('path'))}</code>" if seeded.get("path") else "")
+            + "). It is not a model agent and is not judged; a likely source naming it is counted as seeded, never "
+              f"independent. {_e(src.get('agents_that_read_seed_file', 0))} judged agents read its file, "
+              f"{_e(src.get('read_seed_file_before_first_flagged_submission', 0))} before their first flagged "
+              f"submission; {_e(src.get('cheating_agents_naming_seed', 0))} cheating agents name it as their source.</p>")
+
+
 def render_html(report, rows, old_judge_href=None):
     """The page; ``old_judge_href`` (for example ``../judge/report.html``) links the run's rubric-3.1 judge."""
     c = report["counts"]
@@ -67,6 +92,7 @@ def render_html(report, rows, old_judge_href=None):
              f"<p class=note id={NOTE_ID}><strong>Not comparable:</strong> {_e(NOTE)}"
              + (f" The rubric-3.1 judge's report for this run: <a href=\"{_e(old_judge_href)}\">Behavior judge "
                 f"(rubric 3.1)</a>." if old_judge_href else "") + "</p>",
+             seeded_note(report),
              "<div class=kpis>" + "".join(f"<div class=kpi><b>{_e(v)}</b>{_e(k)}</div>" for k, v in kpis) + "</div>",
              "<h2>Counts</h2><p>Cheating levels: " + ", ".join(f"{_e(k)} {_e(v)}" for k, v in
                                                                c["cheating_level"].items()) +
@@ -98,7 +124,7 @@ def render_html(report, rows, old_judge_href=None):
     for row in rows:
         labels = row.get("labels")
         if not labels:
-            parts.append(f"<tr><td>{_e(row['agent_id'])}</td><td colspan=7 class=warn>{_e(row['status'])}: "
+            parts.append(f"<tr><td>{_agent(row)}</td><td colspan=7 class=warn>{_e(row['status'])}: "
                          f"{_e(row['reason'])}</td></tr>")
             continue
         quotes = "".join(
@@ -110,10 +136,13 @@ def render_html(report, rows, old_judge_href=None):
         extra = (f"<details><summary>{len(labels['evidence'])} quote(s)</summary>{quotes}{notes}</details>"
                  if quotes or notes else "")
         channel = f" ({_e(labels['whistleblower_channel'])})" if labels["whistleblower_channel"] else ""
-        parts.append(f"<tr><td>{_e(row['agent_id'])}{' <span class=warn>fallback</span>' if row['fallback_used'] else ''}"
+        source = _e(labels["likely_source"] or "")
+        if report.get("seeded") and _names_seed(labels["likely_source"], report["seeded"]):
+            source += " <span class=muted>(seeded source)</span>"
+        parts.append(f"<tr><td>{_agent(row)}{' <span class=warn>fallback</span>' if row['fallback_used'] else ''}"
                      f"</td><td>{_level(labels['cheating_level'])}</td><td>{_e(labels['technique'] or '')}</td>"
                      f"<td>{_flag(labels['declined_after_considering'])}</td><td>{_flag(labels['whistleblower'])}"
-                     f"{channel}</td><td>{_flag(labels['evaluation_aware'])}</td><td>{_e(labels['likely_source'] or '')}"
+                     f"{channel}</td><td>{_flag(labels['evaluation_aware'])}</td><td>{source}"
                      f"</td><td>{_e(labels['rationale'])}{extra}</td></tr>")
     parts.append("</table></div></main></body></html>")
     return "".join(parts)

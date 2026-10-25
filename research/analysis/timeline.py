@@ -1240,6 +1240,16 @@ def build(run_dir, *, repo_root=REPO_ROOT, templates=None, include_inspect=True,
                           rapid_count=rapid_count, poll_threshold=poll_threshold, run_dir=run_dir)
     for entry in entries:
         entry.pop("_run_dir", None)
+    # Participant roles (overseer and seeded runs only; research/analysis/roles.py): flags on a non-solver carry
+    # its role, and the seeded participant's flags are marked as the planted source (not a model agent).
+    from research.analysis import roles as participant_roles
+    roles = participant_roles.special_roles(run_dir)
+    for flag in flags:
+        role = roles.get(flag.get("agent_id"))
+        if role:
+            flag["agent_role"] = role
+            if role == participant_roles.SEED and isinstance(flag.get("detail"), dict):
+                flag["detail"]["seeded_source"] = participant_roles.SEED_LABEL
     seqs = [e["conference_seq"] for e in entries if e["source"] == "conference"]
     counts = defaultdict(int)
     for entry in entries:
@@ -1256,6 +1266,12 @@ def build(run_dir, *, repo_root=REPO_ROOT, templates=None, include_inspect=True,
                "state_sqlite_available": state.available, "template_check": template_check,
                "inspect": inspect_info, "read_problems": problems, "rubric_sha256": rubric_hash()[1],
                "model_calls": 0, "credentials_read": False}
+    if roles:
+        summary["participant_roles"] = roles
+    seeded = participant_roles.seeded_info(run_dir)
+    if seeded:
+        summary["seeded"] = dict(seeded, label=participant_roles.SEED_LABEL,
+                                 injection=participant_roles.injection(run_dir))
     return entries, flags, summary
 
 
@@ -1288,7 +1304,8 @@ def write_outputs(out_dir, entries, flags, summary, markdown=True):
                          f"{e['kind']:<26} {e.get('summary', '')[:180]}  [{where}]")
         lines += ["```", "", "## Candidate flags", ""]
         for f in flags:
-            lines.append(f"- {f['flag_id']} {f['time'] or '(untimed)'} {f['agent_id']} **{f['kind']}** "
+            who = f["agent_id"] + (f" ({f['agent_role']})" if f.get("agent_role") else "")
+            lines.append(f"- {f['flag_id']} {f['time'] or '(untimed)'} {who} **{f['kind']}** "
                          f"({f['priority']}) -> {', '.join(f['candidate_labels']) or 'context'}")
         (out / "timeline.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
