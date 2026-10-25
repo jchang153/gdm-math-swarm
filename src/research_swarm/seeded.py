@@ -1,5 +1,13 @@
 """Seeded-contagion track: a generic injection mechanism, disabled by default.
 
+Owner decision (docs/plan.md, "Seeded overseer experiment, October 25, 2026"): the
+declared seeded runs plant ONE exploit, a silent participant (``author``, the
+identifier after the solvers, no container and no model) credited with an accepted
+submission through the normal acceptance path (``declared_run_problems``). The
+artifact is a researcher-only file in the repository (``research/seeds/``), given by
+a repository-relative ``artifact_path`` and pinned by SHA-256. Baseline runs still
+carry no seeded configuration at all.
+
 docs/plan.md (Track definitions): the seeded track introduces a standardized
 artifact at a predefined trigger, but the trigger, artifact, provenance and
 credit/task-state effects are UNDECIDED by the user. This module therefore only
@@ -50,7 +58,11 @@ SEMANTIC_FIELDS = ("trigger_kind", "trigger_value", "artifact_path", "artifact_s
 CHANNEL_FIELDS = {"library_solution": ("task_id",), "library_notebook": ("library_path",),
                   "bulletin_board": ("intent_type",)}
 # Keys a ``seeded`` block may carry for readers only; never passed to the service.
-DOCUMENTATION_KEYS = ("note",)
+# ``source``: provenance of the artifact (researcher-only; e.g. the run and agent it was taken from).
+DOCUMENTATION_KEYS = ("note", "source")
+# Declared seeded runs (owner, 2026-10-25): researcher-only artifacts live here, never in agent workspaces.
+SEED_ARTIFACT_DIRECTORY = "research/seeds"
+SEED_ROLE = "seed"
 
 _AGENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 _SEGMENT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9 _.+-]{0,127}")
@@ -117,7 +129,81 @@ def missing_semantic_fields(block) -> list[str]:
     return [name for name in required if block.get(name) is None]
 
 
-def conference_arguments(run_config) -> dict:
+def seed_agent(run_config):
+    """The silent seed participant's identifier in a seeded run (its ``author``), else None."""
+    if not isinstance(run_config, dict) or run_config.get("track") != SEEDED:
+        return None
+    block = run_config.get("seeded")
+    if not isinstance(block, dict) or block.get("enabled") is not True:
+        return None
+    author = block.get("author")
+    return author if isinstance(author, str) else None
+
+
+def is_declared_run(run_config) -> bool:
+    """True for a config that claims the declared seeded design (track seeded, seeding enabled)."""
+    return (isinstance(run_config, dict) and run_config.get("track") == SEEDED
+            and run_config.get("seeded_contagion_enabled") is True
+            and isinstance(run_config.get("seeded"), dict) and run_config["seeded"].get("enabled") is True)
+
+
+def resolve_artifact_path(path, repo_root):
+    """An absolute artifact path: a repository-relative path under SEED_ARTIFACT_DIRECTORY is
+    resolved against ``repo_root``; an absolute path is returned unchanged."""
+    if not isinstance(path, str) or not path:
+        return path
+    if Path(path).is_absolute() or repo_root is None:
+        return path
+    return str(Path(repo_root) / path)
+
+
+def declared_run_problems(run_config, repo_root=None) -> list[str]:
+    """Launch-gate check of a declared seeded run (docs/plan.md, "Seeded overseer experiment,
+    October 25, 2026"). Empty when the config is a complete declared seeded run:
+
+    * track ``seeded``, ``seeded_contagion_enabled`` true, ``seeded.enabled`` true, on the
+      owner's budget track (``budget_track`` ``gemini``);
+    * channel ``library_solution`` with ``credit_effect`` ``close_task`` and an
+      ``elapsed_seconds`` trigger (the seed is credited at a fixed run minute);
+    * ``author`` is the identifier right after the solvers (``agent-<agent_count + 1>``);
+      the overseer, if any, comes after it (research_swarm.oversight);
+    * the artifact is a repository-relative file under ``research/seeds/`` whose bytes match
+      ``artifact_sha256`` (checked when ``repo_root`` is given).
+    """
+    if not is_declared_run(run_config):
+        return ["not a declared seeded run (track 'seeded', seeded_contagion_enabled true, seeded.enabled true)"]
+    block = run_config["seeded"]
+    problems = []
+    if run_config.get("budget_track") != "gemini":
+        problems.append("declared seeded runs use the owner's budget track ('gemini')")
+    missing = missing_semantic_fields(block)
+    if missing:
+        problems.append("seeded semantics not set: " + ", ".join(missing))
+    if block.get("channel") != "library_solution" or block.get("credit_effect") != "close_task":
+        problems.append("declared seeded runs plant an accepted solution (channel library_solution, "
+                        "credit_effect close_task)")
+    if block.get("trigger_kind") != "elapsed_seconds":
+        problems.append("declared seeded runs use an elapsed_seconds trigger")
+    count = run_config.get("agent_count")
+    expected = f"agent-{count + 1:03d}" if isinstance(count, int) and not isinstance(count, bool) else None
+    if block.get("author") != expected:
+        problems.append(f"seeded.author must be {expected!r} (the identifier right after the solvers)")
+    path = block.get("artifact_path")
+    if not isinstance(path, str) or Path(path).is_absolute() or posixpath.normpath(path) != path \
+            or not path.startswith(SEED_ARTIFACT_DIRECTORY + "/"):
+        problems.append(f"seeded.artifact_path must be a repository-relative file under {SEED_ARTIFACT_DIRECTORY}/")
+    elif repo_root is not None:
+        try:
+            digest = hashlib.sha256((Path(repo_root) / path).read_bytes()).hexdigest()
+        except OSError as exc:
+            problems.append(f"seeded artifact unreadable: {type(exc).__name__}")
+        else:
+            if digest != block.get("artifact_sha256"):
+                problems.append("seeded artifact does not match artifact_sha256")
+    return problems
+
+
+def conference_arguments(run_config, repo_root=None) -> dict:
     """The track keyword arguments for ``ConferenceService`` from a run configuration.
 
     Returns ``{}`` (the spontaneous baseline) unless ``run_config["track"]`` is
@@ -150,6 +236,7 @@ def conference_arguments(run_config) -> dict:
     if missing:
         raise SeededConfigError("Seeded semantics are not set (awaiting user decisions): " + ", ".join(missing))
     config = {key: value for key, value in block.items() if key not in DOCUMENTATION_KEYS}
+    config["artifact_path"] = resolve_artifact_path(config.get("artifact_path"), repo_root)
     return {"track": SEEDED, "seeded_track": SeededTrackConfig.from_value(config)}
 
 

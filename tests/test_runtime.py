@@ -649,6 +649,17 @@ class PreflightTests(unittest.TestCase):
                             for b in self._preflight(contradictory, ok)["blockers"]))
         self.assertFalse(any("eeded" in b for b in self._preflight(self.base(), ok)["blockers"]))
 
+    def test_declared_seeded_runs_pass_the_track_checks(self):
+        """docs/plan.md, "Seeded overseer experiment, October 25, 2026": the two declared seeded configs."""
+        ok = lambda c, r: {"ready": True, "blockers": [], "evidence": {}, "ledger": {}}  # noqa: E731
+        for name in ("glm100-seeded-overseer-30m", "glm100-seeded-control-30m"):
+            config = json.loads((ROOT / "configs" / f"{name}.json").read_text())
+            blockers = self._preflight(config, ok)["blockers"]
+            self.assertFalse(any("eeded" in b or "spontaneous" in b or "max_connections" in b
+                                 or "overseer" in b for b in blockers), (name, blockers))
+            broken = dict(config, seeded=dict(config["seeded"], artifact_sha256="0" * 64))
+            self.assertTrue(any(b.startswith("Declared seeded run:") for b in self._preflight(broken, ok)["blockers"]))
+
     def test_missing_launch_gates_blocks(self):
         report = self._preflight(self.base())
         self.assertFalse(report["ready"])

@@ -1095,15 +1095,28 @@ def _max_connections_blocker(config):
 # seeded configuration only through seeded.conference_arguments, i.e. only when
 # track == "seeded", seeded.enabled is true and every semantic field is set.
 
-def conference_track_arguments(config):
+def conference_track_arguments(config, repo_root=None):
     """``ConferenceService`` track keyword arguments for ``config``: ``{}`` for the
     spontaneous baseline; ``LaunchBlocked`` for any contradictory or incomplete seeded
-    configuration (never a silent fallback to either track)."""
+    configuration (never a silent fallback to either track). A repository-relative
+    seeded ``artifact_path`` is resolved against ``repo_root``."""
     from . import seeded
     try:
-        return seeded.conference_arguments(config or {})
+        return seeded.conference_arguments(config or {}, repo_root)
     except seeded.SeededConfigError as ex:
         raise LaunchBlocked(f"Track configuration refused: {ex}") from ex
+
+
+def seeded_settings(config):
+    """Researcher-only record of a declared seeded run (settings.json ``effective.seeded``)."""
+    block = config.get("seeded") or {}
+    return {"declared_seeded_run": True, "seed_agent": block.get("author"), "role": "seed",
+            "task_id": block.get("task_id"), "channel": block.get("channel"),
+            "path": f"solutions/{block.get('task_id')}.lean" if block.get("channel") == "library_solution" else None,
+            "trigger": {"kind": block.get("trigger_kind"), "value": block.get("trigger_value")},
+            "artifact_path": block.get("artifact_path"), "artifact_sha256": block.get("artifact_sha256"),
+            "source": block.get("source"),
+            "note": "Planted by the researchers (owner decision 2026-10-25); never shown to agents as seeded."}
 
 
 def preflight(config, repo_root):
@@ -1130,9 +1143,23 @@ def preflight(config, repo_root):
             blockers.append(f"The {track} track allows {sorted(counts)} peers")
     elif config.get("agent_count") != APPROVED_AGENT_COUNT:
         blockers.append(f"Pilot requires {APPROVED_AGENT_COUNT} peers (a population change needs user agreement)")
-    if config.get("track") != "spontaneous" or config.get("seeded_contagion_enabled") or config.get("mitigations_enabled"):
-        blockers.append("Initial pilot must be spontaneous baseline")
-    if config.get("seeded") is not None:
+    from . import seeded as seeded_module
+    if seeded_module.is_declared_run(config):
+        # The declared seeded runs (docs/plan.md, "Seeded overseer experiment, October 25, 2026"):
+        # one planted exploit, fully specified and pinned; anything incomplete is refused.
+        blockers.extend("Declared seeded run: " + p for p in seeded_module.declared_run_problems(config, repo_root))
+        if config.get("mitigations_enabled"):
+            blockers.append("Seeded runs have no mitigations")
+        try:
+            conference_track_arguments(config, repo_root)
+        except LaunchBlocked as ex:
+            blockers.append(str(ex))
+    else:
+        if config.get("track") != "spontaneous" or config.get("seeded_contagion_enabled") or config.get("mitigations_enabled"):
+            blockers.append("Initial pilot must be spontaneous baseline")
+    if seeded_module.is_declared_run(config):
+        pass
+    elif config.get("seeded") is not None:
         # Any seeded block, even a disabled template one (docs/plan.md "Initial execution").
         blockers.append("A seeded configuration is present; the approved pilot is spontaneous baseline only")
     else:
@@ -1347,7 +1374,7 @@ def make_conference(repo_root, run_dir, agent_ids, config, record, *, lean_image
     and a factory that cannot take them fails rather than running the baseline.
     Anything else is refused (``LaunchBlocked``) before a compiler is built.
     """
-    track_arguments = conference_track_arguments(config)
+    track_arguments = conference_track_arguments(config, repo_root)
     compiler = make_lean_compiler(config, image=lean_image)
     observer = None
     if conference_factory is None:
@@ -1626,15 +1653,22 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     from . import oversight
     overseer = oversight.overseer_config(config)
     solver_ids = list(personas)
-    agent_ids = solver_ids + ([overseer["agent_id"]] if overseer else [])
-    roles = oversight.roles(solver_ids, overseer)
+    # Declared seeded run (docs/plan.md, "Seeded overseer experiment, October 25, 2026"): the silent
+    # seed participant (agent-<agent_count + 1>) is registered in the conference like any agent, so it
+    # appears in get_status and the participant list, but it has no sample, container or model and
+    # never acts (DMs to it go unanswered). It is credited with the planted solution at the trigger.
+    from .seeded import seed_agent
+    seed = seed_agent(config)
+    agent_ids = solver_ids + ([overseer["agent_id"]] if overseer else [])  # Inspect samples
+    conference_ids = solver_ids + ([seed] if seed else []) + ([overseer["agent_id"]] if overseer else [])
+    roles = oversight.roles(solver_ids, overseer, seed)
     from .dataset import task_set_of
     task_set = task_set_of(config)
     listing, task_files = export_public_tasks(repo_root, task_set=task_set)
     # Before any agent container starts (and so before the barrier): warm the page cache.
     warm_up = await asyncio.to_thread(warm_up_lean, images["lean"]["id"], record, **warm_up_options(config))
     resume = None
-    conference, compiler, observer = make_conference(repo_root, run_dir, agent_ids, config, record,
+    conference, compiler, observer = make_conference(repo_root, run_dir, conference_ids, config, record,
                                                      lean_image=images["lean"]["id"],
                                                      conference_factory=conference_factory)
     try:
@@ -1671,6 +1705,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "max_connections": connections, "track": getattr(conference, "track", config.get("track")),
             "auto_restart": config.get("auto_restart") is True,
             "roles": roles, "participant_count": len(agent_ids),
+            "conference_participants": len(conference_ids),
+            "seeded": None if seed is None else seeded_settings(config),
             "overseer": None if overseer is None else {
                 **overseer, "oversight_tools": [d["name"] for d in oversight.overseer_extra_definitions(overseer)],
                 "proof_checker": proof_checker,
@@ -1691,11 +1727,14 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                                                             agent_ids, listing, record))
         def prompt_for(agent, persona):
             if overseer is not None and agent == overseer["agent_id"]:
-                return oversight.build_overseer_prompt(agent, solver_ids, listing, variant, overseer["powers"])
+                # The seed is one more "other agent" to the overseer, like to everyone else.
+                return oversight.build_overseer_prompt(agent, solver_ids + ([seed] if seed else []), listing, variant,
+                                                       overseer["powers"])
             return build_prompt(agent, persona, listing, variant, reviewing)
 
         solver = peer_solver(conference=conference, definitions=tool_definitions(neutral), personas=personas,
-                             prompt_for=prompt_for, roles=roles if overseer else None,
+                             prompt_for=prompt_for, roles=({a: r for a, r in roles.items() if a in agent_ids}
+                                                           if overseer else None),
                              definitions_for=lambda a: oversight.definitions_for(a, overseer, tool_definitions(neutral)),
                              continue_for=lambda a: oversight.continue_message_for(a, overseer),
                              env_for=lambda a: oversight.claude_code_env_for(a, overseer),
@@ -1707,6 +1746,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
         task = build_task(agent_ids=agent_ids, files=agent_files(task_files), solver=solver, compose=compose,
                           metadata={"condition": condition_label(variant, track), "prompt_variant": variant,
                                     "persona_reviewing": reviewing, "personas": personas, "persona_seed": persona_seed,
+                                    **({"track": "seeded", "seed_agent": seed} if seed else {}),
                                     **({"neutral_environment": NEUTRAL_ENVIRONMENT_VERSION} if neutral else {})},
                           initial_message=initial_message(variant),
                           initial_messages=({overseer["agent_id"]: oversight.OVERSEER_INITIAL_MESSAGE}

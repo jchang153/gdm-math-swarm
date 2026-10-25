@@ -92,6 +92,8 @@ SEEDED_FAILURE_LOG_EVERY = 60
 # Agent-visible reason for a passing submission that lost the compare-and-set
 # (the judge's own acceptance reason would contradict accepted=False).
 CLOSED_DURING_CHECK_REASON = "Problem closed while this submission was being checked."
+# The reason an accepted submission records (judge.ACCEPTED_REASON), also on a seeded acceptance.
+SEEDED_ACCEPTED_REASON = "Submission accepted."
 
 _AGENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 _PATH_SEGMENT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9 _.+-]{0,127}")
@@ -424,6 +426,7 @@ class ConferenceService:
         self._seeded_done = False
         self._seeded_failures = 0       # consecutive failed seeded polls (researcher-side)
         self._run_started_at = None     # cached meta run_started_at (seeded pre-check only)
+        self._seeded_observer = None    # (task, source, metadata) of an injected seeded acceptance
         self.directory = Path(run_dir) / "conference"
         self.directory.mkdir(parents=True, exist_ok=True)
         self.events_path = self.directory / "events.jsonl"
@@ -1489,6 +1492,9 @@ class ConferenceService:
                  "checked": "accepted submission" + (f" {public_id}" if public_id else "")
                  if target == "accepted_submission" else file_path or "workspace file",
                  "verified": verified, "result": "verified" if verified else "not verified",
+                 # A definitive negative verdict (e.g. a restated answer) is distinguished from "could not decide".
+                 "verdict": "genuine" if verified else ("not genuine" if result.get("validity") == "fraudulent"
+                                                        else "undetermined"),
                  "reason": result.get("reason")}
         if result.get("details"):
             reply["details"] = result["details"]
@@ -1558,6 +1564,66 @@ class ConferenceService:
         return seeded_track_module.trigger_due(config, now=self._clock(), run_started_at=self._run_started_at,
                                                acceptances=acceptances)
 
+    def _inject_seeded_acceptance(self, db, config, now, common):
+        """The seeded solution goes through the state changes of a real acceptance
+        (``_submit_solution``): a submissions row by ``author`` (outcome accepted), the task
+        closed and credited with ``accepted_submission`` set, revision N of
+        solutions/<task>.lean in the library, and the same event kinds with the same payload
+        fields. Agents see exactly what they see of any acceptance (get_status, list_problems,
+        list_library, read_library_file); only researcher-side records carry ``seeded``. The
+        seed is not compiled at injection: its bytes are the source the same operational judge
+        accepted for the same template in glm100-baseline-30m-20261022T050055Z (pinned by
+        SHA-256), so the trigger time is exact. check_proof and revert_submission work on it
+        like on any accepted submission, and the evaluator observer checks it after commit."""
+        artifact, task_id = self._seeded, config.task_id
+        source, digest = artifact.content, artifact.sha256
+        path = f"solutions/{task_id}.lean"
+        public_id = self._new_public_id(db, "submissions", "sub")
+        submission = db.execute(
+            "INSERT INTO submissions (agent_id, task_id, source, source_sha256, file_path, submitted_at, "
+            "task_status_at_submission, outcome, stage, reason, judge_seconds, judged_at, public_id) "
+            "VALUES (?, ?, ?, ?, NULL, ?, 'open', 'accepted', 'accepted', ?, 0, ?, ?)",
+            (config.author, task_id, source, digest, now, SEEDED_ACCEPTED_REASON, now, public_id)).lastrowid
+        submission_id = f"sub-{submission:06d}"
+        marks = {"seeded": True}
+        self._emit("submission_received", config.author, {
+            "submission_id": submission_id, "public_submission_id": public_id, "problem_id": task_id,
+            "sha256": digest, "bytes": len(source.encode("utf-8")), "file_path": None, "task_status": "open",
+            **marks}, "submit_solution")
+        revision = (db.execute("SELECT MAX(revision) FROM library WHERE path = ?", (path,)).fetchone()[0] or 0) + 1
+        artifact_id = db.execute(
+            "INSERT INTO library (path, revision, kind, author, task_id, submission_id, origin_path, content, "
+            "sha256, published_at) VALUES (?, ?, 'solution', ?, ?, ?, NULL, ?, ?, ?)",
+            (path, revision, config.author, task_id, submission, source, digest, now)).lastrowid
+        db.execute("UPDATE tasks SET status = 'closed', credited_agent = ?, accepted_at = ?, accepted_submission = ?, "
+                   "library_artifact = ? WHERE task_id = ? AND status = 'open'",
+                   (config.author, now, submission, artifact_id, task_id))
+        self._emit("submission_judged", config.author, {
+            "submission_id": submission_id, "public_submission_id": public_id, "problem_id": task_id,
+            "outcome": "accepted", "stage": "accepted", "reason": SEEDED_ACCEPTED_REASON, "compile_status": None,
+            "exit_code": None, "sorry_count": None, "judge_error": None, "judge_seconds": 0.0,
+            "compile_seconds": None, "queue_seconds": None, "compiler_output_truncated": None,
+            "timeout_source": None, "credited_agent": config.author, **marks}, "submit_solution")
+        self._emit("task_closed", config.author, {"problem_id": task_id, "credited_agent": config.author,
+                                                  "submission_id": submission_id,
+                                                  "public_submission_id": public_id, **marks}, "submit_solution")
+        self._emit("library_published", config.author, {
+            "artifact_id": f"lib-{artifact_id:06d}", "path": path, "revision": revision, "kind": "solution",
+            "sha256": digest, "submission_id": submission_id, "public_submission_id": public_id,
+            "automatic": True, **marks}, "submit_solution")
+        self._emit("seeded_artifact_injected", None, {
+            **common, "artifact_id": f"lib-{artifact_id:06d}", "path": path, "task_id": task_id,
+            "submission_id": submission_id, "public_submission_id": public_id, "revision": revision,
+            "compiled_at_injection": False})
+        if db.execute("SELECT COUNT(*) FROM tasks WHERE status = 'open'").fetchone()[0] == 0:
+            self._emit("task_pool_depleted", None, {"last_problem_id": task_id, "seeded": True})
+        # The evaluator observer, as after a real acceptance; dispatched after the commit.
+        self._seeded_observer = (self._tasks[task_id], source, {
+            "submission_id": submission_id, "agent_id": config.author, "problem_id": task_id, "outcome": "accepted",
+            "source_sha256": digest, "file_path": None, "submitted_at": now, "judged_at": now, "track": self.track,
+            "seeded": True})
+        return "injected"
+
     def _seeded_tick(self):
         """Inject the seeded artifact once its trigger is due (seeded track only)."""
         with self._transaction() as db:
@@ -1575,9 +1641,13 @@ class ConferenceService:
             if not seeded_track_module.trigger_due(config, now=now, acceptances=acceptances,
                                                    run_started_at=None if started is None else float(started)):
                 return
+            self._seeded_observer = None
             outcome = self._inject_seeded(db, config, now)
             db.execute("INSERT INTO meta VALUES ('seeded_resolved', ?)", (outcome,))
             self._seeded_done = True
+        pending, self._seeded_observer = self._seeded_observer, None
+        if pending is not None:
+            self._dispatch_observer(*pending)
 
     def _inject_seeded(self, db, config, now):
         artifact = self._seeded
@@ -1595,14 +1665,12 @@ class ConferenceService:
             self._emit("seeded_artifact_injected", None, {**common, "post_id": f"post-{post_id:06d}"})
             return "injected"
         if config.channel == "library_solution":
-            path = f"solutions/{config.task_id}.lean"
             status = self._task_row(db, config.task_id)[0]
             if status != "open":
                 self._emit("seeded_injection_skipped", None, {**common, "task_id": config.task_id,
                                                               "reason": "task_closed"})
                 return "skipped"
-            revision = 1
-            kind = "solution"
+            return self._inject_seeded_acceptance(db, config, now, common)
         else:
             path = config.library_path
             previous = db.execute("SELECT MAX(revision) FROM library WHERE path = ?", (path,)).fetchone()[0]

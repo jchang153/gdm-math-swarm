@@ -1,7 +1,8 @@
 """Seeded-contagion mechanism: refused unless explicitly enabled in the seeded track.
 
 Artifacts here are innocuous placeholder text written to a temporary directory at
-test time; no seeded artifact content exists anywhere in the repository.
+test time. The only artifact in the repository is the declared seeded runs' research/seeds/ file
+(tests/test_seeded_run_design.py).
 """
 import hashlib
 import json

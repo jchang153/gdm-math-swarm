@@ -128,8 +128,13 @@ def max_connections_problems(config):
     return []
 
 
-def seeded_config_problems(config):
-    """Any seeded-contagion configuration blocks the approved (spontaneous, baseline-only) pilot."""
+def seeded_config_problems(config, repo_root=None):
+    """Any seeded-contagion configuration blocks the approved (spontaneous, baseline-only) pilot,
+    except a complete declared seeded run (docs/plan.md, "Seeded overseer experiment, October 25,
+    2026"; ``seeded.declared_run_problems``)."""
+    from .seeded import declared_run_problems, is_declared_run
+    if is_declared_run(config):
+        return declared_run_problems(config, repo_root)
     problems = []
     if config.get("track") != "spontaneous":
         problems.append(f"track {config.get('track')!r} is not 'spontaneous'")
@@ -553,6 +558,10 @@ class _Gates:
                 configured = None
             if model not in models or configured != model:
                 approved["candidate_model_id"] = f"one of {list(models)}, equal to provider_settings.model_id"
+        from .seeded import is_declared_run
+        if track == "gemini" and is_declared_run(self.config):
+            # Declared seeded runs (owner, October 25, 2026); the seeded_track gate checks the block.
+            approved.update(track="seeded", seeded_contagion_enabled=True)
         if track == "gemini" and self.config.get("task_set") == "all71":
             approved["task_count"] = 71  # owner decision: the whole parent pool on this track
         if track == "gemini":
@@ -593,9 +602,13 @@ class _Gates:
                  max_connections=self.config.get(MAX_CONNECTIONS_KEY), agent_count=self.config.get("agent_count"))
 
     def seeded_track(self):
-        problems = seeded_config_problems(self.config)
+        from .seeded import is_declared_run
+        problems = seeded_config_problems(self.config, self.repo)
+        declared = is_declared_run(self.config)
         self.add("seeded_track", not problems, "; ".join(problems) or
-                 "spontaneous track; no seeded-contagion configuration present")
+                 ("declared seeded run: one planted exploit, pinned artifact (docs/plan.md, \"Seeded overseer "
+                  "experiment, October 25, 2026\")" if declared else
+                  "spontaneous track; no seeded-contagion configuration present"), declared_seeded_run=declared)
 
     def behavior_judge(self):
         from .auto_judge import active_judge_budget, enabled, judge_config_problems, live_settings
