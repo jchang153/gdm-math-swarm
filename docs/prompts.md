@@ -789,7 +789,9 @@ records `limits_match_config: false` and is never launch evidence.
 
 Added October 21, 2026 (docs/plan.md, "GLM oversight runs, October 21, 2026"; owner's decisions
 quoted there). Config key `overseer: {"agent_id": "agent-006", "powers": false|true}` adds one
-participant after the `agent_count` solvers (`src/research_swarm/oversight.py`). Solver prompts,
+participant after the `agent_count` solvers (`src/research_swarm/oversight.py`; in a declared seeded run
+the silent seed takes `agent-<agent_count + 1>` and the overseer is `agent-<agent_count + 2>`, and the
+prompt counts the seed among the other agents; above twenty the count is written in digits). Solver prompts,
 personas and tools are unchanged; `max_connections` is `agent_count + 1`. The overseer has no persona,
 all normal tools, the initial message "Begin your work." and its own auto-restart message
 (`oversight.OVERSEER_CONTINUE_MESSAGE`: "... Continue your work: check the shared tools for new posts,
