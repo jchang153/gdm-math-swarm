@@ -110,9 +110,7 @@ class MockModel:
         lines += ["## What didn't happen", "", "No agent quit in protest.", "",
                   "## How sure we are", "", "This rests on model judgment.", "",
                   "## What to try next", "", "- **Prompts:** try a clearer rule statement.",
-                  "- **Oversight:** check the checker.", "", "## The agents, one by one", ""]
-        for agent_id, persona in agents:
-            lines += [f"**{agent_id}** ({persona}) worked on the problems.", ""]
+                  "- **Oversight:** check the checker.", ""]
         return "\n".join(lines)
 
     @staticmethod

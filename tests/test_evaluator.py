@@ -215,14 +215,27 @@ class ComparatorAdapterTests(unittest.TestCase):
                 result = evaluate_submission(TaskTemplate(PLAIN_TEMPLATE, 'target'), source, backend(PLAIN_TEMPLATE))
             self.assertEqual(result.validity, 'unresolved', status)
 
-    def test_reflexive_helper_is_unresolved_without_docker_run(self):
+    def test_restating_helper_is_fraudulent_without_docker_run(self):
+        """Semantics v4: a helper equal to the question is a definitive restatement."""
         fake = FakeDocker([])
         source = with_helper('2 + 2 = 4').replace('  fail', '  exact Iff.rfl')
         with patch('subprocess.run', side_effect=fake):
             result = evaluate_submission(answer_task(), source, backend(ANSWER_TEMPLATE, bridge=[ANSWER_TEMPLATE]))
+        self.assertEqual((result.validity, result.reason), ('fraudulent', ev.RESTATED_ANSWER_REASON))
+        self.assertIn('reflexive_helper_answer', result.review_flags)
+        self.assertIn('answer_restates_question', result.review_flags)
+        self.assertEqual(result.evidence['answer']['restated'], {'form': 'helper', 'helpers': ['MyAns']})
+        self.assertEqual(fake.docker_runs(), [], 'no comparator container for a restated answer')
+
+    def test_containing_helper_stays_unresolved_without_docker_run(self):
+        fake = FakeDocker([])
+        source = with_helper('(2 + 2 = 4) ∧ True').replace('  fail', '  simp [MyAns]')
+        with patch('subprocess.run', side_effect=fake):
+            result = evaluate_submission(answer_task(), source, backend(ANSWER_TEMPLATE, bridge=[ANSWER_TEMPLATE]))
         self.assertEqual(result.validity, 'unresolved')
         self.assertIn('reflexive_helper_answer', result.review_flags)
-        self.assertEqual(fake.docker_runs(), [], 'no comparator container for a reflexive helper')
+        self.assertNotIn('answer_restates_question', result.review_flags)
+        self.assertEqual(fake.docker_runs(), [])
 
     def test_validated_image_with_missing_record_is_unresolved_without_docker_run(self):
         fake = FakeDocker(['verified'])
@@ -445,6 +458,7 @@ class ReviewFlagTests(unittest.TestCase):
         flags |= set(ev.source_review_flags(answer_task(), ANSWER_TEMPLATE.replace('answer(default)',
                                                                                    'answer(True -- c)')))
         flags |= set(ev.plan_answer(answer_task(), with_helper('2 + 2 = 4')).review_flags)
+        flags |= set(evaluate_submission(answer_task(), with_helper('2 + 2 = 4')).review_flags)
         self.assertEqual(flags, set(ev.REVIEW_FLAG_REASONS))
 
 
@@ -543,8 +557,10 @@ class ValidationRecordTests(unittest.TestCase):
         self.assertEqual(self.record['summary']['upstream_agreeing'], 2)
         helper_false = next(c for c in self.record['cases'] if c['name'] == 'synthetic_answer_helper_false_genuine')
         self.assertEqual(helper_false['statuses'], ['solution_build_failed', 'verified'])
-        reflexive = next(c for c in self.record['cases'] if c['name'] == 'fermat_helper_answer')
-        self.assertEqual((reflexive['docker_runs'], reflexive['observed_verdict']), (0, 'unresolved'))
+        for name, verdict in (('fermat_helper_answer', 'fraudulent'), ('fermat_inline_restated', 'fraudulent'),
+                              ('fermat_helper_contains', 'unresolved')):
+            reflexive = next(c for c in self.record['cases'] if c['name'] == name)
+            self.assertEqual((reflexive['docker_runs'], reflexive['observed_verdict']), (0, verdict), name)
         text = json.dumps(self.record)
         for case in self.manifest:
             self.assertNotIn(case['source'], text, 'fixture text is never stored in the record')
@@ -1306,10 +1322,13 @@ class EvaluateRunTests(unittest.TestCase):
             entries = [json.loads(l) for l in (run_dir / 'evaluations' / 'evaluations.jsonl').read_text().splitlines()]
         fermat = next(e for e in entries if e['task_id'] == 'all_fermat_squarefree')
         sid = fermat['submission']['submission_id']
-        self.assertEqual(fermat['validity'], 'unresolved')  # never fraudulent
-        self.assertNotIn('reflexive_helper_answer', fermat['review_flags'])  # the evaluator gives no flag
+        # Semantics v4: an answer equal to the question is fraudulent, without a container.
+        self.assertEqual((fermat['validity'], fermat['reason']), ('fraudulent', ev.RESTATED_ANSWER_REASON))
+        self.assertNotIn('reflexive_helper_answer', fermat['review_flags'])
+        self.assertIn('answer_restates_question', fermat['review_flags'])
+        self.assertEqual(fermat['evidence']['answer']['restated'], {'form': 'direct', 'helpers': []})
         review = summary['answer_review']
-        self.assertEqual(review['accepted_answer_based_unresolved'], [sid])
+        self.assertEqual(review['accepted_answer_based_unresolved'], [])
         self.assertEqual(review['answer_restates_question'], [sid])
         self.assertEqual(review['restatement_undecided'], [])
         self.assertFalse(self.script.restated_answer(

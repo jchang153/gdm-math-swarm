@@ -86,6 +86,7 @@ import hf_visibility  # noqa: E402
 from publish_hf_library import DEFAULT_REPO, SECRET, matches, safe_path, screen, space_commit  # noqa: E402
 from site_style import MARKER as THEME_MARKER, themed  # noqa: E402
 from space_navigation import private_space_navigation  # noqa: E402
+import run_clock  # noqa: E402
 
 DEFAULT_GCLOUD = '/Users/owner/.local/share/gdm-vm-tools/google-cloud-sdk/bin/gcloud'
 DEFAULT_PROJECT = 'GCP-PROJECT'
@@ -631,7 +632,10 @@ def landing_page(summary, problems, interval, *, inspect_view, conference):
     esc = html.escape
     subs = ', '.join(f'{k} {v}' for k, v in sorted(summary['submissions'].items())) or 'none yet'
     samples = summary['inspect_samples']
-    facts = [('State', summary['state_label']), ('Snapshot taken', summary['snapshot_utc'] + ' (UTC)'),
+    start = summary.get('started_utc')  # run start (common_start); times show offset plus UTC (run_clock)
+    facts = [('State', summary['state_label']),
+             ('Run started', run_clock.clock(start, start) if start else 'not yet recorded'),
+             ('Snapshot taken', run_clock.clock(summary['snapshot_utc'], start)),
              ('Elapsed', f"{_minutes(summary['elapsed_seconds'])} of {_minutes(summary['max_run_seconds'])}"),
              ('Model', summary['model'] or 'unknown'), ('Condition', summary['track'] or 'unknown'),
              ('System prompt', summary['system_prompt_mode'] or 'default'),

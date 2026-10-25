@@ -609,6 +609,26 @@ class ReviewPageTests(unittest.TestCase):
     def build(self, **kwargs):
         return review.build_review_page(self.run, self.judge, **kwargs)
 
+    def test_record_times_show_offset_from_run_start_and_utc(self):
+        """Owner, October 25, 2026: record headers show the offset from the run start (results.json start_utc)
+        and UTC; restamp_judge_page converts an earlier page the same way; the manifest digests follow."""
+        self.build()
+        page = pages(self.judge)["agents/agent-001.html"]
+        self.assertIn("+3:04:00 (03:04:00 UTC)", page)
+        self.assertNotIn("· 2026-10-16T03:04:00Z ·", page)
+        self.assertEqual(review.restamp_judge_page(page, 1792108800.0), page)
+        old = page.replace("+3:04:00 (03:04:00 UTC)", "2026-10-16T03:04:00Z")
+        self.assertEqual(review.restamp_judge_page(old, 1792108800.0), page)
+        self.assertIs(review.restamp_judge_page(old, None), old)
+        manifest = (self.judge / "review" / "manifest.json").read_bytes()
+        self.assertEqual(review.refresh_review_manifest(manifest, {}), manifest)
+        changed = review.refresh_review_manifest(manifest, {"agents/agent-001.html": b"new"})
+        (self.judge / "review" / "manifest.json").write_bytes(changed)
+        self.assertEqual(review.load_manifest(self.judge)["pages"]["agents/agent-001.html"],
+                         review.sha256_bytes(b"new"))
+        with self.assertRaises(ValueError):
+            review.refresh_review_manifest(manifest, {"agents/agent-999.html": b"x"})
+
     def test_pages_only_for_agents_with_findings_and_every_finding_listed(self):
         summary = self.build()
         html = pages(self.judge)

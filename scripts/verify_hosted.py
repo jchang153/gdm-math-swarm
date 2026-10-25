@@ -35,6 +35,12 @@ the Space (simple_judge_local_only). When RUN/analysis/simple_judge/report.html 
 other pages, carries the comparability note (simple_judge_note), and RUN/results.html has the simplified judge's
 Behavior judge tab (simple_judge_tab) and, when the run also has the rubric-3.1 judge, its "Behavior judge
 (rubric 3.1)" tab (simple_judge_rubric_3_1_tab).
+Run clock and incident layout (owner, October 25, 2026; with the default pages): the incident report, when stored,
+is always checked like the other pages; with --expect-run-clock (after the October 25 updates) RUN/results.html shows at least one
+time as run clock plus UTC, "+12:34 (05:17:40 UTC)" (results_run_clock); the conference view embeds the run start
+(conference_run_start); when RUN/analysis/incident/report.html is stored it is checked like the other pages and has
+neither "The agents, one by one" nor "Where to look" (incident_sections_removed) and shows its excerpt times as run
+clock (incident_run_clock).
 Exits 1 when any check fails; the record lists every check.
 """
 import argparse
@@ -51,6 +57,10 @@ import dataset_logs  # noqa: E402
 from dataset_logs import DATASET_REPO  # noqa: E402
 import hf_visibility  # noqa: E402
 import simple_judge_site  # noqa: E402
+import run_clock  # noqa: E402
+from incident_site import INCIDENT_REPORT  # noqa: E402
+
+REMOVED_INCIDENT_SECTIONS = ('id="the-agents-one-by-one"', 'id="where-to-look"')
 
 # Runs published before October 21, 2026 also carry {run}/transcripts/index.html; pass it with --page
 # to check it. New runs have no custom transcript pages (read agent transcripts in Inspect View).
@@ -75,7 +85,8 @@ def sha256(data):
 
 
 def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, range_path=None, cache_dir=None,
-           dataset_repo=DATASET_REPO, dataset_commit=None, dataset_checks=None, expect_no_space_logs=False):
+           dataset_repo=DATASET_REPO, dataset_commit=None, dataset_checks=None, expect_no_space_logs=False,
+           expect_run_clock=False):
     simple_judge_checks = pages is None
     pages = [page.format(run=run) for page in (pages or PAGES)]
     served = {}
@@ -94,16 +105,20 @@ def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, 
         return record
     sj = f"{run}/{simple_judge_site.SJ_DIR}/"
     sj_page, old_judge = sj + "report.html", f"{run}/{simple_judge_site.OLD_REPORT}"
+    incident_page = f"{run}/{INCIDENT_REPORT}"
     sj_present = set()
     if simple_judge_checks:
         local_only = [sj + name for name in ("cases.jsonl", "raw", "run-budgets.json", "adjudication.json",
                                              *simple_judge_site.DATASET_FILES)]
-        sj_present = {entry.path for entry in api.get_paths_info(repo, [sj_page, old_judge, *local_only],
+        sj_present = {entry.path for entry in api.get_paths_info(repo, [sj_page, old_judge, incident_page,
+                                                                        *local_only],
                                                                  repo_type="space", revision=info.sha)}
         stray = sorted(sj_present & set(local_only))
         check("simple_judge_local_only", not stray, examples=stray)
         if sj_page in sj_present and sj_page not in pages:
             pages.append(sj_page)
+        if incident_page in sj_present and incident_page not in pages:
+            pages.append(incident_page)
     names = pages + ([range_path] if range_path else [])
     lfs = {}
     for start in range(0, len(names), PATHS_INFO_BATCH):  # the Hub refuses very long path lists (HTTP 413)
@@ -135,6 +150,30 @@ def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, 
             check("simple_judge_rubric_3_1_tab", simple_judge_site.OLD_TAB in results, path=f"{run}/results.html")
         check("simple_judge_note", 'id=sj-comparability' in served.get(sj_page, b"").decode("utf-8", "replace"),
               path=sj_page)
+    if simple_judge_checks and expect_run_clock:
+        results = served.get(f"{run}/results.html")
+        if results is not None:
+            text = results.decode("utf-8", "replace")
+            visible = re.sub(r"<script\b.*?</script>|<style\b.*?</style>|<[^>]+>", " ", text, flags=re.S | re.I)
+            # Run clock shown, and no raw ISO instant left in the visible text (a page that shows no event time,
+            # such as baseline100's hand-written report, has nothing to convert).
+            check("results_run_clock", run_clock.ISO_RE.search(visible) is None
+                  and (run_clock.CLOCK_RE.search(text) is not None or "UTC" not in visible),
+                  path=f"{run}/results.html")
+        conference = served.get(f"{run}/conference-view/index.html")
+        if conference is not None:
+            import export_conference
+            try:
+                start = export_conference.published_data(conference.decode("utf-8", "replace")).get("run_start")
+            except ValueError:
+                start = None
+            check("conference_run_start", isinstance(start, (int, float)) and not isinstance(start, bool),
+                  path=f"{run}/conference-view/index.html")
+        if incident_page in served:
+            text = served[incident_page].decode("utf-8", "replace")
+            check("incident_sections_removed", not any(m in text for m in REMOVED_INCIDENT_SECTIONS),
+                  path=incident_page)
+            check("incident_run_clock", run_clock.CLOCK_RE.search(text) is not None, path=incident_page)
     if range_path:
         response = session.get(f"{info.host}/{range_path}", headers={**headers, "Range": "bytes=0-63"}, timeout=45,
                                follow_redirects=True)
@@ -300,6 +339,10 @@ def main(argv=None):
                         help="dataset checks (default: on when the run's Inspect View carries the dataset shim)")
     parser.add_argument("--expect-no-space-logs", action="store_true",
                         help="also require that the Space stores no .eval for the run (after their deletion)")
+    parser.add_argument("--expect-run-clock", action="store_true",
+                        help="also require the run clock (October 25, 2026): results.html and incident report times "
+                             "as '+12:34 (05:17:40 UTC)', the conference view's run start, and no 'The agents, one by "
+                             "one' or 'Where to look' section in the incident report")
     parser.add_argument("--output", help="also write the record as JSON here")
     args = parser.parse_args(argv)
     from huggingface_hub import HfApi
@@ -307,7 +350,7 @@ def main(argv=None):
     record = verify(HfApi(), get_session(), build_hf_headers(token=True), args.repo, args.run, args.revision,
                     args.page, args.bundle, args.range_path, args.cache_dir, dataset_repo=args.dataset_repo,
                     dataset_commit=args.dataset_commit, dataset_checks=args.dataset_checks,
-                    expect_no_space_logs=args.expect_no_space_logs)
+                    expect_no_space_logs=args.expect_no_space_logs, expect_run_clock=args.expect_run_clock)
     text = json.dumps(record, indent=2)
     if args.output:
         Path(args.output).write_text(text + "\n")

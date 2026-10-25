@@ -110,6 +110,14 @@ run-budgets.json, adjudication.json, locks and rehearsal ledgers stay local; any
 RUN/analysis/simple_judge/ is refused. One guarded Space commit pinned to the planned revision; rerunning
 continues from the current state (no --resume-from).
 
+Run clock (owner, October 25, 2026: every time on the site shows the time from the run start and the UTC time,
+"+12:34 (05:17:40 UTC)", scripts/run_clock.py): --scope conference renders with the run start of the published
+RUN/results.json and, with --capture-pages, also restamps the captured-file pages (one commit per run);
+--scope site without --bundle (--maintain-run RUN or --all-published-runs) restamps the published
+RUN/results.html (adding the simplified judge's counts when it is published) and the rubric-3.1 judge's HTML pages
+from the published pages alone (maintain_site_published); --scope incident without --bundle reads the three
+incident files from --runs-dir (for reports re-rendered with run_incident_report.py --rerender-layout).
+
 Default: read-only plan pinned to the current Space revision. --commit first writes the
 receipt, a before-inventory, backups of the originals and the plan, then uploads in guarded
 batches (catalogue or manifest last), verifies the result against the original pre-maintenance
@@ -134,12 +142,17 @@ from build_experiment_index import INSPECT_LOGS, inspect_log_links, newest_first
 from incident_site import INCIDENT_DIR, INCIDENT_REPORT, add_incident_tab, incident_excluded, with_incident_link
 from prepare_hf_library import judge_excluded
 import hf_visibility
+import run_clock
+from publish_hf_library import SECRET
 from publish_hf_library import (DEFAULT_REPO, RUN_ID, batches, digest, load_bundle, matches, space_commit,
                                 merge_entries, payload, remote_files, validate_lfs_additions)
 
 SCOPES = ('judge', 'transcripts', 'evaluator', 'results', 'inspect', 'site', 'unlist', 'snapshots', 'incident', 'prune',
           'migrate-logs', 'conference', 'simple-judge')
 NO_BUNDLE = ('unlist', 'snapshots', 'prune', 'migrate-logs', 'conference', 'simple-judge')
+# Scopes that take a bundle or work without one (October 25, 2026): incident reads its three files from
+# --runs-dir; site restamps the published pages host-side (maintain_site_published).
+OPTIONAL_BUNDLE = ('incident', 'site')
 REPLACEABLE = ('results.html', 'results.json')
 INSPECT_VIEW = 'inspect-view/'
 INSPECT_PAGE = INSPECT_VIEW + 'index.html'
@@ -1123,7 +1136,7 @@ def unlist_run(api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=N
 
 
 def maintain_incident(bundle, api, download, *, run, commit=False, repo=DEFAULT_REPO, receipt=None,
-                      backup_dir=None, operation=None):
+                      backup_dir=None, operation=None, runs_dir=None):
     """--scope incident: add or replace one published run's incident report files (only
     RUN/analysis/incident/{report.html, report.md, evidence.json} from the bundle), add the
     Incident report tab to the published RUN/results.html (the published page plus the tab, never the
@@ -1135,27 +1148,59 @@ def maintain_incident(bundle, api, download, *, run, commit=False, repo=DEFAULT_
     idempotent). A published incident file the bundle lacks is refused (nothing is deleted); no
     planned file may be stored as LFS, be named by an LFS rule or come close to HF's automatic LFS
     size, and .gitattributes must stay unchanged.
+
+    Without a bundle (``bundle=None``, ``runs_dir`` given; October 25, 2026, for host-side re-renders such as
+    ``run_incident_report.py --rerender-layout``) the three files are read from
+    ``runs_dir/RUN/analysis/incident/`` (iCloud placeholders are downloaded first); nothing else of the local
+    run is read. The incident report page is screened like a bundle's (no link to a local-only file).
     """
-    bundle = Path(bundle)
     if not isinstance(run, str) or not RUN_ID.fullmatch(run):
         raise ValueError('Invalid run ID')
     if run in unlisted_runs():
         raise ValueError('Run is unlisted by data/library-unlisted.json; its catalogue entry is not maintained: '
                          + str(run))
-    check_outputs(bundle, receipt, backup_dir, commit, operation)
-    manifest, incoming = load_bundle(bundle)
-    if manifest['runs'] != [run] or [x['run'] for x in incoming] != [run]:
-        raise ValueError('Maintenance needs a bundle prepared for exactly one run: ' + run)
     prefix = run + '/'
-    incident = sorted(n for n in manifest['files'] if n.startswith(prefix + INCIDENT_PREFIX))
-    for name in incident:
-        if incident_excluded(name[len(prefix):]):
-            raise ValueError('Bundle incident file outside the publication allowlist: ' + name)
-    recorded = (manifest.get('incident_report') or {}).get(run) or {}
-    if prefix + INCIDENT_REPORT not in incident:
-        raise ValueError('The bundle has no incident report: ' + prefix + INCIDENT_REPORT)
-    if sorted(prefix + n for n in recorded.get('included', [])) != incident:
-        raise ValueError('Bundle incident files do not match the preparation record (incident_report)')
+    if bundle is None:
+        from incident_site import INCIDENT_FILES, unpublished_links
+        if runs_dir is None:
+            raise ValueError('The incident scope needs --bundle or --runs-dir')
+        if commit and (operation is None or receipt is None or backup_dir is None):
+            raise ValueError('--commit requires --receipt, --backup-dir and an upload operation')
+        folder = Path(runs_dir) / run / INCIDENT_DIR
+        if folder.is_symlink() or Path(runs_dir, run).is_symlink():
+            raise ValueError('Refusing a linked run or incident folder: ' + str(folder))
+        local = {}
+        for name in INCIDENT_FILES:
+            path = folder / name
+            if path.is_symlink():
+                raise ValueError('Refusing symlink: ' + str(path))
+            if path.is_file():
+                local[prefix + INCIDENT_DIR + '/' + name] = _read_local(path)
+        if prefix + INCIDENT_REPORT not in local:
+            raise ValueError('No local incident report: ' + str(folder / 'report.html'))
+        if unpublished_links(local[prefix + INCIDENT_REPORT].decode('utf-8')):
+            raise ValueError('The incident report links files that are never published')
+        for name, data in local.items():
+            if SECRET.search(data):
+                raise ValueError('Credential-like content detected; upload refused: ' + name)
+        incident = sorted(local)
+        recorded = {'included': [n[len(prefix):] for n in incident], 'excluded': None, 'source': str(folder)}
+    else:
+        bundle = Path(bundle)
+        check_outputs(bundle, receipt, backup_dir, commit, operation)
+        manifest, incoming = load_bundle(bundle)
+        if manifest['runs'] != [run] or [x['run'] for x in incoming] != [run]:
+            raise ValueError('Maintenance needs a bundle prepared for exactly one run: ' + run)
+        incident = sorted(n for n in manifest['files'] if n.startswith(prefix + INCIDENT_PREFIX))
+        for name in incident:
+            if incident_excluded(name[len(prefix):]):
+                raise ValueError('Bundle incident file outside the publication allowlist: ' + name)
+        recorded = (manifest.get('incident_report') or {}).get(run) or {}
+        if prefix + INCIDENT_REPORT not in incident:
+            raise ValueError('The bundle has no incident report: ' + prefix + INCIDENT_REPORT)
+        if sorted(prefix + n for n in recorded.get('included', [])) != incident:
+            raise ValueError('Bundle incident files do not match the preparation record (incident_report)')
+        local = {name: (bundle / name).read_bytes() for name in incident}
     page_name = prefix + 'results.html'
 
     info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
@@ -1193,19 +1238,29 @@ def maintain_incident(bundle, api, download, *, run, commit=False, repo=DEFAULT_
     listed = [x.get('run') for x in index.get('experiments', [])]
     if listed.count(run) != 1 or len(set(listed)) != len(listed):
         raise ValueError('Remote catalogue must list the run exactly once among unique entries')
-    if regenerate(index['experiments']) != {'experiments.json': index_bytes, 'index.html': catalogue_html}:
-        raise ValueError('The current generator does not reproduce the remote catalogue byte for byte; '
-                         'regenerating it would change other catalogue entries')
     old_entry = next(x for x in index['experiments'] if x['run'] == run)
     new_entry = {**old_entry, 'links': with_incident_link(old_entry['links'], run)}
-    regenerated = regenerate(merge_entries(others(index, run), [new_entry]))
-    new_index = json.loads(regenerated['experiments.json'])
-    if (others(new_index, run) != others(index, run) or len(new_index['experiments']) != len(listed)
-            or [x for x in new_index['experiments'] if x['run'] == run] != [new_entry]):
-        raise ValueError('Another catalogue entry would change')
+    if new_entry == old_entry:
+        # The published entry already links the report (a re-render, October 25, 2026): the catalogue is left
+        # untouched, so it need not match the current generator (re-render it separately).
+        regenerated = {}
+    else:
+        if regenerate(index['experiments']) != {'experiments.json': index_bytes, 'index.html': catalogue_html}:
+            raise ValueError('The current generator does not reproduce the remote catalogue byte for byte; '
+                             'regenerating it would change other catalogue entries')
+        regenerated = regenerate(merge_entries(others(index, run), [new_entry]))
+        new_index = json.loads(regenerated['experiments.json'])
+        if (others(new_index, run) != others(index, run) or len(new_index['experiments']) != len(listed)
+                or [x for x in new_index['experiments'] if x['run'] == run] != [new_entry]):
+            raise ValueError('Another catalogue entry would change')
 
+    if bundle is None:  # the local page as prepare_hf_library.py would publish it (theme, Space navigation, links)
+        name = prefix + INCIDENT_REPORT
+        local[name] = hosted_page(local[name].decode('utf-8'), run, archive, INCIDENT_REPORT).encode('utf-8')
+        if SECRET.search(local[name]):
+            raise ValueError('Credential-like content detected; upload refused: ' + name)
     page = add_incident_tab(fetch(page_name).decode('utf-8')).encode('utf-8')  # published page + the tab
-    planned = {**{name: (bundle / name).read_bytes() for name in incident}, page_name: page, **regenerated}
+    planned = {**local, page_name: page, **regenerated}
     files = dict(archive['files'])
     for name, data in planned.items():
         files[name] = digest(data)
@@ -1232,7 +1287,7 @@ def maintain_incident(bundle, api, download, *, run, commit=False, repo=DEFAULT_
               'incident_files': incident, 'to_add': added,
               'to_replace': [n for n, _ in uploads if n in remote],
               'results_page_tab': 'added' if page_name in dict(uploads) else 'already present',
-              'catalogue': {'entry_diff': entry_diff(old_entry, new_entry),
+              'catalogue': {'entry_diff': entry_diff(old_entry, new_entry), 'regenerated': bool(regenerated),
                             'other_entries_unchanged': len(listed) - 1},
               'archive_manifest': {'changed_digests': sorted(n for n in files if archive['files'].get(n) != files[n]),
                                    'total_bytes_before': archive.get('total_bytes'),
@@ -1390,7 +1445,11 @@ def maintain_simple_judge(api, download, *, run, runs_dir, commit=False, repo=DE
                          'report.json); review them, nothing is deleted automatically: ' + ', '.join(stray[:EXAMPLES]))
 
     old_judge = prefix + 'analysis/judge/report.html' in remote
-    page = site_page(local['report.json'], local['agents.jsonl'], run, old_judge=old_judge)
+    import run_clock  # one run-start source for every page: results.json start_utc (runtime common_start)
+    run_start = run_clock.run_start(source)
+    if run_start is None and prefix + 'results.json' in remote:
+        run_start = run_clock.results_start(fetch(prefix + 'results.json'))
+    page = site_page(local['report.json'], local['agents.jsonl'], run, old_judge=old_judge, run_start=run_start)
     sj_page = private_space_navigation(themed(page), []).encode('utf-8')  # as prepare_hf_library.py does
     for name, data in (('report.json', local['report.json']), ('agents.jsonl', local['agents.jsonl']),
                        ('report.html', sj_page)):
@@ -1406,18 +1465,24 @@ def maintain_simple_judge(api, download, *, run, runs_dir, commit=False, repo=DE
     listed = [x.get('run') for x in index.get('experiments', [])]
     if listed.count(run) != 1 or len(set(listed)) != len(listed):
         raise ValueError('Remote catalogue must list the run exactly once among unique entries')
-    if regenerate(index['experiments']) != {'experiments.json': index_bytes, 'index.html': catalogue_html}:
-        raise ValueError('The current generator does not reproduce the remote catalogue byte for byte; '
-                         'regenerating it would change other catalogue entries')
     old_entry = next(x for x in index['experiments'] if x['run'] == run)
     new_entry = {**old_entry, 'links': with_simple_judge_link(old_entry['links'], run)}
-    regenerated = regenerate(merge_entries(others(index, run), [new_entry]))
-    new_index = json.loads(regenerated['experiments.json'])
-    if (others(new_index, run) != others(index, run) or len(new_index['experiments']) != len(listed)
-            or [x for x in new_index['experiments'] if x['run'] == run] != [new_entry]):
-        raise ValueError('Another catalogue entry would change')
+    if new_entry == old_entry:
+        # The published entry already links the report (a re-render, October 25, 2026): the catalogue is left
+        # untouched, so it need not match the current generator (re-render it separately).
+        regenerated = {}
+    else:
+        if regenerate(index['experiments']) != {'experiments.json': index_bytes, 'index.html': catalogue_html}:
+            raise ValueError('The current generator does not reproduce the remote catalogue byte for byte; '
+                             'regenerating it would change other catalogue entries')
+        regenerated = regenerate(merge_entries(others(index, run), [new_entry]))
+        new_index = json.loads(regenerated['experiments.json'])
+        if (others(new_index, run) != others(index, run) or len(new_index['experiments']) != len(listed)
+                or [x for x in new_index['experiments'] if x['run'] == run] != [new_entry]):
+            raise ValueError('Another catalogue entry would change')
 
-    results_page = add_simple_judge_tab(fetch(page_name).decode('utf-8')).encode('utf-8')  # published page + tab
+    results_page = add_simple_judge_tab(fetch(page_name).decode('utf-8'),  # published page + tab with the counts
+                                        json.loads(local['report.json'])).encode('utf-8')
     planned = {space_names[0]: sj_page, space_names[1]: space_report_json(local['report.json']), page_name: results_page,
                **regenerated}
     files = dict(archive['files'])
@@ -1465,7 +1530,7 @@ def maintain_simple_judge(api, download, *, run, runs_dir, commit=False, repo=DE
               'rubric_3_1_tab': old_judge,
               'dataset': {'repo': dataset_repo, 'revision': dataset.sha, 'path': agents_path,
                           'bytes': wanted['bytes'], 'state': dataset_state},
-              'catalogue': {'entry_diff': entry_diff(old_entry, new_entry),
+              'catalogue': {'entry_diff': entry_diff(old_entry, new_entry), 'regenerated': bool(regenerated),
                             'other_entries_unchanged': len(listed) - 1},
               'archive_manifest': {'changed_digests': sorted(n for n in files if archive['files'].get(n) != files[n]),
                                    'total_bytes_before': archive.get('total_bytes'),
@@ -1987,6 +2052,8 @@ _BODY_START = '<p><a href="../../index.html">'
 # look lack the theme; they get the current one, as with --scope site).
 _HEAD_BLOCKS = re.compile(r'<style id="dataset-file-note">.*?</style>|<script id="private-space-navigation">.*?</script>',
                           re.S)
+# A captured-file page of a conference view (export_conference.py names them file-<20 hex>.html).
+_CAPTURE_PAGE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]*/conference-view/file-[0-9a-f]{20}\.html')
 _HREF = re.compile(r'''\b(?:href|src)=(["'])([^"']*)\1''', re.I)
 
 
@@ -1994,6 +2061,11 @@ def hosted_conference_page(document, run, archive):
     """A conference page as publication serves it: the shared theme and the private-Space navigation
     (prepare_hf_library.py), then links to files moved to the logs dataset pointed at the dataset file of
     their recorded commit and links to files kept offline at the run page's notice (migrate_dataset.py)."""
+    return hosted_page(document, run, archive, CONFERENCE_PAGE)
+
+
+def hosted_page(document, run, archive, relative):
+    """A run page (``relative`` to RUN/) as publication serves it; see hosted_conference_page."""
     import dataset_logs
     from site_style import themed
     from space_navigation import private_space_navigation
@@ -2001,17 +2073,19 @@ def hosted_conference_page(document, run, archive):
     prefix = run + '/'
     by_commit = {}
     for name, record in sorted((archive.get('dataset_files') or {}).items()):
-        if name.startswith(prefix):
+        # Records without a commit (the simplified judge's agents.jsonl, added by --scope simple-judge) are never
+        # linked from these pages; they cannot be repointed to a pinned dataset file.
+        if name.startswith(prefix) and record.get('commit'):
             by_commit.setdefault((record['repo'], record['commit']), set()).add(name[len(prefix):])
     for (repo, commit), moved in sorted(by_commit.items()):
-        page, _ = dataset_logs.repoint_links(page, CONFERENCE_PAGE, run, moved, commit, repo)
+        page, _ = dataset_logs.repoint_links(page, relative, run, moved, commit, repo)
     offline = {n[len(prefix):] for n in (archive.get(OFFLINE_KEY) or {}) if n.startswith(prefix)}
-    page, _ = dataset_logs.offline_links(page, CONFERENCE_PAGE, offline)
+    page, _ = dataset_logs.offline_links(page, relative, offline)
     return page
 
 
 def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_REPO, receipt=None,
-                        backup_dir=None, operation=None):
+                        backup_dir=None, operation=None, capture_pages=False, workers=16, pages_dir=None):
     """--scope conference (owner, October 23, 2026): re-render the published conference views without the
     embedded activity timeline, which stays only in the private logs dataset (RUN/analysis/timeline.jsonl).
 
@@ -2025,6 +2099,16 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
     same-site link must resolve. Captured-file pages, the catalogue and every other file are untouched.
     One guarded commit pinned to the planned revision, backups and a receipt; running it again continues
     from the current state (already re-rendered pages are reproduced byte for byte and skipped).
+
+    Run clock (owner, October 25, 2026): the page is rendered with the run start (``run_start``) read from the
+    published RUN/results.json (``start_utc``, the runtime's common_start), so every time reads
+    "+12:34 (05:17:40 UTC)"; records are unchanged. ``capture_pages`` (opt-in, ``--capture-pages``) also
+    restamps the published captured-file pages RUN/conference-view/file-*.html
+    (export_conference.restamp_capture_page: only their capture-time lines change); then there is one guarded
+    commit per run, each pinned to the revision of the previous one, with archive-manifest.json in every commit.
+    ``pages_dir`` (``--pages-dir``): a local directory laid out like the Space; a file there is used instead of a
+    download only when its bytes match the published file (git blob id at the planned revision), which spares
+    thousands of rate-limited downloads of captured-file pages; anything else is downloaded.
     """
     import dataset_logs
     import export_conference
@@ -2038,13 +2122,23 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
     remote = remote_files(api, repo, base)
     current = inventory(remote)
     cache = {}
+    local_pages = {'used': 0, 'downloaded': 0}
 
     def fetch(name):
         if name not in cache:
+            if pages_dir is not None:
+                local = Path(pages_dir).joinpath(*name.split('/'))
+                if local.is_file() and not local.is_symlink():
+                    data = local.read_bytes()
+                    if matches(data, remote[name]):  # byte-identical to the published file
+                        cache[name] = data
+                        local_pages['used'] += 1
+                        return data
             data = Path(download(repo, name, repo_type='space', revision=base)).read_bytes()
             if not matches(data, remote[name]):
                 raise ValueError('Remote metadata mismatch: ' + name)
             cache[name] = data
+            local_pages['downloaded'] += 1
         return cache[name]
 
     if MANIFEST not in remote:
@@ -2053,6 +2147,12 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
     if archive.get('schema') != 'gdm-private-space/1':
         raise ValueError('Unexpected remote archive manifest schema')
     published = [r for r in archive.get('runs', []) if f'{r}/{CONFERENCE_PAGE}' in remote]
+    if capture_pages:  # fetch the captured-file pages in parallel (thousands of small files)
+        from concurrent.futures import ThreadPoolExecutor
+        wanted = [n for n in remote if _CAPTURE_PAGE.fullmatch(n)
+                  and n.split('/', 1)[0] in (published if runs is None else runs)]
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            list(pool.map(fetch, wanted))
     selected = published if runs is None else list(runs)
     for run in selected:
         if run not in archive.get('runs', []) or not any(n.startswith(run + '/') for n in remote):
@@ -2072,6 +2172,10 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
         old_page = fetch(page_name).decode('utf-8')
         old_data = export_conference.published_data(old_page)
         data, manifest = export_conference.strip_timeline(old_page, json.loads(fetch(manifest_name)), location)
+        results_name = f'{run}/results.json'
+        start = run_clock.results_start(fetch(results_name)) if results_name in remote else None
+        if start is not None:
+            data['run_start'] = start
         page = hosted_conference_page(export_conference.render_index(data), run, archive)
         if export_conference.published_data(page) != data \
                 or data['records'] != [r for r in old_data['records'] if r['category'] != 'activity']:
@@ -2099,7 +2203,21 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
         page_bytes = page.encode('utf-8')
         manifest_bytes = json.dumps(manifest, indent=2).encode('utf-8')
         planned[page_name], planned[manifest_name] = page_bytes, manifest_bytes
-        per_run[run] = {'timeline_location': location, 'timeline_entries_removed': old_data['timeline_entries'],
+        captures = {}
+        if capture_pages and start is not None:
+            for name in sorted(n for n in remote if n.startswith(f'{run}/{CONFERENCE_PREFIX}')
+                               and _CAPTURE_PAGE.fullmatch(n)):
+                old = fetch(name)
+                new = export_conference.restamp_capture_page(old.decode('utf-8'), start).encode('utf-8')
+                if new != old:
+                    captures[name] = new
+            planned.update(captures)
+        per_run[run] = {'run_start': start,
+                        'capture_pages': ({'published': sum(1 for n in remote if n.startswith(f'{run}/{CONFERENCE_PREFIX}')
+                                                            and _CAPTURE_PAGE.fullmatch(n)),
+                                           'restamped': len(captures), 'bytes': sum(map(len, captures.values()))}
+                                          if capture_pages else 'not selected'),
+                        'timeline_location': location, 'timeline_entries_removed': old_data['timeline_entries'],
                         'records_kept': len(data['records']),
                         'head': 'identical' if new_head == old_head else 'current site theme added', 'page_bytes_before': len(fetch(page_name)),
                         'page_bytes_after': len(page_bytes),
@@ -2123,11 +2241,16 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
     result = {'operation': 'maintain-run', 'scope': 'conference', 'repo': repo, **hf_visibility.record(repo, 'space'),
               'runs': selected, 'base_revision': base, 'committed': False, 'per_run': per_run,
               'conference_page_bytes': {'before': before, 'after': after, 'saved': before - after},
-              'to_replace': [n for n, _ in uploads], 'to_add': [],
-              'archive_manifest': {'changed_digests': sorted(n for n in files if archive['files'].get(n) != files[n]),
+              'to_replace': [n for n, _ in uploads if not _CAPTURE_PAGE.fullmatch(n)], 'to_add': [],
+              'capture_pages': ({'to_replace': sum(1 for n, _ in uploads if _CAPTURE_PAGE.fullmatch(n)),
+                                 'bytes': sum(len(d) for n, d in uploads if _CAPTURE_PAGE.fullmatch(n))}
+                                if capture_pages else 'not selected (--capture-pages)'),
+              'archive_manifest': {'changed_digests': sorted(n for n in files if archive['files'].get(n) != files[n]
+                                                             and not _CAPTURE_PAGE.fullmatch(n)),
                                    'total_bytes_before': archive.get('total_bytes'),
                                    'total_bytes_after': new_archive['total_bytes']},
-              'uploads': len(uploads), 'already_applied': not uploads}
+              'uploads': len(uploads), 'already_applied': not uploads,
+              'published_files_read': {'from_pages_dir': local_pages['used'], 'downloaded': local_pages['downloaded']}}
     if not commit or not uploads:
         return result
 
@@ -2151,16 +2274,35 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
         write_json(backup_dir / PLAN, result)
         result.update(backup_dir=str(backup_dir), backups=saved)
         write_receipt('backups written; nothing uploaded')
-        latest = api.repo_info(repo, repo_type='space')
-        if not hf_visibility.unchanged(latest, repo, 'space', base):
-            raise ValueError('Space changed concurrently or its visibility differs from the record; rerun the dry run '
-                             'against the latest revision')
-        response = space_commit(api, 
-            repo_id=repo, repo_type='space', parent_commit=base,
-            commit_message=f'Conference views without the embedded activity timeline ({len(selected)} run(s); '
-                           'the timeline stays in the private logs dataset)',
-            operations=[operation(path_in_repo=n, path_or_fileobj=d) for n, d in uploads])
-        revision = response.oid
+        pages = [n for n, _ in uploads if n != MANIFEST]
+        groups = ([[n for n in pages if n.startswith(r + '/')] for r in selected] if capture_pages else [pages])
+        groups = [g for g in groups if g] or [[]]
+        done = set()
+        for number, group in enumerate(groups, 1):
+            done.update(group)
+            if number == len(groups):
+                manifest_now = planned[MANIFEST]
+            else:  # archive-manifest.json with the digests of the pages committed so far
+                files_now = {**archive['files'], **{n: files[n] for n in done}}
+                manifest_now = json.dumps({**archive, 'files': files_now,
+                                           'total_bytes': sum(x['bytes'] for x in files_now.values())},
+                                          indent=2).encode()
+            operations = [(n, planned[n]) for n in group]
+            if not matches(manifest_now, remote[MANIFEST]):
+                operations.append((MANIFEST, manifest_now))
+            latest = api.repo_info(repo, repo_type='space')
+            if not hf_visibility.unchanged(latest, repo, 'space', revision):
+                raise ValueError('Space changed concurrently or its visibility differs from the record; rerun the '
+                                 'dry run against the latest revision (it continues from the current state)')
+            label = (group[0].split('/', 1)[0] if capture_pages and group else f'{len(selected)} run(s)')
+            response = space_commit(api, 
+                repo_id=repo, repo_type='space', parent_commit=revision,
+                commit_message=f'Conference views with the run clock, without the embedded activity timeline ({label}'
+                               + (f'; {sum(1 for n in group if _CAPTURE_PAGE.fullmatch(n))} captured-file pages'
+                                  if capture_pages else '') + '; the timeline stays in the private logs dataset)',
+                operations=[operation(path_in_repo=n, path_or_fileobj=d) for n, d in operations])
+            revision = response.oid
+            write_receipt(f'committed {number} of {len(groups)}')
         write_receipt('committed; verifying')
         final = api.repo_info(repo, repo_type='space', files_metadata=True)
         if not hf_visibility.unchanged(final, repo, 'space', revision):
@@ -2186,7 +2328,204 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
                   f'{receipt_error}', file=sys.stderr)
         raise
     result.update(committed=True, final_revision=revision, status='verified', verification={
-        'final_files': len(state), 'changed_files': sorted(n for n in current if not same(current[n], state[n])),
+        'final_files': len(state), 'changed_files': sorted(n for n in current if not same(current[n], state[n])
+                                and not _CAPTURE_PAGE.fullmatch(n)),
+        'changed_capture_pages': sum(1 for n in current if not same(current[n], state[n]) and _CAPTURE_PAGE.fullmatch(n)),
+        'verified_planned_files': len(planned), 'verified_preserved_files': len(set(current) - set(planned))})
+    write_receipt('verified')
+    return result
+
+SIMPLE_JUDGE_REPORT_JSON = 'analysis/simple_judge/report.json'
+
+
+def _published_page_restamps(run, remote, fetch):
+    """{name: new bytes} of one run's published pages restamped host-side (no local file read): RUN/results.html
+    (build_results.restamp_page; plus simple_judge_site.add_simple_judge_tab with the published simplified
+    judge report.json when there is one) and every HTML page of the published rubric-3.1 judge under
+    RUN/analysis/judge/ (research.analysis.judge.review.restamp_judge_page). Only pages whose bytes change are
+    returned. The run start comes from the published RUN/results.json."""
+    import build_results
+    root = str(Path(__file__).resolve().parents[1])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from research.analysis.judge.review import refresh_review_manifest, restamp_judge_page
+    from simple_judge_site import add_rubric_tab, add_simple_judge_tab
+    start = run_clock.results_start(fetch(f'{run}/results.json'))
+    if start is None:
+        raise ValueError(f'{run}/results.json has no start_utc; cannot show the run clock')
+    out = {}
+    page_name = f'{run}/results.html'
+    old = fetch(page_name)
+    page = build_results.restamp_page(old.decode('utf-8'), start)
+    report_name = f'{run}/{SIMPLE_JUDGE_REPORT_JSON}'
+    if report_name in remote:
+        page = add_simple_judge_tab(page, json.loads(fetch(report_name)))
+        if f'{run}/{JUDGE_PREFIX}report.html' in remote:  # the rubric-3.1 judge as its own tab (repeat2's gap)
+            page = add_rubric_tab(page)
+    if SITE_THEME_MARKER in old.decode('utf-8') and SITE_THEME_MARKER not in page:
+        raise ValueError('The restamped run page lost the site theme: ' + page_name)
+    if page.encode('utf-8') != old:
+        out[page_name] = page.encode('utf-8')
+    for name in sorted(n for n in remote if n.startswith(f'{run}/{JUDGE_PREFIX}') and n.endswith('.html')):
+        old = fetch(name)
+        new = restamp_judge_page(old.decode('utf-8'), start).encode('utf-8')
+        if new != old:
+            out[name] = new
+    review = f'{run}/{JUDGE_PREFIX}review/'
+    changed = {n[len(review):]: d for n, d in out.items() if n.startswith(review)}
+    if changed and review + 'manifest.json' in remote:  # the evidence browser's page digests follow its pages
+        old = fetch(review + 'manifest.json')
+        listed = (json.loads(old).get('pages') or {}) if isinstance(json.loads(old), dict) else {}
+        new = refresh_review_manifest(old, {n: d for n, d in changed.items() if n in listed})
+        if new != old:
+            out[review + 'manifest.json'] = new
+    return start, out
+
+
+def maintain_site_published(api, download, *, runs=None, commit=False, repo=DEFAULT_REPO, receipt=None,
+                            backup_dir=None, operation=None):
+    """--scope site without --bundle (owner, October 25, 2026: every time on the site shows the run clock and
+    UTC; run pages show the simplified judge's counts): restamp already published pages host-side, from the
+    published pages themselves, with no local run file and no bundle.
+
+    Changes only RUN/results.html and the HTML pages of the published rubric-3.1 judge under RUN/analysis/judge/
+    (see ``_published_page_restamps``) that differ after the restamp, the evidence browser's
+    review/manifest.json page digests (research.analysis.judge.review.refresh_review_manifest), plus their
+    digests in archive-manifest.json. Data files (results.json, judge JSON), the catalogue (re-render it separately with
+    --rerender-catalogue), conference views (--scope conference), incident reports (--scope incident) and every
+    other file are untouched. Each run's pages go in one guarded commit pinned to the revision of the previous
+    commit, archive-manifest.json in each; no planned file may be or become LFS. Backups, a receipt and a final
+    verification against the planned base; running it again continues from the current state (restamps are
+    idempotent, so already applied pages are skipped).
+    """
+    if runs is not None and (not runs or any(not isinstance(r, str) or not RUN_ID.fullmatch(r) for r in runs)):
+        raise ValueError('Invalid run ID')
+    if commit and (operation is None or receipt is None or backup_dir is None):
+        raise ValueError('--commit requires --receipt, --backup-dir and an upload operation')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
+    hf_visibility.check_dataset(api)
+    base = info.sha
+    remote = remote_files(api, repo, base)
+    current = inventory(remote)
+    cache = {}
+
+    def fetch(name):
+        if name not in cache:
+            data = Path(download(repo, name, repo_type='space', revision=base)).read_bytes()
+            if not matches(data, remote[name]):
+                raise ValueError('Remote metadata mismatch: ' + name)
+            cache[name] = data
+        return cache[name]
+
+    if MANIFEST not in remote:
+        raise ValueError('Remote file required for maintenance is missing: ' + MANIFEST)
+    archive = json.loads(fetch(MANIFEST))
+    if archive.get('schema') != 'gdm-private-space/1':
+        raise ValueError('Unexpected remote archive manifest schema')
+    published = [r for r in archive.get('runs', []) if f'{r}/results.html' in remote and f'{r}/results.json' in remote]
+    selected = published if runs is None else list(runs)
+    for run in selected:
+        if run not in archive.get('runs', []) or run not in published:
+            raise ValueError('Run is not published with results.html and results.json: ' + run)
+    planned, per_run = {}, {}
+    for run in selected:
+        start, pages = _published_page_restamps(run, remote, fetch)
+        planned.update(pages)
+        per_run[run] = {'run_start': start,
+                        'results_page': 'restamped' if f'{run}/results.html' in pages else 'unchanged',
+                        'simple_judge_on_run_page': f'{run}/{SIMPLE_JUDGE_REPORT_JSON}' in remote,
+                        'judge_pages': {'published': sum(1 for n in remote if n.startswith(f'{run}/{JUDGE_PREFIX}')
+                                                         and n.endswith('.html')),
+                                        'restamped': sum(1 for n in pages if n.startswith(f'{run}/{JUDGE_PREFIX}')
+                                                         and n.endswith('.html'))},
+                        'bytes': sum(map(len, pages.values()))}
+    files = dict(archive['files'])
+    for name, data in planned.items():
+        files[name] = digest(data)
+    new_archive = {**archive, 'files': files, 'total_bytes': sum(x['bytes'] for x in files.values())}
+    names = sorted(planned)
+    stored_lfs = sorted(n for n in names if remote[n].lfs)
+    ruled = lfs_rule_matches(fetch(ATTRIBUTES), names) if ATTRIBUTES in remote else []
+    large = [f'{n} ({len(planned[n])} bytes)' for n in names if len(planned[n]) >= LFS_SAFE_BYTES]
+    if stored_lfs or ruled or large:
+        raise ValueError('Planned file(s) stored as LFS, named by an LFS rule or close to the size HF stores as '
+                         'LFS: ' + ', '.join([*stored_lfs, *ruled, *large][:EXAMPLES]))
+    if planned:
+        planned[MANIFEST] = json.dumps(new_archive, indent=2).encode()
+    result = {'operation': 'maintain-run', 'scope': 'site', 'source': 'published pages (no bundle)', 'repo': repo,
+              **hf_visibility.record(repo, 'space'), 'runs': selected, 'base_revision': base, 'committed': False,
+              'per_run': per_run, 'to_replace': sorted(planned), 'to_add': [],
+              'bytes': sum(len(d) for n, d in planned.items() if n != MANIFEST),
+              'uploads': len(planned), 'already_applied': not planned}
+    if not commit or not planned:
+        return result
+
+    backup_dir, receipt = Path(backup_dir), Path(receipt)
+    revision = base
+
+    def write_receipt(status):
+        write_json(receipt, {**result, 'last_revision': revision, 'status': status})
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    write_receipt('writing backups; nothing uploaded')
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        write_json(backup_dir / INVENTORY, {'operation': 'maintain-run', 'scope': 'site', 'repo': repo,
+                                            'runs': selected, 'revision': base, 'origin_revision': base,
+                                            'resume_from': None, 'files': current})
+        saved = sorted(n for n in [*planned, ATTRIBUTES] if n in remote)
+        for name in saved:
+            target = backup_dir / ORIGINAL / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(fetch(name))
+        write_json(backup_dir / PLAN, result)
+        result.update(backup_dir=str(backup_dir), backups=saved)
+        write_receipt('backups written; nothing uploaded')
+        groups = [[n for n in names if n.startswith(r + '/')] for r in selected]
+        groups = [g for g in groups if g]
+        done = set()
+        for number, group in enumerate(groups, 1):
+            done.update(group)
+            files_now = {**archive['files'], **{n: files[n] for n in done}}
+            manifest_now = (planned[MANIFEST] if number == len(groups) else json.dumps(
+                {**archive, 'files': files_now, 'total_bytes': sum(x['bytes'] for x in files_now.values())},
+                indent=2).encode())
+            latest = api.repo_info(repo, repo_type='space')
+            if not hf_visibility.unchanged(latest, repo, 'space', revision):
+                raise ValueError('Space changed concurrently or its visibility differs from the record; rerun the '
+                                 'dry run against the latest revision (it continues from the current state)')
+            response = space_commit(api, 
+                repo_id=repo, repo_type='space', parent_commit=revision,
+                commit_message=f'Run clock on the published pages of {group[0].split("/", 1)[0]} '
+                               f'({len(group)} page(s); results.html and judge pages)',
+                operations=[operation(path_in_repo=n, path_or_fileobj=d)
+                            for n, d in [*((n, planned[n]) for n in group), (MANIFEST, manifest_now)]])
+            revision = response.oid
+            write_receipt(f'committed {number} of {len(groups)}')
+        final = api.repo_info(repo, repo_type='space', files_metadata=True)
+        if not hf_visibility.unchanged(final, repo, 'space', revision):
+            raise ValueError('Space changed before verification (or its visibility differs from the record); '
+                             'inspect the latest revision')
+        final_files = remote_files(api, repo, revision)
+        state = inventory(final_files)
+        if set(state) != set(current):
+            raise ValueError(f'Remote file inventory changed unexpectedly: missing '
+                             f'{sorted(set(current) - set(state))[:EXAMPLES]}, unexpected '
+                             f'{sorted(set(state) - set(current))[:EXAMPLES]}')
+        for name in current:
+            if name not in planned and not same(current[name], state[name]):
+                raise ValueError('Unrelated remote file changed: ' + name)
+        for name, data in planned.items():
+            if final_files[name].lfs or not matches(data, final_files[name]):
+                raise ValueError('File mismatch or stored as LFS after maintenance: ' + name)
+    except Exception as error:
+        try:
+            write_receipt('failed: ' + type(error).__name__ + (': ' + str(error) if isinstance(error, ValueError) else ''))
+        except Exception as receipt_error:  # never hide the original error
+            print(f'Could not record the failure in the receipt {receipt}: {type(receipt_error).__name__}: '
+                  f'{receipt_error}', file=sys.stderr)
+        raise
+    result.update(committed=True, final_revision=revision, status='verified', verification={
+        'final_files': len(state), 'changed_files': len([n for n in current if not same(current[n], state[n])]),
         'verified_planned_files': len(planned), 'verified_preserved_files': len(set(current) - set(planned))})
     write_receipt('verified')
     return result
@@ -2198,8 +2537,8 @@ def main(argv=None):
     target.add_argument('--maintain-run', metavar='RUN_ID',
                         help='The already-published run whose results and judge files (or transcripts) are updated')
     target.add_argument('--all-published-runs', action='store_true',
-                        help='migrate-logs or conference scope: every run recorded in the published '
-                             'archive-manifest.json (conference: every one with a conference view)')
+                        help='migrate-logs, conference or site (without --bundle) scope: every run recorded in the '
+                             'published archive-manifest.json (conference: every one with a conference view)')
     target.add_argument('--rerender-catalogue', action='store_true',
                         help='Rebuild only index.html from the published experiments.json with the current '
                              'catalogue generator (after a catalogue page change); no entry or run file changes')
@@ -2238,7 +2577,11 @@ def main(argv=None):
     parser.add_argument('--dataset-repo', default=None,
                         help='migrate-logs and simple-judge scopes: the private logs dataset')
     parser.add_argument('--pages-dir', type=Path,
-                        help='migrate-logs scope: a local copy of the Space pages (used only where byte-identical)')
+                        help='migrate-logs and conference scopes: a local copy of the Space pages (used only where '
+                             'byte-identical to the published file)')
+    parser.add_argument('--capture-pages', action='store_true',
+                        help='conference scope: also restamp the published captured-file pages '
+                             '(RUN/conference-view/file-*.html) with the run clock; one guarded commit per run')
     parser.add_argument('--replace-judge', action='store_true',
                         help='judge scope only: replace published judge files of another judge build (for example '
                              'a re-run under a newer rubric) instead of refusing them; published judge files the '
@@ -2276,8 +2619,20 @@ def main(argv=None):
         result = maintain_conference(HfApi(), hf_hub_download,
                                      runs=None if args.all_published_runs else [args.maintain_run],
                                      commit=args.commit, repo=args.repo_id, receipt=args.receipt,
-                                     backup_dir=args.backup_dir, operation=CommitOperationAdd)
+                                     backup_dir=args.backup_dir, operation=CommitOperationAdd,
+                                     capture_pages=args.capture_pages, pages_dir=args.pages_dir)
         print(json.dumps(result, indent=2))
+        return
+    if args.scope == 'site' and args.bundle is None:
+        if args.resume_from is not None or args.replace_judge:
+            parser.error('--scope site without --bundle takes no --resume-from or --replace-judge')
+        if args.commit and (args.receipt is None or args.backup_dir is None):
+            parser.error('--commit requires --receipt and --backup-dir')
+        from huggingface_hub import HfApi, CommitOperationAdd, hf_hub_download
+        print(json.dumps(maintain_site_published(HfApi(), hf_hub_download,
+                                                 runs=None if args.all_published_runs else [args.maintain_run],
+                                                 commit=args.commit, repo=args.repo_id, receipt=args.receipt,
+                                                 backup_dir=args.backup_dir, operation=CommitOperationAdd), indent=2))
         return
     if args.scope == 'migrate-logs' or args.all_published_runs:
         if args.scope != 'migrate-logs' or args.bundle is not None or args.resume_from is not None:
@@ -2313,8 +2668,9 @@ def main(argv=None):
         return
     if args.migrate_category or args.delete_moved or args.dataset_repo or args.pages_dir:
         parser.error('--migrate-category, --delete-moved and --dataset-repo apply only to --scope migrate-logs')
-    if (args.scope in NO_BUNDLE) == (args.bundle is not None):
-        parser.error('--bundle is required, except for --scope unlist, snapshots or prune, which take none')
+    if (args.scope in NO_BUNDLE) == (args.bundle is not None) and args.scope not in OPTIONAL_BUNDLE:
+        parser.error('--bundle is required, except for --scope unlist, snapshots or prune, which take none '
+                     '(incident and site: optional; without it they work from --runs-dir or the published pages)')
     if args.resume_from is not None and args.scope in (*NO_BUNDLE, 'incident'):
         parser.error('--scope ' + args.scope + ' takes no --resume-from; run it again, it continues from the '
                      'current state')
@@ -2346,7 +2702,8 @@ def main(argv=None):
     if args.scope == 'incident':
         print(json.dumps(maintain_incident(args.bundle, HfApi(), hf_hub_download, run=args.maintain_run,
                                            commit=args.commit, repo=args.repo_id, receipt=args.receipt,
-                                           backup_dir=args.backup_dir, operation=CommitOperationAdd), indent=2))
+                                           backup_dir=args.backup_dir, operation=CommitOperationAdd,
+                                           runs_dir=None if args.bundle is not None else args.runs_dir), indent=2))
         return
     if args.scope == 'unlist':
         print(json.dumps(unlist_run(HfApi(), hf_hub_download, run=args.maintain_run, commit=args.commit,

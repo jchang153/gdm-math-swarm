@@ -273,9 +273,10 @@ docs/prompts.md.
   Serial, resumable, host-wide lock `runs/.gdm-evaluator.lock`; refuses while judge or agent
   containers run (interlock).
 * Validation records: `data/validation/evaluator-<UTC>.json`, schema
-  `gdm-evaluator-validation/3`, semantics `gdm-evaluator-semantics/3`. `load_validation`
+  `gdm-evaluator-validation/3`, semantics `gdm-evaluator-semantics/4` (v4: restated answers
+  are `fraudulent` without a container). `load_validation`
   recomputes every expectation from code and binds the image ID, entry SHA-256, pins,
-  runner settings, trusted verifier SHA-256 (`verifier_sha256` in the image pins), seccomp SHA-256, fixture-manifest SHA-256 and the SHA-256 of
+  runner settings (wall-clock limits may only be tightened, e.g. by `check_proof`), trusted verifier SHA-256 (`verifier_sha256` in the image pins), seccomp SHA-256, fixture-manifest SHA-256 and the SHA-256 of
   `evaluator.py` itself (any edit requires revalidation). `validation_status()` is the
   local-only summary the launch gate uses; `self_compare_passes(entry)` judges each
   self-comparison. Debug subsets are written as `evaluator-debug-*.json` under

@@ -705,6 +705,20 @@ class PageTests(unittest.TestCase):
         self.assertIn("'inspect-view/index.html'", hosted)
         self.assertNotIn('transcripts/index.html', hosted)
         self.assertNotIn('live/index.json', local)
+        self.assertIn('function runClock(t,s)', hosted)  # 'updated' shown as offset from the run start plus UTC
+        self.assertIn('runClock(Date.parse(e.updated_utc)/1000,Date.parse(e.started_utc)/1000)', hosted)
+
+    def test_live_summary_times_show_offset_from_run_start_and_utc(self):
+        summary = {'run': 'a-run', 'vm': 'vm', 'state_label': 'running', 'snapshot_utc': '2026-10-22T19:00:05Z',
+                   'started_utc': '2026-10-22T18:43:07.957182Z', 'elapsed_seconds': 1017, 'max_run_seconds': 5400,
+                   'model': 'm', 'track': 't', 'system_prompt_mode': None, 'agents': 2, 'agent_exits': 0,
+                   'agent_restarts': 0, 'inspect_samples': {'flushed': 0, 'completed': 0, 'running': 2},
+                   'solved': 1, 'task_count': 71, 'submissions': {}}
+        page = live_mirror.landing_page(summary, [], 300, inspect_view=True, conference=True)
+        self.assertIn('<dt>Run started</dt><dd>+0:00 (18:43:07 UTC)</dd>', page)
+        self.assertIn('<dt>Snapshot taken</dt><dd>+16:58 (19:00:05 UTC)</dd>', page)
+        page = live_mirror.landing_page({**summary, 'started_utc': None}, [], 300, inspect_view=True, conference=True)
+        self.assertIn('<dt>Snapshot taken</dt><dd>19:00:05 UTC</dd>', page)
 
 
 if __name__ == '__main__':

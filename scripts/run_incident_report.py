@@ -10,6 +10,10 @@ October 21, 2026), written to RUN/analysis/incident/ (report.html, report.md, ev
   # Host only (no model, no budget): recompute "How the exploit spread" and the table of contents and
   # insert them into the existing report.html, report.md and evidence.json.
   PYTHONPATH=src:. .venv/bin/python scripts/run_incident_report.py --run-dir runs/<run> --rerender-contagion
+  # Host only, reads nothing but the report's own files (report.html, report.md, evidence.json; results.json
+  # for the run start when evidence.json lacks the contagion clock): the current layout (no "The agents, one by
+  # one" or "Where to look" section, run-relative plus absolute times), contagion section from evidence.json.
+  PYTHONPATH=src:. .venv/bin/python scripts/run_incident_report.py --run-dir runs/<run> --rerender-layout
 
 Behavior findings (owner decision, October 24, 2026): the digest and the contagion section read the
 simplified one-pass judge (RUN/analysis/simple_judge/agents.jsonl) when present, else the rubric-3.1
@@ -87,6 +91,12 @@ def parse_args(argv=None):
                         help="host only, no model call and no budget: recompute the 'How the exploit spread' section "
                              "and the table of contents and insert them into the existing report.html, report.md "
                              "and evidence.json (idempotent)")
+    parser.add_argument("--rerender-layout", action="store_true",
+                        help="host only, no model call, no budget and no run records: rewrite the existing report.html "
+                             "and report.md (in --output-dir, default RUN/analysis/incident) in the current layout "
+                             "(owner, October 25, 2026: without 'The agents, one by one' and 'Where to look', times "
+                             "as run-relative plus absolute UTC), re-inserting the contagion section stored in "
+                             "evidence.json; evidence.json is unchanged (idempotent)")
     parser.add_argument("--extract-model", choices=("opus", "sonnet"), default="opus",
                         help="model that picks excerpts of long records by segment number (default opus; "
                              "Sonnet refused Gemini transcripts on gemini10)")
@@ -155,6 +165,11 @@ def main(argv=None):
         log(f"refused: {run_dir} has no results.json (not a completed run)")
         return 2
     out_dir = (args.output_dir or run_dir / "analysis" / "incident").resolve()
+    if args.rerender_layout:
+        if args.mock or args.rerender_contagion:
+            log("refused: --rerender-layout takes no --mock or --rerender-contagion")
+            return 2
+        return _relayout(run_dir, out_dir, log)
     if args.mock and (out_dir == run_dir or run_dir in out_dir.parents):
         log("refused: --mock writes outside the run directory; pass --output-dir <scratch>/<run>/analysis/incident")
         return 2
@@ -176,6 +191,34 @@ def main(argv=None):
         if args.rerender_contagion:
             return _rerender(args, run_dir, out_dir, log)
         return _run(args, run_dir, out_dir, log)
+
+
+def _relayout(run_dir, out_dir, log):
+    """--rerender-layout: the current report layout from the report's own files only (no model, no ledger, no
+    judge or raw run records, no lock: it only rewrites two derived pages)."""
+    from research.analysis.incident import render
+    page_path, md_path, ev_path = out_dir / "report.html", out_dir / "report.md", out_dir / "evidence.json"
+    if not page_path.is_file() or not ev_path.is_file():
+        log(f"refused: {out_dir} has no report.html and evidence.json to re-render")
+        return 2
+    evidence = json.loads(ev_path.read_text(encoding="utf-8"))
+    if evidence.get("run_id") not in (None, run_dir.name):
+        log(f"refused: evidence.json belongs to run {evidence.get('run_id')!r}, not {run_dir.name}")
+        return 2
+    start = render.report_start(evidence, run_dir)
+    old_page = page_path.read_text(encoding="utf-8")
+    old_md = md_path.read_text(encoding="utf-8") if md_path.is_file() else None
+    page, md = render.relayout(old_page, old_md, evidence, start)
+    written = []
+    for path, old, new in ((page_path, old_page, page), (md_path, old_md, md)):
+        if new is not None and new != old:
+            path.write_text(new, encoding="utf-8")
+            written.append(str(path))
+    print(json.dumps({"status": "relayout", "run_start": start, "written": written,
+                      "bytes": {"report.html": [len(old_page.encode()), len(page.encode())],
+                                **({"report.md": [len(old_md.encode()), len(md.encode())]} if md is not None else {})}},
+                     indent=1))
+    return 0
 
 
 def _rerender(args, run_dir, out_dir, log):

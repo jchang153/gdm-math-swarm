@@ -9,7 +9,7 @@ conference page that still embeds it into the page this exporter writes now, for
 import argparse
 import base64
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import hashlib
 import gzip
 import html
@@ -18,11 +18,11 @@ from pathlib import Path
 import re
 import sqlite3
 import sys
-from zoneinfo import ZoneInfo
 
 if str(Path(__file__).resolve().parent) not in sys.path:  # shared site theme lives beside this script
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 from site_style import themed  # noqa: E402
+import run_clock  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:  # research/analysis/roles.py (participant roles)
@@ -54,6 +54,24 @@ TIMELINE_NOTE_OFFLINE = ('<p id="timeline-note" class="muted">Full activity time
                          'researchers, not in this Space or the logs dataset (<a href="../analysis/timeline.jsonl">'
                          'timeline.jsonl</a>). This view does not embed it.</p>')
 TIMELINE_LOCATIONS = ('dataset', 'offline')
+# Optional data field (October 25, 2026): the run start (epoch seconds, run_clock.run_start), so every time in
+# the view reads "+12:34 (05:17:40 UTC)" (run_clock.CLOCK_JS). Pages exported earlier lack it.
+OPTIONAL_KEYS = ('run_start',)
+# The capture-time line of a captured-file page, as exported before October 25, 2026 (America/Los_Angeles).
+_CAPTURE_LINE = re.compile(r'(<h2>Capture \d+</h2><p>)([A-Z][a-z]{2} \d{1,2}, \d{4} \d{1,2}:\d{2}:\d{2} [AP]M) '
+                           r'(PDT|PST|UTC)( · )')
+_ZONE_OFFSETS = {'PDT': -7, 'PST': -8, 'UTC': 0}
+
+
+def restamp_capture_page(document, start):
+    """A captured-file page (conference-view/file-*.html) with each capture time shown as run clock plus UTC
+    (run_clock.clock), e.g. "Oct 22, 2026 12:44:41 PM PDT" -> "+1:37 (19:44:41 UTC)". The zone abbreviation
+    gives the offset explicitly. Idempotent: lines already in the clock format do not match."""
+    def convert(match):
+        local = datetime.strptime(match.group(2), '%b %d, %Y %I:%M:%S %p')
+        stamp = local.replace(tzinfo=timezone(timedelta(hours=_ZONE_OFFSETS[match.group(3)])))
+        return match.group(1) + run_clock.clock(stamp, start) + match.group(4)
+    return _CAPTURE_LINE.sub(convert, document)
 
 
 def json_lines(path):
@@ -107,6 +125,7 @@ def export(run):
         raise ValueError('Conference output must not be a symlink')
     out.mkdir(exist_ok=True)
     events = json_lines(run / 'conference/events.jsonl')
+    start = run_clock.run_start(run)  # results.json start_utc (the runtime's common_start)
     runtime = json_lines(run / 'runtime.jsonl')
     db = sqlite3.connect((run / 'conference/state.sqlite').as_uri() + '?mode=ro', uri=True)
     db.row_factory = sqlite3.Row
@@ -237,7 +256,7 @@ def export(run):
         filename = identity + '.html'
         sections = []
         for i, row in enumerate(rows, 1):
-            captured_at = datetime.fromtimestamp(row['timestamp'], ZoneInfo('America/Los_Angeles')).strftime('%b %d, %Y %I:%M:%S %p %Z')
+            captured_at = run_clock.clock(row['timestamp'], start)
             sections.append(f'<article id="version-{i}"><h2>Capture {i}</h2><p>{captured_at} · '
                             f'{html.escape(str(row["mode"]))} capture · {row["bytes"]} recorded bytes</p>'
                             f'<p>Runtime line {row["runtime_line"]} · blob SHA-256 <code>{row["blob_sha256"]}</code></p>'
@@ -272,6 +291,8 @@ def export(run):
     data = dict(run=run.name, records=records, counts=counts, warnings=warnings,
                 conference_events=len(events), timeline_entries=0, timeline_location='dataset',
                 captured_files=len(versions))
+    if start is not None:
+        data['run_start'] = start
     (out / 'index.html').write_text(render_index(data))
     manifest = {'schema': SCHEMA, 'run': run.name, 'counts': counts, 'captured_files': len(versions),
                 'conference_events': len(events), 'timeline_entries': 0, 'timeline_location': 'dataset',
@@ -284,7 +305,9 @@ def export(run):
 
 def render_index(data):
     """The compact, self-contained conference page for the records in ``data``."""
-    if set(data) != {*DATA_KEYS, 'timeline_location'} or data['timeline_location'] not in TIMELINE_LOCATIONS:
+    if set(data) - set(OPTIONAL_KEYS) != {*DATA_KEYS, 'timeline_location'} \
+            or data['timeline_location'] not in TIMELINE_LOCATIONS \
+            or not isinstance(data.get('run_start', 0), (int, float)) or isinstance(data.get('run_start'), bool):
         raise ValueError('Unexpected conference data fields')
     if data['timeline_entries'] != 0 or 'activity' in data['counts'] \
             or any(r['category'] == 'activity' for r in data['records']):
@@ -305,8 +328,9 @@ const data=JSON.parse(document.getElementById('data').textContent);
 const sections={board:['Bulletin board','Posts shown in posting order. The conference did not store a reply-thread relationship.','No bulletin-board posts were recorded.'],dms:['Direct messages','Private conversations grouped by the two participants.','No direct messages were saved in this run. Inbox checks appear only in the full activity timeline, which this view does not embed.'],library:['Shared library','Published artifacts and revisions. Complete accepted proofs were published automatically; private notes required deliberate publication.','No shared artifacts were recorded.'],submissions:['Submissions & judging','Conference outcomes and independently bound evaluations. “problem_closed” does not mean a proof was mathematically rejected.','No submissions were recorded.'],feedback:['Organizer feedback','Private feedback submitted to the conference organizers.','No organizer feedback was recorded.'],oversight:['Oversight','Credits the overseer reverted (with its stated reason) and the proof checks it ran. A reverted credit removed the credit and the library entry and reopened the problem; the original submission stays in the records.','No credit was reverted and no proof check was run.'],files:['Private notes & files','Captured versions of RESEARCH.md and private workspace working files. These are observations, not a complete edit history.','No private workspace file captures were recorded.']};
 let selected=sections[location.hash.slice(1)]&&(location.hash.slice(1) in data.counts)?location.hash.slice(1):'board',pageNo=0;const size=40;
 const el=id=>document.getElementById(id);const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n;};
-el('run').textContent=data.run+' · '+data.conference_events+' conference events';
-function timestamp(value){return value==null?'Time unknown':new Date(value*1000).toLocaleString(undefined,{timeZone:'America/Los_Angeles',dateStyle:'medium',timeStyle:'medium'})+' America/Los_Angeles';}
+el('run').textContent=data.run+' · '+data.conference_events+' conference events'+(data.run_start!=null?' · times are run clock (from the run start, '+new Date(Math.floor(data.run_start)*1000).toISOString().replace('.000Z','Z')+') and UTC':'');
+'''+run_clock.CLOCK_JS+r'''
+function timestamp(value){return value==null?'Time unknown':runClock(value,data.run_start);}
 for(const [id,[label]] of Object.entries(sections)){if(!(id in data.counts))continue;const b=node('button',label+' ('+(data.counts[id]||0)+')');b.onclick=()=>{selected=id;location.hash=id;pageNo=0;options();render();};b.dataset.section=id;el('tabs').append(b);}
 function options(){const rows=data.records.filter(x=>x.category===selected);for(const [id,values,label] of [['agent',rows.flatMap(x=>x.agents),'All agents'],['task',rows.map(x=>x.task).filter(Boolean),'All tasks']]){const old=el(id).value;el(id).replaceChildren(new Option(label,''));for(const v of [...new Set(values)].sort())el(id).append(new Option(v,v));if([...el(id).options].some(o=>o.value===old))el(id).value=old;}el('task').hidden=el('task').options.length===1;}
 function render(){document.querySelectorAll('[data-section]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.section===selected)));el('intro').textContent=sections[selected][1];const q=el('search').value.toLowerCase(),agent=el('agent').value,task=el('task').value;
@@ -344,7 +368,7 @@ def strip_timeline(document, manifest, location='dataset'):
     if location not in TIMELINE_LOCATIONS:
         raise ValueError('Unknown timeline location: ' + str(location))
     data = published_data(document)
-    if set(data) - {'timeline_location'} != set(DATA_KEYS):
+    if set(data) - {'timeline_location', *OPTIONAL_KEYS} != set(DATA_KEYS):
         raise ValueError('Unexpected conference data fields: ' + ', '.join(sorted(set(data) ^ set(DATA_KEYS))))
     if manifest.get('schema') != SCHEMA or manifest.get('run') != data['run']:
         raise ValueError('Conference manifest does not belong to this page')
@@ -358,6 +382,7 @@ def strip_timeline(document, manifest, location='dataset'):
     new = dict(run=data['run'], records=[r for r in data['records'] if r['category'] != 'activity'], counts=counts,
                warnings=data['warnings'], conference_events=data['conference_events'], timeline_entries=0,
                timeline_location=location, captured_files=data['captured_files'])
+    new.update({k: data[k] for k in OPTIONAL_KEYS if k in data})
     sources = {k: v for k, v in manifest['sources'].items() if k != TIMELINE}
     new_manifest = {'schema': SCHEMA, 'run': manifest['run'], 'counts': counts,
                     'captured_files': manifest['captured_files'], 'conference_events': manifest['conference_events'],

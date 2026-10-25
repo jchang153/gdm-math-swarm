@@ -51,6 +51,7 @@ from pathlib import Path
 SCHEMA = "incident-contagion/2"
 SECTION_TITLE = "How the exploit spread"
 SECTION_ID = "how-the-exploit-spread"
+CLOCK_BASIS = "runtime.jsonl common_start"   # minute 0 = the run start every page uses
 START, END = "<!-- contagion:start -->", "<!-- contagion:end -->"
 CAVEAT = ("A link means the agent read that source's accepted exploit file before first using it: strong evidence "
           "of transmission, not proof; agents exposed to several sources are attributed to the first file read.")
@@ -236,7 +237,7 @@ def run_clock(run_dir, submissions=()):
             last = ts if last is None else max(last, ts)
             if start is None and event.get("kind") == "common_start":
                 start = ts
-    basis = "runtime.jsonl common_start"
+    basis = CLOCK_BASIS
     if start is None:
         times = [s["ts"] for s in submissions if s.get("ts") is not None]
         start = min(times) if times else 0.0
@@ -597,6 +598,21 @@ def _esc(text):
     return html.escape(str(text), quote=True)
 
 
+def _start(record):
+    """The run start of a contagion record: its minute 0 when that is the runtime's common_start (the start every
+    page uses), else None (minute 0 is then the first submission, not the run start)."""
+    clock = record.get("clock") or {}
+    start = clock.get("start_ts")
+    return float(start) if isinstance(start, (int, float)) and clock.get("basis") == CLOCK_BASIS else None
+
+
+def _at(minutes, start):
+    """A run minute as every page shows times: ``+41:36 (19:24:44 UTC)`` (scripts/run_clock.py); figure axes
+    stay in run minutes."""
+    from .render import run_clock
+    return run_clock.clock_minutes(minutes, start)
+
+
 def outbreak_svg(record, width=680, height=240):
     points = record["outbreak"]
     length = max(record["clock"]["length_min"], points[-1][1] if points else 0, 1)
@@ -625,7 +641,7 @@ def outbreak_svg(record, width=680, height=240):
         anchor = "start" if x(first) < left + pw * 0.6 else "end"
         dx = 4 if anchor == "start" else -4
         parts.append(f'<line class="cg-mark" x1="{x(first):.1f}" x2="{x(first):.1f}" y1="{top}" y2="{top + ph}">'
-                     f'<title>First exploit credit at minute {_fmt(round(first, 1))}</title></line>'
+                     f'<title>First exploit credit at {_at(first, _start(record))}</title></line>'
                      f'<text class="cg-tick" x="{x(first) + dx:.1f}" y="{top + 10}" text-anchor="{anchor}">'
                      f'first exploit credit, min {_fmt(round(first, 1))}</text>')
     seeded = record.get("seeded") or {}
@@ -635,7 +651,7 @@ def outbreak_svg(record, width=680, height=240):
         anchor = "start" if x(sm) < left + pw * 0.6 else "end"
         parts.append(f'<line class="cg-mark" x1="{x(sm):.1f}" x2="{x(sm):.1f}" y1="{top}" y2="{top + ph}">'
                      f'<title>{_esc(seeded.get("seed_agent"))} ({_esc(seeded.get("label"))}): exploit credited and '
-                     f'published at minute {_fmt(round(sm, 1))}; not counted in the curve</title></line>'
+                     f'published at {_at(sm, _start(record))}; not counted in the curve</title></line>'
                      f'<text class="cg-tick" x="{x(sm) + (4 if anchor == "start" else -4):.1f}" y="{top + 24}" '
                      f'text-anchor="{anchor}">{_esc(text)}</text>')
     path, count = [f"M{x(0):.1f},{y(0):.1f}"], 0
@@ -647,7 +663,7 @@ def outbreak_svg(record, width=680, height=240):
     parts.append(f'<path class="cg-curve" d="{"".join(path)}"/>')
     for count, (agent, minute) in enumerate(points, 1):
         parts.append(f'<circle class="cg-dot" cx="{x(minute):.1f}" cy="{y(count):.1f}" r="3.5">'
-                     f'<title>{_esc(agent)}: first exploit submission at minute {_fmt(round(minute, 1))} '
+                     f'<title>{_esc(agent)}: first exploit submission at {_at(minute, _start(record))} '
                      f'({count} agent{"s" if count != 1 else ""} so far)</title></circle>')
     parts.append("</svg>")
     return "".join(parts)
@@ -675,7 +691,7 @@ def _roles_of(technique):
             if u.get("seeded") or u.get("role")}
 
 
-def tree_svg(technique, length, width=680):
+def tree_svg(technique, length, width=680, start=None):
     users = {u["agent"]: u for u in technique["users"]}
     roles = _roles_of(technique)
     order = technique["row_order"]
@@ -707,7 +723,7 @@ def tree_svg(technique, length, width=680):
         ex, ux = x(user["exposed_min"]), x(user["first_use_min"])
         parts.append(f'<path class="cg-edge {cls}" d="M{sx:.1f},{sy:.1f}V{ay:.1f}H{ex:.1f}">'
                      f'<title>{_esc(agent_label(agent, roles))} read {_esc(agent_label(src["agent"], roles))}\'s accepted exploit file '
-                     f'{_esc(user["exposure_file"])} at minute {_fmt(round(user["exposed_min"], 1))}</title></path>')
+                     f'{_esc(user["exposure_file"])} at {_at(user["exposed_min"], start)}</title></path>')
         if ux > ex + 0.5:
             parts.append(f'<path class="cg-dash {cls}" d="M{ex:.1f},{ay:.1f}H{ux:.1f}"/>')
     for agent in order:
@@ -727,13 +743,12 @@ def tree_svg(technique, length, width=680):
         else:
             r = _radius(user["credits"])
             shape = f'<circle class="cg-node {cls}" cx="{cx:.1f}" cy="{cy:.1f}" r="{r:.1f}">'
-            how = (f"adopter: read {agent_label(user['source'], roles)}'s exploit file at minute "
-                   f"{_fmt(round(user['exposed_min'], 1))}")
+            how = f"adopter: read {agent_label(user['source'], roles)}'s exploit file at {_at(user['exposed_min'], start)}"
         exposed = ""
         if user["independent"] and user["exposed_min"] is not None:
-            exposed = f"; first read an exploit file later, at minute {_fmt(round(user['exposed_min'], 1))}"
+            exposed = f"; first read an exploit file later, at {_at(user['exposed_min'], start)}"
         parts.append(shape + f"<title>{_esc(agent_label(agent, roles))}: {_esc(how)}; first exploit submission at "
-                     f"minute {_fmt(round(user['first_use_min'], 1))}; {user['credits']} exploit credit"
+                     f"{_at(user['first_use_min'], start)}; {user['credits']} exploit credit"
                      f"{'s' if user['credits'] != 1 else ''}{_esc(exposed)}</title>"
                      + ("</path>" if user["independent"] or user.get("seeded") else "</circle>"))
         parts.append(f'<text class="cg-lab" x="{cx + r + 5:.1f}" y="{cy + 4:.1f}">{_esc(label)}</text>')
@@ -807,7 +822,7 @@ def seeded_sentence(record):
     attributed = sum(t["counts"].get("seeded_adopters", 0) for t in record.get("techniques") or [])
     return (f"Seeded run: {seeded['seed_agent']} is the seeded source, planted by the researchers (not a model "
             f"agent and not an independent discoverer): "
-            + (f"at minute {_fmt(round(when, 1))} " if when is not None else "")
+            + (f"at {_at(when, _start(record))} " if when is not None else "")
             + f"the conference credited it with an accepted exploit for {seeded.get('task_id')}"
             + (f" and published {seeded['path']}" if seeded.get("path") else "")
             + (". " if seeded.get("injected") or when is not None else " (no injection was recorded). ")
@@ -891,7 +906,7 @@ def section_html(record):
         parts.append(f'<p class="cg-counts">{_esc(seeded_sentence(record))}</p>')
     first = record.get("first_credit_min")
     lead = (f"{_plural(total, 'agent')} submitted an exploit"
-            + (f"; the first exploit credit came at minute {_fmt(round(first, 1))}" if first is not None else "")
+            + (f"; the first exploit credit came at {_at(first, _start(record))}" if first is not None else "")
             + (f". {len(techniques)} techniques are shown, largest first." if len(techniques) > 1 else "."))
     parts.append(f'<p class="cg-counts">{_esc(lead)}</p>')
     parts.append('<figure class="cg-fig nomath">' + outbreak_svg(record)
@@ -904,7 +919,8 @@ def section_html(record):
         cross = crosscheck_sentence(record, technique)
         if cross:
             parts.append(f'<p class="cg-caveat">{_esc(cross)}</p>')
-        parts.append('<figure class="cg-fig nomath">' + tree_svg(technique, record["clock"]["length_min"])
+        parts.append('<figure class="cg-fig nomath">'
+                     + tree_svg(technique, record["clock"]["length_min"], start=_start(record))
                      + legend_html(technique)
                      + "<figcaption>Each node sits at the agent's first exploit submission (run minute, top axis); "
                        "rows are in lineage order, children below their source. Hover a node for details."
@@ -925,7 +941,7 @@ def section_markdown(record):
     first = record.get("first_credit_min")
     lines += [f"*{source_line(record)}*", "",
               f"{_plural(record['exploit_users_total'], 'agent')} submitted an exploit"
-              + (f"; the first exploit credit came at minute {_fmt(round(first, 1))}." if first is not None else "."),
+              + (f"; the first exploit credit came at {_at(first, _start(record))}." if first is not None else "."),
               f"The outbreak curve and transmission tree figures are in [report.html](report.html#{SECTION_ID}).", ""]
     if seeded_sentence(record):
         lines += [seeded_sentence(record), ""]
@@ -934,7 +950,7 @@ def section_markdown(record):
         lines += [f"### Transmission tree: {technique['label']}", "", counts_sentence(technique["counts"]), ""]
         lines += [f"*{cross}*", ""] if cross else []
         lines += [
-                  "| Agent | Discovered or adopted | Source | First exposure (min) | First use (min) | Credits |",
+                  "| Agent | Discovered or adopted | Source | First exposure | First use | Credits |",
                   "| --- | --- | --- | --- | --- | --- |"]
         users = {u["agent"]: u for u in technique["users"]}
         roles = _roles_of(technique)
@@ -944,8 +960,8 @@ def section_markdown(record):
                    else "independent" if u["independent"] else "adopted")
             source = agent_label(u["source"], roles) if u["source"] else "-"
             lines.append(f"| {agent_label(agent, roles)} | {how} | {source} | "
-                         f"{'-' if u['exposed_min'] is None else _fmt(round(u['exposed_min'], 1))} | "
-                         f"{_fmt(round(u['first_use_min'], 1))} | {u['credits']} |")
+                         f"{'-' if u['exposed_min'] is None else _at(u['exposed_min'], _start(record))} | "
+                         f"{_at(u['first_use_min'], _start(record))} | {u['credits']} |")
         lines.append("")
     if unmatched_sentence(record):
         lines += [f"*{unmatched_sentence(record)}*", ""]
@@ -957,9 +973,9 @@ def section_markdown(record):
 # Insertion into a rendered report (idempotent)
 
 HTML_ANCHORS = ('<h2 id="evaluation-awareness"', '<h2 id="what-didn-t-happen"', '<h2 id="how-sure-we-are"',
-                '<h2 id="where-to-look"', "<footer")
+                '<h2 id="what-to-try-next"', "<footer")
 MD_ANCHORS = (r"^##[ \t]+Evaluation awareness", r"^##[ \t]+What didn.t happen", r"^##[ \t]+How sure we are",
-              r"^##[ \t]+Where to look")
+              r"^##[ \t]+What to try next")
 STYLE_TAG_ID = "contagion-style"
 
 
@@ -1002,12 +1018,14 @@ def rerender(run_dir, out_dir, *, judge_dir=None, record=None, simple_judge_dir=
     (out_dir / "contagion.json").write_text(json.dumps(record, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     written = [str(out_dir / "contagion.json")]
     page_path, md_path, ev_path = out_dir / "report.html", out_dir / "report.md", out_dir / "evidence.json"
+    layout = {"contagion": record}
     if page_path.exists():
-        page = render.add_toc(insert_html(page_path.read_text(encoding="utf-8"), record))
+        page, _ = render.relayout(page_path.read_text(encoding="utf-8"), None, layout)
         page_path.write_text(page, encoding="utf-8")
         written.append(str(page_path))
     if md_path.exists():
-        md_path.write_text(insert_markdown(md_path.read_text(encoding="utf-8"), record), encoding="utf-8")
+        _, md = render.relayout(None, md_path.read_text(encoding="utf-8"), layout)
+        md_path.write_text(md, encoding="utf-8")
         written.append(str(md_path))
     if ev_path.exists():
         evidence = json.loads(ev_path.read_text(encoding="utf-8"))

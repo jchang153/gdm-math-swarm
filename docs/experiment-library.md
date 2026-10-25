@@ -653,11 +653,15 @@ simplified judge's page. A "not run" placeholder is replaced, the tab help expla
 summary tile names the simplified judge; the facts of `results.html` (including its `behavior_judge` field,
 which still means the rubric-3.1 judge) are unchanged. `build_results.py` adds the tab itself
 (`add_simple_judge_tab`), as does `prepare_hf_library.py` for the bundle's page. The simplified judge's page
-(counts, per-agent labels, every quote marked verified or not; no scripts; light and dark, following the site
-toggle) carries a visible note: **its evaluation-awareness counts are not comparable with the rubric-3.1
+(counts, per-agent labels, every quote marked verified or not; since October 25, 2026 an inline-script filter
+row: cheating levels, technique, whistleblower, evaluation awareness, quotes, text search, sortable columns with
+a sticky header, "Showing N of M agents", state in the URL hash, compact rows that expand to the rationale, quotes
+and run-clock facts; without scripts every row stays visible; light and dark, following the site toggle) carries a visible note: **its evaluation-awareness counts are not comparable with the rubric-3.1
 judge's** (it finds many more; research/analysis/simple_judge/README.md, "Limits"). The local and hosted
-catalogues gain a "Simple behavior judge" link after "Behavior judge"; the catalogue's Behavior judge column
-keeps reading the rubric-3.1 judge's `report.json`. `archive-manifest.json` records the split under
+catalogues gain a "Simple behavior judge" link after "Behavior judge"; since October 25, 2026 the catalogue's
+Behavior judge column, filter, sort and compare view also show the simplified judge's counts, labelled "simple"
+(and the rubric-3.1 cohorts "rubric 3.1" where both exist): new entries carry `summary.simple_judge`, and the
+hosted page reads published entries' counts from `RUN/analysis/simple_judge/report.json` in the browser. `archive-manifest.json` records the split under
 `simple_judge` (Space files, dataset files, count of local files left out).
 
 For already published runs, `maintain_hf_run.py --scope simple-judge` needs **no bundle**: it reads only
@@ -688,9 +692,55 @@ other pages plus its comparability note (`simple_judge_note`) and the run page's
 
 Catalogue checks (2026-10-24): `--scope incident`, `--scope simple-judge` and the run scopes require the current
 generator to reproduce the published catalogue byte for byte; after the public-Space note changed, run
-`maintain_hf_run.py --rerender-catalogue --commit ...` once first. A catalogue link may point to a file the archive
+`maintain_hf_run.py --rerender-catalogue --commit ...` once first. Since October 25, 2026 the incident and
+simple-judge scopes leave the catalogue untouched (and skip that check) when the published entry already links
+the report, as in a re-render (plan field `catalogue.regenerated: false`). A catalogue link may point to a file the archive
 manifest records under `dataset_files` (for example the activity timeline, moved to the dataset on 2026-10-23) or
 `offline_files`; such links are accepted (`maintain_hf_run.link_present`).
+
+## Run clock, simplified judge on the run list, shorter incident reports (October 25, 2026)
+
+Owner requests of October 25, 2026, all host-side (no model calls):
+
+- **One time format everywhere:** every time on the site reads `+12:34 (05:17:40 UTC)` (run clock from the run
+  start, then the absolute UTC time; `+1:02:03 (...)` past the first hour). `scripts/run_clock.py` is the one
+  helper (`clock`, `clock_minutes`, `run_start`, and `CLOCK_JS` for pages that format in the browser). The run
+  start is the runtime's `common_start`, recorded by `build_results.py` as `results.json` `start_utc`; every
+  page reads it from there (runtime.jsonl only when results.json does not exist yet). Covered: run pages
+  (`results.html`), conference views (posts, DMs, library, submissions, feedback, oversight, captured files and
+  the captured-file version pages), incident reports (excerpt headers, citation titles, the contagion section;
+  figure axes stay in run minutes), the simplified judge's page (first flagged submission, first exploit read),
+  the rubric-3.1 evidence browser (`analysis/judge/review/agents/*.html` record headers), the live summary and
+  the catalogue's live list. Inspect View is third-party and unchanged. baseline100's hand-written report shows
+  no event times and is unchanged.
+- **Simplified judge on the run list and run pages:** see "Simplified behavior judge outputs" and "Catalogue
+  page"; run pages show its counts in the summary tile, the Run table and the Behavior judge line instead of
+  "not run", and a run with both judges gets the "Behavior judge (rubric 3.1)" tab
+  (`simple_judge_site.add_rubric_tab`; fixes repeat2's missing tab).
+- **Simplified judge page filters:** see "Simplified behavior judge outputs".
+- **Incident reports without "The agents, one by one" and "Where to look":** the writer prompt
+  (`gdm-incident-prompts/5`), renderer and table of contents drop both; citations without an Inspect View link
+  are plain text. Existing reports are re-laid out with no model call and no raw run records:
+  `scripts/run_incident_report.py --run-dir runs/RUN --rerender-layout` (reads only
+  `analysis/incident/{report.html,report.md,evidence.json}`, rewrites the two pages, keeps evidence.json).
+
+Publication of already published runs (all guarded, revision-pinned, with backups, receipts and verification;
+plan first without `--commit`):
+
+| Step | Command (`maintain_hf_run.py`) | Changes |
+|---|---|---|
+| Catalogue | `--rerender-catalogue` | `index.html` (and the manifest digest) |
+| Run and old-judge pages | `--all-published-runs --scope site` (no `--bundle`: from the published pages) | `RUN/results.html` (run clock, simplified-judge counts, rubric-3.1 tab), changed `RUN/analysis/judge/**/*.html` and the evidence browser's `review/manifest.json`; one commit per run |
+| Simplified judge | `--maintain-run RUN --scope simple-judge` | `report.html` re-rendered with filters and the run start; run page counts |
+| Incident reports | `--maintain-run RUN --scope incident --runs-dir runs` (no `--bundle`) | `report.html` (wrapped as publication does), `report.md`, `evidence.json` from the local run |
+| Conference views | `--all-published-runs --scope conference --capture-pages --pages-dir DIR` | index pages with `run_start` (from the published results.json), and with `--capture-pages` every captured-file page (one commit per run) |
+
+`--pages-dir` (conference scope, like migrate-logs) names a local copy laid out like the Space; a file there is
+used instead of a download only when it is byte-identical to the published file (git blob id), which avoids
+HF's download rate limit (thousands of captured-file pages answered 429). The incident and simple-judge scopes
+leave the catalogue untouched when the entry already links the report. `verify_hosted.py --expect-run-clock`
+adds `results_run_clock`, `conference_run_start`, `incident_sections_removed` and `incident_run_clock`; use it
+after these updates. Records, plans and the local pages copy: `runs/phase-b/web-clock-20261025/`.
 
 ## Snapshot archives (HF file limit)
 
@@ -1250,9 +1300,13 @@ is not a universal secret-detection guarantee; review new data sources before up
 2026; vanilla CSS/JS, no external resources, light and dark mode, cards below 760 px). Columns:
 start (newest first), model with condition and route, prompt variant, agents, duration, accepted /
 genuine tasks (weak operational acceptance vs. distinct independently genuine statements), settled
-pilot cost and the behavior judge's cohort counts or "not run". Rows filter by text, model, prompt
-variant and judge outcome and sort by any column; ticking 2-4 runs opens a side-by-side comparison
-(solves, cost, cost per genuine task, agent exits, judge cohorts), shareable as `#compare=RUN,RUN`.
+pilot cost and the behavior judges' counts or "not run" (since October 25, 2026 both judges: the rubric-3.1
+cohorts and the simplified judge's cheating levels, whistleblowers and labelled agents, each labelled "rubric 3.1"
+or "simple" where both exist, with a link to the simplified judge's report). Rows filter by text, model, prompt
+variant and judge outcome (either judge) and sort by any column; ticking 2-4 runs opens a side-by-side comparison
+(solves, cost, cost per genuine task, agent exits, judge cohorts, simplified-judge rows), shareable as
+`#compare=RUN,RUN`. Published entries without `summary.simple_judge` get those counts in the browser from the
+run's published `analysis/simple_judge/report.json` (same-origin, validated; the entry itself never changes).
 The catalogue links no custom transcript pages (owner, October 21, 2026: agent transcripts are
 read in Inspect View); new entries carry no `Transcripts` link, and the page hides that link in
 entries published earlier (the entries themselves are unchanged). `export_transcripts.py` remains

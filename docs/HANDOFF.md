@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-24 by Claude (Opus 5.5) session (simple judge default and published for 4 runs; 90-min incident report live; public Space).
+Last updated: 2026-10-25 by Claude (Opus 5.5) session (website: run clock everywhere, simple judge on the run list, simple-judge filters, shorter incident reports; code on main, local pages rebuilt, HF update prepared but NOT committed; main restored after an accidental mass deletion).
 
 ## What the project is
 
@@ -216,7 +216,8 @@ The full reference is `docs/gcp-vm.md` and `docs/validation.md`.
    - Code: `research/analysis/incident/`.
    - Writes `analysis/incident/{report.html, report.md, evidence.json}`, a narrative
      report with excerpts verified word for word, in the OpenAI misalignment-report
-     style.
+     style. Since 2026-10-25 (owner) it has no "The agents, one by one" and no "Where to look" section
+     (prompts `gdm-incident-prompts/5`); `--rerender-layout` re-lays out an existing report with no model call.
    - It runs automatically after whichever judge ran, and also with `behavior_judge: "off"`
      (`auto_incident_report`, default = `auto_behavior_judge`; `incident_report_max_usd` $20). It prefers the
      simple judge's verified findings, else the rubric-3.1 judge's, else the deterministic detectors, and names
@@ -371,13 +372,36 @@ is being merged into main via `collab-env`.
      Space `cf1c1965`). verify_hosted `--expect-no-space-logs` passes for 30m, repeat3 and 90m after the fix in `cd3bee7`:
      the now-public Space injects HF social-preview meta tags, which verify_hosted now strips like the creator script.
      **repeat2 fails one cosmetic check** (`simple_judge_rubric_3_1_tab`): its old judge stays reachable as "Behavior judge
-     report" / "Evidence browser" links, not as a "Behavior judge (rubric 3.1)" tab. Fix later by re-rendering its run page.
+     report" / "Evidence browser" links, not as a "Behavior judge (rubric 3.1)" tab. Fixed by item 5's site step
+     (`simple_judge_site.add_rubric_tab`) once the operator runs it.
      Records: `runs/phase-b/simple-judge-default-20261024/`.
    - Open: published judge reports and packages (rubric 3.1) are now world-readable and carry transcript excerpts; the
      `judge`, `evaluator` and `transcripts` maintenance scopes with records-in-space bundles are refused on the public
      Space. Full re-judges of runs whose launch config lacks `behavior_judge` read them as non-live (see
      `research/analysis/judge/README.md`). The supervisor still runs the incident report before `build_results.py`
      (Known gotchas).
+
+5. **2026-10-25: website update (owner requests); code on main, HF NOT yet committed.**
+   - **Main was restored first:** commit `cd3bee7` (2026-10-24) had deleted 744 of 747 tracked files on main by accident
+     (only verify_hosted.py, one test and HANDOFF.md survived). `9b6cff4` restored the tree of `bf30865` plus the three
+     intended changes. Check `git ls-files | wc -l` (about 750) after any commit from a sparse or broken checkout.
+   - **What changed** (details: `docs/experiment-library.md`, "Run clock, simplified judge on the run list, shorter
+     incident reports"): (1) the run list shows the simplified judge's counts ("simple", next to "rubric 3.1"), filter,
+     sort and compare included; published entries read `analysis/simple_judge/report.json` in the browser; run pages show
+     its counts instead of "not run"; (2) the simplified judge's page has a filter row (levels, technique, whistleblower,
+     evaluation-aware, quotes, search), sortable sticky table, "Showing N of M agents", URL-hash state and expandable
+     rows; (3) every time on the site reads `+12:34 (05:17:40 UTC)` via `scripts/run_clock.py` (start = results.json
+     `start_utc` = runtime `common_start`); (4) incident reports lost "The agents, one by one" and "Where to look".
+   - **Local pages rebuilt** for all 18 runs (results.html restamped, conference views re-exported, 14 incident reports
+     re-laid out, 4 simplified-judge pages, old-judge evidence pages, `runs/index.html`); originals in
+     `runs/phase-b/web-clock-20261025/local-backup/`.
+   - **HF plans (read-only, Space `cf1c1965`)** in `runs/phase-b/web-clock-20261025/plans/`: catalogue 2 files; site 141
+     uploads, 19.7 MB (17 run pages, 119 old-judge pages and review manifests); simple-judge 3 files per run; incident 3
+     files per run (14 runs, catalogue untouched); conference 18 index pages plus 10,972 captured-file pages
+     (136.5 MB uploaded; text, so git storage should grow far less; check `used_storage` after).
+   - **To do (operator session):** run `runs/phase-b/web-clock-20261025/operator-commands.sh` with `C=` a fresh clone of
+     main: catalogue, site, simple-judge x4, incident x14, conference with `--capture-pages --pages-dir`, then
+     verify_hosted `--expect-no-space-logs --expect-run-clock` for all 18 runs and `used_storage`. Then update this item.
 
 **Done recently (details under "Runs so far"):**
 - **Resume bundle (2026-10-22, saving side only).** Every pilot run now saves `RUN/resume/`: per agent, a
@@ -484,6 +508,9 @@ is being merged into main via `collab-env`.
   (`inspect_swe/_claude_code/env.py`; the bridge ignores client keys). It matches `publish_hf_library.SECRET`, so both the
   live mirror (from 05:06 UTC) and `publish_hf_library.py` refuse the run. glm10-baseline-2h's log did not contain that event.
   An exact-value exemption was drafted and reverted pending the owner's decision (a guardrail change).
+- **HF download rate limit (2026-10-25).** Plans or updates that download thousands of Space files one by one
+  (for example the 10,972 captured-file pages) hit HTTP 429 and wait minutes per retry. Use `--pages-dir` with a
+  local copy (used only where byte-identical), as in `runs/phase-b/web-clock-20261025/space-pages/`.
 - **HF Space storage (1 GB).** See "Where things live". Check `HfApi().space_info(REPO).used_storage` before
   publishing; a run with 100 agents adds about 115-120 MB of LFS.
 - **Per-model fixes.** GPT models need `strict_tools=False`; Claude via OpenRouter

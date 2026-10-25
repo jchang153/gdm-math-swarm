@@ -65,6 +65,7 @@ from decimal import Decimal
 import html
 import json
 from pathlib import Path
+import re
 import sqlite3
 import sys
 
@@ -72,7 +73,8 @@ if str(Path(__file__).resolve().parent) not in sys.path:  # shared site theme li
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 from site_style import themed  # noqa: E402
 from incident_site import add_incident_tab, has_incident_report  # noqa: E402
-from simple_judge_site import add_simple_judge_tab, has_simple_judge  # noqa: E402
+from simple_judge_site import add_simple_judge_tab, has_simple_judge, simple_report  # noqa: E402
+import run_clock  # noqa: E402
 from site_theme import BASE as STYLE, badge_class  # noqa: E402
 if str(Path(__file__).resolve().parents[1]) not in sys.path:  # research/analysis/roles.py (participant roles)
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -601,7 +603,7 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
         results['seeded'] = seed_facts
     page = render(results, title, inspect_logs(run))
     if has_simple_judge(run):  # navigation only: the simplified judge becomes the Behavior judge tab
-        page = add_simple_judge_tab(page)
+        page = add_simple_judge_tab(page, simple_report(run))
     if has_incident_report(run):  # navigation only: the incident report lives on its own page
         page = add_incident_tab(page)
     return json.dumps(results, indent=1) + '\n', page
@@ -907,9 +909,52 @@ def render(results, title, inspect_logs=()):
     if judge['status'] != 'not_run':
         records.insert(1, ('Behavior judge', judge['report']))
     body.append('<h2>Records</h2><p>' + ' · '.join(link(label, href) for label, href in records) + '</p></main>')
-    return themed('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
+    return restamp_page(themed('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
                   f'content="width=device-width,initial-scale=1"><title>{esc(title or results["run"] + " results")}</title>'
-                  f'<style>{STYLE}</style></head><body>' + ''.join(body) + '</body></html>\n')
+                  f'<style>{STYLE}</style></head><body>' + ''.join(body) + '</body></html>\n'),
+                        run_clock.epoch(results['start_utc']))
+
+
+# Times on the run page (owner, October 25, 2026): every time shows the offset from the run start and the
+# absolute UTC time (scripts/run_clock.py). render() writes the recorded values and restamp_page() converts
+# them, so a published page (with its publication markup) is converted exactly like a fresh one.
+CLOCK_NOTE = ('<p class="muted" data-clock="run-start">Times: offset from the run start (the runtime\'s '
+              'common_start, +0:00) and the absolute time in UTC.</p>')
+_TEXT = re.compile(r'>([^<]+)<')
+_HHMM_CELL = re.compile(r'<td>(\d{2}):(\d{2}) UTC</td>')
+_HHMM_AGENT = re.compile(r'(agent-[\w-]+) \((\d{2}):(\d{2}) UTC\)')
+_UTC_LABELS = re.compile(r'<(th|td)>(Start|Stop|Submitted|Reverted|Time) \(UTC\)</\1>')
+
+
+def _minute_clock(hour, minute, start):
+    """An event recorded only to the minute (exit times): its minute after the run start (the event's midpoint
+    in that minute, rounded) and the recorded UTC minute; a time before the start's hour counts as the next day."""
+    begin = datetime.datetime.fromtimestamp(start, datetime.timezone.utc)
+    at = begin.replace(hour=int(hour), minute=int(minute), second=30, microsecond=0)
+    if at.timestamp() < start - 3600:
+        at += datetime.timedelta(days=1)
+    return f'minute {round((at.timestamp() - start) / 60)} ({hour}:{minute} UTC)'
+
+
+def restamp_page(document, start):
+    """results.html with every recorded time shown as run_clock.clock (offset from the run start ``start``,
+    epoch seconds, plus UTC), the minute-only exit times as "minute N (HH:MM UTC)", "(UTC)" dropped from the
+    column labels and a one-line note under the run line. Only text between tags changes (links, scripts'
+    attributes and publication markup stay), so it also converts a published page; idempotent. ``start`` None
+    leaves the page unchanged."""
+    if start is None:
+        return document
+    head_end = document.find('<body')
+    head, body = (document[:head_end], document[head_end:]) if head_end >= 0 else ('', document)
+    body = _UTC_LABELS.sub(lambda m: f'<{m[1]}>{m[2]}</{m[1]}>', body)
+    body = _HHMM_CELL.sub(lambda m: f'<td>{_minute_clock(m[1], m[2], start)}</td>', body)
+    body = _TEXT.sub(lambda m: '>' + run_clock.restamp_iso(
+        _HHMM_AGENT.sub(lambda a: f'{a[1]} at {_minute_clock(a[2], a[3], start)}', m[1]), start) + '<', body)
+    if 'data-clock="run-start"' not in body:
+        line = re.search(r'<p><code>[^<]*</code> · [^<]*</p>', body)
+        if line:
+            body = body[:line.end()] + CLOCK_NOTE + body[line.end():]
+    return head + body
 
 
 def main(argv=None):
@@ -946,7 +991,7 @@ def main(argv=None):
             raise SystemExit(f'No results.json to re-render: {source}')
         page = render(json.loads(source.read_text(encoding='utf-8')), args.title, inspect_logs(run))
         if has_simple_judge(run):  # same navigation as a full build
-            page = add_simple_judge_tab(page)
+            page = add_simple_judge_tab(page, simple_report(run))
         if has_incident_report(run):
             page = add_incident_tab(page)
         target = (args.output_dir or run).resolve() / 'results.html'

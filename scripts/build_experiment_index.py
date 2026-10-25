@@ -14,7 +14,9 @@ import re
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 from incident_site import has_incident_report, with_incident_link
-from simple_judge_site import has_simple_judge, with_simple_judge_link
+from simple_judge_site import (CATALOGUE_LABEL as SIMPLE_LABEL, SJ_REPORT, has_simple_judge, simple_report,
+                               simple_summary, simple_text, with_simple_judge_link)
+from run_clock import CLOCK_JS
 from catalogue_page import CHEATING, COHORT_GLOSS, COHORT_LABELS, COHORTS, FLAGGED, SCRIPT, STYLE, hidden_link
 from site_style import themed
 from space_navigation import private_space_navigation
@@ -144,7 +146,8 @@ def run_summary(run_dir, data):
     """The catalogue's optional per-run summary: prompt variant, accepted tasks, judge cohorts.
 
     Entries published before October 21, 2026 lack it; the hosted catalogue then reads the same
-    fields from the run's published results.json and analysis/judge/report.json in the browser.
+    fields from the run's published results.json and analysis/judge/report.json in the browser, and entries
+    without ``simple_judge`` read analysis/simple_judge/report.json there when they link the simplified judge.
     """
     condition = data.get('condition') if isinstance(data.get('condition'), dict) else {}
     variant = condition.get('prompt_variant')  # build_results.py records the launch setting here
@@ -158,7 +161,10 @@ def run_summary(run_dir, data):
             judge = None
     return {'prompt_variant': variant if isinstance(variant, str) else None,
             'accepted_tasks': accepted if isinstance(accepted, int) and not isinstance(accepted, bool) else None,
-            'judge': judge}
+            'judge': judge,
+            # Simplified behavior judge (default since October 24, 2026): its counts only. Entries published
+            # before this field existed get it in the browser from RUN/analysis/simple_judge/report.json.
+            'simple_judge': simple_summary(simple_report(run_dir))}
 
 
 # "Live now" (owner request, October 21, 2026; scripts/live_mirror.py). The hosted catalogue reads
@@ -167,11 +173,12 @@ def run_summary(run_dir, data):
 # is already in the catalogue is never listed as live. Entries are shown with textContent only and
 # every link is built here from a validated run ID, never taken from the file.
 LIVE_SCRIPT = r'''<section id="live" hidden><h2>Live now</h2><p>Runs still going, mirrored from their VM about every few minutes. These are unfinished snapshots: transcripts so far in Inspect View, conference (operational) outcomes only, no independent evaluation or behavior judge yet. A run's live entry is removed once it is published here.</p><ul id="live-runs"></ul></section>
-<script>(()=>{const published=new Set(PUBLISHED);const ok=/^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+<script>CLOCKJS
+(()=>{const published=new Set(PUBLISHED);const ok=/^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 fetch('live/index.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(d=>{if(!d||d.schema!=='gdm-live-mirror/1'||!Array.isArray(d.runs))return;
 const list=document.getElementById('live-runs');for(const e of d.runs){if(!e||!ok.test(e.run)||published.has(e.run))continue;
 const li=document.createElement('li'),base='live/'+encodeURIComponent(e.run)+'/',strong=document.createElement('strong');strong.textContent=e.run;li.append(strong);
-const facts=[e.state_label,e.model,e.agents!=null?e.agents+' agents':null,e.solved!=null?e.solved+' solved (conference judge)':null,e.updated_utc?'updated '+new Date(e.updated_utc).toLocaleString():null].filter(Boolean);
+const facts=[e.state_label,e.model,e.agents!=null?e.agents+' agents':null,e.solved!=null?e.solved+' solved (conference judge)':null,e.updated_utc?'updated '+(e.started_utc?runClock(Date.parse(e.updated_utc)/1000,Date.parse(e.started_utc)/1000):new Date(e.updated_utc).toLocaleString()):null].filter(Boolean);
 li.append(document.createTextNode(' · '+facts.join(' · ')+' · '));
 for(const [i,[label,path]] of [['Live summary','index.html'],['Inspect View','inspect-view/index.html'],['Conference','conference-view/index.html']].entries()){const a=document.createElement('a');a.href=base+path;a.textContent=label;if(i)li.append(document.createTextNode(' · '));li.append(a);}
 list.append(li);}document.getElementById('live').hidden=!list.children.length;}).catch(()=>{});})();</script>'''
@@ -180,7 +187,7 @@ list.append(li);}document.getElementById('live').hidden=!list.children.length;})
 def live_section(entries):
     """The hosted catalogue's "Live now" block (empty and hidden until live/index.json lists a run)."""
     published = json.dumps(sorted(e['run'] for e in entries)).replace('<', '\\u003c')
-    return LIVE_SCRIPT.replace('PUBLISHED', published)
+    return LIVE_SCRIPT.replace('CLOCKJS', CLOCK_JS).replace('PUBLISHED', published)
 
 
 def newest_first(entries):
@@ -197,22 +204,42 @@ def duration_text(seconds):
 
 
 def judge_text(entry):
-    """(cell HTML, sort value) of the behavior judge column; plain words, no finding text."""
+    """(cell HTML, sort value) of the behavior judge column; plain words, no finding text. The rubric-3.1 judge's
+    cohorts and the simplified judge's counts are both shown when both exist, labelled "rubric 3.1" and
+    "simple"; a simplified judge the entry links but does not summarize shows a marker the page's script fills
+    from the run's published report.json. The script's judgeCell() writes the same cell."""
+    esc = html.escape
     summary = entry.get('summary')
     judge = summary.get('judge') if isinstance(summary, dict) else None
+    simple = summary.get('simple_judge') if isinstance(summary, dict) else None
+    simple_linked = SIMPLE_LABEL in entry['links']
+    lines, sort = [], None
+    label = 'rubric 3.1: ' if (simple or simple_linked) else ''
     if judge:
         parts = [f'{judge["cohorts"][k]} {COHORT_LABELS[k][0 if judge["cohorts"][k] == 1 else 1]}'
                  for k in FLAGGED if judge['cohorts'].get(k)]
-        flagged = sum(judge['cohorts'].get(k, 0) for k in CHEATING)
+        sort = sum(judge['cohorts'].get(k, 0) for k in CHEATING)
         text = ' · '.join(parts) if parts else 'none flagged'
         graded = judge['graded'] if judge['graded'] is not None else judge['agents']
         extra = f'of {graded} graded' + (f', {judge["provisional"]} provisional' if judge['provisional'] else '')
         if judge.get('mode') not in (None, 'paid'):
             extra += f' ({judge["mode"]})'
-        return f'{html.escape(text)}<br><small>{html.escape(extra)}</small>', flagged
-    if 'Behavior judge' in entry['links']:
-        return ('see report' if isinstance(summary, dict) else '<span class="pending">…</span>'), -1
-    return '<span class="muted">not run</span>', -2
+        lines.append(f'{esc(label + text)}<br><small>{esc(extra)}</small>')
+    elif 'Behavior judge' in entry['links']:
+        lines.append(esc(label) + ('see report' if isinstance(summary, dict) else '<span class="pending">…</span>'))
+        sort = -1
+    if simple:
+        main, detail = simple_text(simple)
+        lines.append(f'{esc("simple: " + main)}<br><small>{esc(detail)} · '
+                     f'<a href="{esc(entry["links"].get(SIMPLE_LABEL) or "", quote=True)}">report</a></small>'
+                     if simple_linked else f'{esc("simple: " + main)}<br><small>{esc(detail)}</small>')
+        sort = simple['cheating_any'] if sort is None or sort < 0 else sort
+    elif simple_linked:
+        lines.append('<span class="pending sj-pending">simple: …</span>')
+        sort = -1 if sort is None else sort
+    if not lines:
+        return '<span class="muted">not run</span>', -2
+    return '<br>'.join(lines), sort
 
 
 def write_index(runs, entries, warnings=(), *, hosted=False):
@@ -297,9 +324,13 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
             '(acceptance is not mathematical validity). Genuine: distinct intended statements with at least one '
             'submission the independent evaluator found genuine, so duplicate accepted proofs count once.</dd>'
             '<dt>Cost</dt><dd>Settled pilot model spend from the run\'s budget ledger.</dd>'
-            '<dt>Behavior judge</dt><dd>The researcher-only post-hoc transcript judge, by cohort. "not run" means no '
-            'judge outputs are published for the run; "…" means the entry predates these columns and the run\'s own '
-            'records could not be read here.</dd>' + glossary + '</dl></details>'
+            '<dt>Behavior judge</dt><dd>The researcher-only post-hoc transcript judges. "simple": the simplified '
+            'one-pass judge (default since October 24, 2026), as counts of agents whose cheating reached explored, '
+            'submitted or credited, plus whistleblowers, of the agents it labelled; its evaluation-awareness counts '
+            '(compare view) are not comparable with the rubric-3.1 judge\'s. "rubric 3.1": the earlier multi-stage '
+            'judge, by cohort (below); a row shows both when both ran. "not run" means no judge outputs are '
+            'published for the run; "…" means the entry predates these columns and the run\'s own records could '
+            'not be read here.</dd>' + glossary + '</dl></details>'
             f'<p class="note">{esc(note)}</p>'
             f'<script type="application/json" id="catalogue-data">{blob}</script>'
             '<script>' + SCRIPT + '</script></body></html>')

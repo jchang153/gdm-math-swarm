@@ -108,8 +108,20 @@
     },
     {
       "name": "fermat_helper_answer",
-      "category": "answer_noncanonical",
+      "category": "answer_restated",
       "submission": "submissions/fermat_helper_answer.lean",
+      "task_id": "all_fermat_squarefree"
+    },
+    {
+      "name": "fermat_inline_restated",
+      "category": "answer_restated",
+      "submission": "submissions/fermat_inline_restated.lean",
+      "task_id": "all_fermat_squarefree"
+    },
+    {
+      "name": "fermat_helper_contains",
+      "category": "answer_noncanonical",
+      "submission": "submissions/fermat_helper_contains.lean",
       "task_id": "all_fermat_squarefree"
     },
     {

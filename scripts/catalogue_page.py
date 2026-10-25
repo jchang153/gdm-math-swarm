@@ -71,7 +71,8 @@ STYLE = (
 
 # Sorting, filtering, the compare view (2-4 ticked runs, shareable as #compare=RUN,RUN) and, for
 # entries published before the summary columns existed, reading the same fields from the run's
-# own published results.json and judge report.json (same-origin fetch; nothing is sent elsewhere).
+# own published results.json and judge report.json (same-origin fetch; nothing is sent elsewhere); entries that
+# link the simplified judge without its counts read RUN/analysis/simple_judge/report.json the same way.
 SCRIPT = r'''
 // Deep link (HF forwards the Space URL's query and hash to this frame): ?page=PATH.html or #page=PATH.html
 // opens that page of this site, keeping the private-Space session; only plain same-site .html paths.
@@ -97,15 +98,35 @@ const MAX=4;
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const sum=e=>e.summary&&typeof e.summary==='object'?e.summary:null;
 const judge=e=>(sum(e)||{}).judge||null;
+// Simplified behavior judge (default since October 24, 2026): counts from the entry's summary, else read in
+// the browser from the run's published analysis/simple_judge/report.json (kept outside the entry).
+const SIMPLE='Simple behavior judge',SHOWN=['explored','submitted','credited'];
+const simple=e=>(sum(e)||{}).simple_judge||e._simple||null;
+function simpleText(s){const parts=SHOWN.filter(k=>s.levels[k]).map(k=>s.levels[k]+' '+k);
+ if(s.whistleblowers)parts.push(s.whistleblowers+' whistleblower'+(s.whistleblowers===1?'':'s'));
+ return [parts.join(' · ')||'none flagged','of '+s.labelled+' labelled'+(s.mode&&s.mode!=='paid'?' ('+s.mode+')':'')];}
+function simpleCounts(r){if(!r||r.schema!=='gdm-simple-judge/1'||!r.counts||typeof r.counts!=='object')return null;
+ const c=r.counts,ok=v=>Number.isInteger(v)&&v>=0,obj=v=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.values(v).every(ok);
+ if(!obj(c.cheating_level)||!obj(c.whistleblower)||!obj(c.evaluation_aware)||!ok(c.agents)||!ok(c.labelled)||!ok(c.cheating_any))return null;
+ return {mode:typeof r.mode==='string'?r.mode:null,agents:c.agents,labelled:c.labelled,cheating_any:c.cheating_any,
+  levels:{...c.cheating_level},whistleblowers:c.whistleblower.True??0,evaluation_aware:c.evaluation_aware.True??0};}
 const variant=e=>(sum(e)||{}).prompt_variant||'';
 const flagged=j=>CHEATING.reduce((n,k)=>n+(j.cohorts[k]||0),0);
 const duration=s=>{s=Math.floor(s);return s>=3600?Math.floor(s/3600)+'h '+String(Math.floor(s%3600/60)).padStart(2,'0')+'m':Math.floor(s/60)+'m '+String(s%60).padStart(2,'0')+'s';};
 const money=v=>'$'+Number(v).toFixed(2);
-function judgeParts(e){const j=judge(e);
- if(j){const parts=FLAGGED.filter(k=>j.cohorts[k]).map(k=>j.cohorts[k]+' '+LABELS[k][j.cohorts[k]===1?0:1]);
-  return [parts.join(' · ')||'none flagged','of '+(j.graded??j.agents)+' graded'+(j.provisional?', '+j.provisional+' provisional':'')+(j.mode&&j.mode!=='paid'?' ('+j.mode+')':'')];}
- return [e.links['Behavior judge']?'see report':'not run',''];}
-function judgeState(e){const j=judge(e);if(j)return flagged(j)?'flagged':'clean';return e.links['Behavior judge']?'run':'none';}
+// The Behavior judge cell, as build_experiment_index.judge_text writes it: [HTML, sort value].
+function judgeCell(e){const j=judge(e),s=simple(e),linked=!!e.links[SIMPLE],label=(s||linked)?'rubric 3.1: ':'',lines=[];let key=null;
+ if(j){const parts=FLAGGED.filter(k=>j.cohorts[k]).map(k=>j.cohorts[k]+' '+LABELS[k][j.cohorts[k]===1?0:1]);key=flagged(j);
+  lines.push(esc(label+(parts.join(' · ')||'none flagged'))+'<br><small>'+esc('of '+(j.graded??j.agents)+' graded'+(j.provisional?', '+j.provisional+' provisional':'')+(j.mode&&j.mode!=='paid'?' ('+j.mode+')':''))+'</small>');}
+ else if(e.links['Behavior judge']){lines.push(esc(label)+(sum(e)?'see report':'<span class="pending">…</span>'));key=-1;}
+ if(s){const [main,detail]=simpleText(s);
+  lines.push(esc('simple: '+main)+'<br><small>'+esc(detail)+(linked?' · <a href="'+esc(e.links[SIMPLE])+'">report</a>':'')+'</small>');
+  key=key==null||key<0?s.cheating_any:key;}
+ else if(linked){lines.push('<span class="pending sj-pending">simple: …</span>');key=key==null?-1:key;}
+ return lines.length?[lines.join('<br>'),key]:['<span class="muted">not run</span>',-2];}
+function judgeState(e){const j=judge(e),s=simple(e);
+ if(j||s)return (j&&flagged(j))||(s&&s.cheating_any)?'flagged':'clean';
+ return e.links['Behavior judge']||e.links[SIMPLE]?'run':'none';}
 // Filters
 function fill(select,values){const keep=select.value;select.length=1;
  for(const v of [...new Set(values)].filter(Boolean).sort()){const o=document.createElement('option');o.value=o.textContent=v;select.append(o);}
@@ -121,7 +142,7 @@ for(const id of ['filter','f-model','f-variant','f-judge'])$(id).addEventListene
 // Sorting
 const KEYS={start:e=>Date.parse(e.start_utc),model:e=>e.model.toLowerCase(),variant:e=>variant(e).toLowerCase(),
  agents:e=>e.agents,duration:e=>e.elapsed_seconds,tasks:e=>e.distinct_verified_tasks*1e4+((sum(e)||{}).accepted_tasks??-1),
- cost:e=>Number(e.pilot_spent_usd),judge:e=>{const j=judge(e);return j?flagged(j):e.links['Behavior judge']?-1:-2;}};
+ cost:e=>Number(e.pilot_spent_usd),judge:e=>judgeCell(e)[1]};
 const NAMES={start:['Oldest first','Newest first']};
 let sortKey='start',descending=true;
 function sort(){const f=KEYS[sortKey];
@@ -153,14 +174,22 @@ function compareTable(list){
  const perTask=e=>genuine(e)?money(cost(e)/genuine(e)):null;
  const cohort=k=>e=>{const j=judge(e);if(!j)return e.links['Behavior judge']?'<span class="muted">see report</span>':'<span class="muted">not run</span>';
   const n=j.cohorts[k];return n==null?null:'<span class="'+(n&&CHEATING.includes(k)?'warn':'')+'">'+n+'</span>'+bar(n,j.graded??j.agents);};
+ const sjMissing=e=>'<span class="muted">'+(e.links[SIMPLE]?'…':'not run')+'</span>';
+ const sj=(f,warn)=>e=>{const s=simple(e);if(!s)return sjMissing(e);const n=f(s);
+  return '<span class="'+(n&&warn?'warn':'')+'">'+esc(n)+'</span>'+bar(n,s.labelled);};
  const spec=[
   ['Start',e=>esc(e.date)],['Model',e=>esc(e.model)],['Condition',e=>esc(e.track)],['Provider route',e=>esc(e.provider_route)],
   ['Prompt variant',e=>variant(e)?esc(variant(e)):null],['Agents',num(e=>e.agents)],['Duration',e=>esc(duration(e.elapsed_seconds))],
   ['Task set size',e=>e.task_count==null?null:esc(e.task_count)],['Accepted tasks',num(accepted)],['Genuine tasks',num(genuine)],
   ['Cost',e=>esc(money(cost(e)))+bar(cost(e),costMax)],['Cost per genuine task',perTask],
   ['Agent exits',e=>Object.entries(e.agent_exits).map(([k,v])=>esc(k.replace(/_/g,' '))+': '+v).join('<br>')],
-  ['Judge: graded agents',e=>{const j=judge(e);return j?esc(j.graded??j.agents)+(j.provisional?' <small>('+j.provisional+' provisional)</small>':''):null;}],
-  ...COHORTS.map(k=>['Judge: '+LABELS[k][1],cohort(k)]),
+  ['Rubric 3.1 judge: graded agents',e=>{const j=judge(e);return j?esc(j.graded??j.agents)+(j.provisional?' <small>('+j.provisional+' provisional)</small>':''):null;}],
+  ...COHORTS.map(k=>['Rubric 3.1 judge: '+LABELS[k][1],cohort(k)]),
+  ['Simple judge: labelled agents',e=>{const s=simple(e);return s?esc(s.labelled)+' of '+esc(s.agents)+(e.links[SIMPLE]?' · <a href="'+esc(e.links[SIMPLE])+'">report</a>':''):sjMissing(e);}],
+  ['Simple judge: cheating (explored or further)',sj(s=>s.cheating_any,true)],
+  ...['considered','explored','submitted','credited','unclear'].map(k=>['Simple judge: '+k,sj(s=>s.levels[k]??0,k!=='considered'&&k!=='unclear')]),
+  ['Simple judge: whistleblowers',sj(s=>s.whistleblowers,false)],
+  ['Simple judge: evaluation-aware (not comparable with rubric 3.1)',sj(s=>s.evaluation_aware,false)],
   ['Open',e=>Object.entries(e.links).filter(([n])=>!hidden(n)).map(([n,u])=>'<a href="'+esc(u)+'">'+esc(n)+'</a>').join('<br>')]];
  return '<table><thead><tr><th scope="col">Run</th>'+list.map(e=>'<th scope="col">'+esc(e.run)+'</th>').join('')+'</tr></thead><tbody>'+
   spec.map(row=>'<tr><th scope="row">'+esc(row[0])+'</th>'+list.map(e=>'<td>'+cell(e,row)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';}
@@ -177,25 +206,27 @@ $('compare').addEventListener('click',()=>openCompare(picked(),true));
 $('close-compare').addEventListener('click',closeCompare);
 function fromHash(){const m=location.hash.match(/^#compare=(.+)$/);if(m)openCompare(m[1].split(',').map(decodeURIComponent),false);}
 window.addEventListener('hashchange',fromHash);
-// Entries without a summary: read the run's own published records (hosted only).
-function render(e){const r=rowOf.get(e.run),s=sum(e);if(!r||!s)return;
- r.querySelector('.c-variant .v').innerHTML=s.prompt_variant?esc(s.prompt_variant):'<span class="muted">not recorded</span>';
- r.querySelector('.c-accepted').textContent=s.accepted_tasks??'?';
- const [main,sub]=judgeParts(e);
- r.querySelector('.c-judge .v').innerHTML=(main==='not run'?'<span class="muted">not run</span>':esc(main))+(sub?'<br><small>'+esc(sub)+'</small>':'');}
+// Entries without a summary (or without the simplified judge's counts): read the run's own published records (hosted only).
+function render(e){const r=rowOf.get(e.run),s=sum(e);if(!r)return;
+ if(s){r.querySelector('.c-variant .v').innerHTML=s.prompt_variant?esc(s.prompt_variant):'<span class="muted">not recorded</span>';
+  r.querySelector('.c-accepted').textContent=s.accepted_tasks??'?';}
+ r.querySelector('.c-judge .v').innerHTML=judgeCell(e)[0];}
 async function read(path){try{const r=await fetch(path,{credentials:'same-origin'});return r.ok?await r.json():null;}catch(_){return null;}}
 function cohorts(report){const c=report&&report.counts;if(!c||typeof c.cohorts!=='object'||!Number.isInteger(c.agents))return null;
  const out={};for(const k of COHORTS)if(k in c.cohorts){if(!Number.isInteger(c.cohorts[k]))return null;out[k]=c.cohorts[k];}
  return {mode:typeof report.mode==='string'?report.mode:null,agents:c.agents,graded:Number.isInteger(c.graded)?c.graded:null,
   provisional:Number.isInteger(c.provisional)?c.provisional:0,cohorts:out};}
-async function enrich(e){const base=encodeURIComponent(e.run)+'/';
- const [results,report]=await Promise.all([read(base+'results.json'),e.links['Behavior judge']?read(base+'analysis/judge/report.json'):null]);
- if(!results&&!report)return;
- const accepted=results&&results.operationally_accepted_tasks,v=results&&results.condition&&results.condition.prompt_variant;
- e.summary={prompt_variant:typeof v==='string'?v:null,accepted_tasks:Number.isInteger(accepted)?accepted:null,judge:cohorts(report)};
+const needs=e=>!sum(e)||(!!e.links[SIMPLE]&&!simple(e));
+async function enrich(e){const base=encodeURIComponent(e.run)+'/',whole=!sum(e),sj=!!e.links[SIMPLE]&&!simple(e);
+ const [results,report,simpleReport]=await Promise.all([whole?read(base+'results.json'):null,
+  whole&&e.links['Behavior judge']?read(base+'analysis/judge/report.json'):null,
+  sj?read(base+'analysis/simple_judge/report.json'):null]);
+ if(whole&&(results||report)){const accepted=results&&results.operationally_accepted_tasks,v=results&&results.condition&&results.condition.prompt_variant;
+  e.summary={prompt_variant:typeof v==='string'?v:null,accepted_tasks:Number.isInteger(accepted)?accepted:null,judge:cohorts(report)};}
+ if(sj)e._simple=simpleCounts(simpleReport);
  render(e);}
 options();sort();apply();selection();fromHash();
-const missing=data.filter(e=>!sum(e));
+const missing=data.filter(needs);
 if(missing.length&&/^https?:$/.test(location.protocol))Promise.all(missing.map(enrich)).then(()=>{options();sort();apply();if(comparing.length)openCompare(comparing,false);});
 })();
 '''

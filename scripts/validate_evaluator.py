@@ -229,7 +229,8 @@ def offline_plan(manifest, dataset, args):
     for case in manifest:
         template, source = case['template_obj'], case['source']
         plan = ev.plan_answer(template, source)
-        minimum = 0 if plan.problem else 1
+        # Restated answers (semantics v4) and plan problems are decided without a container.
+        minimum = 0 if plan.problem or ev.answer_restatement(template, source) else 1
         runs += minimum + (1 if case.get('upstream') and not args.no_upstream else 0)
         print('  %-40s %-32s static=%s plan=%s runs>=%d' % (case['name'], case['category'],
               static_checks(template, source)['passed'], plan.mode, minimum))
