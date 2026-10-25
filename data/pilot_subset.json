@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "seed": 20261013,
+  "method": "Python random.Random(seed).sample over sorted parent task IDs; sampled once; no outcome-driven filtering.",
+  "task_ids": [
+    "erdos_18a",
+    "Erdos6_erdos_6_variants_decreasing",
+    "MagicSquares_exists_semi_magic_square_cubes",
+    "erdos_400_part_i",
+    "Erdos195_erdos_195_variants_leq_5_bound",
+    "all_fermat_squarefree",
+    "Erdos1092_f_asymptotic_2",
+    "EulerBrick_cuboidThree",
+    "greens14",
+    "Green32_hasCosetHole_empty",
+    "Erdos1085_erdos_1085_variants_upper_d3",
+    "DedekindNumber_M'_three",
+    "Erdos23_erdos_23_variants_n1_tight",
+    "SumOfThreeCubes_isSumOfThreeCubes_iff_mod_9"
+  ],
+  "parent_manifest_sha256": "8a114c4c2f6345b8846426900ce9afb2d851565546f925c308cd23e2ead1e653"
+}

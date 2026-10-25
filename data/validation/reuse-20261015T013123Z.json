@@ -1,0 +1,775 @@
+{
+  "schema": "gdm-dependency-reuse/1",
+  "created_at": "2026-10-15T01:31:23Z",
+  "all_required_passed": true,
+  "image_ids": {
+    "gdm-math-swarm-lean:local": "sha256:5588cd382a589737d4909b955966d23ef2a257d88587022ff1195e6fbe5ec943"
+  },
+  "complete": true,
+  "incomplete_reasons": [],
+  "limits": {
+    "timeout_seconds": 120,
+    "memory": "2g",
+    "cpus": 1
+  },
+  "config": {
+    "path": "/home/owner/gdm-math-swarm/configs/pilot.json",
+    "limits": {
+      "timeout_seconds": 120,
+      "memory": "2g",
+      "cpus": 1
+    }
+  },
+  "limits_match_config": true,
+  "missing_pilot_tasks": [],
+  "description": "Informational dependency-reuse check; standard Mathlib reuse is permitted. Exact alpha-equivalent type matches against every imported constant; for answer(_) ↔ P targets, imported constants of type exactly P or ¬P; same last name component; template-local constants used by the statement (a direct dependency match is impossible when any exist). Does not detect matches up to definitional unfolding, unification or generalization, nor multi-step proofs; absence of a match is not evidence that a target is hard. Grep hits are name/shape hints only.",
+  "search_roots": [
+    ".lake/packages/mathlib/Mathlib",
+    "FormalConjecturesForMathlib"
+  ],
+  "environment": {
+    "host": {
+      "platform": "Linux-7.0.0-1014-gcp-x86_64-with-glibc2.39",
+      "python": "3.10.12"
+    },
+    "docker": {
+      "ncpu": "64",
+      "mem_total_bytes": "270434238464",
+      "server_version": "29.8.1"
+    },
+    "lean_image": {
+      "tag": "gdm-math-swarm-lean:local",
+      "id": "sha256:5588cd382a589737d4909b955966d23ef2a257d88587022ff1195e6fbe5ec943"
+    },
+    "dependency_image": {
+      "tag": "gdm-math-swarm-deps:local",
+      "id": "sha256:44af3a8abea1fc29a8a9c218429d6ffc3b9f2f9e3be17de80890b4959e57f1e5"
+    },
+    "container": {
+      "network": "none",
+      "read_only": true,
+      "cap_drop": "ALL",
+      "no_new_privileges": true,
+      "pids_limit": 128,
+      "memory": "2g",
+      "cpus": 1,
+      "timeout_seconds": 120,
+      "label": "gdm-judge=1",
+      "source_via": "stdin",
+      "host_mounts": null,
+      "tmpfs": "/tmp size=128m",
+      "production_shell": "cat > /tmp/Submission.lean && cd /opt/lean-project && timeout -v -s KILL 120 lake env lean /tmp/Submission.lean",
+      "measured_variant": "same container and Lean call under a python3 parent recording metrics"
+    },
+    "jobs": 1
+  },
+  "results": [
+    {
+      "task_id": "erdos_18a",
+      "theorem_name": "Erdos18.erdos_18a",
+      "category": "research open",
+      "answer_based": true,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": true,
+        "same_last_component": [],
+        "same_last_component_count": 0,
+        "target": "Erdos18.erdos_18a",
+        "template_local_constants": [
+          "Erdos18.practicalH"
+        ]
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 20.85,
+        "queue_seconds": 0.0,
+        "lean_seconds": 20.47,
+        "lean_cpu_seconds": 10.59,
+        "max_rss_bytes": 6075662336,
+        "cgroup_memory_peak_bytes": 1643589632,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "IsPractical",
+          "hits": 2,
+          "declaration_hits": [
+            "FormalConjecturesForMathlib/NumberTheory/PracticalNumbers.lean:43: def IsPractical (n : ℕ) : Prop :="
+          ]
+        },
+        {
+          "term": "practicalH",
+          "hits": 0,
+          "declaration_hits": []
+        },
+        {
+          "term": "subsetSums",
+          "hits": 6,
+          "declaration_hits": [
+            "FormalConjecturesForMathlib/NumberTheory/AdditivelyComplete.lean:29: def subsetSums (A : Set M) : Set M :=",
+            "FormalConjecturesForMathlib/NumberTheory/AdditivelyComplete.lean:34: theorem subsetSums_mono {A B : Set M} (h : A ⊆ B) : subsetSums A ⊆ subsetSums B :="
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "Erdos6_erdos_6_variants_decreasing",
+      "theorem_name": "Erdos6.erdos_6.variants.decreasing",
+      "category": "research solved",
+      "answer_based": false,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": false,
+        "same_last_component": [],
+        "same_last_component_count": 0,
+        "target": "Erdos6.erdos_6.variants.decreasing",
+        "template_local_constants": []
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 7.68,
+        "queue_seconds": 0.0,
+        "lean_seconds": 7.35,
+        "lean_cpu_seconds": 7.34,
+        "max_rss_bytes": 6109233152,
+        "cgroup_memory_peak_bytes": 791289856,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "primeGap",
+          "hits": 1,
+          "declaration_hits": [
+            "FormalConjecturesForMathlib/NumberTheory/PrimeGap.lean:27: noncomputable def primeGap (n : ℕ) : ℕ := (n + 1).nth Nat.Prime - n.nth Nat.Prime"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "MagicSquares_exists_semi_magic_square_cubes",
+      "theorem_name": "MagicSquares.exists_semi_magic_square_cubes",
+      "category": "research open",
+      "answer_based": true,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": true,
+        "same_last_component": [],
+        "same_last_component_count": 0,
+        "target": "MagicSquares.exists_semi_magic_square_cubes",
+        "template_local_constants": []
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 7.73,
+        "queue_seconds": 0.0,
+        "lean_seconds": 7.41,
+        "lean_cpu_seconds": 7.4,
+        "max_rss_bytes": 6111358976,
+        "cgroup_memory_peak_bytes": 792416256,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "[Mm]agic",
+          "hits": 5,
+          "declaration_hits": []
+        },
+        {
+          "term": "Injective2",
+          "hits": 25,
+          "declaration_hits": [
+            ".lake/packages/mathlib/Mathlib/Logic/Function/Basic.lean:926: def Injective2 {α β γ : Sort*} (f : α → β → γ) : Prop :=",
+            ".lake/packages/mathlib/Mathlib/Logic/Function/Basic.lean:934: protected theorem left (hf : Injective2 f) (b : β) : Function.Injective fun a ↦ f a b :=",
+            ".lake/packages/mathlib/Mathlib/Logic/Function/Basic.lean:938: protected theorem right (hf : Injective2 f) (a : α) : Function.Injective (f a) :=",
+            ".lake/packages/mathlib/Mathlib/Logic/Function/Basic.lean:941: protected theorem uncurry {α β γ : Type*} {f : α → β → γ} (hf : Injective2 f) :",
+            ".lake/packages/mathlib/Mathlib/Logic/Function/Basic.lean:946: theorem left' (hf : Injective2 f) [Nonempty β] : Function.Injective f := fun _ _ h ↦",
+            ".lake/packages/mathlib/Mathlib/Logic/Function/Basic.lean:951: theorem right' (hf : Injective2 f) [Nonempty α] : Function.Injective fun b a ↦ f a b :=",
+            ".lake/packages/mathlib/Mathlib/Logic/Function/Basic.lean:956: theorem eq_iff (hf : Injective2 f) {a₁ a₂ b₁ b₂} : f a₁ b₁ = f a₂ b₂ ↔ a₁ = a₂ ∧ b₁ = b₂ :=",
+            ".lake/packages/mathlib/Mathlib/Data/Finset/NAry.lean:62: theorem card_image₂ (hf : Injective2 f) (s : Finset α) (t : Finset β) :",
+            ".lake/packages/mathlib/Mathlib/Data/Finset/NAry.lean:69: theorem mem_image₂_iff (hf : Injective2 f) : f a b ∈ image₂ f s t ↔ a ∈ s ∧ b ∈ t := by",
+            ".lake/packages/mathlib/Mathlib/Data/Finset/NAry.lean:171: theorem image₂_inter_left [DecidableEq α] (hf : Injective2 f) :",
+            ".lake/packages/mathlib/Mathlib/Data/Finset/NAry.lean:177: theorem image₂_inter_right [DecidableEq β] (hf : Injective2 f) :",
+            ".lake/packages/mathlib/Mathlib/Data/Finset/Sum.lean:108: lemma Injective2_disjSum {α β : Type*} : Function.Injective2 (@disjSum α β) :="
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "erdos_400_part_i",
+      "theorem_name": "Erdos400.erdos_400.parts.i",
+      "category": "research open",
+      "answer_based": true,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": true,
+        "same_last_component": [
+          "Matrix.TransvectionStruct.i",
+          "HomotopicalAlgebra.RelativeCellComplex.Cells.i",
+          "CategoryTheory.MorphismProperty.FunctorialFactorizationData.i",
+          "Lean.Server.Watchdog.RequestQueueMap.i",
+          "QuaternionAlgebra.Basis.i",
+          "WithIdeal.i",
+          "AlgebraicGeometry.ExistsHomHomCompEqCompAux.i",
+          "Lean.Meta.Grind.CanonArgKey.i",
+          "String.Legacy.Iterator.i",
+          "CategoryTheory.ShortComplex.LeftHomologyData.i",
+          "CategoryTheory.Sieve.ofArrows.i",
+          "Lean.Meta.Grind.CaseTrace.i",
+          "CochainComplex.cm5b.i",
+          "CategoryTheory.SmallObject.FunctorObjIndex.i",
+          "CategoryTheory.MorphismProperty.MapFactorizationData.i",
+          "CategoryTheory.Retract.i",
+          "Lean.ProjectionFunctionInfo.i",
+          "HomotopicalAlgebra.Precylinder.i"
+        ],
+        "same_last_component_count": 18,
+        "target": "Erdos400.erdos_400.parts.i",
+        "template_local_constants": [
+          "Erdos400.g"
+        ]
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 7.68,
+        "queue_seconds": 0.0,
+        "lean_seconds": 7.35,
+        "lean_cpu_seconds": 7.35,
+        "max_rss_bytes": 6110875648,
+        "cgroup_memory_peak_bytes": 790474752,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "erdos_400",
+          "hits": 0,
+          "declaration_hits": []
+        },
+        {
+          "term": "IsEquivalent.*log",
+          "hits": 5,
+          "declaration_hits": [
+            ".lake/packages/mathlib/Mathlib/Analysis/Asymptotics/SpecificAsymptotics.lean:104: theorem Asymptotics.IsEquivalent.log {α : Type*} {l : Filter α} {f g : α → ℝ} (hfg : f ~[l] g)",
+            ".lake/packages/mathlib/Mathlib/Analysis/Asymptotics/AsymptoticEquivalent.lean:318: theorem IsEquivalent.tendsto_atTop [OrderTopology β] (huv : u ~[l] v) (hu : Tendsto u l atTop) :",
+            ".lake/packages/mathlib/Mathlib/Analysis/Asymptotics/AsymptoticEquivalent.lean:323: theorem IsEquivalent.tendsto_atTop_iff [OrderTopology β] (huv : u ~[l] v) :",
+            ".lake/packages/mathlib/Mathlib/Analysis/Asymptotics/AsymptoticEquivalent.lean:327: theorem IsEquivalent.tendsto_atBot [OrderTopology β] (huv : u ~[l] v) (hu : Tendsto u l atBot) :",
+            ".lake/packages/mathlib/Mathlib/Analysis/Asymptotics/AsymptoticEquivalent.lean:333: theorem IsEquivalent.tendsto_atBot_iff [OrderTopology β] (huv : u ~[l] v) :"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "Erdos195_erdos_195_variants_leq_5_bound",
+      "theorem_name": "Erdos195.erdos_195.variants.leq_5_bound",
+      "category": "research solved",
+      "answer_based": false,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": false,
+        "same_last_component": [],
+        "same_last_component_count": 0,
+        "target": "Erdos195.erdos_195.variants.leq_5_bound",
+        "template_local_constants": []
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 8.43,
+        "queue_seconds": 0.0,
+        "lean_seconds": 8.12,
+        "lean_cpu_seconds": 8.12,
+        "max_rss_bytes": 6108995584,
+        "cgroup_memory_peak_bytes": 792043520,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "HasMonotoneAP",
+          "hits": 1,
+          "declaration_hits": [
+            "FormalConjecturesForMathlib/Combinatorics/AP/Basic.lean:248: def HasMonotoneAP {β : Type*} [Preorder β] (f : β → α) (k : ℕ) : Prop :="
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "all_fermat_squarefree",
+      "theorem_name": "Fermat.all_fermat_squarefree",
+      "category": "research open",
+      "answer_based": true,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": true,
+        "same_last_component": [],
+        "same_last_component_count": 0,
+        "target": "Fermat.all_fermat_squarefree",
+        "template_local_constants": []
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 8.43,
+        "queue_seconds": 0.0,
+        "lean_seconds": 8.13,
+        "lean_cpu_seconds": 8.11,
+        "max_rss_bytes": 6115721216,
+        "cgroup_memory_peak_bytes": 798126080,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "fermatNumber",
+          "hits": 50,
+          "declaration_hits": [
+            ".lake/packages/mathlib/Mathlib/NumberTheory/Fermat.lean:35: def fermatNumber (n : ℕ) : ℕ := 2 ^ (2 ^ n) + 1",
+            ".lake/packages/mathlib/Mathlib/NumberTheory/Fermat.lean:37: @[simp] theorem fermatNumber_zero : fermatNumber 0 = 3 := rfl",
+            ".lake/packages/mathlib/Mathlib/NumberTheory/Fermat.lean:38: @[simp] theorem fermatNumber_one : fermatNumber 1 = 5 := rfl",
+            ".lake/packages/mathlib/Mathlib/NumberTheory/Fermat.lean:39: @[simp] theorem fermatNumber_two : fermatNumber 2 = 17 := rfl",
+            ".lake/packages/mathlib/Mathlib/NumberTheory/Fermat.lean:41: theorem fermatNumber_strictMono : StrictMono fermatNumber := by",
+            ".lake/packages/mathlib/Mathlib/NumberTheory/Fermat.lean:46: lemma fermatNumber_mono : Monotone fermatNumber := fermatNumber_strictMono.monotone",
+            ".lake/packages/mathlib/Mathlib/NumberTheory/Fermat.lean:47: lemma fermatNumber_injective : Injective fermatNumber := fermatNumber_strictMono.injective",
+            ".lake/packages/mathlib/Mathlib/NumberTheory/Fermat.lean:49: lemma three_le_fermatNumber (n : ℕ) : 3 ≤ fermatNumber n := fermatNumber_mono n.zero_le",
+            ".lake/packages/mathlib/Mathlib/NumberTheory/Fermat.lean:50: lemma two_lt_fermatNumber (n : ℕ) : 2 < fermatNumber n := three_le_fermatNumber _",
+            ".lake/packages/mathlib/Mathlib/NumberTheory/Fermat.lean:52: lemma fermatNumber_ne_one (n : ℕ) : fermatNumber n ≠ 1 := by have := three_le_fermatNumber n; lia",
+            ".lake/packages/mathlib/Mathlib/NumberTheory/Fermat.lean:54: theorem odd_fermatNumber (n : ℕ) : Odd (fermatNumber n) :=",
+            ".lake/packages/mathlib/Mathlib/NumberTheory/Fermat.lean:57: theorem prod_fermatNumber (n : ℕ) : ∏ k ∈ range n, fermatNumber k = fermatNumber n - 2 := by"
+          ]
+        },
+        {
+          "term": "Squarefree.*fermat|fermat.*Squarefree",
+          "hits": 0,
+          "declaration_hits": []
+        }
+      ]
+    },
+    {
+      "task_id": "Erdos1092_f_asymptotic_2",
+      "theorem_name": "Erdos1092.f_asymptotic_2",
+      "category": "research open",
+      "answer_based": true,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": true,
+        "same_last_component": [],
+        "same_last_component_count": 0,
+        "target": "Erdos1092.f_asymptotic_2",
+        "template_local_constants": [
+          "Erdos1092.f"
+        ]
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 7.83,
+        "queue_seconds": 0.0,
+        "lean_seconds": 7.49,
+        "lean_cpu_seconds": 7.47,
+        "max_rss_bytes": 6115774464,
+        "cgroup_memory_peak_bytes": 800772096,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "deleteEdges.*chromaticNumber|chromaticNumber.*deleteEdges",
+          "hits": 1,
+          "declaration_hits": []
+        }
+      ]
+    },
+    {
+      "task_id": "EulerBrick_cuboidThree",
+      "theorem_name": "EulerBrick.cuboidThree",
+      "category": "research open",
+      "answer_based": false,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": false,
+        "same_last_component": [],
+        "same_last_component_count": 0,
+        "target": "EulerBrick.cuboidThree",
+        "template_local_constants": [
+          "EulerBrick.CuboidThree"
+        ]
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 12.64,
+        "queue_seconds": 0.0,
+        "lean_seconds": 12.31,
+        "lean_cpu_seconds": 12.3,
+        "max_rss_bytes": 6118780928,
+        "cgroup_memory_peak_bytes": 802861056,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "[Cc]uboid",
+          "hits": 1,
+          "declaration_hits": []
+        },
+        {
+          "term": "EulerBrick",
+          "hits": 0,
+          "declaration_hits": []
+        }
+      ]
+    },
+    {
+      "task_id": "greens14",
+      "theorem_name": "Green14.green_14_polynomial",
+      "category": "research open",
+      "answer_based": true,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": true,
+        "same_last_component": [],
+        "same_last_component_count": 0,
+        "target": "Green14.green_14_polynomial",
+        "template_local_constants": [
+          "Green14.W"
+        ]
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 7.73,
+        "queue_seconds": 0.0,
+        "lean_seconds": 7.37,
+        "lean_cpu_seconds": 7.35,
+        "max_rss_bytes": 6107373568,
+        "cgroup_memory_peak_bytes": 792186880,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "IsAPOfLength",
+          "hits": 67,
+          "declaration_hits": [
+            "FormalConjecturesForMathlib/Combinatorics/AP/Basic.lean:46: def Set.IsAPOfLengthWith (s : Set α) (l : ℕ∞) (a d : α) : Prop :=",
+            "FormalConjecturesForMathlib/Combinatorics/AP/Basic.lean:53: def List.IsAPOfLengthWith (s : List α) (l : ℕ) (a d : α) : Prop :=",
+            "FormalConjecturesForMathlib/Combinatorics/AP/Basic.lean:60: theorem card (h : s.IsAPOfLengthWith l a d) : ENat.card s = l := h.1",
+            "FormalConjecturesForMathlib/Combinatorics/AP/Basic.lean:61: theorem eq (h : s.IsAPOfLengthWith l a d) : s = {a + n • d | (n : ℕ) (_ : n < l)} := h.2",
+            "FormalConjecturesForMathlib/Combinatorics/AP/Basic.lean:66: theorem zero : s.IsAPOfLengthWith 0 a d ↔ s = ∅ := by simp [IsAPOfLengthWith]",
+            "FormalConjecturesForMathlib/Combinatorics/AP/Basic.lean:71: theorem one : s.IsAPOfLengthWith 1 a d ↔ s = {a} := by simp +contextual [IsAPOfLengthWith]",
+            "FormalConjecturesForMathlib/Combinatorics/AP/Basic.lean:79: theorem length (h : s.IsAPOfLengthWith l a d) : s.length = l := by",
+            "FormalConjecturesForMathlib/Combinatorics/AP/Basic.lean:85: theorem zero : s.IsAPOfLengthWith 0 a d ↔ s = [] := by",
+            "FormalConjecturesForMathlib/Combinatorics/AP/Basic.lean:91: theorem one : s.IsAPOfLengthWith 1 a d ↔ s = [a] := by",
+            "FormalConjecturesForMathlib/Combinatorics/AP/Basic.lean:124: def Set.IsAPOfLength (s : Set α) (l : ℕ∞) : Prop :=",
+            "FormalConjecturesForMathlib/Combinatorics/AP/Basic.lean:131: def List.IsAPOfLength (s : List α) (l : ℕ) : Prop :=",
+            "FormalConjecturesForMathlib/Combinatorics/AP/Basic.lean:140: theorem card (h : s.IsAPOfLength l) : ENat.card s = l := h.choose_spec.choose_spec.1"
+          ]
+        },
+        {
+          "term": "[Vv]an ?[Dd]er ?[Ww]aerden",
+          "hits": 6,
+          "declaration_hits": []
+        }
+      ]
+    },
+    {
+      "task_id": "Green32_hasCosetHole_empty",
+      "theorem_name": "Green32.hasCosetHole_empty",
+      "category": "test",
+      "answer_based": false,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": false,
+        "same_last_component": [],
+        "same_last_component_count": 0,
+        "target": "Green32.hasCosetHole_empty",
+        "template_local_constants": [
+          "Green32.HasCosetHole"
+        ]
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 7.88,
+        "queue_seconds": 0.0,
+        "lean_seconds": 7.59,
+        "lean_cpu_seconds": 7.58,
+        "max_rss_bytes": 6121713664,
+        "cgroup_memory_peak_bytes": 799444992,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "CosetHole",
+          "hits": 0,
+          "declaration_hits": []
+        }
+      ]
+    },
+    {
+      "task_id": "Erdos1085_erdos_1085_variants_upper_d3",
+      "theorem_name": "Erdos1085.erdos_1085.variants.upper_d3",
+      "category": "research open",
+      "answer_based": true,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": true,
+        "same_last_component": [],
+        "same_last_component_count": 0,
+        "target": "Erdos1085.erdos_1085.variants.upper_d3",
+        "template_local_constants": [
+          "Erdos1085.f"
+        ]
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 7.73,
+        "queue_seconds": 0.0,
+        "lean_seconds": 7.37,
+        "lean_cpu_seconds": 7.36,
+        "max_rss_bytes": 6110330880,
+        "cgroup_memory_peak_bytes": 799555584,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "unitDistNum",
+          "hits": 1,
+          "declaration_hits": [
+            "FormalConjecturesForMathlib/Geometry/Metric.lean:29: noncomputable def unitDistNum (s : Finset X) : ℕ := #{p ∈ s.sym2 | dist p.out.1 p.out.2 = 1}"
+          ]
+        },
+        {
+          "term": "[Uu]nit[- ]?[Dd]istance",
+          "hits": 11,
+          "declaration_hits": [
+            "FormalConjecturesForMathlib/Combinatorics/SimpleGraph/GraphConjectures/Definitions.lean:99: def UnitDistancePlaneGraph (V : Set (EuclideanSpace ℝ (Fin 2))) : SimpleGraph V where"
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "DedekindNumber_M'_three",
+      "theorem_name": "DedekindNumber.M'_three",
+      "category": "test",
+      "answer_based": false,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": false,
+        "same_last_component": [],
+        "same_last_component_count": 0,
+        "target": "DedekindNumber.M'_three",
+        "template_local_constants": [
+          "DedekindNumber.M'"
+        ]
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 7.58,
+        "queue_seconds": 0.0,
+        "lean_seconds": 7.26,
+        "lean_cpu_seconds": 7.25,
+        "max_rss_bytes": 6114504704,
+        "cgroup_memory_peak_bytes": 795779072,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "[Dd]edekind[ _]?[Nn]umber",
+          "hits": 0,
+          "declaration_hits": []
+        },
+        {
+          "term": "IsSperner|Sperner",
+          "hits": 9,
+          "declaration_hits": []
+        }
+      ]
+    },
+    {
+      "task_id": "Erdos23_erdos_23_variants_n1_tight",
+      "theorem_name": "Erdos23.erdos_23.variants.n1_tight",
+      "category": "test",
+      "answer_based": false,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": false,
+        "same_last_component": [],
+        "same_last_component_count": 0,
+        "target": "Erdos23.erdos_23.variants.n1_tight",
+        "template_local_constants": []
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 7.48,
+        "queue_seconds": 0.0,
+        "lean_seconds": 7.17,
+        "lean_cpu_seconds": 7.16,
+        "max_rss_bytes": 6112145408,
+        "cgroup_memory_peak_bytes": 792006656,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "cycleGraph.*(CliqueFree|IsBipartite|Colorable)",
+          "hits": 0,
+          "declaration_hits": []
+        },
+        {
+          "term": "(CliqueFree|IsBipartite).*cycleGraph",
+          "hits": 1,
+          "declaration_hits": []
+        }
+      ]
+    },
+    {
+      "task_id": "SumOfThreeCubes_isSumOfThreeCubes_iff_mod_9",
+      "theorem_name": "SumOfThreeCubes.isSumOfThreeCubes_iff_mod_9",
+      "category": "research open",
+      "answer_based": true,
+      "probe_completed": true,
+      "directly_matched_in_dependencies": false,
+      "probe": {
+        "conjecture_or_negation_matches": [],
+        "exact_type_matches": [],
+        "has_answer_iff": true,
+        "same_last_component": [],
+        "same_last_component_count": 0,
+        "target": "SumOfThreeCubes.isSumOfThreeCubes_iff_mod_9",
+        "template_local_constants": [
+          "SumOfThreeCubes.IsSumOfThreeCubes"
+        ]
+      },
+      "compile": {
+        "status": "success",
+        "exit_code": 0,
+        "sorry_warnings": 1,
+        "elapsed_seconds": 12.19,
+        "queue_seconds": 0.0,
+        "lean_seconds": 11.88,
+        "lean_cpu_seconds": 11.86,
+        "max_rss_bytes": 6606921728,
+        "cgroup_memory_peak_bytes": 1287585792,
+        "output_truncated": false,
+        "timeout_source": null,
+        "errors": []
+      },
+      "source_search": [
+        {
+          "term": "[Tt]hree ?[Cc]ubes",
+          "hits": 0,
+          "declaration_hits": []
+        },
+        {
+          "term": "SumOfThreeCubes",
+          "hits": 0,
+          "declaration_hits": []
+        }
+      ]
+    }
+  ],
+  "warm_up": {
+    "status": "error",
+    "exit_code": 1,
+    "sorry_warnings": 0,
+    "elapsed_seconds": 117.48,
+    "queue_seconds": null,
+    "lean_seconds": 116.75,
+    "lean_cpu_seconds": 13.97,
+    "max_rss_bytes": 5373358080,
+    "cgroup_memory_peak_bytes": 6442450944,
+    "output_truncated": false,
+    "timeout_source": null,
+    "errors": [
+      {
+        "line": 46,
+        "code": null,
+        "text": "Provide a complete proof.\nn : ℕ\n⊢ HasCosetHole ∅ 0"
+      }
+    ],
+    "warnings": [],
+    "memory": "6g",
+    "cpus": 2,
+    "timeout_seconds": 600
+  },
+  "duration_seconds": 256.9
+}

@@ -1,0 +1,1603 @@
+{
+  "schema": "gdm-runtime-e2e/1",
+  "created_at": "2026-10-15T03:08:17Z",
+  "all_required_passed": true,
+  "image_ids": {
+    "agent": "sha256:5a009aa1f593609fe4742bc6f7223f7beccff4a790d1daa8f6064f5b17a294c6",
+    "lean": "sha256:5588cd382a589737d4909b955966d23ef2a257d88587022ff1195e6fbe5ec943"
+  },
+  "paid_calls": 0,
+  "provider_contacted": false,
+  "credentials_in_environment": false,
+  "credentials_in_environment_before_eval": false,
+  "inspect_dotenv_disabled": true,
+  "checks": {
+    "sample_errors": {
+      "passed": true,
+      "required": true,
+      "errors": {
+        "agent-001": null,
+        "agent-002": null,
+        "agent-003": "RuntimeError('Error executing claude code agent 1: [claude-code:unrecognized_model] {\"model\":\"model\",\"query_source\":\"sdk\"}\\n')"
+      },
+      "note": "agent-003 may error only as error_after_truncation (CLI exit after recovery exhaustion)"
+    },
+    "claude_code_executed_bash_lean": {
+      "passed": true,
+      "required": true,
+      "evidence": "Check.lean:10:2: error: Provide a complete proof.\n\u22a2 default \u2194 \u2200 (n : \u2115), Squarefree n.fermatNumber\nLEAN_EXIT=1\nELAPSED=16"
+    },
+    "bash_time_limited_to_120s": {
+      "passed": true,
+      "required": true,
+      "seconds_between_requests": 121.41090321540833,
+      "timed_out_process_survivors": 0,
+      "evidence": "Exit code 143\nCommand timed out after 2m 0s",
+      "process_check": "SLEEP_PROCESSES 0",
+      "note": "The timed-out `sleep 150` must also be gone (checked with ps right after the tool reported the timeout)."
+    },
+    "background_lean_killed_at_120s": {
+      "passed": true,
+      "required": true,
+      "run_in_background_task": {
+        "reported": true,
+        "ended": true,
+        "rc": 137,
+        "seconds": 120,
+        "kill_notice": 1
+      },
+      "run_in_background_outcome": "killed_at_limit",
+      "detached_setsid": {
+        "reported": true,
+        "ended": true,
+        "rc": 137,
+        "seconds": 120,
+        "kill_notice": 1
+      },
+      "surviving_slow_lean_processes": 0,
+      "path_lookup": {
+        "lake": "/usr/local/bin/lake",
+        "lean": "/usr/local/bin/lean"
+      },
+      "expected_wrappers": {
+        "lake": "/usr/local/bin/lake",
+        "lean": "/usr/local/bin/lean"
+      },
+      "lake_env_resolves_lean": "/opt/elan/toolchains/leanprover--lean4---v4.27.0/bin/lean",
+      "kill_window_seconds": [
+        115,
+        135
+      ],
+      "status_result": "SLOW_a status=rc=137 seconds=120 notice=1\nSLOW_b status=rc=137 seconds=120 notice=1\nLEAN_PROCESSES 0\nWHICH_LAKE /usr/local/bin/lake\nWHICH_LEAN /usr/local/bin/lean\nLAKE_ENV_LEAN /opt/elan/toolchains/leanprover--lean4---v4.27.0/bin/lean",
+      "task_start_result": "Command running in background with ID: bzfismx2r. Output is being written to: /tmp/claude-1000/-workspace/f553bd18-3d0c-429c-99a7-4c5c8b971446/tasks/bzfismx2r.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+      "detached_start_result": "BACKGROUND_STARTED",
+      "note": "Invoking the elan/toolchain binaries by absolute path bypasses the wrappers (docs/runtime.md)."
+    },
+    "identity_bound_board_posts": {
+      "passed": true,
+      "required": true,
+      "post_events": [
+        {
+          "seq": 3,
+          "kind": "board_post",
+          "agent_id": "agent-001",
+          "tool": "post_intent"
+        },
+        {
+          "seq": 13,
+          "kind": "board_post",
+          "agent_id": "agent-002",
+          "tool": "post_intent"
+        }
+      ]
+    },
+    "cross_agent_direct_message": {
+      "passed": true,
+      "required": true,
+      "dm_events": 1,
+      "get_messages_result": "{\"ok\": true, \"total\": 1, \"returned\": 1, \"omitted_older\": 0, \"omitted_newer\": 0, \"next_since_seq\": 1, \"truncated\": false, \"never_retrieved_remaining\": 0, \"messages\": [{\"seq\": 1, \"message_id\": \"dm-17f7f19f349bcfcd\", \"from_agent_id\": \"agent-001\", \"message\": \"validation direct message\", \"sent_at\": \"2026-10-15T03:06:18.228Z\", \"new\": true}]}"
+    },
+    "sandbox_file_submission": {
+      "passed": true,
+      "required": true,
+      "submit_result": "{\"ok\": true, \"submission_id\": \"sub-deded72a7100f74a\", \"problem_id\": \"all_fermat_squarefree\", \"accepted\": false, \"outcome\": \"rejected\", \"stage\": \"compilation\", \"reason\": \"Lean error\", \"compile_status\": \"error\", \"compiler_output\": \"/tmp/Submission.lean:10:2: error: Provide a complete proof.\\n\u22a2 default \u2194 \u2200 (n : \u2115), Squarefree n.fermatNumber\\n\"}"
+    },
+    "real_judge_rejects_unmodified_template": {
+      "passed": true,
+      "required": true,
+      "judge_events": [
+        {
+          "outcome": "rejected",
+          "stage": "compilation",
+          "compile_status": "error",
+          "judge_seconds": 5.975
+        }
+      ]
+    },
+    "sandbox_file_outside_root_rejected": {
+      "passed": true,
+      "required": true,
+      "outside_root": "{\"ok\": false, \"error\": \"path_outside_allowed_roots\", \"path\": \"/etc/passwd\"}",
+      "symlink": "{\"ok\": false, \"error\": \"path_outside_allowed_roots\", \"path\": \"/workspace/link.lean\"}",
+      "rejections": [
+        {
+          "tool": "submit_solution",
+          "path": "/etc/passwd",
+          "resolved": "/etc/passwd",
+          "error": "path_outside_allowed_roots"
+        },
+        {
+          "tool": "submit_solution",
+          "path": "/workspace/link.lean",
+          "resolved": "/etc/passwd",
+          "error": "path_outside_allowed_roots"
+        }
+      ]
+    },
+    "publish_notebook": {
+      "passed": true,
+      "required": true,
+      "result": "{\"ok\": true, \"path\": \"notebooks/agent-001/wiki/notes.md\", \"revision\": 1, \"published_at\": \"2026-10-15T03:06:43.437Z\"}"
+    },
+    "read_library_file": {
+      "passed": true,
+      "required": true,
+      "result": "{\"ok\": true, \"seq\": 1, \"path\": \"notebooks/agent-001/wiki/notes.md\", \"kind\": \"notebook\", \"author\": \"agent-001\", \"revision\": 1, \"published_at\": \"2026-10-15T03:06:43.437Z\", \"bytes\": 28, \"total_chars\": 28, \"sha256\": \"bbbdf565a424d10cc163636de1ee18a28ab10ed630d8fe4f1ac7d5f0151a3645\", \"offset\": 0, \"returned_chars\": 28, \"has_more\": false, \"next_offset\": null, \"content\": \"# Notes\\nvalidation notebook\\n\"}"
+    },
+    "publish_notebook_relative_path": {
+      "passed": true,
+      "required": true,
+      "result": "{\"ok\": true, \"path\": \"notebooks/agent-001/workspace/RESEARCH.md\", \"revision\": 1, \"published_at\": \"2026-10-15T03:06:51.803Z\"}",
+      "sandbox_reads": [
+        {
+          "tool": "publish_notebook",
+          "path": "/tmp/w/memory/wiki/notes.md",
+          "resolved": "/tmp/w/memory/wiki/notes.md",
+          "bytes": 28,
+          "sha256": "bbbdf565a424d10cc163636de1ee18a28ab10ed630d8fe4f1ac7d5f0151a3645"
+        },
+        {
+          "tool": "publish_notebook",
+          "path": "RESEARCH.md",
+          "resolved": "/workspace/RESEARCH.md",
+          "bytes": 8,
+          "sha256": "7ae0805303353273103233ab90f08e323cb28ad9545ee10a26383eb9a9f812d5"
+        },
+        {
+          "tool": "publish_notebook",
+          "path": "/tmp/w/memory/wiki/large-unicode.md",
+          "resolved": "/tmp/w/memory/wiki/large-unicode.md",
+          "bytes": 97653,
+          "sha256": "db199e574e8602e05812c2a435877975e45f13a6c29d3c3bfaf534d9b4756f5c"
+        }
+      ]
+    },
+    "read_library_file_large_unicode_full_range": {
+      "passed": true,
+      "required": true,
+      "requested": {
+        "offset": 0,
+        "limit": 40000
+      },
+      "expected_chars": 40000,
+      "expected_utf8_bytes": 97653,
+      "notebook_byte_limit": 262144,
+      "publish_result": "{\"ok\": true, \"path\": \"notebooks/agent-001/wiki/large-unicode.md\", \"revision\": 1, \"published_at\": \"2026-10-15T03:06:58.084Z\"}",
+      "received_chars": 40000,
+      "returned_chars": 40000,
+      "has_more": false,
+      "tool_result_chars": 40886,
+      "tool_result_utf16_units": 44088,
+      "cli_size_estimate_tokens": 11022,
+      "cli_inline_without_token_count": true,
+      "tool_result_head": "{\"ok\": true, \"seq\": 3, \"path\": \"notebooks/agent-001/wiki/large-unicode.md\", \"kind\": \"notebook\", \"author\": \"agent-001\", \"revision\": 1, \"published_at\": \"2026-10-15T03:06:58.084Z\", \"bytes\": 97653, \"total",
+      "tool_result_tail": "\u221a\u221e\u2286\u2282\u2208\u2209\u2205\u2218\u27e8\u27e9\u03b1\u03b2\u03b3\u03b4\u03b5\u03b6\u03b8\u207b\u00b9\u2080\u2081\u2082 \u6570\u5b66\u8a3c\u660e\u5b9a\u7406\u8865\u9898 \ud835\udd3d\ud835\udd5c\ud835\udcd2\ud835\udcaa\ud835\udd38 \ud83e\uddee\u2713 abc xyz 0123\\n\u2203\u2115\u2124\u211a\u211d\u2102\u2192\u2194\u2264\u2265\u2260\u2227\u2228\u00ac\u03bb\u03a0\u03a3\u2211\u222b\u221a\u221e\u2286\u2282\u2208\u2209\u2205\u2218\u27e8\u27e9\u03b1\u03b2\u03b3\u03b4\u03b5\u03b6\u03b8\u207b\u00b9\u2080\u2081\u2082 \u6570\u5b66\u8a3c\u660e\u5b9a\u7406\u8865\u9898 \ud835\udd3d\ud835\udd5c\ud835\udcd2\ud835\udcaa\ud835\udd38 \ud83e\uddee\u2713 abc xyz 0123 \u2200\u2203\u2115\u2124\u211a\u211d\\n\u2194\u2264\u2265\u2260\u2227\u2228\u00ac\u03bb\u03a0\u03a3\u2211\u222b\u221a\u221e\u2286\u2282\u2208\u2209\u2205\u2218\u27e8\u27e9\u03b1\u03b2\u03b3\u03b4\u03b5\u03b6\u03b8\u207b\u00b9\u2080\u2081\u2082 \u6570\u5b66\u8a3c\u660e\u5b9a\u7406\u8865\u9898 \ud835\udd3d\ud835\udd5c\ud835\udcd2\ud835\udcaa\ud835\udd38 \ud83e\uddee\u2713 abc xyz 0123 \u2200\u2203\u2115\u2124\u211a\u211d\u2102\u2192\u2194\u2264\u2265\u2260\u2227\\n\u03bb\u03a0\u03a3\u2211\u222b\u221a\u221e\u2286\u2282\u2208\u2209\u2205\u2218\u27e8\u27e9\u03b1\u03b2\u03b3\u03b4\u03b5\u03b6\u03b8\u207b\u00b9\u2080\u2081\u2082 \u6570\u5b66\u8a3c\u660e\u5b9a\u7406\u8865\u9898 \ud835\udd3d\ud835\udd5c\ud835\udcd2\ud835\udcaa\ud835\udd38 \ud83e\uddee\u2713 abc xyz 0123 \u2200\u2203\u2115\u2124\u211a\u211d\u2102\u2192\u2194\u2264\u2265\u2260\u2227\u2228\u00ac\u03bb\u03a0\u03a3\u2211\u222b\\n\"}",
+      "library_read_events": [
+        {
+          "artifact_id": "lib-000003",
+          "author": "agent-001",
+          "complete": true,
+          "end": 40000,
+          "kind": "notebook",
+          "offset": 0,
+          "path": "notebooks/agent-001/wiki/large-unicode.md",
+          "problem_id": null,
+          "range_sha256": "db199e574e8602e05812c2a435877975e45f13a6c29d3c3bfaf534d9b4756f5c",
+          "returned_chars": 40000,
+          "revision": 1,
+          "sha256": "db199e574e8602e05812c2a435877975e45f13a6c29d3c3bfaf534d9b4756f5c",
+          "total_chars": 40000
+        }
+      ],
+      "note": "The tool result must reach the model untruncated (Claude Code saves an MCP result it judges larger than MAX_MCP_OUTPUT_TOKENS to a file instead)."
+    },
+    "compose_uses_pinned_image_id": {
+      "passed": true,
+      "required": true,
+      "images": {
+        "agent": {
+          "tag": "gdm-math-swarm-agent:local",
+          "id": "sha256:5a009aa1f593609fe4742bc6f7223f7beccff4a790d1daa8f6064f5b17a294c6"
+        },
+        "lean": {
+          "tag": "gdm-math-swarm-lean:local",
+          "id": "sha256:5588cd382a589737d4909b955966d23ef2a257d88587022ff1195e6fbe5ec943"
+        }
+      }
+    },
+    "compose_matches_fingerprint": {
+      "passed": true,
+      "required": true,
+      "compose": {
+        "compose_sha256": "ffaa3ae8d2a8865c5a9ed487a2022947f785184efefefc6c097a96926e78cd5b",
+        "compose_fingerprint": "ffaa3ae8d2a8865c5a9ed487a2022947f785184efefefc6c097a96926e78cd5b",
+        "matches": true,
+        "compose_file": "runs/validation-runtime-20261015T030326Z/compose.yaml",
+        "agent_image_id": "sha256:5a009aa1f593609fe4742bc6f7223f7beccff4a790d1daa8f6064f5b17a294c6",
+        "agent_memory": "2g",
+        "agent_cpus": null
+      },
+      "note": "X3: compose_sha256 is the file the agents ran; it must equal runtime.compose_fingerprint(config, agent image ID)."
+    },
+    "lean_warm_up": {
+      "passed": true,
+      "required": false,
+      "warm_up": {
+        "image": "sha256:5588cd382a589737d4909b955966d23ef2a257d88587022ff1195e6fbe5ec943",
+        "memory": "6g",
+        "cpus": 2,
+        "timeout_seconds": 900,
+        "source": "import FormalConjectures.Util.ProblemImports",
+        "vm_before": {
+          "vm_uptime_seconds": 121.91,
+          "MemTotal_kib": 264095948,
+          "MemFree_kib": 261691652,
+          "MemAvailable_kib": 261209572,
+          "Buffers_kib": 80840,
+          "Cached_kib": 855944,
+          "Active(file)_kib": 662068,
+          "Inactive(file)_kib": 264304
+        },
+        "status": "success",
+        "exit_code": 0,
+        "lean_elapsed_seconds": 109.846657347,
+        "timeout_source": null,
+        "ok": true,
+        "wall_seconds": 109.847,
+        "vm_after": {
+          "vm_uptime_seconds": 231.93,
+          "MemTotal_kib": 264095948,
+          "MemFree_kib": 256174104,
+          "MemAvailable_kib": 261180992,
+          "Buffers_kib": 81496,
+          "Cached_kib": 6284516,
+          "Active(file)_kib": 1132828,
+          "Inactive(file)_kib": 5223028
+        }
+      },
+      "note": "Not a gate (an optimization); records VM uptime and page cache before/after."
+    },
+    "barrier_released_only_after_late_agent": {
+      "passed": true,
+      "required": true,
+      "arrivals": {
+        "agent-001": 1792033533.975847,
+        "agent-003": 1792033533.9805303,
+        "agent-002": 1792033554.452614
+      },
+      "common_start": 1792033554.4556541,
+      "agent_001_first_generation": 1792033555.007197,
+      "agent_ready_events": [
+        [
+          "agent-001",
+          1792033533.978203
+        ],
+        [
+          "agent-003",
+          1792033533.982667
+        ],
+        [
+          "agent-002",
+          1792033554.4556243
+        ]
+      ]
+    },
+    "inspect_logs_capture_model_and_tool_calls": {
+      "passed": true,
+      "required": true,
+      "model_events": {
+        "agent-001": 28,
+        "agent-002": 9,
+        "agent-003": 5
+      },
+      "model_events_with_raw_call": {
+        "agent-001": 28,
+        "agent-002": 9,
+        "agent-003": 5
+      }
+    },
+    "inspect_tool_result_replays_consistent": {
+      "passed": true,
+      "required": true,
+      "conflicts": {}
+    },
+    "file_snapshots": {
+      "passed": true,
+      "required": true,
+      "paths": [
+        "/home/researcher/.claude/projects/-workspace/0b444ed9-e02b-4d4e-996e-8e0e3532a96c.jsonl",
+        "/home/researcher/.claude/projects/-workspace/d25283b9-3185-459c-bba9-7a393617ca01.jsonl",
+        "/home/researcher/.claude/projects/-workspace/f553bd18-3d0c-429c-99a7-4c5c8b971446.jsonl",
+        "/tmp/w/memory/wiki/large-unicode.md",
+        "/tmp/w/memory/wiki/notes.md",
+        "/workspace/Attempt.lean",
+        "/workspace/Check.lean",
+        "/workspace/RESEARCH.md",
+        "/workspace/SlowCheckA.lean",
+        "/workspace/SlowCheckB.lean",
+        "/workspace/lake-manifest.json",
+        "/workspace/lakefile.toml",
+        "/workspace/problems/DedekindNumber_M'_three.lean",
+        "/workspace/problems/Erdos1085_erdos_1085_variants_upper_d3.lean",
+        "/workspace/problems/Erdos1092_f_asymptotic_2.lean",
+        "/workspace/problems/Erdos195_erdos_195_variants_leq_5_bound.lean",
+        "/workspace/problems/Erdos23_erdos_23_variants_n1_tight.lean",
+        "/workspace/problems/Erdos6_erdos_6_variants_decreasing.lean",
+        "/workspace/problems/EulerBrick_cuboidThree.lean",
+        "/workspace/problems/Green32_hasCosetHole_empty.lean",
+        "/workspace/problems/MagicSquares_exists_semi_magic_square_cubes.lean",
+        "/workspace/problems/SumOfThreeCubes_isSumOfThreeCubes_iff_mod_9.lean",
+        "/workspace/problems/all_fermat_squarefree.lean",
+        "/workspace/problems/erdos_18a.lean",
+        "/workspace/problems/erdos_400_part_i.lean",
+        "/workspace/problems/greens14.lean",
+        "/workspace/problems/tasks.json"
+      ],
+      "transcript_modes": [
+        "append",
+        "full"
+      ]
+    },
+    "effective_instructions_archived": {
+      "passed": true,
+      "required": true,
+      "archives": [
+        {
+          "agent_id": "agent-001",
+          "file": "runs/validation-runtime-20261015T030326Z/instructions/agent-001-71c9c09fe087f0e4.json",
+          "system_blocks": 3,
+          "system_chars": 15232,
+          "tools": [
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "Edit",
+            "EnterWorktree",
+            "ExitWorktree",
+            "ListAgents",
+            "NotebookEdit",
+            "Read",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskStop",
+            "Workflow",
+            "Write",
+            "mcp__conference__get_bulletin_board",
+            "mcp__conference__get_conference_status",
+            "mcp__conference__get_messages",
+            "mcp__conference__get_problem",
+            "mcp__conference__list_library",
+            "mcp__conference__list_problems",
+            "mcp__conference__post_intent",
+            "mcp__conference__publish_notebook",
+            "mcp__conference__read_library_file",
+            "mcp__conference__send_direct_message",
+            "mcp__conference__submit_feedback",
+            "mcp__conference__submit_solution"
+          ],
+          "tool_definitions": 29,
+          "appended_prompt_present": true,
+          "claude_code_builtin_prompt_present": true
+        },
+        {
+          "agent_id": "agent-001",
+          "file": "runs/validation-runtime-20261015T030326Z/instructions/agent-001-8ea93afa57fb9d39.json",
+          "system_blocks": 3,
+          "system_chars": 15232,
+          "tools": [
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "Edit",
+            "EnterWorktree",
+            "ExitWorktree",
+            "ListAgents",
+            "NotebookEdit",
+            "Read",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskStop",
+            "Workflow",
+            "Write",
+            "mcp__conference__get_bulletin_board",
+            "mcp__conference__get_conference_status",
+            "mcp__conference__get_messages",
+            "mcp__conference__get_problem",
+            "mcp__conference__list_library",
+            "mcp__conference__list_problems",
+            "mcp__conference__post_intent",
+            "mcp__conference__publish_notebook",
+            "mcp__conference__read_library_file",
+            "mcp__conference__send_direct_message",
+            "mcp__conference__submit_feedback",
+            "mcp__conference__submit_solution"
+          ],
+          "tool_definitions": 29,
+          "appended_prompt_present": true,
+          "claude_code_builtin_prompt_present": true
+        },
+        {
+          "agent_id": "agent-002",
+          "file": "runs/validation-runtime-20261015T030326Z/instructions/agent-002-89d0b76d9769a905.json",
+          "system_blocks": 3,
+          "system_chars": 15134,
+          "tools": [
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "Edit",
+            "EnterWorktree",
+            "ExitWorktree",
+            "ListAgents",
+            "NotebookEdit",
+            "Read",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskStop",
+            "Workflow",
+            "Write",
+            "mcp__conference__get_bulletin_board",
+            "mcp__conference__get_conference_status",
+            "mcp__conference__get_messages",
+            "mcp__conference__get_problem",
+            "mcp__conference__list_library",
+            "mcp__conference__list_problems",
+            "mcp__conference__post_intent",
+            "mcp__conference__publish_notebook",
+            "mcp__conference__read_library_file",
+            "mcp__conference__send_direct_message",
+            "mcp__conference__submit_feedback",
+            "mcp__conference__submit_solution"
+          ],
+          "tool_definitions": 29,
+          "appended_prompt_present": true,
+          "claude_code_builtin_prompt_present": true
+        },
+        {
+          "agent_id": "agent-003",
+          "file": "runs/validation-runtime-20261015T030326Z/instructions/agent-003-b65db0adcae7ca8e.json",
+          "system_blocks": 3,
+          "system_chars": 15146,
+          "tools": [
+            "Bash",
+            "CronCreate",
+            "CronDelete",
+            "CronList",
+            "Edit",
+            "EnterWorktree",
+            "ExitWorktree",
+            "ListAgents",
+            "NotebookEdit",
+            "Read",
+            "ReportFindings",
+            "ScheduleWakeup",
+            "SendMessage",
+            "Skill",
+            "TaskStop",
+            "Workflow",
+            "Write",
+            "mcp__conference__get_bulletin_board",
+            "mcp__conference__get_conference_status",
+            "mcp__conference__get_messages",
+            "mcp__conference__get_problem",
+            "mcp__conference__list_library",
+            "mcp__conference__list_problems",
+            "mcp__conference__post_intent",
+            "mcp__conference__publish_notebook",
+            "mcp__conference__read_library_file",
+            "mcp__conference__send_direct_message",
+            "mcp__conference__submit_feedback",
+            "mcp__conference__submit_solution"
+          ],
+          "tool_definitions": 29,
+          "appended_prompt_present": true,
+          "claude_code_builtin_prompt_present": true
+        }
+      ],
+      "note": "append mode: the conference prompt follows Claude Code's built-in prompt"
+    },
+    "disallowed_tools_absent": {
+      "passed": true,
+      "required": true,
+      "offered_tools": [
+        "Bash",
+        "CronCreate",
+        "CronDelete",
+        "CronList",
+        "Edit",
+        "EnterWorktree",
+        "ExitWorktree",
+        "ListAgents",
+        "NotebookEdit",
+        "Read",
+        "ReportFindings",
+        "ScheduleWakeup",
+        "SendMessage",
+        "Skill",
+        "TaskStop",
+        "Workflow",
+        "Write",
+        "mcp__conference__get_bulletin_board",
+        "mcp__conference__get_conference_status",
+        "mcp__conference__get_messages",
+        "mcp__conference__get_problem",
+        "mcp__conference__list_library",
+        "mcp__conference__list_problems",
+        "mcp__conference__post_intent",
+        "mcp__conference__publish_notebook",
+        "mcp__conference__read_library_file",
+        "mcp__conference__send_direct_message",
+        "mcp__conference__submit_feedback",
+        "mcp__conference__submit_solution"
+      ],
+      "disallowed_offered": [],
+      "webfetch_call_result": "<tool_use_error>Error: No such tool available: WebFetch. WebFetch is disabled for this session, in subagents as well as here.</tool_use_error>",
+      "agent_call_result": "<tool_use_error>Error: No such tool available: Agent. Agent is disabled for this session, in subagents as well as here.</tool_use_error>"
+    },
+    "budget_filter_reserve_settle": {
+      "passed": true,
+      "required": true,
+      "ledger": {
+        "cap_usd": "1000",
+        "committed_usd": "0.2954195",
+        "remaining_usd": "999.7045805",
+        "settled_usd": "0.2954195",
+        "held_usd": "0",
+        "unresolved_requests": 0,
+        "uncertain_requests": 0,
+        "in_flight_requests": 0,
+        "settled_requests": 42,
+        "unbilled_error_requests": 0,
+        "violation": false,
+        "acknowledged_violations": 0,
+        "reconciliations": 0,
+        "manual_reconciliations": 0,
+        "cap_raises": 0
+      },
+      "ledger_path": "runs/validation-runtime-20261015T030326Z/validation-budget.sqlite",
+      "scope": "validation",
+      "admitted": 42,
+      "finished": 42,
+      "bases": [
+        "provider_reported_cost",
+        "usage_priced_upper_bound"
+      ]
+    },
+    "truncated_tool_call_not_executed_and_session_continues": {
+      "passed": true,
+      "required": true,
+      "requests_after_truncation": [
+        "truncation_nudge",
+        "check_truncated_not_run",
+        "truncation_nudge",
+        "final"
+      ],
+      "truncated_events": [
+        {
+          "request_id": "d7aa5892-b1f8-4116-9736-ccad883fbf70",
+          "tool_calls_removed": 1,
+          "stop_reason": "max_tokens",
+          "consecutive": 1
+        }
+      ]
+    },
+    "truncation_exhaustion_not_voluntary_exit": {
+      "passed": true,
+      "required": true,
+      "agent_003_exit": {
+        "status": "error_after_truncation",
+        "harness_status": "error",
+        "harness_after_stop": null,
+        "final_output": "text",
+        "error": "RuntimeError('Error executing claude code agent 1: [claude-code:unrecognized_model] {\"model\":\"model\",\"query_source\":\"sdk\"}\\n')",
+        "inference": {
+          "requests": 5,
+          "finished": 5,
+          "last_stop_reason": "max_tokens",
+          "consecutive_truncations": 4,
+          "truncated_responses": 4,
+          "unbilled_errors": 0,
+          "uncertain": 0,
+          "in_flight": 0,
+          "last_request_outcome": "finished",
+          "last_denial": null,
+          "last_error": null,
+          "last_output_kind": "text"
+        }
+      },
+      "recovery_nudges_seen": 3,
+      "agent_003_requests": [
+        "bash_hello",
+        "truncated_text_1",
+        "truncation_nudge",
+        "truncated_text_2",
+        "truncation_nudge",
+        "truncated_text_3",
+        "truncation_nudge",
+        "truncated_text_4"
+      ]
+    },
+    "voluntary_exit_recorded": {
+      "passed": true,
+      "required": true,
+      "exits": {
+        "agent-003": [
+          "error_after_truncation",
+          "error"
+        ],
+        "agent-001": [
+          "harness_completed",
+          "harness_completed"
+        ],
+        "agent-002": [
+          "harness_completed",
+          "harness_completed"
+        ]
+      }
+    },
+    "compaction_triggered": {
+      "passed": true,
+      "required": false,
+      "compaction_events": [
+        {
+          "uuid": "eRhmJd2QjGKYNLAyxUWBwk",
+          "span_id": "2AxdJVNWKA5NAfVrviGDsr",
+          "timestamp": "2026-10-15T03:07:23.204270+00:00",
+          "working_start": 118.19129493599976,
+          "metadata": {
+            "trigger": "auto",
+            "content": "Conversation compacted"
+          },
+          "pending": null,
+          "event": "compaction",
+          "type": "summary",
+          "role": null,
+          "tokens_before": null,
+          "tokens_after": null,
+          "source": "claude_code"
+        },
+        {
+          "uuid": "5qaQdYHto6KWmxfb27PFAT",
+          "span_id": "2AxdJVNWKA5NAfVrviGDsr",
+          "timestamp": "2026-10-15T03:07:23.679147+00:00",
+          "working_start": 118.66617011499974,
+          "metadata": {
+            "trigger": "auto",
+            "content": "Conversation compacted"
+          },
+          "pending": null,
+          "event": "compaction",
+          "type": "summary",
+          "role": null,
+          "tokens_before": null,
+          "tokens_after": null,
+          "source": "claude_code"
+        },
+        {
+          "uuid": "Rz8rJ9Xz9JQKZijNtA757h",
+          "span_id": "2AxdJVNWKA5NAfVrviGDsr",
+          "timestamp": "2026-10-15T03:07:29.690360+00:00",
+          "working_start": 124.65977741899971,
+          "metadata": {
+            "trigger": "auto",
+            "content": "Conversation compacted"
+          },
+          "pending": null,
+          "event": "compaction",
+          "type": "summary",
+          "role": null,
+          "tokens_before": null,
+          "tokens_after": null,
+          "source": "claude_code"
+        }
+      ],
+      "note": "Fabricated usage; the live threshold depends on the context window Claude Code assumes for the presented model id and must be observed on the real route."
+    },
+    "compaction_threshold_bracketed": {
+      "passed": true,
+      "required": false,
+      "compaction_threshold_tokens": 170000,
+      "highest_level_without_compaction": 150000,
+      "levels": [
+        120000,
+        150000,
+        170000,
+        185000,
+        195000
+      ],
+      "levels_served": [
+        120000,
+        150000,
+        170000,
+        185000,
+        195000
+      ],
+      "compacted_after_levels": [
+        170000,
+        185000,
+        195000
+      ],
+      "complete": true,
+      "note": "Informational, recorded as compaction_threshold_tokens: the lowest fabricated prompt size after which the pinned Claude Code sent its auto-compaction request (scripts/project_cost.py --compaction-threshold). Assumes the CLI gives the live route's presented model name the same default context window as the mock's (neither is a known Claude model id)."
+    },
+    "conference_event_log_ordered": {
+      "passed": true,
+      "required": true,
+      "events": 16
+    },
+    "evaluator_queue_observer_wired": {
+      "passed": true,
+      "required": false,
+      "note": "I2 make_queue_observer; post-run evaluation can also read conference SQLite"
+    },
+    "no_conflicting_containers_at_start": {
+      "passed": true,
+      "required": true,
+      "forced": false,
+      "blockers": [],
+      "containers": [],
+      "checked_at": "2026-10-15T03:03:26Z",
+      "note": "runtime.launch_interlock before any container started; --force-while-live is for debugging"
+    }
+  },
+  "kind": "unpaid end-to-end runtime validation (mockllm scripted outputs)",
+  "versions": {
+    "inspect-ai": "0.3.279",
+    "inspect-swe": "0.2.71",
+    "anthropic": "1.13.0",
+    "openai": "3.29.0",
+    "claude_code": "2.1.296"
+  },
+  "run_dir": "runs/validation-runtime-20261015T030326Z",
+  "inspect_log": "2026-10-15T03-05-19-00-00_gdm-math-swarm_NNwpSsM7x99vYXU8cnfUpD.eval",
+  "config": {
+    "agent_image": "gdm-math-swarm-agent:local",
+    "lean_image": "gdm-math-swarm-lean:local",
+    "compilation_timeout_seconds": 120,
+    "judge_memory": "2g",
+    "judge_cpus": 1,
+    "judge_max_concurrent": 1,
+    "agent_memory": "2g",
+    "agent_cpus": null,
+    "system_prompt_mode": "append",
+    "claude_auto_memory": true
+  },
+  "images": {
+    "agent": {
+      "tag": "gdm-math-swarm-agent:local",
+      "id": "sha256:5a009aa1f593609fe4742bc6f7223f7beccff4a790d1daa8f6064f5b17a294c6"
+    },
+    "lean": {
+      "tag": "gdm-math-swarm-lean:local",
+      "id": "sha256:5588cd382a589737d4909b955966d23ef2a257d88587022ff1195e6fbe5ec943"
+    }
+  },
+  "claude_code_env": {
+    "BASH_DEFAULT_TIMEOUT_MS": "120000",
+    "BASH_MAX_TIMEOUT_MS": "120000",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "DISABLE_AUTOUPDATER": "1",
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "DISABLE_BUG_COMMAND": "1",
+    "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
+    "CLAUDE_CODE_MAX_RETRIES": "4",
+    "API_TIMEOUT_MS": "1800000",
+    "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0"
+  },
+  "compose_sha256": "ffaa3ae8d2a8865c5a9ed487a2022947f785184efefefc6c097a96926e78cd5b",
+  "compose": {
+    "compose_sha256": "ffaa3ae8d2a8865c5a9ed487a2022947f785184efefefc6c097a96926e78cd5b",
+    "compose_fingerprint": "ffaa3ae8d2a8865c5a9ed487a2022947f785184efefefc6c097a96926e78cd5b",
+    "matches": true,
+    "compose_file": "runs/validation-runtime-20261015T030326Z/compose.yaml",
+    "agent_image_id": "sha256:5a009aa1f593609fe4742bc6f7223f7beccff4a790d1daa8f6064f5b17a294c6",
+    "agent_memory": "2g",
+    "agent_cpus": null
+  },
+  "background_lean_check": true,
+  "lean_wrappers": {
+    "lake": "/usr/local/bin/lake",
+    "lean": "/usr/local/bin/lean"
+  },
+  "disallowed_tools": [
+    "Agent",
+    "Task",
+    "WebSearch",
+    "WebFetch"
+  ],
+  "interlock": {
+    "checked_at": "2026-10-15T03:03:26Z",
+    "blockers": [],
+    "containers": [],
+    "judge_containers": [],
+    "forced": false
+  },
+  "budget": {
+    "ledger": "throwaway",
+    "scope": "validation",
+    "notional_cap_usd": 1000
+  },
+  "samples": {
+    "agent-001": {
+      "error": null,
+      "limit": null,
+      "model_events": 28,
+      "model_events_with_call_record": 28,
+      "tool_calls_in_model_outputs": [
+        "Bash",
+        "mcp__conference__post_intent",
+        "mcp__conference__send_direct_message",
+        "Bash",
+        "mcp__conference__submit_solution",
+        "mcp__conference__submit_solution",
+        "mcp__conference__submit_solution",
+        "mcp__conference__publish_notebook",
+        "mcp__conference__read_library_file",
+        "mcp__conference__publish_notebook",
+        "Bash",
+        "mcp__conference__publish_notebook",
+        "mcp__conference__read_library_file",
+        "mcp__conference__get_bulletin_board",
+        "WebFetch",
+        "Agent",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash"
+      ],
+      "inspect_tool_events": [],
+      "compaction_events": [
+        {
+          "uuid": "eRhmJd2QjGKYNLAyxUWBwk",
+          "span_id": "2AxdJVNWKA5NAfVrviGDsr",
+          "timestamp": "2026-10-15T03:07:23.204270+00:00",
+          "working_start": 118.19129493599976,
+          "metadata": {
+            "trigger": "auto",
+            "content": "Conversation compacted"
+          },
+          "pending": null,
+          "event": "compaction",
+          "type": "summary",
+          "role": null,
+          "tokens_before": null,
+          "tokens_after": null,
+          "source": "claude_code"
+        },
+        {
+          "uuid": "5qaQdYHto6KWmxfb27PFAT",
+          "span_id": "2AxdJVNWKA5NAfVrviGDsr",
+          "timestamp": "2026-10-15T03:07:23.679147+00:00",
+          "working_start": 118.66617011499974,
+          "metadata": {
+            "trigger": "auto",
+            "content": "Conversation compacted"
+          },
+          "pending": null,
+          "event": "compaction",
+          "type": "summary",
+          "role": null,
+          "tokens_before": null,
+          "tokens_after": null,
+          "source": "claude_code"
+        },
+        {
+          "uuid": "Rz8rJ9Xz9JQKZijNtA757h",
+          "span_id": "2AxdJVNWKA5NAfVrviGDsr",
+          "timestamp": "2026-10-15T03:07:29.690360+00:00",
+          "working_start": 124.65977741899971,
+          "metadata": {
+            "trigger": "auto",
+            "content": "Conversation compacted"
+          },
+          "pending": null,
+          "event": "compaction",
+          "type": "summary",
+          "role": null,
+          "tokens_before": null,
+          "tokens_after": null,
+          "source": "claude_code"
+        }
+      ],
+      "tool_result_metadata": {
+        "a1-lean": {
+          "function": "Bash",
+          "content_sha256": "fee4bb0bde417d2fb8c067cbaa1a9bbc583a538586c0af11ff5145d30e4b2f82",
+          "error": null,
+          "sources": [
+            "model_event[1].input[6]",
+            "model_event[2].input[6]",
+            "model_event[3].input[6]",
+            "model_event[4].input[6]",
+            "model_event[5].input[6]",
+            "model_event[6].input[6]",
+            "model_event[7].input[6]",
+            "model_event[8].input[6]",
+            "model_event[9].input[6]",
+            "model_event[10].input[6]",
+            "model_event[11].input[6]",
+            "model_event[12].input[6]",
+            "model_event[13].input[6]",
+            "model_event[14].input[6]",
+            "model_event[15].input[6]",
+            "model_event[16].input[6]",
+            "model_event[17].input[6]",
+            "model_event[18].input[6]",
+            "model_event[19].input[6]"
+          ]
+        },
+        "a1-post": {
+          "function": "mcp__conference__post_intent",
+          "content_sha256": "ded4cda32684ef8848f25ad3cd1e00399159598d97d1ea55294e5a41060dfcea",
+          "error": null,
+          "sources": [
+            "model_event[2].input[9]",
+            "model_event[3].input[9]",
+            "model_event[4].input[9]",
+            "model_event[5].input[9]",
+            "model_event[6].input[9]",
+            "model_event[7].input[9]",
+            "model_event[8].input[9]",
+            "model_event[9].input[9]",
+            "model_event[10].input[9]",
+            "model_event[11].input[9]",
+            "model_event[12].input[9]",
+            "model_event[13].input[9]",
+            "model_event[14].input[9]",
+            "model_event[15].input[9]",
+            "model_event[16].input[9]",
+            "model_event[17].input[9]",
+            "model_event[18].input[9]",
+            "model_event[19].input[9]"
+          ]
+        },
+        "a1-dm": {
+          "function": "mcp__conference__send_direct_message",
+          "content_sha256": "3919bc5cdf05f14ccabc04c1f8cd75aa20d8e61cfca1d3d0222cb36961d50c49",
+          "error": null,
+          "sources": [
+            "model_event[3].input[12]",
+            "model_event[4].input[12]",
+            "model_event[5].input[12]",
+            "model_event[6].input[12]",
+            "model_event[7].input[12]",
+            "model_event[8].input[12]",
+            "model_event[9].input[12]",
+            "model_event[10].input[12]",
+            "model_event[11].input[12]",
+            "model_event[12].input[12]",
+            "model_event[13].input[12]",
+            "model_event[14].input[12]",
+            "model_event[15].input[12]",
+            "model_event[16].input[12]",
+            "model_event[17].input[12]",
+            "model_event[18].input[12]",
+            "model_event[19].input[12]"
+          ]
+        },
+        "a1-notes": {
+          "function": "Bash",
+          "content_sha256": "de156d26c3feff84f26719dfc389a650084c6738df729f8f67c2d9269a1594bf",
+          "error": null,
+          "sources": [
+            "model_event[4].input[15]",
+            "model_event[5].input[15]",
+            "model_event[6].input[15]",
+            "model_event[7].input[15]",
+            "model_event[8].input[15]",
+            "model_event[9].input[15]",
+            "model_event[10].input[15]",
+            "model_event[11].input[15]",
+            "model_event[12].input[15]",
+            "model_event[13].input[15]",
+            "model_event[14].input[15]",
+            "model_event[15].input[15]",
+            "model_event[16].input[15]",
+            "model_event[17].input[15]",
+            "model_event[18].input[15]",
+            "model_event[19].input[15]"
+          ]
+        },
+        "a1-submit": {
+          "function": "mcp__conference__submit_solution",
+          "content_sha256": "de82f49e0fd8e7ad789dfc8ba208d077e1e5d349b58b8a4e8d18f2c43fea949c",
+          "error": null,
+          "sources": [
+            "model_event[5].input[18]",
+            "model_event[6].input[18]",
+            "model_event[7].input[18]",
+            "model_event[8].input[18]",
+            "model_event[9].input[18]",
+            "model_event[10].input[18]",
+            "model_event[11].input[18]",
+            "model_event[12].input[18]",
+            "model_event[13].input[18]",
+            "model_event[14].input[18]",
+            "model_event[15].input[18]",
+            "model_event[16].input[18]",
+            "model_event[17].input[18]",
+            "model_event[18].input[18]",
+            "model_event[19].input[18]"
+          ]
+        },
+        "a1-escape": {
+          "function": "mcp__conference__submit_solution",
+          "content_sha256": "45b570cacf4e39ba124fb7aa9b62ea3a202fb42690d6bbfec275620bde23891e",
+          "error": null,
+          "sources": [
+            "model_event[6].input[21]",
+            "model_event[7].input[21]",
+            "model_event[8].input[21]",
+            "model_event[9].input[21]",
+            "model_event[10].input[21]",
+            "model_event[11].input[21]",
+            "model_event[12].input[21]",
+            "model_event[13].input[21]",
+            "model_event[14].input[21]",
+            "model_event[15].input[21]",
+            "model_event[16].input[21]",
+            "model_event[17].input[21]",
+            "model_event[18].input[21]",
+            "model_event[19].input[21]"
+          ]
+        },
+        "a1-symlink": {
+          "function": "mcp__conference__submit_solution",
+          "content_sha256": "a695b605ce66ee8d8f8200cb898440f1b9f6db3f658a89cbee68763823d5f364",
+          "error": null,
+          "sources": [
+            "model_event[7].input[24]",
+            "model_event[8].input[24]",
+            "model_event[9].input[24]",
+            "model_event[10].input[24]",
+            "model_event[11].input[24]",
+            "model_event[12].input[24]",
+            "model_event[13].input[24]",
+            "model_event[14].input[24]",
+            "model_event[15].input[24]",
+            "model_event[16].input[24]",
+            "model_event[17].input[24]",
+            "model_event[18].input[24]",
+            "model_event[19].input[24]"
+          ]
+        },
+        "a1-publish": {
+          "function": "mcp__conference__publish_notebook",
+          "content_sha256": "c4b5fc378c76effe78336ac51421d978f2d661600eb290142b1577c7084e73dc",
+          "error": null,
+          "sources": [
+            "model_event[8].input[27]",
+            "model_event[9].input[27]",
+            "model_event[10].input[27]",
+            "model_event[11].input[27]",
+            "model_event[12].input[27]",
+            "model_event[13].input[27]",
+            "model_event[14].input[27]",
+            "model_event[15].input[27]",
+            "model_event[16].input[27]",
+            "model_event[17].input[27]",
+            "model_event[18].input[27]",
+            "model_event[19].input[27]"
+          ]
+        },
+        "a1-read": {
+          "function": "mcp__conference__read_library_file",
+          "content_sha256": "fbf04821ebf8461075e314f5e8f7b86c54a03722878c0a8aa90ac0f4474529ee",
+          "error": null,
+          "sources": [
+            "model_event[9].input[30]",
+            "model_event[10].input[30]",
+            "model_event[11].input[30]",
+            "model_event[12].input[30]",
+            "model_event[13].input[30]",
+            "model_event[14].input[30]",
+            "model_event[15].input[30]",
+            "model_event[16].input[30]",
+            "model_event[17].input[30]",
+            "model_event[18].input[30]",
+            "model_event[19].input[30]"
+          ]
+        },
+        "a1-publish-rel": {
+          "function": "mcp__conference__publish_notebook",
+          "content_sha256": "53d70bc06d48feda9ba1075afaa029937c6df0a9c8f079c1192b19af88362645",
+          "error": null,
+          "sources": [
+            "model_event[10].input[33]",
+            "model_event[11].input[33]",
+            "model_event[12].input[33]",
+            "model_event[13].input[33]",
+            "model_event[14].input[33]",
+            "model_event[15].input[33]",
+            "model_event[16].input[33]",
+            "model_event[17].input[33]",
+            "model_event[18].input[33]",
+            "model_event[19].input[33]"
+          ]
+        },
+        "a1-large": {
+          "function": "Bash",
+          "content_sha256": "9805894ccb5949653274395c7af843b65532f2e41762a70f508557c7441fd5ba",
+          "error": null,
+          "sources": [
+            "model_event[11].input[36]",
+            "model_event[12].input[36]",
+            "model_event[13].input[36]",
+            "model_event[14].input[36]",
+            "model_event[15].input[36]",
+            "model_event[16].input[36]",
+            "model_event[17].input[36]",
+            "model_event[18].input[36]",
+            "model_event[19].input[36]"
+          ]
+        },
+        "a1-publish-large": {
+          "function": "mcp__conference__publish_notebook",
+          "content_sha256": "d940c8473673addbf5708aa6fb2607b82f56d749767dedd4ae39a56d3dd3994f",
+          "error": null,
+          "sources": [
+            "model_event[12].input[39]",
+            "model_event[13].input[39]",
+            "model_event[14].input[39]",
+            "model_event[15].input[39]",
+            "model_event[16].input[39]",
+            "model_event[17].input[39]",
+            "model_event[18].input[39]",
+            "model_event[19].input[39]"
+          ]
+        },
+        "a1-read-large": {
+          "function": "mcp__conference__read_library_file",
+          "content_sha256": "d935f169ab6e223c62e677efab2dd5954f64796e47425c0224adeb674bd878c3",
+          "error": null,
+          "sources": [
+            "model_event[13].input[42]",
+            "model_event[14].input[42]",
+            "model_event[15].input[42]",
+            "model_event[16].input[42]",
+            "model_event[17].input[42]",
+            "model_event[18].input[42]",
+            "model_event[19].input[42]"
+          ]
+        },
+        "a1-board": {
+          "function": "mcp__conference__get_bulletin_board",
+          "content_sha256": "7a75530a6bfd9d583a0e8228477ab0330c2ccd2b4d5c81c88b6c8f4fd47733db",
+          "error": null,
+          "sources": [
+            "model_event[14].input[45]",
+            "model_event[15].input[45]",
+            "model_event[16].input[45]",
+            "model_event[17].input[45]",
+            "model_event[18].input[45]",
+            "model_event[19].input[45]"
+          ]
+        },
+        "a1-webfetch": {
+          "function": "WebFetch",
+          "content_sha256": "495e95f66957b166a8388717edf90282e1c81ec757a9dbf03efe7cf8b3727cd3",
+          "error": {
+            "type": "unknown",
+            "message": "<tool_use_error>Error: No such tool available: WebFetch. WebFetch is disabled for this session, in subagents as well as here.</tool_use_error>"
+          },
+          "sources": [
+            "model_event[15].input[48]",
+            "model_event[16].input[48]",
+            "model_event[17].input[48]",
+            "model_event[18].input[48]",
+            "model_event[19].input[48]"
+          ]
+        },
+        "a1-agent": {
+          "function": "Agent",
+          "content_sha256": "b322627c3b7ecb2741c4f1c28b25e1be6ba17cd9155fabd1d60934e85010e446",
+          "error": {
+            "type": "unknown",
+            "message": "<tool_use_error>Error: No such tool available: Agent. Agent is disabled for this session, in subagents as well as here.</tool_use_error>"
+          },
+          "sources": [
+            "model_event[16].input[51]",
+            "model_event[17].input[51]",
+            "model_event[18].input[51]",
+            "model_event[19].input[51]"
+          ]
+        },
+        "a1-usage-120000": {
+          "function": "Bash",
+          "content_sha256": "00e2283f78911d8431587b4cec6c2e3c5edb2e6b2ce4c4808fcd9cc6e4fd261b",
+          "error": null,
+          "sources": [
+            "model_event[17].input[54]",
+            "model_event[18].input[54]",
+            "model_event[19].input[54]"
+          ]
+        },
+        "a1-usage-150000": {
+          "function": "Bash",
+          "content_sha256": "e32fcdd7c55720bcd987a7a110d33f2833208b1c9ac9ff6d4dde086865ba0c1a",
+          "error": null,
+          "sources": [
+            "model_event[18].input[57]",
+            "model_event[19].input[57]"
+          ]
+        },
+        "a1-usage-170000": {
+          "function": "Bash",
+          "content_sha256": "ab0b3759ab79ff5ef518d63be28e51edd536b1980660af54d02b9b195d0e5273",
+          "error": null,
+          "sources": [
+            "model_event[20].input[6]",
+            "model_event[21].input[6]"
+          ]
+        },
+        "a1-usage-185000": {
+          "function": "Bash",
+          "content_sha256": "b83a2b712a35dc28e08bbe26cd43c17e8adb4ea2409f5d4cdeb0869b50248017",
+          "error": null,
+          "sources": [
+            "model_event[22].input[6]",
+            "model_event[23].input[6]"
+          ]
+        },
+        "a1-usage-195000": {
+          "function": "Bash",
+          "content_sha256": "e824b9b0c93b0f7013e9aa41982c7fad80fd615992a1bf6adb42e9fe876ffd29",
+          "error": null,
+          "sources": [
+            "model_event[24].input[6]",
+            "model_event[25].input[6]",
+            "model_event[26].input[6]",
+            "model_event[27].input[6]",
+            "sample.messages[6]"
+          ]
+        },
+        "a1-after": {
+          "function": "Bash",
+          "content_sha256": "fbbf9cc1fbc5e3d8014c00066e1011c7a61f6ec0aef6fb59491a4aa6c0c813d4",
+          "error": null,
+          "sources": [
+            "model_event[25].input[10]",
+            "model_event[26].input[10]",
+            "model_event[27].input[10]",
+            "sample.messages[10]"
+          ]
+        },
+        "a1-check": {
+          "function": "Bash",
+          "content_sha256": "8c44790e6174fb657421c2fd24511228fc29bb0058a1a7ff001b938d633d80bb",
+          "error": null,
+          "sources": [
+            "model_event[27].input[15]",
+            "sample.messages[15]"
+          ]
+        }
+      },
+      "tool_result_conflicts": {}
+    },
+    "agent-002": {
+      "error": null,
+      "limit": null,
+      "model_events": 9,
+      "model_events_with_call_record": 9,
+      "tool_calls_in_model_outputs": [
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "mcp__conference__post_intent",
+        "mcp__conference__get_messages",
+        "mcp__conference__list_library"
+      ],
+      "inspect_tool_events": [],
+      "compaction_events": [],
+      "tool_result_metadata": {
+        "a2-bg-task": {
+          "function": "Bash",
+          "content_sha256": "d154fa5a004b731d3192ece4d85d3df822b9098af6d854736d82d918d98b7226",
+          "error": null,
+          "sources": [
+            "model_event[1].input[6]",
+            "model_event[2].input[6]",
+            "model_event[3].input[6]",
+            "model_event[4].input[6]",
+            "model_event[5].input[6]",
+            "model_event[6].input[6]",
+            "model_event[7].input[6]",
+            "model_event[8].input[6]",
+            "sample.messages[6]"
+          ]
+        },
+        "a2-bg-detached": {
+          "function": "Bash",
+          "content_sha256": "2f8f29eb4dd1b0f301a7749ced1ab0c1cd1abeeb3656433cfaa41bc9261e3ad3",
+          "error": null,
+          "sources": [
+            "model_event[2].input[9]",
+            "model_event[3].input[9]",
+            "model_event[4].input[9]",
+            "model_event[5].input[9]",
+            "model_event[6].input[9]",
+            "model_event[7].input[9]",
+            "model_event[8].input[9]",
+            "sample.messages[9]"
+          ]
+        },
+        "a2-sleep": {
+          "function": "Bash",
+          "content_sha256": "3fbea51573de041e1a47792c32f31164e1386c98815bd4bccaf7e6dd78699d1f",
+          "error": {
+            "type": "unknown",
+            "message": "Exit code 143\nCommand timed out after 2m 0s"
+          },
+          "sources": [
+            "model_event[3].input[12]",
+            "model_event[4].input[12]",
+            "model_event[5].input[12]",
+            "model_event[6].input[12]",
+            "model_event[7].input[12]",
+            "model_event[8].input[12]",
+            "sample.messages[12]"
+          ]
+        },
+        "a2-sleep-gone": {
+          "function": "Bash",
+          "content_sha256": "17f878e8ad221d32ba4c4f1d4f7260ce2b903975cd795da5c20e9726908ce393",
+          "error": null,
+          "sources": [
+            "model_event[4].input[15]",
+            "model_event[5].input[15]",
+            "model_event[6].input[15]",
+            "model_event[7].input[15]",
+            "model_event[8].input[15]",
+            "sample.messages[15]"
+          ]
+        },
+        "a2-bg-status": {
+          "function": "Bash",
+          "content_sha256": "4ceee5c1ac08cb83faa7e3ade4f64105fab6ea6bf3b5b60d2b1fc486f57472b7",
+          "error": null,
+          "sources": [
+            "model_event[5].input[18]",
+            "model_event[6].input[18]",
+            "model_event[7].input[18]",
+            "model_event[8].input[18]",
+            "sample.messages[18]"
+          ]
+        },
+        "a2-post": {
+          "function": "mcp__conference__post_intent",
+          "content_sha256": "caaf9b84a135d1456583323f8026ca2977cd319db4e5b6bba8825a1350b4c9f4",
+          "error": null,
+          "sources": [
+            "model_event[6].input[21]",
+            "model_event[7].input[21]",
+            "model_event[8].input[21]",
+            "sample.messages[21]"
+          ]
+        },
+        "a2-messages": {
+          "function": "mcp__conference__get_messages",
+          "content_sha256": "b880073f37695745ef4423d80263feafeb4beb5c9e90c30697e5c776c95ed560",
+          "error": null,
+          "sources": [
+            "model_event[7].input[24]",
+            "model_event[8].input[24]",
+            "sample.messages[24]"
+          ]
+        },
+        "a2-library": {
+          "function": "mcp__conference__list_library",
+          "content_sha256": "67d26f4afa76b54c565523ca21d1139881994a4239e5568ac89cd86f1c16ae78",
+          "error": null,
+          "sources": [
+            "model_event[8].input[27]",
+            "sample.messages[27]"
+          ]
+        }
+      },
+      "tool_result_conflicts": {}
+    },
+    "agent-003": {
+      "error": "RuntimeError('Error executing claude code agent 1: [claude-code:unrecognized_model] {\"model\":\"model\",\"query_source\":\"sdk\"}\\n')",
+      "limit": null,
+      "model_events": 5,
+      "model_events_with_call_record": 5,
+      "tool_calls_in_model_outputs": [
+        "Bash"
+      ],
+      "inspect_tool_events": [],
+      "compaction_events": [],
+      "tool_result_metadata": {
+        "a3-hello": {
+          "function": "Bash",
+          "content_sha256": "c45f5c3271a8ec4a7bb763ce7da12fefd2e01ad239c3eabfcc2ce05731dab1b4",
+          "error": null,
+          "sources": [
+            "model_event[1].input[6]",
+            "model_event[2].input[6]",
+            "model_event[3].input[6]",
+            "model_event[4].input[6]",
+            "sample.messages[6]"
+          ]
+        }
+      },
+      "tool_result_conflicts": {}
+    }
+  },
+  "tool_results": {
+    "agent-001": {
+      "a1-lean": "Check.lean:10:2: error: Provide a complete proof.\n\u22a2 default \u2194 \u2200 (n : \u2115), Squarefree n.fermatNumber\nLEAN_EXIT=1\nELAPSED=16",
+      "a1-post": "{\"ok\": true, \"post_id\": \"post-000001\", \"seq\": 1, \"posted_at\": \"2026-10-15T03:06:14.108Z\"}",
+      "a1-dm": "{\"ok\": true, \"message_id\": \"dm-17f7f19f349bcfcd\", \"sent_at\": \"2026-10-15T03:06:18.228Z\"}",
+      "a1-notes": "ok",
+      "a1-submit": "{\"ok\": true, \"submission_id\": \"sub-deded72a7100f74a\", \"problem_id\": \"all_fermat_squarefree\", \"accepted\": false, \"outcome\": \"rejected\", \"stage\": \"compilation\", \"reason\": \"Lean error\", \"compile_status\": \"error\", \"compiler_output\": \"/tmp/Submission.lean:10:2: error: Provide a complete proof.\\n\u22a2 default \u2194 \u2200 (n : \u2115), Squarefree n.fermatNumber\\n\"}",
+      "a1-escape": "{\"ok\": false, \"error\": \"path_outside_allowed_roots\", \"path\": \"/etc/passwd\"}",
+      "a1-symlink": "{\"ok\": false, \"error\": \"path_outside_allowed_roots\", \"path\": \"/workspace/link.lean\"}",
+      "a1-publish": "{\"ok\": true, \"path\": \"notebooks/agent-001/wiki/notes.md\", \"revision\": 1, \"published_at\": \"2026-10-15T03:06:43.437Z\"}",
+      "a1-read": "{\"ok\": true, \"seq\": 1, \"path\": \"notebooks/agent-001/wiki/notes.md\", \"kind\": \"notebook\", \"author\": \"agent-001\", \"revision\": 1, \"published_at\": \"2026-10-15T03:06:43.437Z\", \"bytes\": 28, \"total_chars\": 28, \"sha256\": \"bbbdf565a424d10cc163636de1ee18a28ab10ed630d8fe4f1ac7d5f0151a3645\", \"offset\": 0, \"returned_chars\": 28, \"has_more\": false, \"next_offset\": null, \"content\": \"# Notes\\nvalidation notebook\\n\"}",
+      "a1-publish-rel": "{\"ok\": true, \"path\": \"notebooks/agent-001/workspace/RESEARCH.md\", \"revision\": 1, \"published_at\": \"2026-10-15T03:06:51.803Z\"}",
+      "a1-large": "97653 /tmp/w/memory/wiki/large-unicode.md",
+      "a1-publish-large": "{\"ok\": true, \"path\": \"notebooks/agent-001/wiki/large-unicode.md\", \"revision\": 1, \"published_at\": \"2026-10-15T03:06:58.084Z\"}",
+      "a1-read-large": "{\"ok\": true, \"seq\": 3, \"path\": \"notebooks/agent-001/wiki/large-unicode.md\", \"kind\": \"notebook\", \"author\": \"agent-001\", \"revision\": 1, \"published_at\": \"2026-10-15T03:06:58.084Z\", \"bytes\": 97653, \"total_chars\": 40000, \"sha256\": \"db199e574e8602e05812c2a435877975e45f13a6c29d3c3bfaf534d9b4756f5c\", \"offset\": 0, \"returned_chars\": 40000, \"has_more\": false, \"next_offset\": null, \"content\": \"\u2200\u2203\u2115\u2124\u211a\u211d\u2102\u2192\u2194\u2264\u2265\u2260\u2227\u2228\u00ac\u03bb\u03a0\u03a3\u2211\u222b\u221a\u221e\u2286\u2282\u2208\u2209\u2205\u2218\u27e8\u27e9\u03b1\u03b2\u03b3\u03b4\u03b5\u03b6\u03b8\u207b\u00b9\u2080\u2081\u2082 \u6570\u5b66\u8a3c\u660e\u5b9a\u7406\u8865\u9898 \ud835\udd3d\ud835\udd5c\ud835\udcd2\ud835\udcaa\ud835\udd38 \ud83e\uddee\u2713 abc xyz 0123 \u2200\u2203\u2115\u2124\u211a\\n\u2192\u2194\u2264\u2265\u2260\u2227\u2228\u00ac\u03bb\u03a0\u03a3\u2211\u222b\u221a\u221e\u2286\u2282\u2208\u2209\u2205\u2218\u27e8\u27e9\u03b1\u03b2\u03b3\u03b4\u03b5\u03b6\u03b8\u207b\u00b9\u2080\u2081\u2082 \u6570\u5b66\u8a3c\u660e\u5b9a\u7406\u8865\u9898 \ud835\udd3d\ud835\udd5c\ud835\udcd2\ud835\udcaa\ud835\udd38 \ud83e\uddee\u2713 abc xyz 0123 \u2200\u2203\u2115\u2124\u211a\u211d\u2102\u2192\u2194\u2264\u2265\u2260\\n\u00ac\u03bb\u03a0\u03a3\u2211\u222b\u221a\u221e\u2286\u2282\u2208\u2209\u2205\u2218\u27e8\u27e9\u03b1\u03b2\u03b3\u03b4\u03b5\u03b6\u03b8\u207b\u00b9\u2080\u2081\u2082 \u6570\u5b66\u8a3c\u660e\u5b9a\u7406\u8865\u9898 \ud835\udd3d\ud835\udd5c\ud835\udcd2\ud835\udcaa\ud835\udd38 \ud83e\uddee\u2713 abc xyz",
+      "a1-board": "{\"ok\": true, \"total\": 1, \"returned\": 1, \"omitted_older\": 0, \"omitted_newer\": 0, \"next_since_seq\": 1, \"truncated\": false, \"posts\": [{\"seq\": 1, \"post_id\": \"post-000001\", \"agent_id\": \"agent-001\", \"intent_type\": \"exploring\", \"message\": \"validation post\", \"tags\": [\"validation\"], \"posted_at\": \"2026-10-15T03:06:14.108Z\"}]}",
+      "a1-webfetch": "<tool_use_error>Error: No such tool available: WebFetch. WebFetch is disabled for this session, in subagents as well as here.</tool_use_error>",
+      "a1-agent": "<tool_use_error>Error: No such tool available: Agent. Agent is disabled for this session, in subagents as well as here.</tool_use_error>",
+      "a1-usage-120000": "usage-120000",
+      "a1-usage-150000": "usage-150000",
+      "a1-usage-170000": "usage-170000",
+      "a1-usage-185000": "usage-185000",
+      "a1-usage-195000": "usage-195000",
+      "a1-after": "after-compaction",
+      "a1-check": "ABSENT"
+    },
+    "agent-002": {
+      "a2-bg-task": "Command running in background with ID: bzfismx2r. Output is being written to: /tmp/claude-1000/-workspace/f553bd18-3d0c-429c-99a7-4c5c8b971446/tasks/bzfismx2r.output. You will be notified when it completes. To check interim output, use Read on that file path.",
+      "a2-bg-detached": "BACKGROUND_STARTED",
+      "a2-sleep": "Exit code 143\nCommand timed out after 2m 0s",
+      "a2-sleep-gone": "SLEEP_PROCESSES 0",
+      "a2-bg-status": "SLOW_a status=rc=137 seconds=120 notice=1\nSLOW_b status=rc=137 seconds=120 notice=1\nLEAN_PROCESSES 0\nWHICH_LAKE /usr/local/bin/lake\nWHICH_LEAN /usr/local/bin/lean\nLAKE_ENV_LEAN /opt/elan/toolchains/leanprover--lean4---v4.27.0/bin/lean",
+      "a2-post": "{\"ok\": true, \"post_id\": \"post-000002\", \"seq\": 2, \"posted_at\": \"2026-10-15T03:08:05.170Z\"}",
+      "a2-messages": "{\"ok\": true, \"total\": 1, \"returned\": 1, \"omitted_older\": 0, \"omitted_newer\": 0, \"next_since_seq\": 1, \"truncated\": false, \"never_retrieved_remaining\": 0, \"messages\": [{\"seq\": 1, \"message_id\": \"dm-17f7f19f349bcfcd\", \"from_agent_id\": \"agent-001\", \"message\": \"validation direct message\", \"sent_at\": \"2026-10-15T03:06:18.228Z\", \"new\": true}]}",
+      "a2-library": "{\"ok\": true, \"total\": 3, \"returned\": 3, \"omitted_older\": 0, \"omitted_newer\": 0, \"next_since_seq\": 3, \"truncated\": false, \"files\": [{\"seq\": 1, \"path\": \"notebooks/agent-001/wiki/notes.md\", \"kind\": \"notebook\", \"author\": \"agent-001\", \"revision\": 1, \"published_at\": \"2026-10-15T03:06:43.437Z\", \"bytes\": 28, \"total_chars\": 28, \"sha256\": \"bbbdf565a424d10cc163636de1ee18a28ab10ed630d8fe4f1ac7d5f0151a3645\"}, {\"seq\": 2, \"path\": \"notebooks/agent-001/workspace/RESEARCH.md\", \"kind\": \"notebook\", \"author\": \"agent-001\", \"revision\": 1, \"published_at\": \"2026-10-15T03:06:51.803Z\", \"bytes\": 8, \"total_chars\": 8, \"sha"
+    },
+    "agent-003": {
+      "a3-hello": "hello"
+    }
+  },
+  "request_sequences": {
+    "agent-001": [
+      "bash_lean_check",
+      "post_intent",
+      "send_direct_message",
+      "bash_write_notes",
+      "submit_template",
+      "submit_outside_root",
+      "submit_symlink",
+      "publish_notebook",
+      "read_library_file",
+      "publish_notebook_relative",
+      "bash_write_large_notebook",
+      "publish_large_notebook",
+      "read_large_notebook",
+      "get_bulletin_board",
+      "disallowed_webfetch",
+      "disallowed_agent",
+      "compaction_probe_120000",
+      "compaction_probe_150000",
+      "compaction_probe_170000",
+      "compaction_request",
+      "compaction_probe_185000",
+      "compaction_request",
+      "compaction_probe_195000",
+      "compaction_request",
+      "after_compaction",
+      "truncated_tool_call",
+      "truncation_nudge",
+      "check_truncated_not_run",
+      "truncation_nudge",
+      "final"
+    ],
+    "agent-002": [
+      "bash_background_lean_task",
+      "bash_background_lean_detached",
+      "bash_time_limit",
+      "bash_timed_out_process_check",
+      "bash_background_lean_status",
+      "post_intent",
+      "get_messages",
+      "list_library",
+      "final"
+    ],
+    "agent-003": [
+      "bash_hello",
+      "truncated_text_1",
+      "truncation_nudge",
+      "truncated_text_2",
+      "truncation_nudge",
+      "truncated_text_3",
+      "truncation_nudge",
+      "truncated_text_4"
+    ]
+  },
+  "unattributed_requests": [],
+  "runtime_event_counts": {
+    "images_pinned": 1,
+    "lean_warm_up": 1,
+    "compose_bound": 1,
+    "agent_configured": 3,
+    "file_snapshot": 70,
+    "effective_instructions": 4,
+    "agent_ready": 3,
+    "common_start": 1,
+    "inference_admitted": 42,
+    "inference_finished": 42,
+    "truncated_response": 5,
+    "agent_exit": 3,
+    "sandbox_file_read": 4,
+    "sandbox_file_rejected": 2
+  },
+  "compaction_threshold_tokens": 170000,
+  "compaction_threshold_bracket": {
+    "compaction_threshold_tokens": 170000,
+    "highest_level_without_compaction": 150000,
+    "levels": [
+      120000,
+      150000,
+      170000,
+      185000,
+      195000
+    ],
+    "levels_served": [
+      120000,
+      150000,
+      170000,
+      185000,
+      195000
+    ],
+    "compacted_after_levels": [
+      170000,
+      185000,
+      195000
+    ],
+    "complete": true
+  },
+  "limitations": [
+    "mockllm scripted outputs establish harness, bridge, tool, logging and isolation plumbing only; they say nothing about DeepSeek V4.1's tool-call reliability, reasoning replay through the Anthropic dialect, theorem-proving ability, latency, or OpenRouter billing fields.",
+    "Compaction was provoked by fabricated usage counts (COMPACTION_PROBE_LEVELS); compaction_threshold_tokens brackets the pinned CLI's trigger for a reported prompt size, assuming the live route's presented model name gets the same default context window. The live compatibility check's compaction_observed stays informational.",
+    "Truncation was simulated with stop_reason=max_tokens; a live truncated reasoning turn may also carry reasoning content, which changes Claude Code's recovery branch."
+  ]
+}

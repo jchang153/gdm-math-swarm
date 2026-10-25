@@ -1,0 +1,26 @@
+{
+  "schema": "route-pricing/v1",
+  "created_at": "2026-10-15T03:54:45.601037+00:00",
+  "image_ids": {},
+  "kind": "public_route_pricing_freeze",
+  "retrieved_utc": "2026-10-15T03:54:45.601037+00:00",
+  "url": "https://openrouter.ai/api/v1/models/deepseek/deepseek-v4.1-flash/endpoints",
+  "catalog_sha256": "337c8c34ca65ea1de1871cbdd1131e45987de35258de11527e8ac60b67d4db79",
+  "credential_used": false,
+  "paid_calls": 0,
+  "config": "/home/owner/gdm-math-swarm/configs/pilot.json",
+  "settings": {
+    "model_id": "deepseek/deepseek-v4.1-flash",
+    "provider_route": "deepseek",
+    "max_tokens": 16384,
+    "context_length": 1048576,
+    "prompt_usd_per_token": "0.0000003",
+    "output_usd_per_token": "0.0000012",
+    "pricing_verified": false,
+    "live_compatibility_verified": false,
+    "reasoning_effort": "high"
+  },
+  "valid": false,
+  "reason": "Pinned provider route unavailable",
+  "all_required_passed": false
+}

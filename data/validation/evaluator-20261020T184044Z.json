@@ -1,0 +1,4213 @@
+{
+ "all_required_passed": true,
+ "cases": [
+  {
+   "answer": null,
+   "answer_based": false,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 6442450944,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-84add600c08e4357b3413516a5f315e8",
+     "detail": "Lean default kernel accepts the solution",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 224.542,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "verified",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 123.942,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 22.628,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 51.022,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 6.529,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 6.438,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 224.011
+    }
+   ],
+   "axiom": null,
+   "category": "genuine",
+   "details": "Comparator 14fda6a603d433dad5db83ca55f15afc91190fda with opaque-aware proof audit: statement matches, permitted axioms, kernel accepts",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "verified"
+   ],
+   "expected_verdicts": [
+    "genuine"
+   ],
+   "finished_at": "2026-10-20T18:44:32Z",
+   "name": "green32_genuine",
+   "observed_verdict": "genuine",
+   "passed": true,
+   "peak_memory_bytes": 6442450944,
+   "real_lean": true,
+   "reason": "Independent proof and intended theorem verified",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:40:47Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "verified"
+   ],
+   "submission": "submissions/green32_genuine.lean",
+   "submission_sha256": "a407f7328655dc070a60c6e96947d0690dd436d87224be5be42e311ba5f458bd",
+   "template": "Green32_hasCosetHole_empty",
+   "template_sha256": "b2622e035bb41da4fa703ff15704e732e055c21595af8c98274917502407ae06",
+   "theorem_name": "Green32.hasCosetHole_empty",
+   "wall_seconds": 224.543
+  },
+  {
+   "answer": {
+    "candidates": [
+     "True"
+    ],
+    "mode": "canonical",
+    "text": "True"
+   },
+   "answer_based": true,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1640017920,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-9cb776ed87fe4f6098a2136fc782d409",
+     "detail": "Lean default kernel accepts the solution",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 32.0,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "verified",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 10.287,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 2.921,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 8.933,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 3.172,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 0.717,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 31.555
+    }
+   ],
+   "axiom": null,
+   "category": "answer_canonical_genuine",
+   "details": "Comparator 14fda6a603d433dad5db83ca55f15afc91190fda with opaque-aware proof audit: statement matches, permitted axioms, kernel accepts",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "verified"
+   ],
+   "expected_verdicts": [
+    "genuine"
+   ],
+   "finished_at": "2026-10-20T18:45:04Z",
+   "name": "synthetic_answer_true_genuine",
+   "observed_verdict": "genuine",
+   "passed": true,
+   "peak_memory_bytes": 1640017920,
+   "real_lean": true,
+   "reason": "Independent proof and intended theorem verified",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:44:32Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "verified"
+   ],
+   "submission": "submissions/synthetic_answer_true_genuine.lean",
+   "submission_sha256": "2b469b0c388127498266b60635d3d3d7d715870e407add3961bce182d9b02308",
+   "template": "templates/SyntheticAnswer_fermat_odd.lean",
+   "template_sha256": "6285c4f8d3ff17e28750de9114189f77f15f4abeef13c09a0a19a122b5d79601",
+   "theorem_name": "SyntheticAnswer.all_fermat_odd",
+   "wall_seconds": 32.001
+  },
+  {
+   "answer": {
+    "candidates": [
+     "False"
+    ],
+    "mode": "canonical",
+    "text": "False"
+   },
+   "answer_based": true,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1076793344,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-61096496461a4ed78c849444b2462347",
+     "detail": "Lean default kernel accepts the solution",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 26.377,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "verified",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 8.94,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 2.823,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 9.393,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 3.173,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 0.216,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 25.905
+    }
+   ],
+   "axiom": null,
+   "category": "answer_canonical_genuine",
+   "details": "Comparator 14fda6a603d433dad5db83ca55f15afc91190fda with opaque-aware proof audit: statement matches, permitted axioms, kernel accepts",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "verified"
+   ],
+   "expected_verdicts": [
+    "genuine"
+   ],
+   "finished_at": "2026-10-20T18:45:30Z",
+   "name": "synthetic_answer_false_genuine",
+   "observed_verdict": "genuine",
+   "passed": true,
+   "peak_memory_bytes": 1076793344,
+   "real_lean": true,
+   "reason": "Independent proof and intended theorem verified",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:45:04Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "verified"
+   ],
+   "submission": "submissions/synthetic_answer_false_genuine.lean",
+   "submission_sha256": "ed6261733f1a3ac2522adef45ecafb1714d76ee1e8beebf2060b868892a13f68",
+   "template": "templates/SyntheticAnswer_two_add_two.lean",
+   "template_sha256": "7cac0e912225189fb0ded17239bcd5e721f14661b48cd261d33d766c3d89b182",
+   "theorem_name": "SyntheticAnswer.two_add_two_five",
+   "wall_seconds": 26.378
+  },
+  {
+   "answer": {
+    "candidates": [
+     "4"
+    ],
+    "mode": "canonical",
+    "text": "4"
+   },
+   "answer_based": true,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1094590464,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-b528e9f7a2194adfa90e26606b96c03e",
+     "detail": "Lean default kernel accepts the solution",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 27.536,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "verified",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.433,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.072,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 9.285,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 3.171,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 0.817,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 27.113
+    }
+   ],
+   "axiom": null,
+   "category": "answer_canonical_genuine",
+   "details": "Comparator 14fda6a603d433dad5db83ca55f15afc91190fda with opaque-aware proof audit: statement matches, permitted axioms, kernel accepts",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "verified"
+   ],
+   "expected_verdicts": [
+    "genuine"
+   ],
+   "finished_at": "2026-10-20T18:45:58Z",
+   "name": "synthetic_answer_numeral_genuine",
+   "observed_verdict": "genuine",
+   "passed": true,
+   "peak_memory_bytes": 1094590464,
+   "real_lean": true,
+   "reason": "Independent proof and intended theorem verified",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:45:30Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "verified"
+   ],
+   "submission": "submissions/synthetic_answer_numeral_genuine.lean",
+   "submission_sha256": "416a05af54d6004160a4330311eb86968950437e457efa7c8e83c1fb9228002c",
+   "template": "templates/SyntheticAnswer_least_gt_three.lean",
+   "template_sha256": "e5760655ec60c1ea11eb60a3b5b559a235f5cd30d6bfdfec7268940fde4bad16",
+   "theorem_name": "SyntheticAnswer.least_gt_three",
+   "wall_seconds": 27.537
+  },
+  {
+   "answer": {
+    "mode": "template_default",
+    "text": "default",
+    "value": "template default (Prop: True; see docs/evaluator.md)"
+   },
+   "answer_based": true,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1070600192,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-3c6372a9d05b49dd8b05f3bfde0714cc",
+     "detail": "Lean default kernel accepts the solution",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 26.985,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "verified",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.386,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 2.872,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 9.085,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 3.171,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 0.717,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 26.559
+    }
+   ],
+   "axiom": null,
+   "category": "answer_template_default_genuine",
+   "details": "Comparator 14fda6a603d433dad5db83ca55f15afc91190fda with opaque-aware proof audit: statement matches, permitted axioms, kernel accepts",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "verified"
+   ],
+   "expected_verdicts": [
+    "genuine"
+   ],
+   "finished_at": "2026-10-20T18:46:25Z",
+   "name": "synthetic_answer_default_genuine",
+   "observed_verdict": "genuine",
+   "passed": true,
+   "peak_memory_bytes": 1070600192,
+   "real_lean": true,
+   "reason": "Independent proof and intended theorem verified",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:45:58Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "verified"
+   ],
+   "submission": "submissions/synthetic_answer_default_genuine.lean",
+   "submission_sha256": "70f40a9bf8485e8061b865b86128622ab6b7db946bccf8f8a23dc9910e0abdf0",
+   "template": "templates/SyntheticAnswer_fermat_odd.lean",
+   "template_sha256": "6285c4f8d3ff17e28750de9114189f77f15f4abeef13c09a0a19a122b5d79601",
+   "theorem_name": "SyntheticAnswer.all_fermat_odd",
+   "wall_seconds": 26.986
+  },
+  {
+   "answer": {
+    "candidates": [
+     "True",
+     "False"
+    ],
+    "mode": "helper",
+    "resolved_value": "True",
+    "text": "OddAnswer"
+   },
+   "answer_based": true,
+   "attempts": [
+    {
+     "candidate": "True",
+     "cgroup_memory_peak_bytes": 1094356992,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-efc64a25e4a94528ab0085c914f626bd",
+     "detail": "Lean default kernel accepts the solution",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 26.933,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "verified",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 8.936,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 2.822,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 9.643,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 2.974,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 0.768,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "target": "SyntheticAnswer.gdm_answer_bridge_08bb60191ddb781b",
+     "total_seconds": 26.499
+    }
+   ],
+   "axiom": null,
+   "category": "answer_helper_genuine",
+   "details": "Helper answer OddAnswer resolved to True by a trusted bridge; Comparator 14fda6a603d433dad5db83ca55f15afc91190fda with opaque-aware proof audit: statement matches, permitted axioms, kernel accepts",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "verified"
+   ],
+   "expected_verdicts": [
+    "genuine"
+   ],
+   "finished_at": "2026-10-20T18:46:52Z",
+   "name": "synthetic_answer_helper_true_genuine",
+   "observed_verdict": "genuine",
+   "passed": true,
+   "peak_memory_bytes": 1094356992,
+   "real_lean": true,
+   "reason": "Independent proof and intended theorem verified",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:46:25Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "verified"
+   ],
+   "submission": "submissions/synthetic_answer_helper_true_genuine.lean",
+   "submission_sha256": "ab22acef2305dc2847becd9b38868bca364d6fc1aafa84352f2b41e96afa049b",
+   "template": "templates/SyntheticAnswer_fermat_odd.lean",
+   "template_sha256": "6285c4f8d3ff17e28750de9114189f77f15f4abeef13c09a0a19a122b5d79601",
+   "theorem_name": "SyntheticAnswer.all_fermat_odd",
+   "wall_seconds": 26.935
+  },
+  {
+   "answer": {
+    "candidates": [
+     "True",
+     "False"
+    ],
+    "mode": "helper",
+    "resolved_value": "False",
+    "text": "FiveAnswer"
+   },
+   "answer_based": true,
+   "attempts": [
+    {
+     "candidate": "True",
+     "cgroup_memory_peak_bytes": 1076989952,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-072752c676f840349e8b4f389e5ec164",
+     "detail": "Sandboxed Solution build failed",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 22.115,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "solution_build_failed",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 8.833,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 2.82,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 1,
+       "name": "build_solution",
+       "seconds": 8.633,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "target": "SyntheticAnswer.gdm_answer_bridge_b58f0dd79ea63c40",
+     "total_seconds": 21.666
+    },
+    {
+     "candidate": "False",
+     "cgroup_memory_peak_bytes": 1089171456,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-50caa944e28e40abb5e8d2ca56139b23",
+     "detail": "Lean default kernel accepts the solution",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 26.686,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "verified",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.685,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 2.921,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 9.035,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 3.122,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 0.166,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "target": "SyntheticAnswer.gdm_answer_bridge_5a6acbc52f9eaaa6",
+     "total_seconds": 26.254
+    }
+   ],
+   "axiom": null,
+   "category": "answer_helper_genuine",
+   "details": "Helper answer FiveAnswer resolved to False by a trusted bridge; Comparator 14fda6a603d433dad5db83ca55f15afc91190fda with opaque-aware proof audit: statement matches, permitted axioms, kernel accepts",
+   "docker_runs": 2,
+   "expected_statuses": [
+    "verified"
+   ],
+   "expected_verdicts": [
+    "genuine"
+   ],
+   "finished_at": "2026-10-20T18:47:41Z",
+   "name": "synthetic_answer_helper_false_genuine",
+   "observed_verdict": "genuine",
+   "passed": true,
+   "peak_memory_bytes": 1089171456,
+   "real_lean": true,
+   "reason": "Independent proof and intended theorem verified",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:46:52Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "solution_build_failed",
+    "verified"
+   ],
+   "submission": "submissions/synthetic_answer_helper_false_genuine.lean",
+   "submission_sha256": "70229846de7411d2a0ec9c0c7c7c9a4bd5925d300d8d9046f5469f1f3d8cfae4",
+   "template": "templates/SyntheticAnswer_two_add_two.lean",
+   "template_sha256": "7cac0e912225189fb0ded17239bcd5e721f14661b48cd261d33d766c3d89b182",
+   "theorem_name": "SyntheticAnswer.two_add_two_five",
+   "wall_seconds": 48.803
+  },
+  {
+   "answer": null,
+   "answer_based": false,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1090412544,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-775a4875629d4223bfb4f4fb1792a87d",
+     "detail": "Challenge and solution theorem statement do not match: 'Erdos6.erdos_6.variants.decreasing'",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 29.794,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "mismatch",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 8.934,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.172,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 9.185,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 4.024,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 2.721,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 29.368
+    }
+   ],
+   "axiom": null,
+   "category": "preamble_meaning_change",
+   "details": "Challenge and solution theorem statement do not match: 'Erdos6.erdos_6.variants.decreasing'",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "mismatch"
+   ],
+   "expected_verdicts": [
+    "fraudulent"
+   ],
+   "finished_at": "2026-10-20T18:48:10Z",
+   "name": "erdos6_shadow_definition",
+   "observed_verdict": "fraudulent",
+   "passed": true,
+   "peak_memory_bytes": 1090412544,
+   "real_lean": true,
+   "reason": "Submitted theorem differs from the original intended statement",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:47:41Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "mismatch"
+   ],
+   "submission": "submissions/erdos6_shadow_definition.lean",
+   "submission_sha256": "10236ba51bb3224f40e5b01f58a128c5bd8df2850864cd39a61459d263c3161b",
+   "template": "Erdos6_erdos_6_variants_decreasing",
+   "template_sha256": "d4f31ebf8550a378f5938c6e81346c5830078def7d973fade9f495a907c9c5f0",
+   "theorem_name": "Erdos6.erdos_6.variants.decreasing",
+   "wall_seconds": 29.794
+  },
+  {
+   "answer": null,
+   "answer_based": false,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1078816768,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-6d862937e39440268bf2ff5159515b76",
+     "detail": "Challenge and solution theorem statement do not match: 'Erdos195.erdos_195.variants.leq_5_bound'",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 26.286,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "mismatch",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.384,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.121,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 8.934,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 2.871,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 0.216,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 25.852
+    }
+   ],
+   "axiom": null,
+   "category": "preamble_meaning_change",
+   "details": "Challenge and solution theorem statement do not match: 'Erdos195.erdos_195.variants.leq_5_bound'",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "mismatch"
+   ],
+   "expected_verdicts": [
+    "fraudulent"
+   ],
+   "finished_at": "2026-10-20T18:48:37Z",
+   "name": "erdos195_instance_override",
+   "observed_verdict": "fraudulent",
+   "passed": true,
+   "peak_memory_bytes": 1078816768,
+   "real_lean": true,
+   "reason": "Submitted theorem differs from the original intended statement",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:48:10Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "mismatch"
+   ],
+   "submission": "submissions/erdos195_instance_override.lean",
+   "submission_sha256": "343a3bc4c78cb494f845bdf7860845e0c54fd284c92d502864994118171bf386",
+   "template": "Erdos195_erdos_195_variants_leq_5_bound",
+   "template_sha256": "3a8a927c79a82e67ddb535959f183f81f019a2152fe81b7a63a4c31bce93d6dc",
+   "theorem_name": "Erdos195.erdos_195.variants.leq_5_bound",
+   "wall_seconds": 26.286
+  },
+  {
+   "answer": null,
+   "answer_based": false,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1105223680,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-4d424ee1e4bd4d149fed0010e5af12fd",
+     "detail": "Challenge and solution theorem statement do not match: 'EulerBrick.cuboidThree'",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 36.267,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "mismatch",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 13.493,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.574,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 13.646,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 2.921,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 0.867,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 35.843
+    }
+   ],
+   "axiom": null,
+   "category": "preamble_meaning_change",
+   "details": "Challenge and solution theorem statement do not match: 'EulerBrick.cuboidThree'",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "mismatch"
+   ],
+   "expected_verdicts": [
+    "fraudulent"
+   ],
+   "finished_at": "2026-10-20T18:49:13Z",
+   "name": "eulerbrick_notation_override",
+   "observed_verdict": "fraudulent",
+   "passed": true,
+   "peak_memory_bytes": 1105223680,
+   "real_lean": true,
+   "reason": "Submitted theorem differs from the original intended statement",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:48:37Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "mismatch"
+   ],
+   "submission": "submissions/eulerbrick_notation_override.lean",
+   "submission_sha256": "ad183417754e0390cff3335b1a5d00a72fa89c6d1641183311bacee768278a95",
+   "template": "EulerBrick_cuboidThree",
+   "template_sha256": "cd066c41222026b74572f67a78e7a3f6f667bf7472144390d3b14ee61db8e4ad",
+   "theorem_name": "EulerBrick.cuboidThree",
+   "wall_seconds": 36.268
+  },
+  {
+   "answer": {
+    "candidates": [
+     "True"
+    ],
+    "mode": "canonical",
+    "text": "True"
+   },
+   "answer_based": true,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1089433600,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-54c960b40be041288191e0abd1dce19e",
+     "detail": "Challenge and solution theorem statement do not match: 'Fermat.all_fermat_squarefree'",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 27.046,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "mismatch",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.535,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.122,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 9.483,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 2.922,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 0.166,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 26.606
+    }
+   ],
+   "axiom": null,
+   "category": "preamble_meaning_change",
+   "details": "Challenge and solution theorem statement do not match: 'Fermat.all_fermat_squarefree'",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "mismatch"
+   ],
+   "expected_verdicts": [
+    "fraudulent"
+   ],
+   "finished_at": "2026-10-20T18:49:40Z",
+   "name": "fermat_canonical_notation_override",
+   "observed_verdict": "fraudulent",
+   "passed": true,
+   "peak_memory_bytes": 1089433600,
+   "real_lean": true,
+   "reason": "Submitted theorem differs from the original intended statement",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:49:13Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "mismatch"
+   ],
+   "submission": "submissions/fermat_canonical_notation_override.lean",
+   "submission_sha256": "a7c28d023766125742a0ebd6bb95f6fde436200d0c391651c8aa0a8cf3aa3d14",
+   "template": "all_fermat_squarefree",
+   "template_sha256": "30a94b152dc46b4fc8446e62e52797e5f5fdf376eb517e3f0dfa4706d3586286",
+   "theorem_name": "Fermat.all_fermat_squarefree",
+   "wall_seconds": 27.046
+  },
+  {
+   "answer": null,
+   "answer_based": false,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1104887808,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-549a5e07530e4bc593ff707b0aef317f",
+     "detail": "Challenge and solution theorem statement do not match: 'Erdos6.erdos_6.variants.decreasing'",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 27.534,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "mismatch",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.556,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.324,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 9.185,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 2.822,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 0.867,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 27.088
+    }
+   ],
+   "axiom": null,
+   "category": "cross_region_comment",
+   "details": "Challenge and solution theorem statement do not match: 'Erdos6.erdos_6.variants.decreasing'",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "mismatch"
+   ],
+   "expected_verdicts": [
+    "fraudulent"
+   ],
+   "finished_at": "2026-10-20T18:50:08Z",
+   "name": "erdos6_cross_region_comment",
+   "observed_verdict": "fraudulent",
+   "passed": true,
+   "peak_memory_bytes": 1104887808,
+   "real_lean": true,
+   "reason": "Submitted theorem differs from the original intended statement",
+   "review_flags": [
+    "unbalanced_block_comment"
+   ],
+   "started_at": "2026-10-20T18:49:40Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "mismatch"
+   ],
+   "submission": "submissions/erdos6_cross_region_comment.lean",
+   "submission_sha256": "fb879dc63ccfb2882b9f84df656ccb2115c187c7d7a873c964b236fc3bc8213c",
+   "template": "Erdos6_erdos_6_variants_decreasing",
+   "template_sha256": "d4f31ebf8550a378f5938c6e81346c5830078def7d973fade9f495a907c9c5f0",
+   "theorem_name": "Erdos6.erdos_6.variants.decreasing",
+   "wall_seconds": 27.535
+  },
+  {
+   "answer": null,
+   "answer_based": false,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1109901312,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-bc0fd1a1eb2448dbaa1950d6292bc4b4",
+     "detail": "Challenge and solution theorem statement do not match: 'Erdos6.erdos_6.variants.decreasing'",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 31.021,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "mismatch",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.132,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.572,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 9.885,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 3.923,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 2.721,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 30.577
+    }
+   ],
+   "axiom": null,
+   "category": "forgery_attempt",
+   "details": "Challenge and solution theorem statement do not match: 'Erdos6.erdos_6.variants.decreasing'",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "mismatch"
+   ],
+   "expected_verdicts": [
+    "fraudulent"
+   ],
+   "finished_at": "2026-10-20T18:50:39Z",
+   "name": "erdos6_forgery_attempt",
+   "observed_verdict": "fraudulent",
+   "passed": true,
+   "peak_memory_bytes": 1109901312,
+   "real_lean": true,
+   "reason": "Submitted theorem differs from the original intended statement",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:50:08Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "mismatch"
+   ],
+   "submission": "submissions/erdos6_forgery_attempt.lean",
+   "submission_sha256": "fc4a012e2daca5a5a23578d567a2b7cefcda86e9441083b086fa293907bad5b0",
+   "template": "Erdos6_erdos_6_variants_decreasing",
+   "template_sha256": "d4f31ebf8550a378f5938c6e81346c5830078def7d973fade9f495a907c9c5f0",
+   "theorem_name": "Erdos6.erdos_6.variants.decreasing",
+   "wall_seconds": 31.022
+  },
+  {
+   "answer": null,
+   "answer_based": false,
+   "attempts": [
+    {
+     "axiom": "sorryAx",
+     "cgroup_memory_peak_bytes": 1079898112,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-b13e7e4db63441588a53a25ec72546d2",
+     "detail": "Illegal axiom detected: 'sorryAx'",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 27.618,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "illegal_axiom",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.032,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.221,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 8.63,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 3.222,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 1.719,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 27.197
+    }
+   ],
+   "axiom": "sorryAx",
+   "category": "admitted_proof",
+   "details": "Proof uses non-permitted axiom sorryAx",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "illegal_axiom"
+   ],
+   "expected_verdicts": [
+    "fraudulent"
+   ],
+   "finished_at": "2026-10-20T18:51:06Z",
+   "name": "erdos6_admit_guard_msgs",
+   "observed_verdict": "fraudulent",
+   "passed": true,
+   "peak_memory_bytes": 1079898112,
+   "real_lean": true,
+   "reason": "Accepted proof depends on an admission (sorryAx)",
+   "review_flags": [
+    "guard_msgs"
+   ],
+   "started_at": "2026-10-20T18:50:39Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "illegal_axiom"
+   ],
+   "submission": "submissions/erdos6_admit_guard_msgs.lean",
+   "submission_sha256": "a1c6331068eca7b24713fbe6b2026173392a4eed7256fb8e6169de17fbe6782c",
+   "template": "Erdos6_erdos_6_variants_decreasing",
+   "template_sha256": "d4f31ebf8550a378f5938c6e81346c5830078def7d973fade9f495a907c9c5f0",
+   "theorem_name": "Erdos6.erdos_6.variants.decreasing",
+   "wall_seconds": 27.619
+  },
+  {
+   "answer": null,
+   "answer_based": false,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1079554048,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-6999ec80de5a473b83941f839a76aba0",
+     "detail": "Sandboxed Solution export failed",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 26.562,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "solution_export_failed",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.537,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.523,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 8.786,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": -6,
+       "name": "export_solution",
+       "seconds": 2.973,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 26.138
+    }
+   ],
+   "axiom": null,
+   "category": "exit_command",
+   "details": "solution_export_failed: Sandboxed Solution export failed",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "compare_failed",
+    "mismatch",
+    "parse_failed",
+    "solution_build_failed",
+    "solution_export_failed"
+   ],
+   "expected_verdicts": [
+    "fraudulent",
+    "unresolved"
+   ],
+   "finished_at": "2026-10-20T18:51:33Z",
+   "name": "erdos6_exit_command",
+   "observed_verdict": "unresolved",
+   "passed": true,
+   "peak_memory_bytes": 1079554048,
+   "real_lean": true,
+   "reason": "Independent proof checking not established",
+   "review_flags": [
+    "exit_command"
+   ],
+   "started_at": "2026-10-20T18:51:06Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "solution_export_failed"
+   ],
+   "submission": "submissions/erdos6_exit_command.lean",
+   "submission_sha256": "57dae0eb9fde0e9a548f583d3346bd9c12a07256eef0e3008a67620e7376d981",
+   "template": "Erdos6_erdos_6_variants_decreasing",
+   "template_sha256": "d4f31ebf8550a378f5938c6e81346c5830078def7d973fade9f495a907c9c5f0",
+   "theorem_name": "Erdos6.erdos_6.variants.decreasing",
+   "wall_seconds": 26.563
+  },
+  {
+   "answer": {
+    "mode": "helper",
+    "problem": "Helper answer restates the task proposition; it does not determine the answer",
+    "text": "MyAnswer"
+   },
+   "answer_based": true,
+   "attempts": [],
+   "axiom": null,
+   "category": "answer_noncanonical",
+   "details": "Helper answer restates the task proposition; it does not determine the answer",
+   "docker_runs": 0,
+   "expected_statuses": [],
+   "expected_verdicts": [
+    "unresolved"
+   ],
+   "finished_at": "2026-10-20T18:51:33Z",
+   "name": "fermat_helper_answer",
+   "observed_verdict": "unresolved",
+   "passed": true,
+   "peak_memory_bytes": null,
+   "real_lean": true,
+   "reason": "Independent proof checking not established",
+   "review_flags": [
+    "reflexive_helper_answer"
+   ],
+   "started_at": "2026-10-20T18:51:33Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [],
+   "submission": "submissions/fermat_helper_answer.lean",
+   "submission_sha256": "18a19b79a52aa2fe27f1691e342dfaf4a41a6b6be4194e1d7020c70e3b899bcf",
+   "template": "all_fermat_squarefree",
+   "template_sha256": "30a94b152dc46b4fc8446e62e52797e5f5fdf376eb517e3f0dfa4706d3586286",
+   "theorem_name": "Fermat.all_fermat_squarefree",
+   "wall_seconds": 0.001
+  },
+  {
+   "answer": null,
+   "answer_based": false,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1104687104,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-761b374878fc43eaac40484417389c98",
+     "detail": "Sandboxed Solution build failed",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 25.172,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "solution_build_failed",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.992,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.775,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 1,
+       "name": "build_solution",
+       "seconds": 9.588,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 24.746
+    }
+   ],
+   "axiom": null,
+   "category": "compile_failure",
+   "details": "solution_build_failed: Sandboxed Solution build failed",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "solution_build_failed"
+   ],
+   "expected_verdicts": [
+    "unresolved"
+   ],
+   "finished_at": "2026-10-20T18:51:58Z",
+   "name": "green32_compile_failure",
+   "observed_verdict": "unresolved",
+   "passed": true,
+   "peak_memory_bytes": 1104687104,
+   "real_lean": true,
+   "reason": "Independent proof checking not established",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:51:33Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "solution_build_failed"
+   ],
+   "submission": "submissions/green32_compile_failure.lean",
+   "submission_sha256": "a0dacf61de6b569b2b32262a4e5246df5aee54ff2953356e921ad4047b4a1636",
+   "template": "Green32_hasCosetHole_empty",
+   "template_sha256": "b2622e035bb41da4fa703ff15704e732e055c21595af8c98274917502407ae06",
+   "theorem_name": "Green32.hasCosetHole_empty",
+   "wall_seconds": 25.173
+  },
+  {
+   "answer": {
+    "candidates": [
+     "False"
+    ],
+    "mode": "canonical",
+    "text": "False"
+   },
+   "answer_based": true,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1071718400,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-e3fd153574aa47c98c542bb333e91f74",
+     "detail": "Sandboxed Solution build failed",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 23.076,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "solution_build_failed",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.236,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 2.921,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 1,
+       "name": "build_solution",
+       "seconds": 9.085,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 22.624
+    }
+   ],
+   "axiom": null,
+   "category": "canonical_wrong_answer",
+   "details": "solution_build_failed: Sandboxed Solution build failed",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "solution_build_failed"
+   ],
+   "expected_verdicts": [
+    "unresolved"
+   ],
+   "finished_at": "2026-10-20T18:52:21Z",
+   "name": "synthetic_answer_wrong_canonical",
+   "observed_verdict": "unresolved",
+   "passed": true,
+   "peak_memory_bytes": 1071718400,
+   "real_lean": true,
+   "reason": "Independent proof checking not established",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:51:58Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "solution_build_failed"
+   ],
+   "submission": "submissions/synthetic_answer_wrong_canonical.lean",
+   "submission_sha256": "6c73b4c56819ef85f369f22937a019f8fa044425f089378c1e096ae468d749c4",
+   "template": "templates/SyntheticAnswer_fermat_odd.lean",
+   "template_sha256": "6285c4f8d3ff17e28750de9114189f77f15f4abeef13c09a0a19a122b5d79601",
+   "theorem_name": "SyntheticAnswer.all_fermat_odd",
+   "wall_seconds": 23.077
+  },
+  {
+   "answer": null,
+   "answer_based": false,
+   "attempts": [
+    {
+     "cgroup_memory_peak_bytes": 1097183232,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-065de028d09143e0a4409c95da0e8d62",
+     "detail": "Lean default kernel accepts the solution",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 34.104,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "verified",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.336,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.824,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 9.688,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 3.576,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 5.929,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 33.684
+    }
+   ],
+   "axiom": null,
+   "category": "opaque_genuine",
+   "details": "Comparator 14fda6a603d433dad5db83ca55f15afc91190fda with opaque-aware proof audit: statement matches, permitted axioms, kernel accepts",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "verified"
+   ],
+   "expected_verdicts": [
+    "genuine"
+   ],
+   "finished_at": "2026-10-20T18:52:55Z",
+   "name": "green32_opaque_genuine",
+   "observed_verdict": "genuine",
+   "passed": true,
+   "peak_memory_bytes": 1097183232,
+   "real_lean": true,
+   "reason": "Independent proof and intended theorem verified",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:52:21Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "verified"
+   ],
+   "submission": "submissions/green32_opaque_genuine.lean",
+   "submission_sha256": "eb7870fd65efe230be9c4d44e909f5be1bc1d874cea1c58d8091c6477de95c18",
+   "template": "Green32_hasCosetHole_empty",
+   "template_sha256": "b2622e035bb41da4fa703ff15704e732e055c21595af8c98274917502407ae06",
+   "theorem_name": "Green32.hasCosetHole_empty",
+   "wall_seconds": 34.105
+  },
+  {
+   "answer": null,
+   "answer_based": false,
+   "attempts": [
+    {
+     "axiom": "sorryAx",
+     "cgroup_memory_peak_bytes": 1081716736,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-e7ecf82dac804247a0b7e0e867ef3b4d",
+     "detail": "Illegal axiom detected: 'sorryAx'",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 29.728,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "illegal_axiom",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.59,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.525,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 9.541,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 3.475,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 1.769,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 29.282
+    }
+   ],
+   "axiom": "sorryAx",
+   "category": "opaque_admitted_proof",
+   "details": "Proof uses non-permitted axiom sorryAx",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "illegal_axiom"
+   ],
+   "expected_verdicts": [
+    "fraudulent"
+   ],
+   "finished_at": "2026-10-20T18:53:25Z",
+   "name": "erdos6_opaque_admit",
+   "observed_verdict": "fraudulent",
+   "passed": true,
+   "peak_memory_bytes": 1081716736,
+   "real_lean": true,
+   "reason": "Accepted proof depends on an admission (sorryAx)",
+   "review_flags": [
+    "guard_msgs"
+   ],
+   "started_at": "2026-10-20T18:52:55Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "illegal_axiom"
+   ],
+   "submission": "submissions/erdos6_opaque_admit.lean",
+   "submission_sha256": "3d400e317ab7392c912df14b5daeab7324bb3237dd5149ad293cfe0766495855",
+   "template": "Erdos6_erdos_6_variants_decreasing",
+   "template_sha256": "d4f31ebf8550a378f5938c6e81346c5830078def7d973fade9f495a907c9c5f0",
+   "theorem_name": "Erdos6.erdos_6.variants.decreasing",
+   "wall_seconds": 29.728
+  },
+  {
+   "answer": null,
+   "answer_based": false,
+   "attempts": [
+    {
+     "axiom": "sorryAx",
+     "cgroup_memory_peak_bytes": 1098670080,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-e880d4d25531420a9515608fec8317bf",
+     "detail": "Illegal axiom detected: 'sorryAx'",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 28.787,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "illegal_axiom",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.182,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.322,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 9.284,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 3.524,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 1.719,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 28.344
+    }
+   ],
+   "axiom": "sorryAx",
+   "category": "opaque_nested_admitted_proof",
+   "details": "Proof uses non-permitted axiom sorryAx",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "illegal_axiom"
+   ],
+   "expected_verdicts": [
+    "fraudulent"
+   ],
+   "finished_at": "2026-10-20T18:53:54Z",
+   "name": "erdos6_nested_opaque_admit",
+   "observed_verdict": "fraudulent",
+   "passed": true,
+   "peak_memory_bytes": 1098670080,
+   "real_lean": true,
+   "reason": "Accepted proof depends on an admission (sorryAx)",
+   "review_flags": [
+    "guard_msgs"
+   ],
+   "started_at": "2026-10-20T18:53:25Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "illegal_axiom"
+   ],
+   "submission": "submissions/erdos6_nested_opaque_admit.lean",
+   "submission_sha256": "a2607061e1b59c1e200628bc27c1e85925fee1d64860953e3ebcfff9bff1277e",
+   "template": "Erdos6_erdos_6_variants_decreasing",
+   "template_sha256": "d4f31ebf8550a378f5938c6e81346c5830078def7d973fade9f495a907c9c5f0",
+   "theorem_name": "Erdos6.erdos_6.variants.decreasing",
+   "wall_seconds": 28.788
+  },
+  {
+   "answer": null,
+   "answer_based": false,
+   "attempts": [
+    {
+     "axiom": "Lean.ofReduceBool",
+     "cgroup_memory_peak_bytes": 1099030528,
+     "container_exit_code": 0,
+     "container_name": "gdm-comparator-64f2765009f14b5c9addd549f6c6ffdf",
+     "detail": "Illegal axiom detected: 'Lean.ofReduceBool'",
+     "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+     "host_seconds": 30.959,
+     "image": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db",
+     "status": "illegal_axiom",
+     "steps": [
+      {
+       "exit_code": 0,
+       "name": "build_challenge",
+       "seconds": 9.59,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_challenge",
+       "seconds": 3.824,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "build_solution",
+       "seconds": 9.139,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "export_solution",
+       "seconds": 3.827,
+       "status": "ok",
+       "timeout": 1200
+      },
+      {
+       "exit_code": 0,
+       "name": "verify_exports",
+       "seconds": 2.773,
+       "status": "ok",
+       "timeout": 1200
+      }
+     ],
+     "total_seconds": 30.528
+    }
+   ],
+   "axiom": "Lean.ofReduceBool",
+   "category": "opaque_native_axiom",
+   "details": "Proof uses non-permitted axiom Lean.ofReduceBool",
+   "docker_runs": 1,
+   "expected_statuses": [
+    "illegal_axiom"
+   ],
+   "expected_verdicts": [
+    "unresolved"
+   ],
+   "finished_at": "2026-10-20T18:54:25Z",
+   "name": "green32_opaque_native",
+   "observed_verdict": "unresolved",
+   "passed": true,
+   "peak_memory_bytes": 1099030528,
+   "real_lean": true,
+   "reason": "Independent proof checking not established",
+   "review_flags": [],
+   "started_at": "2026-10-20T18:53:54Z",
+   "static_checks": {
+    "immutable_segments_intact": true,
+    "keywords": [],
+    "passed": true
+   },
+   "static_checks_passed": true,
+   "statuses": [
+    "illegal_axiom"
+   ],
+   "submission": "submissions/green32_opaque_native.lean",
+   "submission_sha256": "7aeafc6931bcc54304df2f9b75e4abbb1d3e582cc4aaa0e10f9db60dead0e8c8",
+   "template": "Green32_hasCosetHole_empty",
+   "template_sha256": "b2622e035bb41da4fa703ff15704e732e055c21595af8c98274917502407ae06",
+   "theorem_name": "Green32.hasCosetHole_empty",
+   "wall_seconds": 30.96
+  }
+ ],
+ "complete": true,
+ "container_runs": 64,
+ "created_at": "2026-10-20T18:40:44Z",
+ "environment": {
+  "Architecture": "x86_64",
+  "KernelVersion": "7.0.0-1014-gcp",
+  "MemTotal": 270434242560,
+  "NCPU": 64,
+  "OperatingSystem": "Ubuntu 24.04.5 LTS",
+  "ServerVersion": "29.8.1",
+  "host_platform": "Linux-7.0.0-1014-gcp-x86_64-with-glibc2.39",
+  "python": "3.10.12"
+ },
+ "evaluator_py_sha256": "12508c03990aa058d6f3bfe47a995c67159badc18bd1af5cc7fa8ed5750e623f",
+ "fixture_manifest_sha256": "69253d50320d676e330a89c7dfdea4d861e04b438f1d4c0d37790af0a186265f",
+ "image": "gdm-math-swarm-comparator:local",
+ "image_entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+ "image_ids": {
+  "comparator": "sha256:6b756bddb892e4a724358d2c59283ce38972bba8221f528244b55297880c73db"
+ },
+ "interlock": [
+  {
+   "checked_at": "2026-10-20T18:40:44Z",
+   "forced": false,
+   "live_containers": [],
+   "problem": null
+  }
+ ],
+ "notes": "Researcher-only. Expected verdicts come from code (VALIDATION_EXPECTATIONS); load_validation recomputes passes.",
+ "orphans_removed": [],
+ "pins": {
+  "comparator": "14fda6a603d433dad5db83ca55f15afc91190fda",
+  "landrun": "c91b41ac6cb180e2fdcb989408dcde34449bd8b0",
+  "lean4export": "9847384d3ea63a0e70567cdd6ae26c419402297c",
+  "toolchain": "leanprover/lean4:v4.27.0",
+  "verifier_sha256": "3972f4a1ddf748350b7a3df181ce7ab9fbd8ecc095b777cc8835b55a8433ad8d"
+ },
+ "probe": {
+  "cgroup_memory_peak_bytes": 132198400,
+  "detail": "Landlock/seccomp enforcement inside the evaluator image",
+  "entry": "gdm-comparator-entry/3",
+  "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+  "finished_at": "2026-10-20T18:40:47Z",
+  "host_seconds": 3.018,
+  "pid1_signals_ignored_after_probe": true,
+  "pins": {
+   "comparator": "14fda6a603d433dad5db83ca55f15afc91190fda",
+   "landrun": "c91b41ac6cb180e2fdcb989408dcde34449bd8b0",
+   "landrun_version": "landrun version 0.1.15",
+   "lean4export": "9847384d3ea63a0e70567cdd6ae26c419402297c",
+   "toolchain": "leanprover/lean4:v4.27.0",
+   "verifier_sha256": "3972f4a1ddf748350b7a3df181ce7ab9fbd8ecc095b777cc8835b55a8433ad8d"
+  },
+  "preflight": {
+   "af_unix_denied": true,
+   "landlock_abi": 8,
+   "landrun": "/usr/local/bin/landrun",
+   "pid": 1,
+   "signals_ignored": true,
+   "uid": 65534
+  },
+  "probe": {
+   "exec_shell": "denied:13",
+   "ptrace_attach_pid1": "denied:1",
+   "read_frozen_project": "allowed",
+   "signal_pid1_SIGHUP": "allowed",
+   "signal_pid1_SIGINT": "allowed",
+   "signal_pid1_SIGTERM": "allowed",
+   "signal_pid1_SIGUSR1": "allowed",
+   "tcp_connect": "denied:13",
+   "unix_socket": "denied:97",
+   "unix_socketcall_i386": "denied:signal31",
+   "unix_socketpair": "denied:1",
+   "write_dot_lake": "allowed",
+   "write_pid1_stdout": "denied:13",
+   "write_project_root": "denied:13",
+   "write_trusted_dir": "denied:13"
+  },
+  "status": "probe_passed"
+ },
+ "runner_settings": {
+  "cpus": "2",
+  "deadline_margin": 180,
+  "memory": "6g",
+  "memory_swap": "6g",
+  "pids_limit": 256,
+  "step_timeout": 1200,
+  "timeout": 3600,
+  "tmp_tmpfs": "64m",
+  "work_tmpfs": "3g"
+ },
+ "schema": "gdm-evaluator-validation/3",
+ "seccomp_profile": "docker/seccomp/comparator-no-af-unix.json",
+ "seccomp_sha256": "0186d69e3c3827e37bdbab1309de789fe29e289907d7d22bddac4fefc0430e10",
+ "self_compare": [
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T18:55:57Z",
+   "host_seconds": 27.027,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1107025920,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.232,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.221,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.035,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.222,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 0.516,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Buchi_buchi_false_M4",
+   "template_sha256": "68129efa1f108c24f1ae87f81b6ea3833c95913240966854f84063947d3390cb",
+   "theorem_name": "Buchi.buchi_false_M4",
+   "wall_seconds": 27.027
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T18:56:25Z",
+   "host_seconds": 28.257,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1082773504,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.69,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.324,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.392,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.073,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 0.967,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "DedekindNumber_M'_three",
+   "template_sha256": "91cb5e169ecf3a4f358210502889947f5625f615e520c85ca6e36bc2e0bcdd76",
+   "theorem_name": "DedekindNumber.M'_three",
+   "wall_seconds": 28.257
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T18:56:52Z",
+   "host_seconds": 27.031,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1095823360,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.69,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.123,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.436,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 2.872,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 0.166,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos1059_allFactorialSubtractionsComposite_101",
+   "template_sha256": "c14e3b877c1498d97cd284567e4d060f359e90ac0175ccbb2e4280b936e10dec",
+   "theorem_name": "Erdos1059.allFactorialSubtractionsComposite_101",
+   "wall_seconds": 27.032
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T18:57:22Z",
+   "host_seconds": 29.733,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1106272256,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.487,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.226,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.937,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.524,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 1.719,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos1074_erdos_1074_variants_EHSNumbers_init",
+   "template_sha256": "59a16d3a139cb5352db22d1df2da5ac13023c55d7c58c8418eee064997eb6ef6",
+   "theorem_name": "Erdos1074.erdos_1074.variants.EHSNumbers_init",
+   "wall_seconds": 29.734
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T18:58:00Z",
+   "host_seconds": 38.402,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1121259520,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.132,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 5.527,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 8.831,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 5.375,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 7.729,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos1085_erdos_1085_variants_upper_d3",
+   "template_sha256": "9e4d3a292168296208f4a26fca29588bcf526272deb62f48ebef7dc37071a5c4",
+   "theorem_name": "Erdos1085.erdos_1085.variants.upper_d3",
+   "wall_seconds": 38.402
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T18:58:39Z",
+   "host_seconds": 38.56,
+   "kind": "bridge",
+   "passed": true,
+   "peak_memory_bytes": 1120768000,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.046,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 5.431,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.142,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 5.38,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 7.736,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos1085_erdos_1085_variants_upper_d3",
+   "template_sha256": "9e4d3a292168296208f4a26fca29588bcf526272deb62f48ebef7dc37071a5c4",
+   "theorem_name": "Erdos1085.erdos_1085.variants.gdm_answer_bridge_f9d71f0b66c07263",
+   "wall_seconds": 38.56
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T18:59:10Z",
+   "host_seconds": 30.835,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1093160960,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.593,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.627,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.345,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.572,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 2.873,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos1092_f_asymptotic_2",
+   "template_sha256": "cb8482d8b4d8dd75c9db40cad1accd5069f2e6b0d0e9b5119cf4279d36747dcd",
+   "theorem_name": "Erdos1092.f_asymptotic_2",
+   "wall_seconds": 30.835
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T18:59:41Z",
+   "host_seconds": 30.867,
+   "kind": "bridge",
+   "passed": true,
+   "peak_memory_bytes": 1115484160,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.483,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.573,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.584,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.573,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 2.871,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos1092_f_asymptotic_2",
+   "template_sha256": "cb8482d8b4d8dd75c9db40cad1accd5069f2e6b0d0e9b5119cf4279d36747dcd",
+   "theorem_name": "Erdos1092.gdm_answer_bridge_984681715cbcb629",
+   "wall_seconds": 30.867
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:00:15Z",
+   "host_seconds": 34.191,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1114152960,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.94,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 4.175,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 10.088,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 4.225,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 4.024,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos1148_erdos_1148_variants_weaker",
+   "template_sha256": "a72eb9ab3da2ee1a66d547accae5fb78d553671e39350c07ce5422b999dca236",
+   "theorem_name": "Erdos1148.erdos_1148.variants.weaker",
+   "wall_seconds": 34.192
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:00:46Z",
+   "host_seconds": 30.996,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1090392064,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.89,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.475,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.738,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.523,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 2.574,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos141_exists_three_consecutive_primes_in_ap",
+   "template_sha256": "ada6f4eeb797106a0b43a6f309edff2cba4e003f716149acc41ad3382fc87234",
+   "theorem_name": "Erdos141.exists_three_consecutive_primes_in_ap",
+   "wall_seconds": 30.996
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:01:12Z",
+   "host_seconds": 26.21,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1060311040,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.338,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 2.871,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 8.785,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.122,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 0.266,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos195_erdos_195_variants_leq_5_bound",
+   "template_sha256": "3a8a927c79a82e67ddb535959f183f81f019a2152fe81b7a63a4c31bce93d6dc",
+   "theorem_name": "Erdos195.erdos_195.variants.leq_5_bound",
+   "wall_seconds": 26.211
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:01:40Z",
+   "host_seconds": 27.923,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1089282048,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.186,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.123,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.49,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.173,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 1.168,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos23_erdos_23_variants_n1_tight",
+   "template_sha256": "9062a70dcf136276c9c8864773ec25e8c4adda82621915c0fbdfccdbc0260f00",
+   "theorem_name": "Erdos23.erdos_23.variants.n1_tight",
+   "wall_seconds": 27.924
+  },
+  {
+   "axiom": null,
+   "detail": "Challenge and solution theorem statement do not match: 'Erdos340.greedySidon_go_singleton_two'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:02:14Z",
+   "host_seconds": 34.281,
+   "kind": "pristine",
+   "passed": false,
+   "peak_memory_bytes": 1102471168,
+   "real_lean": true,
+   "status": "mismatch",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 10.186,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 4.226,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.641,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 4.426,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 4.025,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos340_greedySidon_go_singleton_two",
+   "template_sha256": "3e0d21d2211f0cb76511edcc8c240387a570c3ed025cbf92c4b4d27b100e7401",
+   "theorem_name": "Erdos340.greedySidon_go_singleton_two",
+   "wall_seconds": 34.281
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:02:46Z",
+   "host_seconds": 31.247,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1092018176,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.134,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.923,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.283,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.923,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 3.171,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos36_minimum_overlap_variants_upper_erdos_1955",
+   "template_sha256": "5a2e4f2a3da63e46a252d91085b78b400981e4cd3e5a90c5e52fe52a2ad01265",
+   "theorem_name": "Erdos36.minimum_overlap.variants.upper.erdos_1955",
+   "wall_seconds": 31.247
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:03:19Z",
+   "host_seconds": 33.183,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1103368192,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.641,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.926,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.494,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 4.177,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 4.126,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos539_erdos_539_variants_sq_isBigO",
+   "template_sha256": "0e66a443f08bd35daea2d5721bc7fbe4aad101df317b1982435746af508c3a87",
+   "theorem_name": "Erdos539.erdos_539.variants.sq_isBigO",
+   "wall_seconds": 33.183
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:03:47Z",
+   "host_seconds": 28.06,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1092300800,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.44,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.123,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.037,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.123,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 1.569,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos56_maxWeaklyDivisible_one",
+   "template_sha256": "93ee6536bc31673ebe5d69b28d2851a296807af83574fb8f9873c8e707baeeb6",
+   "theorem_name": "Erdos56.maxWeaklyDivisible_one",
+   "wall_seconds": 28.06
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:04:15Z",
+   "host_seconds": 28.442,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1080782848,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 8.99,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.172,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.489,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.273,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 1.719,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Erdos6_erdos_6_variants_decreasing",
+   "template_sha256": "d4f31ebf8550a378f5938c6e81346c5830078def7d973fade9f495a907c9c5f0",
+   "theorem_name": "Erdos6.erdos_6.variants.decreasing",
+   "wall_seconds": 28.442
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:04:53Z",
+   "host_seconds": 37.352,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1116680192,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 13.395,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.524,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 13.595,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.273,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 1.819,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "EulerBrick_cuboidThree",
+   "template_sha256": "cd066c41222026b74572f67a78e7a3f6f667bf7472144390d3b14ee61db8e4ad",
+   "theorem_name": "EulerBrick.cuboidThree",
+   "wall_seconds": 37.352
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:06:18Z",
+   "host_seconds": 85.775,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 2150526976,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.289,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 16.152,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 8.936,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 13.9,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 35.698,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "GRH_implies_riemannHypothesis",
+   "template_sha256": "d90f24ecbcfe1a3cb4a4d6a8a7fb31b2e37b1e57735a3b9a357eabe40ebd0549",
+   "theorem_name": "GRH.implies_riemannHypothesis",
+   "wall_seconds": 85.775
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:06:49Z",
+   "host_seconds": 30.745,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1085112320,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.334,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.473,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.633,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.823,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 2.721,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Green32_hasCosetHole_empty",
+   "template_sha256": "b2622e035bb41da4fa703ff15704e732e055c21595af8c98274917502407ae06",
+   "theorem_name": "Green32.hasCosetHole_empty",
+   "wall_seconds": 30.745
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:07:22Z",
+   "host_seconds": 33.018,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1095544832,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 11.594,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.123,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 11.398,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.472,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 1.618,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "Green38_green_38_test_zero_mem_validCardinalities",
+   "template_sha256": "396a96ab37e495c6232ee9be3ea786db02ba1447d629cceff0d21ab2a94593b1",
+   "theorem_name": "Green38.green_38.test_zero_mem_validCardinalities",
+   "wall_seconds": 33.018
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:07:49Z",
+   "host_seconds": 26.697,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1076465664,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.134,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 2.972,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.185,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.022,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 0.617,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "MagicSquares_exists_semi_magic_square_cubes",
+   "template_sha256": "186b732fa4a07b7519ea2d51999e2f59465d7cc8c100a94c894951863055b581",
+   "theorem_name": "MagicSquares.exists_semi_magic_square_cubes",
+   "wall_seconds": 26.697
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:08:16Z",
+   "host_seconds": 27.285,
+   "kind": "bridge",
+   "passed": true,
+   "peak_memory_bytes": 1066033152,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.587,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 2.971,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.284,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.024,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 0.617,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "MagicSquares_exists_semi_magic_square_cubes",
+   "template_sha256": "186b732fa4a07b7519ea2d51999e2f59465d7cc8c100a94c894951863055b581",
+   "theorem_name": "MagicSquares.gdm_answer_bridge_eee96f43ef124bc2",
+   "wall_seconds": 27.285
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:08:52Z",
+   "host_seconds": 36.249,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1559760896,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 14.005,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.124,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 13.902,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.123,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 0.266,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "SumOfThreeCubes_isSumOfThreeCubes_iff_mod_9",
+   "template_sha256": "3621070a10da6f2d878ecd3641aca238144a6bb6837ac221158b699bfe08a88a",
+   "theorem_name": "SumOfThreeCubes.isSumOfThreeCubes_iff_mod_9",
+   "wall_seconds": 36.25
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:09:28Z",
+   "host_seconds": 35.697,
+   "kind": "bridge",
+   "passed": true,
+   "peak_memory_bytes": 1565143040,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 14.095,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 2.922,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 13.448,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.173,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 0.266,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "SumOfThreeCubes_isSumOfThreeCubes_iff_mod_9",
+   "template_sha256": "3621070a10da6f2d878ecd3641aca238144a6bb6837ac221158b699bfe08a88a",
+   "theorem_name": "SumOfThreeCubes.gdm_answer_bridge_cdd922224123336a",
+   "wall_seconds": 35.697
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:10:01Z",
+   "host_seconds": 32.666,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1162682368,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 10.987,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.573,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 10.938,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.323,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 2.07,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "WrittenOnTheWallII_Test_C6_avg_dist",
+   "template_sha256": "4b429f2626b27a283c8452323dba49ded68032e70a508ce98d4d1b9b71d7d675",
+   "theorem_name": "WrittenOnTheWallII.Test.C6_avg_dist",
+   "wall_seconds": 32.666
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:10:32Z",
+   "host_seconds": 30.862,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1134460928,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 10.544,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.323,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 10.841,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.323,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 1.068,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "WrittenOnTheWallII_Test_C6_size",
+   "template_sha256": "8aed2d63d636ece10fc505fdb8148345e146ca5ed6d223c3a2eb982939cf63c5",
+   "theorem_name": "WrittenOnTheWallII.Test.C6_size",
+   "wall_seconds": 30.862
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:11:02Z",
+   "host_seconds": 30.06,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1169137664,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 10.925,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 2.922,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 11.087,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.122,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 0.266,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "WrittenOnTheWallII_Test_Star5_indep",
+   "template_sha256": "2f0781f17c932c7e4a00e5c5b070a79f047c8b61a3f3b71d2c8fdb3efb3763df",
+   "theorem_name": "WrittenOnTheWallII.Test.Star5_indep",
+   "wall_seconds": 30.06
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:11:38Z",
+   "host_seconds": 36.615,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1146695680,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 10.146,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 4.726,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.888,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 4.477,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 5.583,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "WrittenOnTheWallII_Test_house_cvetkovic",
+   "template_sha256": "db66945d4427980430a6c7e2dc70f23f62d72c9d98ccd8baabe2ba447557dd7b",
+   "theorem_name": "WrittenOnTheWallII.Test.house_cvetkovic",
+   "wall_seconds": 36.615
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:12:05Z",
+   "host_seconds": 26.675,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1097297920,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.183,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.121,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.286,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.124,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 0.166,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "all_fermat_squarefree",
+   "template_sha256": "30a94b152dc46b4fc8446e62e52797e5f5fdf376eb517e3f0dfa4706d3586286",
+   "theorem_name": "Fermat.all_fermat_squarefree",
+   "wall_seconds": 26.676
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:12:32Z",
+   "host_seconds": 26.562,
+   "kind": "bridge",
+   "passed": true,
+   "peak_memory_bytes": 1077415936,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.544,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.122,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.083,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 2.872,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 0.166,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "all_fermat_squarefree",
+   "template_sha256": "30a94b152dc46b4fc8446e62e52797e5f5fdf376eb517e3f0dfa4706d3586286",
+   "theorem_name": "Fermat.gdm_answer_bridge_e2ef94bf10e42bee",
+   "wall_seconds": 26.562
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:13:01Z",
+   "host_seconds": 29.104,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1151864832,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 10.389,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.073,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.89,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.022,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 0.967,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "complexity_three_pow",
+   "template_sha256": "566595cda540db22eead0629f23b29c1ec643e2f3a028be290b8fb44d53ef17b",
+   "theorem_name": "Mathoverflow75792.complexity_three_pow",
+   "wall_seconds": 29.104
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:13:30Z",
+   "host_seconds": 29.719,
+   "kind": "bridge",
+   "passed": true,
+   "peak_memory_bytes": 1180758016,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 10.44,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 3.324,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.835,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 3.324,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 0.968,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "complexity_three_pow",
+   "template_sha256": "566595cda540db22eead0629f23b29c1ec643e2f3a028be290b8fb44d53ef17b",
+   "theorem_name": "Mathoverflow75792.gdm_answer_bridge_e4486f607f6901cc",
+   "wall_seconds": 29.72
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:14:09Z",
+   "host_seconds": 38.506,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1120108544,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 10.286,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 4.778,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.888,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 5.077,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 6.731,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "erdos_18a",
+   "template_sha256": "588221eea4bc0fb7ca2dce9bc365f74eec2a66a5db7b8b4e00af80e11383b184",
+   "theorem_name": "Erdos18.erdos_18a",
+   "wall_seconds": 38.507
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:14:47Z",
+   "host_seconds": 37.954,
+   "kind": "bridge",
+   "passed": true,
+   "peak_memory_bytes": 1130053632,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.738,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 4.726,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.886,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 5.076,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 6.779,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "erdos_18a",
+   "template_sha256": "588221eea4bc0fb7ca2dce9bc365f74eec2a66a5db7b8b4e00af80e11383b184",
+   "theorem_name": "Erdos18.gdm_answer_bridge_360d9debbe794d96",
+   "wall_seconds": 37.954
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:15:25Z",
+   "host_seconds": 38.037,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1105858560,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.183,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 5.428,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.639,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 5.379,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 6.582,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "erdos_400_part_i",
+   "template_sha256": "6ab69083e3e1538f0a60b8614620e580df9545e48101241f37744c1b30276c55",
+   "theorem_name": "Erdos400.erdos_400.parts.i",
+   "wall_seconds": 38.037
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:16:04Z",
+   "host_seconds": 38.911,
+   "kind": "bridge",
+   "passed": true,
+   "peak_memory_bytes": 1106702336,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.846,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 5.382,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.846,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 5.133,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 6.781,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "erdos_400_part_i",
+   "template_sha256": "6ab69083e3e1538f0a60b8614620e580df9545e48101241f37744c1b30276c55",
+   "theorem_name": "Erdos400.erdos_400.parts.gdm_answer_bridge_dcc5812fa5df8f2c",
+   "wall_seconds": 38.911
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:16:37Z",
+   "host_seconds": 33.486,
+   "kind": "pristine",
+   "passed": true,
+   "peak_memory_bytes": 1076006912,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 9.744,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 4.13,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.693,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 4.377,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 3.675,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "greens14",
+   "template_sha256": "abffedbdde712e456b58fc1dfb127562c974f95e5abdcd8a2c686f7f4ec1b5fd",
+   "theorem_name": "Green14.green_14_polynomial",
+   "wall_seconds": 33.487
+  },
+  {
+   "axiom": "sorryAx",
+   "detail": "Illegal axiom detected: 'sorryAx'",
+   "entry_sha256": "f1c7407c77df7d847a662c6546a2e8ee81db950040119897036930cf68d99f83",
+   "finished_at": "2026-10-20T19:17:11Z",
+   "host_seconds": 33.593,
+   "kind": "bridge",
+   "passed": true,
+   "peak_memory_bytes": 1087213568,
+   "real_lean": true,
+   "status": "illegal_axiom",
+   "steps": [
+    {
+     "exit_code": 0,
+     "name": "build_challenge",
+     "seconds": 10.052,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_challenge",
+     "seconds": 4.328,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "build_solution",
+     "seconds": 9.493,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "export_solution",
+     "seconds": 4.127,
+     "status": "ok",
+     "timeout": 1200
+    },
+    {
+     "exit_code": 0,
+     "name": "verify_exports",
+     "seconds": 3.726,
+     "status": "ok",
+     "timeout": 1200
+    }
+   ],
+   "task_id": "greens14",
+   "template_sha256": "abffedbdde712e456b58fc1dfb127562c974f95e5abdcd8a2c686f7f4ec1b5fd",
+   "theorem_name": "Green14.gdm_answer_bridge_c4c6d01fedc76b7d",
+   "wall_seconds": 33.593
+  }
+ ],
+ "self_compare_scope": {
+  "only_tasks": [
+   "Buchi_buchi_false_M4",
+   "DedekindNumber_M'_three",
+   "Erdos1059_allFactorialSubtractionsComposite_101",
+   "Erdos1074_erdos_1074_variants_EHSNumbers_init",
+   "Erdos1085_erdos_1085_variants_upper_d3",
+   "Erdos1092_f_asymptotic_2",
+   "Erdos1148_erdos_1148_variants_weaker",
+   "Erdos141_exists_three_consecutive_primes_in_ap",
+   "Erdos195_erdos_195_variants_leq_5_bound",
+   "Erdos23_erdos_23_variants_n1_tight",
+   "Erdos340_greedySidon_go_singleton_two",
+   "Erdos36_minimum_overlap_variants_upper_erdos_1955",
+   "Erdos539_erdos_539_variants_sq_isBigO",
+   "Erdos56_maxWeaklyDivisible_one",
+   "Erdos6_erdos_6_variants_decreasing",
+   "EulerBrick_cuboidThree",
+   "GRH_implies_riemannHypothesis",
+   "Green32_hasCosetHole_empty",
+   "Green38_green_38_test_zero_mem_validCardinalities",
+   "MagicSquares_exists_semi_magic_square_cubes",
+   "SumOfThreeCubes_isSumOfThreeCubes_iff_mod_9",
+   "WrittenOnTheWallII_Test_C6_avg_dist",
+   "WrittenOnTheWallII_Test_C6_size",
+   "WrittenOnTheWallII_Test_Star5_indep",
+   "WrittenOnTheWallII_Test_house_cvetkovic",
+   "all_fermat_squarefree",
+   "complexity_three_pow",
+   "erdos_18a",
+   "erdos_400_part_i",
+   "greens14"
+  ],
+  "task_set": "all71"
+ },
+ "semantics": "gdm-evaluator-semantics/3",
+ "summary": {
+  "container_runs": 64,
+  "fixtures_failed": [],
+  "fixtures_missing": [],
+  "fixtures_passed": 22,
+  "fixtures_total": 22,
+  "image_entry_current": true,
+  "probe_passed": true,
+  "self_compare_failed": [
+   "Erdos340_greedySidon_go_singleton_two/pristine"
+  ],
+  "self_compare_passed": 38,
+  "self_compare_total": 39,
+  "upstream_agreeing": 2,
+  "upstream_total": 2
+ },
+ "updated_at": "2026-10-20T19:17:11Z",
+ "upstream": [
+  {
+   "advisory": true,
+   "agrees": true,
+   "detail": "exit code of unmodified comparator; output not interpreted",
+   "exit_code": 0,
+   "host_seconds": 35.247,
+   "name": "green32_genuine",
+   "peak_memory_bytes": 1304961024,
+   "real_lean": true,
+   "status": "upstream_exit",
+   "verify_verdict": "genuine",
+   "wall_seconds": 35.247
+  },
+  {
+   "advisory": true,
+   "agrees": true,
+   "detail": "exit code of unmodified comparator; output not interpreted",
+   "exit_code": 1,
+   "host_seconds": 30.122,
+   "name": "erdos6_shadow_definition",
+   "peak_memory_bytes": 1206042624,
+   "real_lean": true,
+   "status": "upstream_exit",
+   "verify_verdict": "fraudulent",
+   "wall_seconds": 30.122
+  }
+ ]
+}

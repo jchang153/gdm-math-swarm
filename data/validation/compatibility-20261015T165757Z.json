@@ -1,0 +1,318 @@
+{
+  "schema": "gdm-compatibility/1",
+  "created_at": "2026-10-15T17:01:25Z",
+  "all_required_passed": true,
+  "image_ids": {
+    "agent": "sha256:5a009aa1f593609fe4742bc6f7223f7beccff4a790d1daa8f6064f5b17a294c6",
+    "lean": "sha256:5588cd382a589737d4909b955966d23ef2a257d88587022ff1195e6fbe5ec943"
+  },
+  "model_id": "deepseek/deepseek-v4.1-flash",
+  "provider_route": "fireworks/us",
+  "settings": {
+    "context_length": 1048576,
+    "max_tokens": 16384,
+    "model_id": "deepseek/deepseek-v4.1-flash",
+    "output_usd_per_token": "0.0000018",
+    "prompt_usd_per_token": "0.00000045",
+    "provider_route": "fireworks/us",
+    "reasoning_effort": "high"
+  },
+  "spent_usd": "0.106694370",
+  "requests": 13,
+  "request_ids": [
+    "7bb4f9ec-8468-41c4-83fc-fd02448433c7",
+    "b56972dd-9ec6-49a9-969a-3ac1459ee691",
+    "cbb58375-be01-4a63-bb07-b3865aa81cb8",
+    "d9c49565-4c10-4b36-9375-1864fe68c1b4",
+    "791e2d30-32f2-42a6-ae9a-560f2e84bc4b",
+    "285e3e74-f28a-4eb4-802f-d68f53152d52",
+    "f3ade276-3b45-490b-ad77-5a4c5a1fd990",
+    "d006387a-c17e-42e6-93a5-886daac833b2",
+    "d52769b6-04dd-4296-8b99-c1a49f64af35",
+    "1868e29d-74ab-4dcc-a007-bd93b0178c94",
+    "e40f765f-cc38-46a2-aa99-ab9a4de68267",
+    "703ae709-6dda-40b1-b70b-f6752602b6b2",
+    "c4a2b456-4b35-4cb7-89c7-0122d595460a"
+  ],
+  "checks": {
+    "tool_call_parsed": {
+      "passed": true,
+      "required": true,
+      "detail": "11 built-in Bash call(s) parsed and executed; 0 tool call(s) with a parse error out of 15"
+    },
+    "conference_tool_call": {
+      "passed": true,
+      "required": true,
+      "detail": "2 of 3 executed mcp__conference__* call(s) returned ok and appear in the conference log under agent-001"
+    },
+    "reasoning_replay_accepted": {
+      "passed": true,
+      "required": true,
+      "detail": "11 of 11 request(s) replaying earlier reasoning returned without provider error; 10 response(s) reported reasoning tokens"
+    },
+    "provider_cost_reported": {
+      "passed": true,
+      "required": true,
+      "detail": "settlement bases of 12 finished inference(s): {'provider_reported_cost': 12}; 0 unbilled/uncertain provider error(s)"
+    },
+    "completion_within_max_tokens": {
+      "passed": true,
+      "required": true,
+      "detail": "max generated tokens incl. reasoning 6684 (limit 16384); 0 response(s) over the limit or without usage"
+    },
+    "reasoning_cap_enforced": {
+      "passed": true,
+      "required": true,
+      "detail": "probe max_tokens 1024: 1 admitted, 1 finished, 0 failed []; stop reason 'max_tokens' (required 'max_tokens'); provider-reported generated tokens incl. reasoning 1024 (reasoning 705; required <= 1024 with reasoning > 0); settled 0.0018846 by 'provider_reported_cost' within the probe reservation: True; route consistent: True"
+    },
+    "no_estimate_violation": {
+      "passed": true,
+      "required": true,
+      "detail": "0 request(s) of this check in estimate_violation; scope violation flag False"
+    },
+    "route_pinned": {
+      "passed": true,
+      "required": true,
+      "detail": "12 of 12 finished inference(s) served by route 'fireworks/us' as deepseek/deepseek-v4.1-flash"
+    },
+    "no_sample_error": {
+      "passed": true,
+      "required": true,
+      "detail": "sample error None; 0 unrecovered/unknown out of 0 model event error(s); abort reason 'max_requests'"
+    },
+    "truncation_observed": {
+      "passed": false,
+      "required": false,
+      "detail": "0 truncated response(s); stop reasons []"
+    },
+    "compaction_observed": {
+      "passed": false,
+      "required": false,
+      "detail": "0 compaction event(s), 0 compaction request(s)"
+    }
+  },
+  "kind": "paid live compatibility check (one genuine Claude Code agent, frozen OpenRouter route)",
+  "agent_id": "agent-001",
+  "persona": "combinatorics",
+  "abort_reason": "max_requests",
+  "evaluation_cancelled": false,
+  "agent_exit": {
+    "status": "stopped:max_requests",
+    "harness_status": "stopped:max_requests",
+    "harness_after_stop": null,
+    "final_output": "tool_calls",
+    "error": null,
+    "inference": {
+      "requests": 12,
+      "finished": 12,
+      "last_stop_reason": "tool_calls",
+      "consecutive_truncations": 0,
+      "truncated_responses": 0,
+      "unbilled_errors": 0,
+      "uncertain": 0,
+      "in_flight": 0,
+      "last_request_outcome": "not_admitted",
+      "last_denial": "run_stopped",
+      "last_error": null,
+      "last_output_kind": "tool_calls"
+    }
+  },
+  "limits": {
+    "max_requests": 12,
+    "max_minutes": 10,
+    "min_remaining_usd": "0.50",
+    "cap_probe_max_tokens": 1024
+  },
+  "ledger": {
+    "path": "state/budget.sqlite",
+    "scope": "compatibility",
+    "before": {
+      "cap_usd": "2",
+      "committed_usd": "0.144114852",
+      "remaining_usd": "1.855885148",
+      "settled_usd": "0.144114852",
+      "held_usd": "0",
+      "unresolved_requests": 0,
+      "uncertain_requests": 0,
+      "in_flight_requests": 0,
+      "settled_requests": 26,
+      "unbilled_error_requests": 0,
+      "violation": false,
+      "acknowledged_violations": 0,
+      "reconciliations": 0,
+      "manual_reconciliations": 0,
+      "cap_raises": 0
+    },
+    "after": {
+      "cap_usd": "2",
+      "committed_usd": "0.250809222",
+      "remaining_usd": "1.749190778",
+      "settled_usd": "0.250809222",
+      "held_usd": "0",
+      "unresolved_requests": 0,
+      "uncertain_requests": 0,
+      "in_flight_requests": 0,
+      "settled_requests": 39,
+      "unbilled_error_requests": 0,
+      "violation": false,
+      "acknowledged_violations": 0,
+      "reconciliations": 0,
+      "manual_reconciliations": 0,
+      "cap_raises": 0
+    },
+    "estimate_violation_requests": [],
+    "committed_delta_usd": "0.106694370",
+    "request_states": {
+      "settled": 13
+    },
+    "missing_request_ids": []
+  },
+  "run_dir": "runs/compat-20261015T165757Z",
+  "inspect_log": "2026-10-15T17-00-01-00-00_gdm-math-swarm_Uz5ieJbHTfJyTT8vkTQana.eval",
+  "lean_warm_up": {
+    "image": "sha256:5588cd382a589737d4909b955966d23ef2a257d88587022ff1195e6fbe5ec943",
+    "memory": "6g",
+    "cpus": 2,
+    "timeout_seconds": 900,
+    "source": "import FormalConjectures.Util.ProblemImports",
+    "vm_before": {
+      "vm_uptime_seconds": 394.74,
+      "MemTotal_kib": 264095952,
+      "MemFree_kib": 261863744,
+      "MemAvailable_kib": 261271472,
+      "Buffers_kib": 92144,
+      "Cached_kib": 737084,
+      "Active(file)_kib": 557324,
+      "Inactive(file)_kib": 261348
+    },
+    "status": "success",
+    "exit_code": 0,
+    "lean_elapsed_seconds": 115.474416765,
+    "timeout_source": null,
+    "ok": true,
+    "wall_seconds": 115.475,
+    "vm_after": {
+      "vm_uptime_seconds": 510.38,
+      "MemTotal_kib": 264095952,
+      "MemFree_kib": 256291336,
+      "MemAvailable_kib": 261187664,
+      "Buffers_kib": 92824,
+      "Cached_kib": 6165396,
+      "Active(file)_kib": 1022216,
+      "Inactive(file)_kib": 5225776
+    }
+  },
+  "tool_calls": [
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "mcp__conference__get_conference_status",
+      "parse_error": null
+    },
+    {
+      "function": "mcp__conference__list_problems",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "mcp__conference__get_bulletin_board",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    }
+  ],
+  "duration_seconds": 207.5,
+  "credential_source": "host only (secrets.load_openrouter_key)",
+  "credentials_in_environment": false,
+  "provider_limit": {
+    "endpoint": "https://openrouter.ai/api/v1/key",
+    "checked_at": "2026-10-15T16:59:54.875767+00:00",
+    "paid_calls": 0,
+    "limit": null,
+    "limit_remaining": null,
+    "limit_reset": null,
+    "usage": 191.213098903,
+    "usage_daily": 0,
+    "usage_weekly": 63.126766534,
+    "usage_monthly": 191.213098903,
+    "is_free_tier": false,
+    "include_byok_in_limit": false,
+    "expires_at": null,
+    "max_remaining_usd": "1.855885148",
+    "checks": {
+      "limit_set": {
+        "passed": true,
+        "waived": true,
+        "reason": "user authorized an unlimited key; shared ledger remains mandatory"
+      },
+      "limit_does_not_reset": {
+        "passed": true,
+        "limit_reset": null
+      },
+      "remaining_within_allowance": {
+        "passed": true,
+        "limit_remaining": null,
+        "max_remaining_usd": "1.855885148",
+        "waived": true,
+        "reason": "user authorized an unlimited key; shared ledger remains mandatory"
+      },
+      "key_not_expired": {
+        "passed": true,
+        "expires_at": null
+      }
+    },
+    "warnings": [
+      "no provider cap; shared ledger remains mandatory",
+      "key already has usage 191.213098903",
+      "BYOK usage is excluded from the limit"
+    ],
+    "unlimited_key_authorized": true,
+    "provider_limit_enforced": false,
+    "all_required_passed": true
+  },
+  "compose_sha256": "ffaa3ae8d2a8865c5a9ed487a2022947f785184efefefc6c097a96926e78cd5b",
+  "cap_probe_error": null
+}

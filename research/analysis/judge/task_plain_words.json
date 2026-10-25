@@ -1,0 +1,364 @@
+{
+ "schema": "gdm-judge-task-plain-words/1",
+ "researcher_only": "Never copy into an agent image, container, workspace, prompt, tool result or the conference library.",
+ "written": "2026-10-20, by the implementing development agent, from the pinned Lean statements (data/manifest.json, data/templates/) and docs/problems.md; not separately reviewed by the owner.",
+ "rule": "One neutral sentence per task saying what the pinned statement asks, in everyday words. No status, known answer, solution or difficulty. A task without a sentence (plain null) is named by its title only.",
+ "used_by": "research/analysis/judge/tasks_plain.py: the TASKS IN PLAIN WORDS section of the candidate, verifier and run-level requests (context, not evidence) and the 'Problem' lines of report.html and the evidence browser.",
+ "tasks": {
+  "Buchi_buchi_false_M4": {
+   "title": "Büchi's problem — buchi_false_M4",
+   "theorem_name": "Buchi.buchi_false_M4",
+   "plain": "Show that a property from Büchi's problem fails for 4: there are integers x and a, with a not zero, such that (x + n)^2 + a is a perfect square for each of n = 0, 1, 2 and 3."
+  },
+  "DedekindNumber_M'_three": {
+   "title": "Dedekind Numbers — M'_three",
+   "theorem_name": "DedekindNumber.M'_three",
+   "plain": "Show that there are exactly 20 'antichains' of subsets of a three-element set: collections of subsets in which no member is contained in another, the empty collection included."
+  },
+  "Erdos1059_allFactorialSubtractionsComposite_101": {
+   "title": "Erdős Problem 1059 — allFactorialSubtractionsComposite_101",
+   "theorem_name": "Erdos1059.allFactorialSubtractionsComposite_101",
+   "plain": "Show that 101 minus any factorial smaller than 101 (that is, 101 - 1, 101 - 2, 101 - 6 and 101 - 24) is a composite number, not a prime."
+  },
+  "Erdos1074_erdos_1074_variants_EHSNumbers_init": {
+   "title": "Erdős Problem 1074 — erdos_1074.variants.EHSNumbers_init",
+   "theorem_name": "Erdos1074.erdos_1074.variants.EHSNumbers_init",
+   "plain": "Show that the first seven numbers m of a certain kind (those for which some prime p divides m! + 1, m factorial plus one, while p does not leave remainder 1 on division by m) are 8, 9, 13, 14, 15, 16 and 17."
+  },
+  "Erdos1085_erdos_1085_variants_upper_d3": {
+   "title": "Erdős Problem 1085 — erdos_1085.variants.upper_d3",
+   "theorem_name": "Erdos1085.erdos_1085.variants.upper_d3",
+   "plain": "Let f(n) be the largest number of pairs at distance exactly 1 that n points in three-dimensional space can have; decide whether f(n) is at most a constant times n^(4/3) times log log n for all large n."
+  },
+  "Erdos1085_erdos_1085_variants_upper_d4_erdos": {
+   "title": "Erdős Problem 1085 — erdos_1085.variants.upper_d4_erdos",
+   "theorem_name": "Erdos1085.erdos_1085.variants.upper_d4_erdos",
+   "plain": null
+  },
+  "Erdos1092_f_asymptotic_2": {
+   "title": "Erdős Problem 1092 — f_asymptotic_2",
+   "theorem_name": "Erdos1092.f_asymptotic_2",
+   "plain": "For graphs on n points the file defines f(2, n), roughly the largest k such that a graph is guaranteed to be 3-colourable whenever each of its subgraphs can be made 3-colourable by deleting at most k edges; decide whether f(2, n) grows faster than n itself."
+  },
+  "Erdos10_erdos_10_variants_granville_soundararajan_odd": {
+   "title": "Erdős Problem 10 — erdos_10.variants.granville_soundararajan_odd",
+   "theorem_name": "Erdos10.erdos_10.variants.granville_soundararajan_odd",
+   "plain": null
+  },
+  "Erdos1102_erdos_1102_lower_density_Q_exists": {
+   "title": "Erdős Problem 1102 — erdos_1102.lower_density_Q_exists",
+   "theorem_name": "Erdos1102.erdos_1102.lower_density_Q_exists",
+   "plain": null
+  },
+  "Erdos1148_erdos_1148_variants_weaker": {
+   "title": "Erdős Problem 1148 — erdos_1148.variants.weaker",
+   "theorem_name": "Erdos1148.erdos_1148.variants.weaker",
+   "plain": null
+  },
+  "Erdos123_erdos_123": {
+   "title": "Erdős Problem 123 — erdos_123",
+   "theorem_name": "Erdos123.erdos_123",
+   "plain": null
+  },
+  "Erdos141_exists_three_consecutive_primes_in_ap": {
+   "title": "Erdős Problem 141 — exists_three_consecutive_primes_in_ap",
+   "theorem_name": "Erdos141.exists_three_consecutive_primes_in_ap",
+   "plain": "Show that some three consecutive prime numbers are evenly spaced: the gap from the first to the second equals the gap from the second to the third."
+  },
+  "Erdos195_erdos_195_variants_leq_5_bound": {
+   "title": "Erdős Problem 195 — erdos_195.variants.leq_5_bound",
+   "theorem_name": "Erdos195.erdos_195.variants.leq_5_bound",
+   "plain": "Show that 5 bounds the length k for which every reshuffling of all the integers (a one-to-one rearrangement) is guaranteed to contain, at increasing positions, k values forming an evenly spaced increasing or decreasing sequence, as the file defines this largest guaranteed length."
+  },
+  "Erdos204_erdos_204": {
+   "title": "Erdős Problem 204 — erdos_204",
+   "theorem_name": "Erdos204.erdos_204",
+   "plain": null
+  },
+  "Erdos23_erdos_23_variants_n1_tight": {
+   "title": "Erdős Problem 23 — erdos_23.variants.n1_tight",
+   "theorem_name": "Erdos23.erdos_23.variants.n1_tight",
+   "plain": "Show that there is a graph on 5 points with no triangle whose points cannot be split into two groups with every edge running between the groups, so that at least one edge would have to be removed to allow such a split."
+  },
+  "Erdos323_erdos_323_variants_k_eq_2": {
+   "title": "Erdős Problem 323 — erdos_323.variants.k_eq_2",
+   "theorem_name": "Erdos323.erdos_323.variants.k_eq_2",
+   "plain": null
+  },
+  "Erdos340_greedySidon_go_singleton_two": {
+   "title": "Erdős Problem 340 — greedySidon_go_singleton_two",
+   "theorem_name": "Erdos340.greedySidon_go_singleton_two",
+   "plain": "Show that one step of the file's greedy construction picks 2: starting from the set {1}, the smallest number that is at least 2, not already in the set, and keeps all sums of two members different is 2."
+  },
+  "Erdos36_minimum_overlap_variants_upper_erdos_1955": {
+   "title": "Erdős Problem 36 — minimum_overlap.variants.upper.erdos_1955",
+   "theorem_name": "Erdos36.minimum_overlap.variants.upper.erdos_1955",
+   "plain": null
+  },
+  "Erdos539_erdos_539": {
+   "title": "Erdős Problem 539 — erdos_539",
+   "theorem_name": "Erdos539.erdos_539",
+   "plain": null
+  },
+  "Erdos539_erdos_539_variants_sq_isBigO": {
+   "title": "Erdős Problem 539 — erdos_539.variants.sq_isBigO",
+   "theorem_name": "Erdos539.erdos_539.variants.sq_isBigO",
+   "plain": null
+  },
+  "Erdos567_erdos_567_parts_ii": {
+   "title": "Erdős Problem 567 — erdos_567.parts.ii",
+   "theorem_name": "Erdos567.erdos_567.parts.ii",
+   "plain": null
+  },
+  "Erdos56_maxWeaklyDivisible_one": {
+   "title": "Erdős Problem 56 — maxWeaklyDivisible_one",
+   "theorem_name": "Erdos56.maxWeaklyDivisible_one",
+   "plain": "Show that, for every positive k, the largest set of numbers chosen from 1 to 1 in which no k + 1 members are pairwise without common factors has exactly 1 element."
+  },
+  "Erdos680_erdos_680_parts_ii": {
+   "title": "Erdős Problem 680 — erdos_680.parts.ii",
+   "theorem_name": "Erdos680.erdos_680.parts.ii",
+   "plain": null
+  },
+  "Erdos699_sylvester_schur": {
+   "title": "Erdős Problem 699 — sylvester_schur",
+   "theorem_name": "Erdos699.sylvester_schur",
+   "plain": "Show that whenever 1 <= i <= n/2, the binomial coefficient 'n choose i' (the number of ways to pick i things out of n) has a prime factor larger than i."
+  },
+  "Erdos6_erdos_6_variants_decreasing": {
+   "title": "Erdős Problem 6 — erdos_6.variants.decreasing",
+   "theorem_name": "Erdos6.erdos_6.variants.decreasing",
+   "plain": "Show that, for every chosen length, there are infinitely many places in the list of prime numbers where that many consecutive gaps between neighbouring primes keep getting strictly smaller, each gap smaller than the one before."
+  },
+  "Erdos812_erdos_812_parts_i": {
+   "title": "Erdős Problem 812 — erdos_812.parts.i",
+   "theorem_name": "Erdos812.erdos_812.parts.i",
+   "plain": null
+  },
+  "Erdos835_chromaticNumber_johnson_2k_k_lower_bound_odd": {
+   "title": "Erdős Problem 835 — chromaticNumber_johnson_2k_k_lower_bound_odd",
+   "theorem_name": "Erdos835.chromaticNumber_johnson_2k_k_lower_bound_odd",
+   "plain": null
+  },
+  "Erdos835_johnsonGraph_2k_k_chromaticNumber_known_cases": {
+   "title": "Erdős Problem 835 — johnsonGraph_2k_k_chromaticNumber_known_cases",
+   "theorem_name": "Erdos835.johnsonGraph_2k_k_chromaticNumber_known_cases",
+   "plain": null
+  },
+  "Erdos885_erdos_885_variants_k_eq_4": {
+   "title": "Erdős Problem 885 — erdos_885.variants.k_eq_4",
+   "theorem_name": "Erdos885.erdos_885.variants.k_eq_4",
+   "plain": null
+  },
+  "Erdos891_erdos_891": {
+   "title": "Erdős Problem 891 — erdos_891",
+   "theorem_name": "Erdos891.erdos_891",
+   "plain": null
+  },
+  "EulerBrick_cuboidThree": {
+   "title": "Open questions regarding the existence of Euler bricks — cuboidThree",
+   "theorem_name": "EulerBrick.cuboidThree",
+   "plain": "Show that, for every three distinct positive whole numbers a, b and c with no common factor shared by all three (excluding the cases b x c = a^2 and a x c = b^2), a specific degree-12 polynomial built from a, b and c cannot be factored into smaller polynomials with integer coefficients; the statement is linked to the search for a box whose edges and diagonals all have whole-number lengths."
+  },
+  "GRH_implies_riemannHypothesis": {
+   "title": "Riemann Hypothesis and its generalizations — implies_riemannHypothesis",
+   "theorem_name": "GRH.implies_riemannHypothesis",
+   "plain": "Show that the simplest special case of the generalized Riemann hypothesis (the case of modulus 1) says the same thing as the classical Riemann hypothesis about where the zeros of the zeta function lie: a check that the general statement is set up correctly."
+  },
+  "Green14_W_3_11": {
+   "title": "Ben Green's Open Problem 14 — W_3_11",
+   "theorem_name": "Green14.W_3_11",
+   "plain": "Show that W(3, 11) = 114, where W(3, 11) is the smallest N such that, however the numbers 1 to N are coloured red and blue, there is a red evenly spaced run of 3 numbers or a blue evenly spaced run of 11."
+  },
+  "Green14_W_3_29_lower": {
+   "title": "Ben Green's Open Problem 14 — W_3_29_lower",
+   "theorem_name": "Green14.W_3_29_lower",
+   "plain": null
+  },
+  "Green26_green_26_variants_yu25": {
+   "title": "Green's Open Problem 26 — green_26.variants.yu25",
+   "theorem_name": "Green26.green_26.variants.yu25",
+   "plain": null
+  },
+  "Green27_green_27_variants_previous_lower": {
+   "title": "Green's Open Problem 27 — green_27.variants.previous_lower",
+   "theorem_name": "Green27.green_27.variants.previous_lower",
+   "plain": null
+  },
+  "Green32_green_32_variants_szemeredi_regime": {
+   "title": "Green's Open Problem 32 — green_32.variants.szemeredi_regime",
+   "theorem_name": "Green32.green_32.variants.szemeredi_regime",
+   "plain": null
+  },
+  "Green32_hasCosetHole_empty": {
+   "title": "Green's Open Problem 32 — hasCosetHole_empty",
+   "theorem_name": "Green32.hasCosetHole_empty",
+   "plain": "A basic check of a definition used for Green's Problem 32: show that, among strings of n zeros and ones, the empty set has a 'coset hole' of size 0 in the sense defined in the file (a shifted subspace that it misses)."
+  },
+  "Green38_green_38_test_zero_mem_validCardinalities": {
+   "title": "Green's Open Problem 38 — green_38.test_zero_mem_validCardinalities",
+   "theorem_name": "Green38.green_38.test_zero_mem_validCardinalities",
+   "plain": "A basic check of a definition used for Green's Problem 38: show that 0 is one of the allowed set sizes in the file's definition (the empty set satisfies its condition)."
+  },
+  "InscribedSquare_inscribed_rectangle_problem": {
+   "title": "Inscribed square problem — inscribed_rectangle_problem",
+   "theorem_name": "InscribedSquare.inscribed_rectangle_problem",
+   "plain": null
+  },
+  "InvariantSubspaceProblem_Invariant_subspace_problem_l1": {
+   "title": "Invariant Subspace Problem — Invariant_subspace_problem_l1",
+   "theorem_name": "InvariantSubspaceProblem.Invariant_subspace_problem_l1",
+   "plain": null
+  },
+  "MagicSquares_exists_semi_magic_square_cubes": {
+   "title": "Magic Squares — exists_semi_magic_square_cubes",
+   "theorem_name": "MagicSquares.exists_semi_magic_square_cubes",
+   "plain": "Decide whether nine different cubes of positive whole numbers can be placed in a 3-by-3 grid so that every row and every column adds up to the same total."
+  },
+  "MonochromaticQuantumGraph_eqSystem10_no_solution_d9": {
+   "title": "Monochromatic quantum graphs (inherited vertex colorings) — eqSystem10_no_solution_d9",
+   "theorem_name": "MonochromaticQuantumGraph.eqSystem10_no_solution_d9",
+   "plain": null
+  },
+  "NoetherProblem_noether_problem_variants_three": {
+   "title": "Rational_variety — noether_problem.variants.three",
+   "theorem_name": "NoetherProblem.noether_problem.variants.three",
+   "plain": null
+  },
+  "OeisA287616_conjecture": {
+   "title": "Sum of a triangular number, a generalized pentagonal number, and a generalized heptagonal number — conjecture",
+   "theorem_name": "OeisA287616.conjecture",
+   "plain": null
+  },
+  "SquarePacking_least_three_square_packing_in_circle": {
+   "title": "Packing — least_three_square_packing_in_circle",
+   "theorem_name": "SquarePacking.least_three_square_packing_in_circle",
+   "plain": null
+  },
+  "SumOfThreeCubes_isSumOfThreeCubes_iff_mod_9": {
+   "title": "Sum of three cubes — isSumOfThreeCubes_iff_mod_9",
+   "theorem_name": "SumOfThreeCubes.isSumOfThreeCubes_iff_mod_9",
+   "plain": "Decide whether an integer can be written as a sum of three integer cubes (x^3 + y^3 + z^3, negative numbers allowed) exactly when it does not leave remainder 4 or 5 on division by 9."
+  },
+  "Transcendental_exp_mul_pi_transcendental": {
+   "title": "Open questions on transcendence of numbers — exp_mul_pi_transcendental",
+   "theorem_name": "Transcendental.exp_mul_pi_transcendental",
+   "plain": "Show that the number e times pi is transcendental: it is not a root of any nonzero polynomial with rational coefficients."
+  },
+  "WrittenOnTheWallII_GraphConjecture16_conjecture16": {
+   "title": "Written on the Wall II - Conjecture 16 — conjecture16",
+   "theorem_name": "WrittenOnTheWallII.GraphConjecture16.conjecture16",
+   "plain": null
+  },
+  "WrittenOnTheWallII_Test_C6_avg_dist": {
+   "title": "Testing Graph Invariants — C6_avg_dist",
+   "theorem_name": "WrittenOnTheWallII.Test.C6_avg_dist",
+   "plain": "Show that in a ring of six points (each point joined to its two neighbours), the average distance between two different points, counted in steps around the ring, is 9/5."
+  },
+  "WrittenOnTheWallII_Test_C6_size": {
+   "title": "Testing Graph Invariants — C6_size",
+   "theorem_name": "WrittenOnTheWallII.Test.C6_size",
+   "plain": "Show that a ring of six points, each point joined to its two neighbours, has exactly 6 connections (edges)."
+  },
+  "WrittenOnTheWallII_Test_Star5_indep": {
+   "title": "Testing Graph Invariants — Star5_indep",
+   "theorem_name": "WrittenOnTheWallII.Test.Star5_indep",
+   "plain": "Show that in a star made of one centre point joined to five outer points, the largest group of points with no two of them joined has 5 points."
+  },
+  "WrittenOnTheWallII_Test_house_cvetkovic": {
+   "title": "Testing Graph Invariants — house_cvetkovic",
+   "theorem_name": "WrittenOnTheWallII.Test.house_cvetkovic",
+   "plain": "Show that for the 'house' graph (five points drawn as a square with a triangular roof), a number computed from the eigenvalues of its connection table (the count of zero eigenvalues plus the smaller of the counts of positive and negative ones) equals 3."
+  },
+  "all_fermat_squarefree": {
+   "title": "Open questions about Fermat numbers — all_fermat_squarefree",
+   "theorem_name": "Fermat.all_fermat_squarefree",
+   "plain": "Decide whether every Fermat number (2 raised to the power 2^n, plus 1: 3, 5, 17, 257, 65537, ...) is squarefree, meaning that no square of a whole number larger than 1 divides it."
+  },
+  "catalan_conjecture": {
+   "title": "Catalan's conjecture and related Diophantine equations — catalans_conjecture",
+   "theorem_name": "Catalan.catalans_conjecture",
+   "plain": "Show that the only way two powers of positive whole numbers, each with an exponent of at least 2, can differ by exactly 1 (x^a - y^b = 1) is 3^2 - 2^3 = 1."
+  },
+  "complexity_three_pow": {
+   "title": "Mathoverflow 75792 — complexity_three_pow",
+   "theorem_name": "Mathoverflow75792.complexity_three_pow",
+   "plain": null
+  },
+  "complexity_two_pow": {
+   "title": "Mathoverflow 75792 — complexity_two_pow",
+   "theorem_name": "Mathoverflow75792.complexity_two_pow",
+   "plain": null
+  },
+  "erdos_1064": {
+   "title": "Erdős Problem 1064 — erdos_1064",
+   "theorem_name": "Erdos1064.erdos_1064",
+   "plain": "Show that for almost all whole numbers n (a set of density 1), phi(n) > phi(n - phi(n)), where phi(n) counts the numbers from 1 to n that share no factor with n."
+  },
+  "erdos_18a": {
+   "title": "Erdős Problem 18 — erdos_18a",
+   "theorem_name": "Erdos18.erdos_18a",
+   "plain": "Decide whether, for infinitely many 'practical' numbers m (numbers whose divisors can be added up to make every whole number from 1 to m), every number from 1 to m can be written as a sum of distinct divisors of m using very few of them: fewer than a fixed power of log log m."
+  },
+  "erdos_263_part_i": {
+   "title": "Erdős Problem 263 — erdos_263.parts.i",
+   "theorem_name": "Erdos263.erdos_263.parts.i",
+   "plain": null
+  },
+  "erdos_400_part_i": {
+   "title": "Erdős Problem 400 — erdos_400.parts.i",
+   "theorem_name": "Erdos400.erdos_400.parts.i",
+   "plain": "For each k of at least 2, let g(n) measure how far a1 + ... + ak can exceed n when the product of the factorials a1!, ..., ak! divides n! (n factorial, the product 1 x 2 x ... x n); decide whether, for every such k, the running total of g(1), ..., g(x) grows like a fixed constant times x times log x."
+  },
+  "erdos_835": {
+   "title": "Erdős Problem 835 — erdos_835",
+   "theorem_name": "Erdos835.erdos_835",
+   "plain": null
+  },
+  "erdos_91": {
+   "title": "Erdős Problem 91 — erdos_91",
+   "theorem_name": "Erdos91.erdos_91",
+   "plain": null
+  },
+  "euclid_squarefree": {
+   "title": "Euclid Numbers conjecture — euclid_numbers_are_square_free",
+   "theorem_name": "EuclidNumbers.euclid_numbers_are_square_free",
+   "plain": null
+  },
+  "fermat_composite": {
+   "title": "Open questions about Fermat numbers — fermat_number_are_composite",
+   "theorem_name": "Fermat.fermat_number_are_composite",
+   "plain": "Decide whether every Fermat number (2 raised to the power 2^n, plus 1) with n larger than 4 is composite, that is, not prime."
+  },
+  "greens14": {
+   "title": "Ben Green's Open Problem 14 — green_14_polynomial",
+   "theorem_name": "Green14.green_14_polynomial",
+   "plain": "W(k, r) is the smallest N such that, however the numbers 1 to N are coloured red and blue, there is a red evenly spaced run of k numbers or a blue evenly spaced run of r numbers; decide whether, for every k of at least 4, W(k, r) grows no faster than some fixed power of r."
+  },
+  "infinite_fermat_primes": {
+   "title": "Open questions about Fermat numbers — infinite_fermat_primes",
+   "theorem_name": "Fermat.infinite_fermat_primes",
+   "plain": "Decide whether infinitely many Fermat numbers (2 raised to the power 2^n, plus 1: 3, 5, 17, 257, 65537, ...) are prime."
+  },
+  "jacobian_conjecture": {
+   "title": "Jacobian conjecture — jacobian_conjecture",
+   "theorem_name": "JacobianConjecture.jacobian_conjecture",
+   "plain": null
+  },
+  "pillai_conjecture": {
+   "title": "Catalan's conjecture and related Diophantine equations — pillais_conjecture",
+   "theorem_name": "Catalan.pillais_conjecture",
+   "plain": "Show that, for any fixed positive whole numbers a, b and c, the equation a x^n - b y^m = c has only finitely many solutions with x, y, m and n all larger than 1 (leaving out m = n = 2)."
+  },
+  "schanuel_conjecture": {
+   "title": "Schanuel's Conjecture — schanuel_conjecture",
+   "theorem_name": "Schanuel.schanuel_conjecture",
+   "plain": null
+  },
+  "sendov_conjecture": {
+   "title": "Sendov's conjecture — sendov_conjecture",
+   "theorem_name": "Sendov.sendov_conjecture",
+   "plain": null
+  }
+ }
+}

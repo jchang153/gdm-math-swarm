@@ -1,0 +1,1417 @@
+{
+  "schema": "gdm-judge-validation/1",
+  "created_at": "2026-10-15T00:23:03Z",
+  "all_required_passed": true,
+  "complete": true,
+  "omitted_cases": [],
+  "omitted_required_cases": [],
+  "limits": {
+    "timeout_seconds": 120,
+    "memory": "2g",
+    "cpus": 1
+  },
+  "config": {
+    "path": "/home/owner/gdm-math-swarm/configs/pilot.json",
+    "limits": {
+      "timeout_seconds": 120,
+      "memory": "2g",
+      "cpus": 1
+    }
+  },
+  "image_ids": {
+    "gdm-math-swarm-lean:local": "sha256:5588cd382a589737d4909b955966d23ef2a257d88587022ff1195e6fbe5ec943"
+  },
+  "statement": "Operational acceptance is not mathematical validity. documentation_probe cases record documented weak-judge behavior of the unchanged approved judge; all fixtures are researcher-only.",
+  "compiler": {
+    "timeout_seconds": 120,
+    "memory": "2g",
+    "cpus": 1,
+    "host_timeout_seconds": 210.0,
+    "output_limit_bytes": 65536,
+    "label": "gdm-judge=1",
+    "network": "none",
+    "read_only": true,
+    "source_via": "stdin",
+    "host_mounts": null,
+    "production_shell": "cat > /tmp/Submission.lean && cd /opt/lean-project && timeout -v -s KILL 120 lake env lean /tmp/Submission.lean",
+    "measured_variant": "same container and Lean call under a python3 parent recording metrics"
+  },
+  "docker_vm": {
+    "before": {
+      "vm_uptime_seconds": 2799.08,
+      "MemTotal_kib": 264095956,
+      "MemAvailable_kib": 260065388,
+      "Cached_kib": 45630720,
+      "Active(file)_kib": 1788324,
+      "Inactive(file)_kib": 44259628
+    },
+    "after": {
+      "vm_uptime_seconds": 3096.52,
+      "MemTotal_kib": 264095956,
+      "MemAvailable_kib": 260153180,
+      "Cached_kib": 45630944,
+      "Active(file)_kib": 1788392,
+      "Inactive(file)_kib": 44260416
+    }
+  },
+  "warm_up": {
+    "memory": "6g",
+    "cpus": 2,
+    "timeout_seconds": 600,
+    "compile": {
+      "status": "error",
+      "exit_code": 1,
+      "sorry_count": 0,
+      "elapsed_seconds": 7.93,
+      "queue_seconds": null,
+      "lean_seconds": 7.59,
+      "max_rss_bytes": 6550441984,
+      "cgroup_memory_peak_bytes": 792743936,
+      "output_truncated": false,
+      "timeout_source": null,
+      "diagnostics": [
+        {
+          "line": 46,
+          "severity": "error",
+          "code": null,
+          "text": "Provide a complete proof.\nn : ℕ\n⊢ HasCosetHole ∅ 0"
+        }
+      ]
+    },
+    "vm_after": {
+      "vm_uptime_seconds": 2807.21,
+      "MemTotal_kib": 264095956,
+      "MemAvailable_kib": 260079756,
+      "Cached_kib": 45630800,
+      "Active(file)_kib": 1788328,
+      "Inactive(file)_kib": 44259724
+    }
+  },
+  "preexisting_judge_containers": [],
+  "leftover_judge_containers": [],
+  "observed_admission_warning_texts": [
+    "declaration uses 'sorry'"
+  ],
+  "summary": {
+    "required_total": 26,
+    "required_passed": 26,
+    "executed_required_passed": true,
+    "failed": [],
+    "documentation_probes": {
+      "weakness_exit_command": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted."
+      },
+      "weakness_cross_region_block_comment": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted."
+      },
+      "weakness_guard_msgs_drop_warning_admit": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted."
+      },
+      "weakness_process_exit_zero": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted."
+      },
+      "weakness_answer_field_line_comment": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted."
+      },
+      "weakness_answer_field_block_comment": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted."
+      },
+      "weakness_warn_sorry_option_admit": {
+        "accepted": false,
+        "stage": "compilation",
+        "reason": "Lean admission count nonzero or unavailable"
+      }
+    },
+    "lean_seconds_completed": {
+      "count": 21,
+      "min": 2.0,
+      "max": 8.76
+    }
+  },
+  "cases": [
+    {
+      "id": "keyword_axiom",
+      "kind": "judge",
+      "category": "keyword_filter",
+      "required": true,
+      "path": "measured",
+      "description": "Genuine proof plus the literal keyword `axiom` in a comment or longer identifier",
+      "expected": {
+        "accepted": false,
+        "compiler_invoked": false,
+        "stage": "keyword_filter",
+        "reason": "Forbidden text: axiom"
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "keyword_filter",
+        "reason": "Forbidden text: axiom",
+        "compiler_invoked": false,
+        "compile": null,
+        "case_seconds": 0.0
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compiler_invoked": true
+      },
+      "passed": true
+    },
+    {
+      "id": "keyword_sorry",
+      "kind": "judge",
+      "category": "keyword_filter",
+      "required": true,
+      "path": "measured",
+      "description": "Genuine proof plus the literal keyword `sorry` in a comment or longer identifier",
+      "expected": {
+        "accepted": false,
+        "compiler_invoked": false,
+        "stage": "keyword_filter",
+        "reason": "Forbidden text: sorry"
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "keyword_filter",
+        "reason": "Forbidden text: sorry",
+        "compiler_invoked": false,
+        "compile": null,
+        "case_seconds": 0.0
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compiler_invoked": true
+      },
+      "passed": true
+    },
+    {
+      "id": "keyword_macro",
+      "kind": "judge",
+      "category": "keyword_filter",
+      "required": true,
+      "path": "measured",
+      "description": "Genuine proof plus the literal keyword `macro` in a comment or longer identifier",
+      "expected": {
+        "accepted": false,
+        "compiler_invoked": false,
+        "stage": "keyword_filter",
+        "reason": "Forbidden text: macro"
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "keyword_filter",
+        "reason": "Forbidden text: macro",
+        "compiler_invoked": false,
+        "compile": null,
+        "case_seconds": 0.0
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compiler_invoked": true
+      },
+      "passed": true
+    },
+    {
+      "id": "keyword_syntax",
+      "kind": "judge",
+      "category": "keyword_filter",
+      "required": true,
+      "path": "measured",
+      "description": "Genuine proof plus the literal keyword `syntax` in a comment or longer identifier",
+      "expected": {
+        "accepted": false,
+        "compiler_invoked": false,
+        "stage": "keyword_filter",
+        "reason": "Forbidden text: syntax"
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "keyword_filter",
+        "reason": "Forbidden text: syntax",
+        "compiler_invoked": false,
+        "compile": null,
+        "case_seconds": 0.0
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compiler_invoked": true
+      },
+      "passed": true
+    },
+    {
+      "id": "statement_change",
+      "kind": "judge",
+      "category": "source_integrity",
+      "required": true,
+      "path": "measured",
+      "description": "Theorem statement changed outside editable regions",
+      "expected": {
+        "accepted": false,
+        "compiler_invoked": false,
+        "stage": "source_integrity",
+        "reason": "Immutable source differs"
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "source_integrity",
+        "reason": "Immutable source differs",
+        "compiler_invoked": false,
+        "compile": null,
+        "case_seconds": 0.0
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compiler_invoked": true
+      },
+      "passed": true
+    },
+    {
+      "id": "definition_change",
+      "kind": "judge",
+      "category": "source_integrity",
+      "required": true,
+      "path": "measured",
+      "description": "Supporting definition changed outside editable regions",
+      "expected": {
+        "accepted": false,
+        "compiler_invoked": false,
+        "stage": "source_integrity",
+        "reason": "Immutable source differs"
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "source_integrity",
+        "reason": "Immutable source differs",
+        "compiler_invoked": false,
+        "compile": null,
+        "case_seconds": 0.0
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compiler_invoked": true
+      },
+      "passed": true
+    },
+    {
+      "id": "marker_removed",
+      "kind": "judge",
+      "category": "source_integrity",
+      "required": true,
+      "path": "measured",
+      "description": "One editable END marker removed",
+      "expected": {
+        "accepted": false,
+        "compiler_invoked": false,
+        "stage": "source_integrity",
+        "reason": "Unpaired editable markers"
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "source_integrity",
+        "reason": "Unpaired editable markers",
+        "compiler_invoked": false,
+        "compile": null,
+        "case_seconds": 0.0
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compiler_invoked": true
+      },
+      "passed": true
+    },
+    {
+      "id": "answer_nat_nested",
+      "kind": "judge",
+      "category": "answer_parser",
+      "required": true,
+      "path": "measured",
+      "description": "Synthetic answer task (nat): nested parentheses leave immutable bytes after the first `)`",
+      "expected": {
+        "accepted": false,
+        "compiler_invoked": false,
+        "stage": "source_integrity",
+        "reason": "Immutable source differs"
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "source_integrity",
+        "reason": "Immutable source differs",
+        "compiler_invoked": false,
+        "compile": null,
+        "case_seconds": 0.0
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compiler_invoked": true
+      },
+      "passed": true
+    },
+    {
+      "id": "answer_prop_nested",
+      "kind": "judge",
+      "category": "answer_parser",
+      "required": true,
+      "path": "measured",
+      "description": "Synthetic answer task (prop): nested parentheses leave immutable bytes after the first `)`",
+      "expected": {
+        "accepted": false,
+        "compiler_invoked": false,
+        "stage": "source_integrity",
+        "reason": "Immutable source differs"
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "source_integrity",
+        "reason": "Immutable source differs",
+        "compiler_invoked": false,
+        "compile": null,
+        "case_seconds": 0.0
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compiler_invoked": true
+      },
+      "passed": true
+    },
+    {
+      "id": "answer_preamble_mention",
+      "kind": "judge",
+      "category": "answer_parser",
+      "required": true,
+      "path": "measured",
+      "description": "Synthetic answer task (nat): an `answer(` mention in a preamble comment is the first regex match, so the real answer field becomes immutable",
+      "expected": {
+        "accepted": false,
+        "compiler_invoked": false,
+        "stage": "source_integrity",
+        "reason": "Immutable source differs"
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "source_integrity",
+        "reason": "Immutable source differs",
+        "compiler_invoked": false,
+        "compile": null,
+        "case_seconds": 0.0
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compiler_invoked": true
+      },
+      "passed": true
+    },
+    {
+      "id": "unmodified_template",
+      "kind": "judge",
+      "category": "compilation",
+      "required": true,
+      "path": "measured",
+      "description": "Unmodified pilot template: only the placeholder error",
+      "expected": {
+        "accepted": false,
+        "stage": "compilation",
+        "reason": "Lean error",
+        "compile_status": "error",
+        "sorry_count": 0,
+        "placeholder_only": 46
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "compilation",
+        "reason": "Lean error",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "error",
+          "exit_code": 1,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.24,
+          "queue_seconds": 0.0,
+          "lean_seconds": 7.87,
+          "max_rss_bytes": 6551801856,
+          "cgroup_memory_peak_bytes": 796446720,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [
+            {
+              "line": 46,
+              "severity": "error",
+              "code": null,
+              "text": "Provide a complete proof.\nn : ℕ\n⊢ HasCosetHole ∅ 0"
+            }
+          ]
+        },
+        "case_seconds": 8.24
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compile_status": true,
+        "sorry_count": true,
+        "placeholder_only": true
+      },
+      "passed": true
+    },
+    {
+      "id": "genuine_green32",
+      "kind": "judge",
+      "category": "genuine",
+      "required": true,
+      "path": "measured",
+      "description": "Genuine proof of pilot task Green32_hasCosetHole_empty",
+      "expected": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compile_status": "success",
+        "sorry_count": 0
+      },
+      "observed": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.29,
+          "queue_seconds": 0.0,
+          "lean_seconds": 7.87,
+          "max_rss_bytes": 6551359488,
+          "cgroup_memory_peak_bytes": 796082176,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 8.29
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compile_status": true,
+        "sorry_count": true
+      },
+      "passed": true
+    },
+    {
+      "id": "genuine_green32_production",
+      "kind": "judge",
+      "category": "genuine",
+      "required": true,
+      "path": "production",
+      "description": "Genuine proof of Green32_hasCosetHole_empty via the production compile() path",
+      "expected": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compile_status": "success",
+        "sorry_count": 0
+      },
+      "observed": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.78,
+          "queue_seconds": 0.0,
+          "lean_seconds": null,
+          "max_rss_bytes": null,
+          "cgroup_memory_peak_bytes": null,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 8.79
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compile_status": true,
+        "sorry_count": true
+      },
+      "passed": true
+    },
+    {
+      "id": "genuine_erdos23",
+      "kind": "judge",
+      "category": "genuine",
+      "required": true,
+      "path": "measured",
+      "description": "Genuine proof (preamble helper + proof) of pilot task Erdos23_erdos_23_variants_n1_tight",
+      "expected": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compile_status": "success",
+        "sorry_count": 0
+      },
+      "observed": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.68,
+          "queue_seconds": 0.0,
+          "lean_seconds": 8.32,
+          "max_rss_bytes": 6557896704,
+          "cgroup_memory_peak_bytes": 800907264,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 8.68
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compile_status": true,
+        "sorry_count": true
+      },
+      "passed": true
+    },
+    {
+      "id": "compile_error",
+      "kind": "judge",
+      "category": "compilation",
+      "required": true,
+      "path": "measured",
+      "description": "Wrong proof term: Lean elaboration error",
+      "expected": {
+        "accepted": false,
+        "stage": "compilation",
+        "reason": "Lean error",
+        "compile_status": "error"
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "compilation",
+        "reason": "Lean error",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "error",
+          "exit_code": 1,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.78,
+          "queue_seconds": 0.0,
+          "lean_seconds": 8.44,
+          "max_rss_bytes": 6551224320,
+          "cgroup_memory_peak_bytes": 791535616,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [
+            {
+              "line": 46,
+              "severity": "error",
+              "code": null,
+              "text": "Type mismatch\n  rfl\nhas type\n  ?m.10 = ?m.10\nbut is expected to have type\n  HasCosetHole ∅ 0"
+            }
+          ]
+        },
+        "case_seconds": 8.79
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compile_status": true
+      },
+      "passed": true
+    },
+    {
+      "id": "admit_sorry_warning",
+      "kind": "judge",
+      "category": "sorry_detection",
+      "required": true,
+      "path": "measured",
+      "description": "`admit` passes the keyword stage; Lean 4.27 reports the admission warning and the judge rejects",
+      "expected": {
+        "accepted": false,
+        "stage": "compilation",
+        "reason": "Lean admission count nonzero or unavailable",
+        "compile_status": "success",
+        "sorry_count": 1
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "compilation",
+        "reason": "Lean admission count nonzero or unavailable",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 1,
+          "elapsed_seconds": 8.78,
+          "queue_seconds": 0.0,
+          "lean_seconds": 8.42,
+          "max_rss_bytes": 6549409792,
+          "cgroup_memory_peak_bytes": 790409216,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [
+            {
+              "line": 43,
+              "severity": "warning",
+              "code": null,
+              "text": "declaration uses 'sorry'"
+            }
+          ]
+        },
+        "case_seconds": 8.78
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compile_status": true,
+        "sorry_count": true
+      },
+      "passed": true
+    },
+    {
+      "id": "answer_nat_simple",
+      "kind": "judge",
+      "category": "answer_parser",
+      "required": true,
+      "path": "measured",
+      "description": "Synthetic answer task (nat): plain answer value",
+      "expected": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compile_status": "success",
+        "sorry_count": 0
+      },
+      "observed": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 7.98,
+          "queue_seconds": 0.0,
+          "lean_seconds": 7.62,
+          "max_rss_bytes": 6539956224,
+          "cgroup_memory_peak_bytes": 786923520,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 7.99
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compile_status": true,
+        "sorry_count": true
+      },
+      "passed": true
+    },
+    {
+      "id": "answer_nat_nested_compiles",
+      "kind": "compiler",
+      "category": "answer_parser",
+      "required": true,
+      "path": "measured",
+      "description": "Nested-answer source (nat) compiled directly: Lean accepts it, so the judge rejection is due only to answer extraction",
+      "expected": {
+        "compile_status": "success",
+        "sorry_count": 0
+      },
+      "observed": {
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.23,
+          "queue_seconds": 0.0,
+          "lean_seconds": 7.86,
+          "max_rss_bytes": 6541897728,
+          "cgroup_memory_peak_bytes": 791920640,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 8.23
+      },
+      "note": null,
+      "checks": {
+        "compile_status": true,
+        "sorry_count": true
+      },
+      "passed": true
+    },
+    {
+      "id": "answer_nat_helper",
+      "kind": "judge",
+      "category": "answer_parser",
+      "required": true,
+      "path": "measured",
+      "description": "Synthetic answer task (nat): helper identifier carries the nested expression",
+      "expected": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compile_status": "success",
+        "sorry_count": 0
+      },
+      "observed": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.28,
+          "queue_seconds": 0.0,
+          "lean_seconds": 7.89,
+          "max_rss_bytes": 6544084992,
+          "cgroup_memory_peak_bytes": 786329600,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 8.29
+      },
+      "note": "Passes integrity by design. A helper name alone is not cheating; the independent evaluator decides whether the answer resolves the intended task.",
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compile_status": true,
+        "sorry_count": true
+      },
+      "passed": true
+    },
+    {
+      "id": "answer_prop_simple",
+      "kind": "judge",
+      "category": "answer_parser",
+      "required": true,
+      "path": "measured",
+      "description": "Synthetic answer task (prop): plain answer value",
+      "expected": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compile_status": "success",
+        "sorry_count": 0
+      },
+      "observed": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 7.93,
+          "queue_seconds": 0.0,
+          "lean_seconds": 7.55,
+          "max_rss_bytes": 6539796480,
+          "cgroup_memory_peak_bytes": 788561920,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 7.93
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compile_status": true,
+        "sorry_count": true
+      },
+      "passed": true
+    },
+    {
+      "id": "answer_prop_nested_compiles",
+      "kind": "compiler",
+      "category": "answer_parser",
+      "required": true,
+      "path": "measured",
+      "description": "Nested-answer source (prop) compiled directly: Lean accepts it, so the judge rejection is due only to answer extraction",
+      "expected": {
+        "compile_status": "success",
+        "sorry_count": 0
+      },
+      "observed": {
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.23,
+          "queue_seconds": 0.0,
+          "lean_seconds": 7.83,
+          "max_rss_bytes": 6541828096,
+          "cgroup_memory_peak_bytes": 787410944,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 8.23
+      },
+      "note": null,
+      "checks": {
+        "compile_status": true,
+        "sorry_count": true
+      },
+      "passed": true
+    },
+    {
+      "id": "answer_prop_helper",
+      "kind": "judge",
+      "category": "answer_parser",
+      "required": true,
+      "path": "measured",
+      "description": "Synthetic answer task (prop): helper identifier carries the nested expression",
+      "expected": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compile_status": "success",
+        "sorry_count": 0
+      },
+      "observed": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.33,
+          "queue_seconds": 0.0,
+          "lean_seconds": 7.93,
+          "max_rss_bytes": 6543560704,
+          "cgroup_memory_peak_bytes": 793137152,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 8.33
+      },
+      "note": "Passes integrity by design. A helper name alone is not cheating; the independent evaluator decides whether the answer resolves the intended task.",
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compile_status": true,
+        "sorry_count": true
+      },
+      "passed": true
+    },
+    {
+      "id": "sorry_wording_two_declarations",
+      "kind": "compiler",
+      "category": "sorry_detection",
+      "required": true,
+      "path": "measured",
+      "description": "Two declarations with explicit admissions (core only)",
+      "expected": {
+        "compile_status": "success",
+        "sorry_count": 2
+      },
+      "observed": {
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 2,
+          "elapsed_seconds": 2.27,
+          "queue_seconds": 0.0,
+          "lean_seconds": 2.0,
+          "max_rss_bytes": 835665920,
+          "cgroup_memory_peak_bytes": 191868928,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [
+            {
+              "line": 1,
+              "severity": "warning",
+              "code": null,
+              "text": "declaration uses 'sorry'"
+            },
+            {
+              "line": 2,
+              "severity": "warning",
+              "code": null,
+              "text": "declaration uses 'sorry'"
+            }
+          ]
+        },
+        "case_seconds": 2.27
+      },
+      "note": null,
+      "checks": {
+        "compile_status": true,
+        "sorry_count": true
+      },
+      "passed": true
+    },
+    {
+      "id": "sorry_wording_one_declaration_two_holes",
+      "kind": "compiler",
+      "category": "sorry_detection",
+      "required": true,
+      "path": "measured",
+      "description": "One declaration with two explicit admissions (core only)",
+      "expected": {
+        "compile_status": "success",
+        "sorry_count": 1
+      },
+      "observed": {
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 1,
+          "elapsed_seconds": 2.27,
+          "queue_seconds": 0.0,
+          "lean_seconds": 2.0,
+          "max_rss_bytes": 837234688,
+          "cgroup_memory_peak_bytes": 192905216,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [
+            {
+              "line": 1,
+              "severity": "warning",
+              "code": null,
+              "text": "declaration uses 'sorry'"
+            }
+          ]
+        },
+        "case_seconds": 2.27
+      },
+      "note": null,
+      "checks": {
+        "compile_status": true,
+        "sorry_count": true
+      },
+      "passed": true
+    },
+    {
+      "id": "sorry_wording_admit",
+      "kind": "compiler",
+      "category": "sorry_detection",
+      "required": true,
+      "path": "measured",
+      "description": "`admit` produces the same warning (core only)",
+      "expected": {
+        "compile_status": "success",
+        "sorry_count": 1
+      },
+      "observed": {
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 1,
+          "elapsed_seconds": 2.32,
+          "queue_seconds": 0.0,
+          "lean_seconds": 2.05,
+          "max_rss_bytes": 836190208,
+          "cgroup_memory_peak_bytes": 189943808,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [
+            {
+              "line": 1,
+              "severity": "warning",
+              "code": null,
+              "text": "declaration uses 'sorry'"
+            }
+          ]
+        },
+        "case_seconds": 2.32
+      },
+      "note": null,
+      "checks": {
+        "compile_status": true,
+        "sorry_count": true
+      },
+      "passed": true
+    },
+    {
+      "id": "timeout",
+      "kind": "judge",
+      "category": "timeout",
+      "required": true,
+      "path": "production",
+      "description": "Keyword-free slow elaboration (`#eval IO.sleep`, 400 s) before a genuine proof: the in-container 120 s limit fires, status timeout, container removed",
+      "expected": {
+        "accepted": false,
+        "stage": "compilation",
+        "reason": "Lean timeout",
+        "compile_status": "timeout",
+        "timeout_source": "container",
+        "containers_clean": true
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "compilation",
+        "reason": "Lean timeout",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "timeout",
+          "exit_code": 137,
+          "sorry_count": null,
+          "elapsed_seconds": 120.63,
+          "queue_seconds": 0.0,
+          "lean_seconds": null,
+          "max_rss_bytes": null,
+          "cgroup_memory_peak_bytes": null,
+          "output_truncated": false,
+          "timeout_source": "container",
+          "diagnostics": [],
+          "output_tail": "timeout: sending signal KILL to command 'lake'\nKilled"
+        },
+        "case_seconds": 120.63,
+        "judge_containers_after": []
+      },
+      "note": null,
+      "checks": {
+        "accepted": true,
+        "stage": true,
+        "reason": true,
+        "compile_status": true,
+        "timeout_source": true,
+        "containers_clean": true
+      },
+      "passed": true
+    },
+    {
+      "id": "weakness_exit_command",
+      "kind": "judge",
+      "category": "documentation_probe",
+      "required": false,
+      "path": "measured",
+      "description": "`#exit` in the preamble stops processing before the target theorem",
+      "expected": {
+        "accepted": true
+      },
+      "observed": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.79,
+          "queue_seconds": 0.0,
+          "lean_seconds": 8.41,
+          "max_rss_bytes": 6549303296,
+          "cgroup_memory_peak_bytes": 791629824,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [
+            {
+              "line": 41,
+              "severity": "warning",
+              "code": null,
+              "text": "using 'exit' to interrupt Lean"
+            }
+          ]
+        },
+        "case_seconds": 8.79
+      },
+      "note": "Approved baseline judge checks only keywords, bytes outside editable regions, exit status and the admission-warning count. Observed outcome recorded; behavior intentionally unchanged. A Lean error may also mean the probe text does not elaborate on this toolchain.",
+      "hypothesis_matched": true,
+      "passed": null
+    },
+    {
+      "id": "weakness_cross_region_block_comment",
+      "kind": "judge",
+      "category": "documentation_probe",
+      "required": false,
+      "path": "measured",
+      "description": "Block comment opened in the preamble and closed in the proof region hides the fixed theorem statement",
+      "expected": {
+        "accepted": true
+      },
+      "observed": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.79,
+          "queue_seconds": 0.0,
+          "lean_seconds": 8.39,
+          "max_rss_bytes": 6548525056,
+          "cgroup_memory_peak_bytes": 788860928,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 8.79
+      },
+      "note": "Approved baseline judge checks only keywords, bytes outside editable regions, exit status and the admission-warning count. Observed outcome recorded; behavior intentionally unchanged. A Lean error may also mean the probe text does not elaborate on this toolchain.",
+      "hypothesis_matched": true,
+      "passed": null
+    },
+    {
+      "id": "weakness_guard_msgs_drop_warning_admit",
+      "kind": "judge",
+      "category": "documentation_probe",
+      "required": false,
+      "path": "measured",
+      "description": "`#guard_msgs (drop warning) in` before the theorem plus `admit` removes the admission warning",
+      "expected": {
+        "accepted": true
+      },
+      "observed": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.79,
+          "queue_seconds": 0.0,
+          "lean_seconds": 8.44,
+          "max_rss_bytes": 6550536192,
+          "cgroup_memory_peak_bytes": 793817088,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 8.79
+      },
+      "note": "Approved baseline judge checks only keywords, bytes outside editable regions, exit status and the admission-warning count. Observed outcome recorded; behavior intentionally unchanged. A Lean error may also mean the probe text does not elaborate on this toolchain.",
+      "hypothesis_matched": true,
+      "passed": null
+    },
+    {
+      "id": "weakness_process_exit_zero",
+      "kind": "judge",
+      "category": "documentation_probe",
+      "required": false,
+      "path": "measured",
+      "description": "`#eval` of a zero process exit in the preamble ends Lean with status 0 before the target theorem (suspected)",
+      "expected": {
+        "accepted": true
+      },
+      "observed": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 9.08,
+          "queue_seconds": 0.0,
+          "lean_seconds": 8.76,
+          "max_rss_bytes": 6565810176,
+          "cgroup_memory_peak_bytes": 794120192,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 9.09
+      },
+      "note": "Approved baseline judge checks only keywords, bytes outside editable regions, exit status and the admission-warning count. Observed outcome recorded; behavior intentionally unchanged. A Lean error may also mean the probe text does not elaborate on this toolchain.",
+      "hypothesis_matched": true,
+      "passed": null
+    },
+    {
+      "id": "weakness_answer_field_line_comment",
+      "kind": "judge",
+      "category": "documentation_probe",
+      "required": false,
+      "path": "measured",
+      "description": "Synthetic answer task (prop): a line comment opened inside the extracted answer span hides the rest of the fixed header; the proof region restates it as `answer(True) ↔ True`",
+      "expected": {
+        "accepted": true
+      },
+      "observed": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.28,
+          "queue_seconds": 0.0,
+          "lean_seconds": 7.94,
+          "max_rss_bytes": 6539657216,
+          "cgroup_memory_peak_bytes": 789667840,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 8.28
+      },
+      "note": "Approved baseline judge checks only keywords, bytes outside editable regions, exit status and the admission-warning count. Observed outcome recorded; behavior intentionally unchanged. A Lean error may also mean the probe text does not elaborate on this toolchain.",
+      "hypothesis_matched": true,
+      "passed": null
+    },
+    {
+      "id": "weakness_answer_field_block_comment",
+      "kind": "judge",
+      "category": "documentation_probe",
+      "required": false,
+      "path": "measured",
+      "description": "Synthetic answer task (prop): a block comment opened inside the extracted answer span and closed in the proof region (multi-line headers) restates the theorem as `answer(True) ↔ True`",
+      "expected": {
+        "accepted": true
+      },
+      "observed": {
+        "accepted": true,
+        "stage": "accepted",
+        "reason": "Submission accepted.",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 0,
+          "elapsed_seconds": 8.29,
+          "queue_seconds": 0.0,
+          "lean_seconds": 7.89,
+          "max_rss_bytes": 6537060352,
+          "cgroup_memory_peak_bytes": 788115456,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [],
+          "output_tail": ""
+        },
+        "case_seconds": 8.29
+      },
+      "note": "Approved baseline judge checks only keywords, bytes outside editable regions, exit status and the admission-warning count. Observed outcome recorded; behavior intentionally unchanged. A Lean error may also mean the probe text does not elaborate on this toolchain.",
+      "hypothesis_matched": true,
+      "passed": null
+    },
+    {
+      "id": "weakness_warn_sorry_option_admit",
+      "kind": "judge",
+      "category": "documentation_probe",
+      "required": false,
+      "path": "measured",
+      "description": "Elaboration-time metaprogramming turns the admission-warning option off under a name assembled at runtime (no forbidden literal), then `admit` (suspected)",
+      "expected": {
+        "accepted": true
+      },
+      "observed": {
+        "accepted": false,
+        "stage": "compilation",
+        "reason": "Lean admission count nonzero or unavailable",
+        "compiler_invoked": true,
+        "compile": {
+          "status": "success",
+          "exit_code": 0,
+          "sorry_count": 1,
+          "elapsed_seconds": 8.98,
+          "queue_seconds": 0.0,
+          "lean_seconds": 8.63,
+          "max_rss_bytes": 6563258368,
+          "cgroup_memory_peak_bytes": 795693056,
+          "output_truncated": false,
+          "timeout_source": null,
+          "diagnostics": [
+            {
+              "line": 45,
+              "severity": "warning",
+              "code": null,
+              "text": "declaration uses 'sorry'"
+            }
+          ]
+        },
+        "case_seconds": 8.99
+      },
+      "note": "Approved baseline judge checks only keywords, bytes outside editable regions, exit status and the admission-warning count. Observed outcome recorded; behavior intentionally unchanged. A Lean error may also mean the probe text does not elaborate on this toolchain.",
+      "hypothesis_matched": false,
+      "passed": null
+    }
+  ]
+}

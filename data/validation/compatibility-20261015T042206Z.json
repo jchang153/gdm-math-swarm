@@ -1,0 +1,324 @@
+{
+  "schema": "gdm-compatibility/1",
+  "created_at": "2026-10-15T04:28:17Z",
+  "all_required_passed": true,
+  "image_ids": {
+    "agent": "sha256:5a009aa1f593609fe4742bc6f7223f7beccff4a790d1daa8f6064f5b17a294c6",
+    "lean": "sha256:5588cd382a589737d4909b955966d23ef2a257d88587022ff1195e6fbe5ec943"
+  },
+  "model_id": "deepseek/deepseek-v4.1-flash",
+  "provider_route": "fireworks",
+  "settings": {
+    "context_length": 1048576,
+    "max_tokens": 16384,
+    "model_id": "deepseek/deepseek-v4.1-flash",
+    "output_usd_per_token": "0.0000012",
+    "prompt_usd_per_token": "0.0000003",
+    "provider_route": "fireworks",
+    "reasoning_effort": "high"
+  },
+  "spent_usd": "0.051163872",
+  "requests": 13,
+  "request_ids": [
+    "410823f0-f843-4418-9f63-0ecb88d60a73",
+    "e14d157b-853b-4f34-8e18-7e405116715c",
+    "cf14209c-9a04-47fb-a58d-eca9f3aac396",
+    "29e5afba-2b1a-4971-8026-af5c8e77ee20",
+    "3ff77371-5ff2-4447-80d8-da7c00925a36",
+    "3ed94609-c6ae-4a56-951e-d34b4e256515",
+    "7f3c4f11-65ad-4e4a-9d13-017c8e285335",
+    "8830ce7e-320a-4a8b-9205-d1804e965173",
+    "8cbf8bcc-2ac9-4730-971a-f86bb3253eeb",
+    "642e5398-5b9b-4b04-a96f-8c18729f102a",
+    "be8e4e72-95c2-4a0a-b131-f0a25d93a3a8",
+    "1ea473ff-3b15-4cc5-bafe-6e24c5a6c4ce",
+    "0af6a408-118f-4404-8241-507073b46704"
+  ],
+  "checks": {
+    "tool_call_parsed": {
+      "passed": true,
+      "required": true,
+      "detail": "14 built-in Bash call(s) parsed and executed; 0 tool call(s) with a parse error out of 18"
+    },
+    "conference_tool_call": {
+      "passed": true,
+      "required": true,
+      "detail": "3 of 3 executed mcp__conference__* call(s) returned ok and appear in the conference log under agent-001"
+    },
+    "reasoning_replay_accepted": {
+      "passed": true,
+      "required": true,
+      "detail": "11 of 11 request(s) replaying earlier reasoning returned without provider error; 11 response(s) reported reasoning tokens"
+    },
+    "provider_cost_reported": {
+      "passed": true,
+      "required": true,
+      "detail": "settlement bases of 12 finished inference(s): {'provider_reported_cost': 12}; 0 unbilled/uncertain provider error(s)"
+    },
+    "completion_within_max_tokens": {
+      "passed": true,
+      "required": true,
+      "detail": "max generated tokens incl. reasoning 3708 (limit 16384); 0 response(s) over the limit or without usage"
+    },
+    "reasoning_cap_enforced": {
+      "passed": true,
+      "required": true,
+      "detail": "probe max_tokens 1024: 1 admitted, 1 finished, 0 failed []; stop reason 'max_tokens' (required 'max_tokens'); provider-reported generated tokens incl. reasoning 1024 (reasoning 790; required <= 1024 with reasoning > 0); settled 0.0012564 by 'provider_reported_cost' within the probe reservation: True; route consistent: True"
+    },
+    "no_estimate_violation": {
+      "passed": true,
+      "required": true,
+      "detail": "0 request(s) of this check in estimate_violation; scope violation flag False"
+    },
+    "route_pinned": {
+      "passed": true,
+      "required": true,
+      "detail": "12 of 12 finished inference(s) served by route 'fireworks' as deepseek/deepseek-v4.1-flash"
+    },
+    "no_sample_error": {
+      "passed": true,
+      "required": true,
+      "detail": "sample error None; 0 unrecovered/unknown out of 0 model event error(s); abort reason 'max_requests'"
+    },
+    "truncation_observed": {
+      "passed": false,
+      "required": false,
+      "detail": "0 truncated response(s); stop reasons []"
+    },
+    "compaction_observed": {
+      "passed": false,
+      "required": false,
+      "detail": "0 compaction event(s), 0 compaction request(s)"
+    }
+  },
+  "kind": "paid live compatibility check (one genuine Claude Code agent, frozen OpenRouter route)",
+  "agent_id": "agent-001",
+  "persona": "combinatorics",
+  "abort_reason": "max_requests",
+  "evaluation_cancelled": false,
+  "agent_exit": {
+    "status": "stopped:max_requests",
+    "harness_status": "stopped:max_requests",
+    "harness_after_stop": null,
+    "final_output": "tool_calls",
+    "error": null,
+    "inference": {
+      "requests": 12,
+      "finished": 12,
+      "last_stop_reason": "tool_calls",
+      "consecutive_truncations": 0,
+      "truncated_responses": 0,
+      "unbilled_errors": 0,
+      "uncertain": 0,
+      "in_flight": 0,
+      "last_request_outcome": "not_admitted",
+      "last_denial": "run_stopped",
+      "last_error": null,
+      "last_output_kind": "tool_calls"
+    }
+  },
+  "limits": {
+    "max_requests": 12,
+    "max_minutes": 10,
+    "min_remaining_usd": "0.50",
+    "cap_probe_max_tokens": 1024
+  },
+  "ledger": {
+    "path": "state/budget.sqlite",
+    "scope": "compatibility",
+    "before": {
+      "cap_usd": "2",
+      "committed_usd": "0.09295098",
+      "remaining_usd": "1.90704902",
+      "settled_usd": "0.09295098",
+      "held_usd": "0",
+      "unresolved_requests": 0,
+      "uncertain_requests": 0,
+      "in_flight_requests": 0,
+      "settled_requests": 13,
+      "unbilled_error_requests": 0,
+      "violation": false,
+      "acknowledged_violations": 0,
+      "reconciliations": 0,
+      "manual_reconciliations": 0,
+      "cap_raises": 0
+    },
+    "after": {
+      "cap_usd": "2",
+      "committed_usd": "0.144114852",
+      "remaining_usd": "1.855885148",
+      "settled_usd": "0.144114852",
+      "held_usd": "0",
+      "unresolved_requests": 0,
+      "uncertain_requests": 0,
+      "in_flight_requests": 0,
+      "settled_requests": 26,
+      "unbilled_error_requests": 0,
+      "violation": false,
+      "acknowledged_violations": 0,
+      "reconciliations": 0,
+      "manual_reconciliations": 0,
+      "cap_raises": 0
+    },
+    "estimate_violation_requests": [],
+    "committed_delta_usd": "0.051163872",
+    "request_states": {
+      "settled": 13
+    },
+    "missing_request_ids": []
+  },
+  "run_dir": "runs/compat-20261015T042206Z",
+  "inspect_log": "2026-10-15T04-26-30-00-00_gdm-math-swarm_UmaThzdH7eK3finc7KfQoZ.eval",
+  "lean_warm_up": {
+    "image": "sha256:5588cd382a589737d4909b955966d23ef2a257d88587022ff1195e6fbe5ec943",
+    "memory": "6g",
+    "cpus": 2,
+    "timeout_seconds": 900,
+    "source": "import FormalConjectures.Util.ProblemImports",
+    "vm_before": {
+      "vm_uptime_seconds": 333.5,
+      "MemTotal_kib": 264095944,
+      "MemFree_kib": 261881232,
+      "MemAvailable_kib": 261276468,
+      "Buffers_kib": 92072,
+      "Cached_kib": 725448,
+      "Active(file)_kib": 561440,
+      "Inactive(file)_kib": 245732
+    },
+    "status": "success",
+    "exit_code": 0,
+    "lean_elapsed_seconds": 250.89737858,
+    "timeout_source": null,
+    "ok": true,
+    "wall_seconds": 250.898,
+    "vm_after": {
+      "vm_uptime_seconds": 584.7,
+      "MemTotal_kib": 264095944,
+      "MemFree_kib": 256363556,
+      "MemAvailable_kib": 261246336,
+      "Buffers_kib": 93564,
+      "Cached_kib": 6151244,
+      "Active(file)_kib": 1035488,
+      "Inactive(file)_kib": 5199180
+    }
+  },
+  "tool_calls": [
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "mcp__conference__get_conference_status",
+      "parse_error": null
+    },
+    {
+      "function": "mcp__conference__get_bulletin_board",
+      "parse_error": null
+    },
+    {
+      "function": "mcp__conference__list_library",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    },
+    {
+      "function": "Bash",
+      "parse_error": null
+    }
+  ],
+  "duration_seconds": 371.8,
+  "credential_source": "host only (secrets.load_openrouter_key)",
+  "credentials_in_environment": false,
+  "provider_limit": {
+    "endpoint": "https://openrouter.ai/api/v1/key",
+    "checked_at": "2026-10-15T04:26:19.237307+00:00",
+    "paid_calls": 0,
+    "limit": 2,
+    "limit_remaining": 1.90704902,
+    "limit_reset": null,
+    "usage": 0.09295098,
+    "usage_daily": 0.09295098,
+    "usage_weekly": 0.09295098,
+    "usage_monthly": 0.09295098,
+    "is_free_tier": false,
+    "include_byok_in_limit": false,
+    "expires_at": null,
+    "max_remaining_usd": "1.90704902",
+    "checks": {
+      "limit_set": {
+        "passed": true
+      },
+      "limit_does_not_reset": {
+        "passed": true,
+        "limit_reset": null
+      },
+      "remaining_within_allowance": {
+        "passed": true,
+        "limit_remaining": 1.90704902,
+        "max_remaining_usd": "1.90704902"
+      },
+      "key_not_expired": {
+        "passed": true,
+        "expires_at": null
+      }
+    },
+    "warnings": [
+      "key already has usage 0.09295098; provider-side remaining is limit minus usage",
+      "limit 2 exceeds the allowance 1.90704902; only limit_remaining protects it",
+      "BYOK usage is excluded from the limit"
+    ],
+    "all_required_passed": true
+  },
+  "compose_sha256": "ffaa3ae8d2a8865c5a9ed487a2022947f785184efefefc6c097a96926e78cd5b",
+  "cap_probe_error": null
+}
