@@ -62,13 +62,50 @@ class CataloguePageTests(unittest.TestCase):
             'prompt_variant': 'collaboration_continuous', 'accepted_tasks': 5,
             'judge': {'mode': 'paid', 'agents': 10, 'graded': 9, 'provisional': 1, 'cohorts': {
                 'exploiter': 4, 'convert': 1, 'exploit_promoter': 0, 'whistleblower': 2, 'no_misbehavior': 2,
-                'insufficient_record': 1}}})
-        self.assertEqual(entries['plain']['summary'], {'prompt_variant': None, 'accepted_tasks': None, 'judge': None})
+                'insufficient_record': 1}}, 'simple_judge': None})
+        self.assertEqual(entries['plain']['summary'], {'prompt_variant': None, 'accepted_tasks': None, 'judge': None,
+                                                       'simple_judge': None})
         page = (runs / 'index.html').read_text()
         self.assertIn('4 exploiters · 1 convert · 2 whistleblowers · 1 insufficient record', page)
         self.assertIn('of 9 graded, 1 provisional', page)
         self.assertIn('collaboration_continuous', page)
         self.assertIn('<span class="muted">not run</span>', page)
+
+    def test_simple_judge_counts_shown_labelled_and_linked(self):
+        """Owner, October 25, 2026: a run with the simplified judge shows its counts ("simple"), next to the
+        rubric-3.1 cohorts ("rubric 3.1") when both ran; a published entry without them gets them in the browser."""
+        from simple_judge_site import simple_summary
+        import test_simple_judge_site as sjs
+        runs = self.root / 'runs'
+        both = make_run(runs, 'both', judge={})
+        report = json.loads((both / 'analysis/judge/report.json').read_text())
+        (both / 'analysis/judge/report.json').write_text(json.dumps({**report, 'counts': COUNTS}))
+        sjs.write_simple_judge(both, local=False)
+        only = make_run(runs, 'only')
+        sjs.write_simple_judge(only, local=False)
+        build(runs, unlisted=set())
+        entries = {e['run']: e for e in json.loads((runs / 'experiments.json').read_text())['experiments']}
+        expected = simple_summary(json.loads((only / 'analysis/simple_judge/report.json').read_text()))
+        self.assertEqual(entries['only']['summary']['simple_judge'], expected)
+        self.assertEqual(expected['levels']['credited'], 1)
+        page = (runs / 'index.html').read_text()
+        self.assertIn('rubric 3.1: 4 exploiters · 1 convert · 2 whistleblowers · 1 insufficient record', page)
+        self.assertIn('simple: 1 credited<br><small>of 2 labelled · <a href="only/analysis/simple_judge/report.html">'
+                      'report</a></small>', page)
+        cell = re.search(r'data-run="only".*?class="c-judge"><div class="v">(.*?)</div>', page, re.S)[1]
+        self.assertNotIn('not run', cell)
+        # A published entry that links the simplified judge but predates the counts: a marker the page fills.
+        old = entry('a-old', 1, summary={'prompt_variant': 'v1', 'accepted_tasks': 4, 'judge': None},
+                    links={'Report': 'a-old/results.html',
+                           'Simple behavior judge': 'a-old/analysis/simple_judge/report.html'})
+        page, index = self.write([old])
+        self.assertEqual(json.loads(index)['experiments'][0], old)  # entry unchanged
+        self.assertIn('<span class="pending sj-pending">simple: …</span>', page)
+        self.assertIn("read(base+'analysis/simple_judge/report.json')", page)
+        self.assertIn("r.schema!=='gdm-simple-judge/1'", page)
+        self.assertIn("'Simple judge: evaluation-aware (not comparable with rubric 3.1)'", page)
+        self.assertIsNone(simple_summary({'schema': 'gdm-simple-judge/1', 'counts': {'agents': 2}}))
+        self.assertIsNone(simple_summary({'schema': 'other', 'counts': {}}))
 
     def test_judge_summary_rejects_reports_without_valid_counts(self):
         self.assertIsNone(judge_summary({'schema': 'gdm-judge-report/3'}))

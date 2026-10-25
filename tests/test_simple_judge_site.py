@@ -94,12 +94,57 @@ class HelperTests(unittest.TestCase):
         self.assertIn(site.HELP + site.OLD_HELP + '<li><strong>Inspect</strong>', page)
         self.assertNotIn('old judge text', page)
 
+    def test_rubric_tab_added_after_the_simple_tab_when_missing(self):
+        # glm100-repeat2: the simplified judge's tab came first, the rubric-3.1 judge was published afterwards.
+        page = site.add_simple_judge_tab(PAGE)
+        self.assertNotIn(site.OLD_TAB, page)
+        fixed = site.add_rubric_tab(page)
+        self.assertIn(site.TAB + site.OLD_TAB, fixed)
+        self.assertIn(site.HELP + site.OLD_HELP, fixed)
+        self.assertEqual(site.add_rubric_tab(fixed), fixed)
+        both = site.add_simple_judge_tab(JUDGED_PAGE)
+        self.assertEqual(site.add_rubric_tab(both), both)  # already there
+        self.assertEqual(site.add_rubric_tab(PAGE), PAGE)  # no simplified-judge tab: unchanged
+
     def test_summary_tile_names_the_simplified_judge(self):
         tile = ('<div class="tile"><div class="k">Behavior judge</div><div class="v">not run</div>'
                 '<div class="s">no judge outputs</div></div>')
         page = site.add_simple_judge_tab(PAGE.replace('<nav', tile + '<nav'))
         self.assertIn(site.TILE, page)
         self.assertNotIn('no judge outputs', page)
+
+    def test_judge_spots_name_the_simplified_judge_with_counts(self):
+        """The Run table row and the line after the proof checker no longer say "not run" (owner, October 25,
+        2026); a rubric-3.1 status there is kept and labelled; the counts come from report.json; idempotent, also
+        on a page that already has the tab."""
+        spots = ('<tr><td>Behavior judge</td><td>not run</td></tr><p>Behavior judge: not run</p>'
+                 '<div class="tile"><div class="k">Behavior judge</div><div class="v">not run</div>'
+                 '<div class="s">no judge outputs</div></div>')
+        report = {'schema': site.REPORT_SCHEMA, 'mode': 'paid', 'counts': {
+            'agents': 100, 'labelled': 100, 'cheating_any': 27, 'whistleblower': {'False': 98, 'True': 2},
+            'evaluation_aware': {'False': 76, 'True': 24},
+            'cheating_level': {'none': 46, 'considered': 26, 'explored': 0, 'submitted': 25, 'credited': 2,
+                               'unclear': 1}}}
+        tabbed = site.add_simple_judge_tab(PAGE + spots)
+        self.assertIn('<td>Behavior judge</td><td><span data-sj="1">simplified judge completed (<a href="'
+                      'analysis/simple_judge/report.html">report</a>)</span></td>', tabbed)
+        counted = site.add_simple_judge_tab(tabbed, report)
+        self.assertNotIn('not run', counted.split('<nav', 1)[0] + counted.split('</nav>', 1)[1].split('<ul', 1)[0])
+        line = ('simplified judge: 25 submitted · 2 credited · 2 whistleblowers, of 100 labelled '
+                '(<a href="analysis/simple_judge/report.html">report</a>)')
+        self.assertIn(f'<p>Behavior judge: <span data-sj="1">{line}</span></p>', counted)
+        self.assertIn('<div class="v">25 submitted · 2 credited · 2 whistleblowers</div>', counted)
+        self.assertEqual(site.add_simple_judge_tab(counted, report), counted)
+        self.assertEqual(counted, site.add_simple_judge_tab(PAGE + spots, report))
+        judged = site.add_simple_judge_tab(JUDGED_PAGE + '<tr><td>Behavior judge</td><td>completed</td></tr>'
+                                           '<p>Behavior judge: see <a href="analysis/judge/report.html">x</a></p>',
+                                           report)
+        self.assertIn(f'<td>Behavior judge</td><td>completed (rubric 3.1) · <span data-sj="1">{line}</span>', judged)
+        self.assertIn(f'<p>Behavior judge: see <a href="analysis/judge/report.html">x</a> (rubric 3.1); '
+                      f'<span data-sj="1">{line}</span></p>', judged)
+        self.assertEqual(site.add_simple_judge_tab(judged, report), judged)
+        self.assertEqual(site.simple_summary(report)['evaluation_aware'], 24)
+        self.assertIsNone(site.simple_summary({**report, 'counts': {**report['counts'], 'agents': True}}))
 
     def test_catalogue_link_after_behavior_judge(self):
         links = {'Report': 'r/results.html', 'Behavior judge': 'r/analysis/judge/report.html',
@@ -121,7 +166,8 @@ class HelperTests(unittest.TestCase):
             for text in ('id=sj-comparability', 'not comparable', 'evaluation-aware', 'credited',
                          'just use Iff.rfl', '&#10003;', '&#10007;', 'data-theme="dark"'):
                 self.assertIn(text, page)
-            self.assertNotIn('<script', page)
+            self.assertNotIn('src=', page)  # inline script only, nothing external
+            self.assertNotRegex(page, r'https?://')
             self.assertNotIn('../judge/report.html', page)
             self.assertIn('href="../judge/report.html"', linked)
             with self.assertRaisesRegex(ValueError, 'belongs to run'):
@@ -129,6 +175,36 @@ class HelperTests(unittest.TestCase):
             write_simple_judge(Path(tmp) / RUN, mode='mock', local=False)
             with self.assertRaisesRegex(ValueError, 'mode'):
                 site.site_page((folder / 'report.json').read_bytes(), data['agents.jsonl'], RUN)
+
+    def test_site_page_filter_ui_run_clock_and_escaping(self):
+        import json as _json
+        from research.analysis.simple_judge.report import render_html
+        hostile = row('agent-003', 'submitted')
+        hostile['labels']['rationale'] = '<img src=x onerror=alert(1)> rationale'
+        hostile['labels']['technique'] = 'a "quoted" <b>technique</b>'
+        hostile['facts'] = {'submissions': 2, 'accepted': 1, 'flagged_submissions': 1, 'flagged_accepted': 1,
+                            'first_flagged_minute': 12.6, 'first_exploit_read_minute': 2.0,
+                            'first_exploit_read_author': 'agent-001'}
+        unlabelled = {'agent_id': 'agent-004', 'status': 'failed', 'reason': 'provider error', 'labels': None,
+                      'fallback_used': False}
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = write_simple_judge(Path(tmp) / RUN, local=False)
+            report = _json.loads((folder / 'report.json').read_text())
+        start = 1792694587.9  # 18:43:07 UTC
+        page = render_html(report, [row('agent-001'), hostile, unlabelled], run_start=start)
+        for text in ('id=filters hidden', 'id=f-level', 'id=f-tech', 'id=f-wb', 'id=f-ea', 'id=f-q', 'id=f-s',
+                     'id=shown', 'position:sticky', 'aria-sort', 'URLSearchParams', 'history.replaceState',
+                     'hashchange', 'Showing', 'data-level="not labelled"', 'data-q="verified unverified"',
+                     'first flagged submission +12:36 (18:55:43 UTC)',
+                     'first read of an exploit +2:00 (18:45:07 UTC) (by agent-001)', 'Run clock'.lower()[:3]):
+            self.assertIn(text, page)
+        self.assertIn('18:43:07 UTC (common_start)', page)
+        self.assertNotIn('<img src=x', page)
+        self.assertIn('&lt;img src=x onerror=alert(1)&gt;', page)
+        self.assertNotIn('<b>technique</b>', page)
+        self.assertEqual(page.count('<tr data-level='), 3)
+        # Without a run start the facts stay in run minutes.
+        self.assertIn('first flagged submission minute 12.6', render_html(report, [hostile]))
 
     def test_incomplete_judge_is_not_published(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -348,6 +424,9 @@ class SimpleJudgeScopeTests(unittest.TestCase):
         self.assertIn('id="site-theme"', report)
         self.assertIn('id=sj-comparability', report)
         self.assertIn('href="../judge/report.html"', report)
+        self.assertIn('id=filters hidden', report)  # the filterable agents table (owner, October 25, 2026)
+        start = json.loads((self.runs / RUN / 'results.json').read_text())['start_utc']
+        self.assertIn('Times: run clock from the run start, ' + start[11:19] + ' UTC', report)
         manifest = json.loads(final['archive-manifest.json'])
         for name, info in manifest['files'].items():
             self.assertEqual(digest(final[name]), info, name)

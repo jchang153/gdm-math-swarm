@@ -21,8 +21,8 @@ import dataset_logs
 from dataset_logs import COMMIT_PLACEHOLDER, DATASET_REPO, DATASET_SCHEMA, category, dataset_path
 from incident_site import INCIDENT_DIR, add_incident_tab, incident_excluded, incident_files, unpublished_links
 from simple_judge_site import (DATASET_FILES as SJ_DATASET_FILES, SJ_DIR, SPACE_FILES as SJ_SPACE_FILES,
-                               add_simple_judge_tab, simple_judge_excluded, simple_judge_files, site_page,
-                               space_report_json)
+                               add_simple_judge_tab, simple_judge_excluded, simple_judge_files, simple_report,
+                               site_page, space_report_json)
 from publish_hf_library import SECRET
 from space_navigation import private_space_navigation
 from site_style import themed
@@ -163,7 +163,9 @@ def simple_judge_publication(source, judge_plan=None):
         return None
     data = {name: (source / SJ_DIR / name).read_bytes() for name in names if name != 'report.html'}
     old_judge = bool(judge_plan) and 'analysis/judge/report.html' in judge_plan['included']
-    page = site_page(data['report.json'], data['agents.jsonl'], source.name, old_judge=old_judge).encode('utf-8')
+    from run_clock import run_start  # the per-agent times as run clock plus UTC (owner, October 25, 2026)
+    page = site_page(data['report.json'], data['agents.jsonl'], source.name, old_judge=old_judge,
+                     run_start=run_start(source)).encode('utf-8')
     for name, content in {**data, 'report.html': page}.items():
         if SECRET.search(content):
             raise ValueError(f'Credential-like content in {SJ_DIR}/{name}; not published')
@@ -468,7 +470,8 @@ def main():
             (output / run_id / SJ_DIR / 'report.json').write_bytes(
                 space_report_json((source / SJ_DIR / 'report.json').read_bytes()))  # no host paths on the Space
             page = output / run_id / 'results.html'
-            page.write_text(add_simple_judge_tab(page.read_text(encoding='utf-8')), encoding='utf-8')
+            page.write_text(add_simple_judge_tab(page.read_text(encoding='utf-8'), simple_report(source)),
+                            encoding='utf-8')
         if incident_plans[run_id] is not None:  # the run page's Incident report tab (navigation only)
             page = output / run_id / 'results.html'
             page.write_text(add_incident_tab(page.read_text(encoding='utf-8')), encoding='utf-8')

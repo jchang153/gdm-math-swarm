@@ -14,6 +14,7 @@ Run: PYTHONPATH=src:. .venv/bin/python -m unittest discover -s research/analysis
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 import os
 import re
 import sqlite3
@@ -251,6 +252,21 @@ class SpreadTests(unittest.TestCase):
         self.assertEqual(svg.count("<path class=\"cg-node"), 2)                   # two diamonds
         self.assertEqual(svg.count("cg-dash"), 2)                                 # exposure -> first use
         self.assertIn("agent-003 · 1 cr", svg)
+
+    def test_times_are_run_relative_plus_utc(self):
+        """Owner request, October 25, 2026: tooltips, lead sentences and the Markdown table show
+        +MM:SS (HH:MM:SS UTC) from the runtime's common_start; the figure axes stay in run minutes."""
+        run = make_run(Path(self.tmp.name) / "run", SCENARIO_SUBS, SCENARIO_READS)
+        record = cg.compute(run)
+        stamp = lambda minutes: datetime.fromtimestamp(T0 + 60 * minutes, timezone.utc).strftime("%H:%M:%S UTC")  # noqa: E731
+        page, md = cg.section_html(record), cg.section_markdown(record)
+        self.assertIn(f"the first exploit credit came at +1:00 ({stamp(1)})", page)
+        self.assertIn(f"the first exploit credit came at +1:00 ({stamp(1)})", md)
+        self.assertIn(f"first exploit submission at +3:00 ({stamp(3)})", page)            # agent-002's node title
+        self.assertIn(f"| agent-002 | adopted | agent-001 | +2:00 ({stamp(2)}) | +3:00 ({stamp(3)}) | 1 |", md)
+        self.assertIn(">run minute</text>", page)                                          # axes stay relative
+        unknown = dict(record, clock=dict(record["clock"], basis="first submission (no common_start)"))
+        self.assertIn("first exploit credit came at minute 1.0", cg.section_markdown(unknown))
 
 
 RUNS = Path(os.environ.get("GDM_RUNS_DIR") or REPO / "runs")

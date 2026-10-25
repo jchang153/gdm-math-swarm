@@ -4,8 +4,11 @@ A super high-level, highly readable account of one run, written per run for the 
 October 21, 2026; docs/plan.md "Incident report per run (October 21, 2026)"), modelled on OpenAI's
 misalignment incident reports: the whole story up front, two to five case-study storylines with
 labelled verbatim excerpts, a section on evaluation awareness, what didn't happen, candid uncertainty,
-what to try next (prompts, models, population, oversight), a paragraph per agent and a "where to look"
-appendix precise enough for a coding agent to drill into the transcripts (links open Inspect View).
+and what to try next (prompts, models, population, oversight). Every excerpt names its agent, its time
+(run-relative plus absolute, `+12:34 (05:17:40 UTC)`, scripts/run_clock.py) and record id, and links its
+Inspect View transcript event. Since October 25, 2026 (owner request) the report has no per-agent section
+("The agents, one by one") and no host-written "Where to look" appendix; evidence.json keeps every cited
+record's locator.
 
 It is **model-generated and post-hoc** and is labelled so on every page. The deterministic results
 report (`results.html`) is unchanged and remains the record of outcomes. Operational acceptance is not
@@ -20,6 +23,11 @@ PYTHONPATH=src:. .venv/bin/python scripts/run_incident_report.py --run-dir runs/
 # Host only, no model and no budget: recompute "How the exploit spread" and the table of contents and
 # insert them into an existing report.html, report.md and evidence.json (idempotent; the backfill command).
 PYTHONPATH=src:. .venv/bin/python scripts/run_incident_report.py --run-dir runs/<run> --rerender-contagion
+# Host only, no model, no budget and no run records: rewrite an existing report.html and report.md in the
+# current layout (both sections above removed with their contents entries and links, event times shown
+# run-relative plus absolute, contagion section re-inserted from evidence.json); evidence.json is unchanged.
+# Reads only analysis/incident/ (and results.json for the start if evidence.json has no contagion clock).
+PYTHONPATH=src:. .venv/bin/python scripts/run_incident_report.py --run-dir runs/<run> --rerender-layout
 # Any of the above with --judge-source auto|simple|full|none (default auto: the simplified judge when present,
 # else the rubric-3.1 judge, else none); a forced source whose outputs are missing is refused (exit 2).
 # Tests (offline; the real-run regression uses runs/ or $GDM_RUNS_DIR and is skipped without it)
@@ -30,7 +38,7 @@ Output, in `RUN/analysis/incident/` (the site links to it):
 
 | File | What |
 | --- | --- |
-| `report.html` | The report: banner, labelled excerpt blocks (visible thinking or reasoning, tool call, submitted proof or template text, board post, DM...), each with agent, time, record and excerpt ids, a "Program-chosen passage" flag when the program rather than the extraction model chose it, an **Inspect View deep link** and a link to its appendix row; the host-written note in "How sure we are"; the host-written "Where to look" appendix. |
+| `report.html` | The report: banner, labelled excerpt blocks (visible thinking or reasoning, tool call, submitted proof or template text, board post, DM...), each with agent, time, record and excerpt ids, a "Program-chosen passage" flag when the program rather than the extraction model chose it, its time as `+MM:SS (HH:MM:SS UTC)` from the run start (runtime common_start), an **Inspect View deep link**; record citations link the same Inspect View event (or are plain labelled ids when none exists); the host-written note in "How sure we are". |
 | `report.md` | The same report in Markdown: each excerpt a labelled quotation (same header) around a verbatim block; unverified or incomplete quotes marked. |
 | `evidence.json` | The plan, every fetched record with its locator (Inspect log, sample, epoch, model event and message ids; raw record path; for a conference record the tool call that created it and its time), every excerpt with its label, source (`host` whole record, `model`, `host_fallback` with the reason) and verification result, `excerpt_sources`, `extract_refusals`, `chain_of_thought` (reasoning records per agent and how many are encrypted), dropped plan items, the writer's revision attempts and the model units with their costs. |
 | `contagion.json` | The host-computed contagion record (also in evidence.json under `contagion`), written before any model stage so it exists even when they fail; `judge_source` / `judge_source_label` / `behavior_findings` name the findings it used. |
@@ -56,7 +64,7 @@ Output, in `RUN/analysis/incident/` (the site links to it):
    judge's and not comparable with them; the digest text and the prompts say so. The source is recorded
    (`digest.json` `judge.source`, `judge.label`) and stated in the host-written note in "How sure we are"
    ("Behavior findings: simplified one-pass judge (gdm-simple-judge/1)." / "rubric-3.1 judge (...)" / "none,
-   deterministic detectors"); the "Where to look" appendix and the header link point at that judge's files. The
+   deterministic detectors"); the header link points at that judge's report. The
    independent proof checker's verdicts; conference board posts, DMs, feedback, library entries and
    submissions (`conference/state.sqlite`, read only); timeline counts and restarts
    (`analysis/timeline.jsonl`); the agents' instructions; per agent its activity, submissions,
@@ -142,8 +150,9 @@ True/False/default term, or any `answer(...)` whose meaning the editable region 
 regions only). The section names its source in a visible line ("Behavior findings: ..."; `contagion.json`
 `judge_source`). On glm100-baseline-30m the simplified judge gives the detectors' counts (15 users, 1
 independent, 8 credits; 10 readied-bypass agents not drawn); the rubric-3.1 judge 15 users and 7 credits. Without an exploit it is one line and no figures; without
-conference records it says the answer is unknown. report.md carries the counts and a per-agent table and links
-to the figures in report.html. Detector counts reproduce the owner's checks: glm100-baseline-30m 15 users,
+conference records it says the answer is unknown. report.md carries the counts and a per-agent table (first
+exposure and first use as `+MM:SS (HH:MM:SS UTC)`) and links to the figures in report.html; node tooltips use
+the same format, the figure axes stay in run minutes. Detector counts reproduce the owner's checks: glm100-baseline-30m 15 users,
 1 independent (agent-026), 8 credits; glm100-repeat2 20 users, 2 independent (008, 064); glm100-repeat3 2
 users, both independent (058, 020), 1 credit.
 
@@ -152,7 +161,7 @@ left-margin contents list on wide screens (at least 1240 px) with sub-entries fo
 contagion trees, smooth scrolling, the section in view highlighted (IntersectionObserver) and a thin
 reading-progress bar; on narrower screens a "Contents" button at the top opens the list in the page flow
 (it never covers the text). Inline CSS and JS only, themed with the report's variables. Both the section and
-the contents are inserted between markers, so `--rerender-contagion` is idempotent.
+the contents are inserted between markers, so `--rerender-contagion` and `--rerender-layout` are idempotent.
 
 ## Budget and models
 

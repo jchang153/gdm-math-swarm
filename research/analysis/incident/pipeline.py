@@ -17,8 +17,8 @@
    record (whitespace normalized only), citations must exist and the required sections must be
    present (``verify``). With problems, Opus revises once (``prompts.REPAIR_SYSTEM``); the version
    with fewer problems is kept, and every remaining unverified quote is marked in the output.
-6. Render (host): report.md, report.html (banner, labelled excerpts, Inspect View deep links, the
-   host-written "Where to look" appendix) and evidence.json.
+6. Render (host): report.md, report.html (banner, labelled excerpts with run-relative and absolute times,
+   Inspect View deep links) and evidence.json (with every cited record's locator).
 
 Each model request is one cached unit (``units/<name>.json``, keyed by the SHA-256 of the exact
 request), so a rerun or a resume after a stop pays nothing twice; raw requests and responses are
@@ -618,14 +618,15 @@ class IncidentPipeline:
         evidence["excerpt_sources"] = excerpt_sources(evidence)
         note = render.host_note_markdown(digest, evidence, self.extract_refusals, self.units, draft,
                                          model_fallbacks=self.model_fallbacks)
-        body = render.insert_into_section(draft.rstrip(), "How sure we are", note) + "\n" \
-            + render.appendix_markdown(evidence, self.locator, digest)
+        body = render.insert_into_section(draft.rstrip(), "How sure we are", note) + "\n"
         checks = verify.verify_markdown(body, self.locator.item)
-        markdown = render.banner_markdown(generated) + render.reader_markdown(body, checks, self.locator, evidence)
+        start = render.report_start({"contagion": spread}, self.run_dir)   # runtime common_start
+        markdown = render.banner_markdown(generated) + render.reader_markdown(body, checks, self.locator, evidence,
+                                                                              start=start)
         markdown = contagion.insert_markdown(markdown, spread)
         (self.out_dir / "report.md").write_text(markdown, encoding="utf-8")
         page = render.render_html(body, checks, self.locator, digest, generated_at=generated, models=self.models,
-                                  evidence=evidence)
+                                  evidence=evidence, start=start)
         page = render.add_toc(contagion.insert_html(page, spread))
         (self.out_dir / "report.html").write_text(page, encoding="utf-8")
         record = {"schema": SCHEMA, "run_id": digest["run_id"], "generated_at": generated, "mode": self.mode,

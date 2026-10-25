@@ -128,7 +128,7 @@ def verify_markdown(markdown, lookup):
 
 
 REQUIRED_SECTIONS = ("Summary", "Case studies", "Evaluation awareness", "What didn't happen", "How sure we are",
-                     "What to try next", "The agents, one by one")
+                     "What to try next")
 
 
 def structure_problems(markdown):

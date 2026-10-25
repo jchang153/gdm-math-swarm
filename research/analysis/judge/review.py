@@ -98,6 +98,7 @@ import html
 import json
 import os
 import re
+import sys
 import unicodedata
 from collections import Counter
 from pathlib import Path
@@ -106,6 +107,11 @@ try:  # package layout (PYTHONPATH=src:.)
     from . import tasks_plain as _tasks_plain
 except ImportError:  # pragma: no cover - flat layout with research/analysis/judge on sys.path
     import tasks_plain as _tasks_plain  # type: ignore[no-redef]
+
+_SCRIPTS = Path(__file__).resolve().parents[3] / "scripts"
+if str(_SCRIPTS) not in sys.path:  # scripts/run_clock.py: the site's one time format
+    sys.path.insert(0, str(_SCRIPTS))
+import run_clock  # noqa: E402
 
 AGENT_RESULT_SCHEMA = "gdm-judge-agent-result/4"
 # Readable agent-result schemas: /4 (rubric v3.1, plain-language explanations), /3 (judge revision
@@ -1750,6 +1756,7 @@ def build_review_page(run_dir, judge_dir=None, seed=None, *, now=None):
     review = judge_dir / "review"
     pages, models = {}, Counter()
     tasks = _tasks_plain.task_table(run_dir)  # rubric v3.1: the "Problem" lines
+    start = run_clock.run_start(run_dir)  # record times shown as offset from the run start plus UTC
     for agent_id, result in sorted(results.items()):
         if not has_page(result):
             continue
@@ -1758,8 +1765,9 @@ def build_review_page(run_dir, judge_dir=None, seed=None, *, now=None):
             if finding_state(finding) in VERDICT_STATES:
                 entry = verifier_model(result, finding, unit_models)
                 models[(entry or {}).get("key") or "not recorded"] += 1
-        text = render_agent_page(run_id, agent_id, result, PackageIndex(load_package(judge_dir, agent_id)),
-                                 unit_models, labels, mode, built_at, tasks)
+        text = restamp_judge_page(render_agent_page(run_id, agent_id, result,
+                                                    PackageIndex(load_package(judge_dir, agent_id)),
+                                                    unit_models, labels, mode, built_at, tasks), start)
         name = agent_page_name(agent_id)
         write_text_atomic(review / name, text)
         pages[name] = sha256_bytes(text.encode("utf-8"))
@@ -1784,6 +1792,39 @@ def build_review_page(run_dir, judge_dir=None, seed=None, *, now=None):
     return {"page": str(review / "index.html"), "agent_pages": counts["agent_pages"],
             "manifest": str(review / "manifest.json"), "counts": counts,
             "manifest_sha256": manifest["manifest_sha256"], "unrecognized_files": unrecognized}
+
+
+# Record times (owner, October 25, 2026): each record's header line shows its time as run_clock.clock (offset
+# from the run start plus UTC). render_item writes the recorded ISO time; restamp_judge_page converts it, so an
+# already published page converts exactly like a fresh one. The build time ("built ...") and the JSON detail
+# dumps keep their recorded values.
+_ITEM_HEAD = re.compile(r'<div class="item-head">.*?</div>', re.S)
+
+
+def restamp_judge_page(document, start):
+    """An evidence-browser or judge page with every record header's ISO time shown as run_clock.clock;
+    idempotent; ``start`` None (unknown run start) leaves the page unchanged."""
+    if start is None:
+        return document
+    return _ITEM_HEAD.sub(lambda m: run_clock.restamp_iso(m.group(0), start), document)
+
+
+def refresh_review_manifest(manifest_bytes, pages):
+    """review/manifest.json bytes with the digests of the re-rendered pages ``pages`` ({name relative to
+    review/: page bytes}, names already in the manifest) and its own manifest_sha256 recomputed; everything
+    else unchanged. Refuses an invalid manifest or a page it does not list."""
+    manifest = json.loads(manifest_bytes)
+    if not isinstance(manifest, dict) or manifest.get("schema") != MANIFEST_SCHEMA:
+        raise ValueError(f"review manifest must have schema {MANIFEST_SCHEMA}")
+    core = {k: v for k, v in manifest.items() if k != "manifest_sha256"}
+    if canonical_sha256(core) != manifest.get("manifest_sha256"):
+        raise ValueError("review manifest digest mismatch (edited after the page was built)")
+    unknown = sorted(set(pages) - set(core.get("pages") or {}))
+    if unknown:
+        raise ValueError("pages not listed in the review manifest: " + ", ".join(unknown))
+    core["pages"] = dict(sorted({**core["pages"], **{n: sha256_bytes(b) for n, b in pages.items()}}.items()))
+    core["manifest_sha256"] = canonical_sha256({k: v for k, v in core.items() if k != "manifest_sha256"})
+    return (json.dumps(core, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 
 
 def load_manifest(judge_dir):

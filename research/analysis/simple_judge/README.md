@@ -67,7 +67,7 @@ PYTHONPATH=scripts:src:. .venv/bin/python scripts/run_simple_judge.py --run-dir 
 4. **Outputs** in `RUN/analysis/simple_judge/`: `agents.jsonl` (one row per agent: labels after verification, the
    model's own labels, quotes with verification, checks, detector facts, cost), `report.json` (counts by code, no
    model summary; cost, wall time, budget record and, when the run has a rubric-3.1 judge, the per-agent
-   comparison: `compare.py`), `report.html` (small, no scripts, light and dark). Working files, not for the site:
+   comparison: `compare.py`), `report.html` (self-contained, light and dark; since October 25, 2026 its agents table has one row of filters (cheating level multi-select, technique, whistleblower, evaluation-aware, quotes, text search over agent id, rationale and quotes), sortable columns, a sticky header, "Showing N of M agents", filter and sort state in the URL hash (for example `#level=submitted,credited&ea=yes&sort=q-desc`) and compact rows whose details expand; inline JS and CSS only, no CDN; without JS every row is shown and the details still expand. Per-agent times (first flagged submission, first exploit read) are shown as run clock plus UTC, `+12:34 (05:17:40 UTC)`, from the run start of `scripts/run_clock.py`). Working files, not for the site:
    `cases.jsonl` (the case files with the full text of every cited record), `raw/` (request and response archives)
    and `run-budgets.json`.
 

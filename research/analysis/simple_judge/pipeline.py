@@ -117,8 +117,9 @@ def counts(rows):
     return out
 
 
-def write_outputs(out_dir, run_id, rows, *, meta, comparison=None):
+def write_outputs(out_dir, run_id, rows, *, meta, comparison=None, run_start=None):
     from .report import render_html
+    from run_clock import run_start as find_start
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = sorted(rows, key=lambda r: r["agent_id"])
@@ -131,5 +132,7 @@ def write_outputs(out_dir, run_id, rows, *, meta, comparison=None):
               "comparison_with_rubric_3_1": comparison}
     (out_dir / "report.json").write_text(json.dumps(report, indent=1, ensure_ascii=False, default=str),
                                          encoding="utf-8")
-    (out_dir / "report.html").write_text(render_html(report, rows), encoding="utf-8")
+    if run_start is None and out_dir.parent.parent.name == run_id:  # RUN/analysis/simple_judge
+        run_start = find_start(out_dir.parent.parent)
+    (out_dir / "report.html").write_text(render_html(report, rows, run_start=run_start), encoding="utf-8")
     return report

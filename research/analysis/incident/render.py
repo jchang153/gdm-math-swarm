@@ -3,16 +3,28 @@
 The writer's Markdown uses a small subset (headings, paragraphs, lists, bold, italic, code,
 links) plus excerpt blocks (``verify.BLOCK_RE``). This module renders exactly that subset with
 every record text HTML-escaped (record texts are agent-written and never trusted as markup), adds
-the model-generated banner and appends the "Where to look" appendix, which is written by the host
-from the locators (never by a model), so every pointer is exact.
+the model-generated banner and labels every excerpt with its agent, run-relative and absolute time
+(scripts/run_clock.py) and Inspect View link, from the host's locators (never from a model).
+
+The report has no per-agent section ("The agents, one by one") and no host appendix ("Where to look")
+since the owner's request of October 25, 2026; ``relayout`` removes both from an already rendered report
+without any model call or run record.
 """
 from __future__ import annotations
 
 import html
+from pathlib import Path
 import re
+import sys
 
 from . import verify
 from .digest import ITEM_ID
+
+try:
+    import run_clock
+except ImportError:  # scripts/ (the shared run clock) is not on the path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+    import run_clock
 
 BANNER = ("Post-hoc account written by Claude Opus 5.5 from the run's records after the run; "
           "it can be wrong. Every quoted excerpt was checked by a program to appear verbatim in the cited record "
@@ -40,66 +52,17 @@ def kind_class(label):
     return "other"
 
 
-def _time(value):
+def _time(value, start=None):
+    """An event time as every page shows it: ``+12:34 (05:17:40 UTC)`` relative to the run start
+    (scripts/run_clock.py); only the absolute time when the start is unknown."""
     if not value:
         return "time unknown"
-    match = re.match(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})", str(value))
-    return f"{match.group(1)} {match.group(2)} UTC" if match else str(value)
-
-
-# ---------------------------------------------------------------------------
-# Appendix (host-written)
-
-
-def appendix_records(evidence, locator):
-    """Every record the report cites or quotes, grouped: storyline records, then other citations."""
-    rows, seen = [], set()
-    for story in evidence.get("storylines") or []:
-        for record in story["records"]:
-            if record["id"] not in seen:
-                seen.add(record["id"])
-                rows.append(dict(record["locator"], storyline=story["id"]))
-    for item_id in evidence.get("cited_ids") or []:
-        if item_id not in seen:
-            loc = locator.locate(item_id)
-            if loc:
-                seen.add(item_id)
-                rows.append(dict(loc, storyline=None))
-    return rows
-
-
-def appendix_markdown(evidence, locator, digest):
-    run_id = digest["run_id"]
-    out = ["", "## Where to look", "",
-           "Host-written (not model-written) pointers to every record this report quotes or cites. Item ids are "
-           "the behavior judge history's stable ids (`research/analysis/judge/history.py`). Inspect View links "
-           "open the agent's transcript at the model event that produced the record.", "",
-           "Run records: `results.json`, `results.html` (deterministic results report), "
-           + judge_records_phrase(digest)
-           + "`evaluations/evaluations.jsonl` (independent proof checker), `conference/state.sqlite` (board, DMs, "
-           "library, submissions), `analysis/timeline.jsonl`, " + ", ".join(f"`{s}`" for s in digest["sources"]["inspect"])
-           + " (raw Inspect log).", ""]
-    if not locator.inspect_view_present:
-        out += ["Note: this run directory has no local `inspect-view/` bundle; the Inspect View links work where "
-                "the bundle is published beside the run (the hosted experiment library).", ""]
-    out += ["| Record | Kind | Agent | Time | Storyline | Raw record |", "| --- | --- | --- | --- | --- | --- |"]
-    for row in appendix_records(evidence, locator):
-        link = f"[{row['id']}]({row['inspect_url']})" if row.get("inspect_url") else f"`{row['id']}`"
-        out.append(f"| {link} | {row['label']} | {row['agent']} | {_time(row['time'])} | {row['storyline'] or ''} | "
-                   f"`{row.get('raw') or ''}` |")
-    out += ["", "Per agent:", ""]
-    for agent_id in digest["agents"]:
-        url = locator.sample_url(agent_id)
-        judge = judge_agent_phrase(digest, agent_id)
-        out.append(f"- **{agent_id}**: " + (f"[Inspect View transcript]({url})" if url else "no Inspect sample") + judge)
-    out += ["", "To read any record in full from a checkout (offline, no model):", "",
-            "```",
-            f"PYTHONPATH=src:. .venv/bin/python -c \"from research.analysis.judge.history import build_run; "
-            f"r = build_run('runs/{run_id}', agents=['agent-007']); print(r.lookup('A07.t0123.r')['text'])\"",
-            "```", "",
-            "`evidence.json` beside this report lists every excerpt with its verification result and every record's "
-            "locator (Inspect log, sample, epoch, event and message ids).", ""]
-    return "\n".join(out)
+    match = re.match(r"(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})", str(value))
+    if not match:
+        return str(value)
+    if start is None:
+        return f"{match.group(1)} {match.group(2)} UTC"
+    return run_clock.clock(f"{match.group(1)}T{match.group(2)}Z", start)
 
 
 # ---------------------------------------------------------------------------
@@ -139,10 +102,11 @@ def _cite(item_id, ctx):
     loc = ctx["locate"](item_id)
     if loc is None:
         return f'<span class="cite missing" title="Unknown record id">[{html.escape(item_id)}?]</span>'
-    href = loc.get("inspect_url") or f"#rec-{_anchor(item_id)}"
-    title = f"{loc['label']}, {loc['agent']}, {_time(loc['time'])}"
-    return f'<a class="cite" href="{html.escape(href, quote=True)}" title="{html.escape(title, quote=True)}">' \
-           f'{html.escape(item_id)}</a>'
+    title = f"{loc['label']}, {loc['agent']}, {_time(loc['time'], ctx.get('start'))}"
+    if not loc.get("inspect_url"):  # no same-page appendix any more: a labelled record id, not a link
+        return f'<span class="cite" title="{html.escape(title, quote=True)}">{html.escape(item_id)}</span>'
+    return f'<a class="cite" href="{html.escape(loc["inspect_url"], quote=True)}" ' \
+           f'title="{html.escape(title, quote=True)}">{html.escape(item_id)}</a>'
 
 
 def _anchor(item_id):
@@ -174,7 +138,6 @@ def _excerpt_html(record, ctx):
     links = []
     if loc.get("inspect_url"):
         links.append(f'<a href="{html.escape(loc["inspect_url"], quote=True)}">Open in Inspect View</a>')
-    links.append(f'<a href="#rec-{_anchor(record["item"])}">Where to look</a>')
     status = "" if record["verified"] else (
         f'<div class="unverified">Not verified: {html.escape(record.get("reason") or "not found verbatim")}. Treat '
         "this excerpt as unreliable.</div>")
@@ -191,11 +154,12 @@ def _excerpt_html(record, ctx):
                  f'{MODEL_FALLBACK_NOTE}</span>')
     return (f'<figure class="excerpt k-{css}{"" if record["verified"] else " bad"}">'
             f'<figcaption><span class="kind">{html.escape(label)}</span>'
-            f'<span class="meta">{html.escape(str(loc["agent"]))} · {html.escape(_time(loc["time"]))} · '
+            f'<span class="meta">{html.escape(str(loc["agent"]))} · {html.escape(_time(loc["time"], ctx.get("start")))} · '
             f'<code>{html.escape(record["item"])}</code>'
             + (f' · <code>{html.escape(record["eid"])}</code>' if record.get("eid") else "")
             + f'</span>{badge}</figcaption>{status}'
-            f'<blockquote>{body}</blockquote><div class="links">{" · ".join(links)}</div></figure>')
+            f'<blockquote>{body}</blockquote>'
+            + (f'<div class="links">{" · ".join(links)}</div>' if links else "") + '</figure>')
 
 
 def markdown_to_html(markdown, ctx):
@@ -349,7 +313,7 @@ figure.excerpt .links{font:12.5px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI
 .unverified{color:var(--bad);font:13px/1.4 -apple-system,BlinkMacSystemFont,sans-serif;margin:.3em 0}
 .unverified-mark{color:var(--bad);font-size:.8em;border:1px solid var(--bad);border-radius:3px;padding:0 .3em}
 .elide{color:var(--muted)}
-a.cite{font:0.8em ui-monospace,SFMono-Regular,Menlo,monospace;text-decoration:none;border-bottom:1px dotted}
+.cite{font:0.8em ui-monospace,SFMono-Regular,Menlo,monospace;text-decoration:none;border-bottom:1px dotted}
 .cite.missing{color:var(--bad);font:0.8em ui-monospace,monospace}
 .k-reasoning{--kc:var(--k-reasoning)}.k-message{--kc:var(--k-message)}.k-tool{--kc:var(--k-tool)}
 .k-submission{--kc:var(--k-submission)}.k-board{--kc:var(--k-board)}.k-dm{--kc:var(--k-dm)}
@@ -381,13 +345,14 @@ def excerpt_table(evidence):
             for e in r["excerpts"] if e.get("eid")}
 
 
-def render_html(markdown, checks, locator, digest, *, generated_at, models, evidence=None):
-    """report.html: banner, the writer's report, the appendix (already appended to ``markdown``)."""
+def render_html(markdown, checks, locator, digest, *, generated_at, models, evidence=None, start=None):
+    """report.html: banner and the writer's report; ``start`` is the run start (epoch seconds) for the
+    run-relative times."""
     blocks = {q["span"][0]: q for q in checks["quotes"] if q["form"] == "block"}
     inline_ok = {(verify.normalize(q["quote"]), q["item"]): q["verified"] for q in checks["quotes"]
                  if q["form"] == "inline"}
     ctx = {"locate": locator.locate, "blocks": blocks, "inline_ok": inline_ok, "excerpts": excerpt_table(evidence),
-           "excerpt_label": getattr(locator, "excerpt_label", None)}
+           "excerpt_label": getattr(locator, "excerpt_label", None), "start": start}
     title_match = re.search(r"^#\s+(.+)$", markdown, re.M)
     title = title_match.group(1).strip() if title_match else f"Incident report: {digest['run_id']}"
     summary = checks["summary"]
@@ -425,10 +390,11 @@ def annotate_markdown(markdown, checks):
     return reader_markdown(markdown, checks, None, None)
 
 
-def reader_markdown(markdown, checks, locator, evidence):
+def reader_markdown(markdown, checks, locator, evidence, start=None):
     """report.md: each excerpt block becomes a labelled quotation (label, agent, time, record and
     excerpt ids, Inspect View link, program-chosen flag) around a verbatim code block; unverified or
     incomplete excerpts and unverified inline quotes get a visible note."""
+    run_start = start   # the run start; "start" is reused below for excerpt spans
     excerpts = excerpt_table(evidence)
     out, last = [], 0
     for record in sorted(checks["quotes"], key=lambda q: q["span"][0]):
@@ -445,7 +411,7 @@ def reader_markdown(markdown, checks, locator, evidence):
         label = label or (loc or {}).get("label") or "Excerpt"
         head = [f"**{label}**"]
         if loc:
-            head += [str(loc["agent"]), _time(loc["time"])]
+            head += [str(loc["agent"]), _time(loc["time"], run_start)]
         head.append(f"`{record['item']}`" + (f" ({record['eid']})" if record.get("eid") else ""))
         if loc and loc.get("inspect_url"):
             head.append(f"[Inspect View]({loc['inspect_url']})")
@@ -667,3 +633,78 @@ def add_toc(page):
     page = page.replace("</head>", f'<style id="toc-style">{TOC_STYLE}</style></head>', 1)
     page = re.sub(r"(<body[^>]*>)", lambda m: m.group(1) + nav, page, count=1)
     return page.replace("</body>", f'<script id="toc-script">{TOC_SCRIPT}</script></body>', 1)
+
+
+# ---------------------------------------------------------------------------
+# Host-side relayout of an existing report (owner request, October 25, 2026): no model call, no run record.
+
+REMOVED_SECTIONS = ("the agents, one by one", "where to look")
+_EVENT_TIME_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) UTC\b")
+_HTML_H2_RE = re.compile(r'<h2\b[^>]*>(.*?)</h2>', re.S)
+_MD_H2_RE = re.compile(r"^##[ \t]+(.+?)[ \t]*$", re.M)
+_SECTION_END_HTML = re.compile(r'<h2\b|<!-- contagion:start|<footer|</main>')
+_SECTION_END_MD = re.compile(r"^##[ \t]|^<!-- contagion:start", re.M)
+
+
+def _removed(title):
+    return _heading_text(title).replace("’", "'").lower().rstrip(".") in REMOVED_SECTIONS
+
+
+def _drop_sections(text, heading_re, end_re):
+    while True:
+        match = next((m for m in heading_re.finditer(text) if _removed(m.group(1))), None)
+        if match is None:
+            return text
+        following = end_re.search(text, match.end())
+        stop = following.start() if following else len(text)
+        text = text[:match.start()].rstrip("\n") + "\n" + text[stop:]
+
+
+def restamp(text, start):
+    """``text`` with every event time written as ``YYYY-MM-DD HH:MM:SS UTC`` (the earlier excerpt-header and
+    citation format) shown as ``+12:34 (05:17:40 UTC)``; other times (the minute-precision 'generated' line)
+    are left alone. Idempotent."""
+    if start is None:
+        return text
+    return _EVENT_TIME_RE.sub(lambda m: run_clock.clock(f"{m.group(1)}T{m.group(2)}Z", start), text)
+
+
+def report_start(evidence, run_dir=None):
+    """The run start of a report: evidence.json's contagion clock (runtime.jsonl common_start), else
+    run_clock.run_start(run_dir) (results.json start_utc or runtime.jsonl), else None."""
+    from .contagion import _start
+    record = (evidence or {}).get("contagion")
+    start = _start(record) if isinstance(record, dict) else None
+    if start is None and run_dir is not None:
+        start = run_clock.run_start(run_dir)
+    return start
+
+
+def relayout(page, md, evidence, start=None):
+    """(report.html, report.md) of an already rendered report in the current layout: without the
+    "The agents, one by one" and "Where to look" sections (and their contents entries), without the
+    per-excerpt "Where to look" links and the same-page record links that pointed into that appendix,
+    with run-relative plus absolute event times, the contagion section re-inserted from
+    evidence["contagion"] and the table of contents rebuilt. evidence.json is not changed. Idempotent."""
+    from . import contagion
+    start = report_start(evidence) if start is None else start
+    record = (evidence or {}).get("contagion")
+    if page is not None:
+        page = _strip_toc(page)
+        page = _drop_sections(page, _HTML_H2_RE, _SECTION_END_HTML)
+        page = re.sub(r'(?: · )?<a href="#rec-[^"]*">Where to look</a>', "", page)
+        page = page.replace('<div class="links"></div>', "")
+        page = re.sub(r'<a class="cite" href="#rec-[^"]*"( title="[^"]*")?>(.*?)</a>',
+                      lambda m: f'<span class="cite"{m.group(1) or ""}>{m.group(2)}</span>', page)
+        page = page.replace("\na.cite{font:", "\n.cite{font:", 1)   # record ids without a link keep their look
+        page = restamp(page, start)
+        if isinstance(record, dict) and record.get("clock"):
+            page = contagion.insert_html(page, record)
+        page = add_toc(page)
+    if md is not None:
+        md = _drop_sections(md, _MD_H2_RE, _SECTION_END_MD)
+        md = restamp(md, start)
+        if isinstance(record, dict) and record.get("clock"):
+            md = contagion.insert_markdown(md, record)
+        md = md.rstrip("\n") + "\n"
+    return page, md

@@ -220,6 +220,43 @@ class BuildResultsTest(unittest.TestCase):
         self.assertNotIn('transcripts/', page)
         self.assertEqual(page, build_results.render(json.loads(data_bytes), None, build_results.inspect_logs(run)))
 
+    def test_times_show_offset_from_run_start_and_utc(self):
+        """Owner, October 25, 2026: every time on the run page shows the offset from the run start and UTC;
+        restamp_page converts an earlier (published) page exactly like a fresh render and is idempotent."""
+        from unittest.mock import patch
+        run = make_run(self.tmp.name)
+        data, page = generate(run)
+        start = build_results.run_clock.epoch(data['start_utc'])
+        self.assertIn('+0:00 (' + data['start_utc'][11:19] + ' UTC) to +', page)
+        self.assertIn('data-clock="run-start"', page)
+        self.assertNotIn('(UTC)</th>', page)
+        self.assertNotIn('<td>Start (UTC)</td>', page)
+        self.assertIn('agent-002 at minute ', page)  # minute-only exit times
+        self.assertRegex(page, r'<td>minute \d+ \(\d\d:\d\d UTC\)</td>')
+        self.assertIsNone(build_results.run_clock.ISO_RE.search(re.sub(r'<[^>]*>', '', page.split('<body', 1)[1])))
+        self.assertEqual(build_results.restamp_page(page, start), page)
+        with patch.object(build_results, 'restamp_page', lambda document, _start: document):
+            old = build_results.render(data, None, [])
+        self.assertIn('Submitted (UTC)', old)
+        # A published page carries publication markup (navigation script, links); only the times change.
+        wrapped = old.replace('<body>', '<body><script>const a=1>0;</script><a href="x/2026-10-20T01-00-00.eval">x</a>')
+        restamped = build_results.restamp_page(wrapped, start)
+        self.assertEqual(restamped, page.replace('<body>', '<body><script>const a=1>0;</script>'
+                                                           '<a href="x/2026-10-20T01-00-00.eval">x</a>'))
+        self.assertIs(build_results.restamp_page(old, None), old)
+
+    def test_simplified_judge_replaces_not_run_on_the_run_page(self):
+        import test_simple_judge_site as sjs
+        run = make_run(self.tmp.name)
+        sjs.write_simple_judge(run, run_id=run.name, local=False)
+        data, page = generate(run)
+        self.assertEqual(data['behavior_judge'], {'status': 'not_run'})  # data unchanged
+        self.assertNotIn('Behavior judge: not run', page)
+        self.assertNotIn('<td>Behavior judge</td><td>not run</td>', page)
+        self.assertIn('simplified judge: 1 credited, of 2 labelled (<a href="analysis/simple_judge/report.html">'
+                      'report</a>)', page)
+        self.assertIn('<div class="v">1 credited</div>', page)
+
     def test_rerender_html_adds_incident_tab_when_report_exists(self):
         run = make_run(self.tmp.name)
         generate(run)

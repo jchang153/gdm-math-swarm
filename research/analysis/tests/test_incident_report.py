@@ -12,7 +12,10 @@ Run: PYTHONPATH=src:. .venv/bin/python -m unittest discover -s research/analysis
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -103,7 +106,7 @@ def write_run_files(run_dir):
     run_dir = Path(run_dir)
     (run_dir / "analysis" / "judge" / "agents").mkdir(parents=True, exist_ok=True)
     (run_dir / "results.json").write_text(json.dumps({
-        "run": RUN_ID, "condition": {"agents": 3, "task_count": 2, "model": "mock"},
+        "run": RUN_ID, "start_utc": iso(0), "condition": {"agents": 3, "task_count": 2, "model": "mock"},
         "agents": [{"agent": "agent-002", "requests": 9, "exit": "budget_exhausted", "submissions": {"accepted": 1}}],
         "tasks": [{"task": "T1", "submissions": {"accepted": 1}}],
         "independent_evaluation": {"status": "completed", "by_validity": {"genuine": 1},
@@ -171,7 +174,7 @@ class VerifyTests(unittest.TestCase):
     def test_structure_problems(self):
         md = "# T\n\n## Summary\n\n## Case studies\n\n### 1. A\n\n### 2. B\n\n## Evaluation awareness\n\n" \
              "## What didn't happen\n\n" \
-             "## How sure we are\n\n## What to try next\n\n## The agents, one by one\n"
+             "## How sure we are\n\n## What to try next\n"
         self.assertEqual(verify.structure_problems(md), [])
         self.assertTrue(any("missing section" in p for p in verify.structure_problems("# T\n\n## Summary\n")))
 
@@ -242,13 +245,19 @@ class PipelineTests(unittest.TestCase):
         page = (fx.out / "report.html").read_text()
         self.assertTrue(md.startswith("> **Model-generated.**"))
         self.assertNotIn(FAKE, md)
-        self.assertIn("## Where to look", md)
+        # No per-agent section and no host appendix (owner, October 25, 2026); times are run-relative + UTC.
+        for gone in ("Where to look", "The agents, one by one"):
+            self.assertNotIn(gone, md)
+            self.assertNotIn(gone, page)
+        self.assertNotIn('href="#rec-', page)
+        self.assertIn("agent-001 · +0:20 (00:00:20 UTC)", md)
+        self.assertIn("agent-001 · +0:20 (00:00:20 UTC)", page)
+        self.assertEqual(evidence["prompts"], "gdm-incident-prompts/5")
         self.assertIn("Model-generated.", page)
         self.assertNotIn("<b>decide", page)                     # record text is escaped
         self.assertIn("&lt;b&gt;decide +native&lt;/b&gt;", page)
         self.assertIn('class="kind">Board post<', page)
         self.assertIn("transcript?event=ev13", page)
-        self.assertIn('id="rec-post-000001"', page)
         # The host-computed contagion section and the table of contents (no model involved).
         self.assertIn('<h2 id="how-the-exploit-spread">', page)
         self.assertIn('<nav class="toc"', page)
@@ -335,7 +344,11 @@ class HelperTests(unittest.TestCase):
         self.assertIn("<em>emphasis</em>", html_text)
         self.assertIn("<code>code&lt;x&gt;</code>", html_text)
         self.assertIn("&lt;script&gt;", html_text)
-        self.assertIn('href="#rec-A02_t0001_r"', html_text)
+        # Without an Inspect View link the record id is a labelled span, never a dead same-page link.
+        self.assertIn('<span class="cite" title="Direct message, agent-002, ', html_text)
+        self.assertNotIn('href="#rec-', html_text)
+        ctx["start"] = T0
+        self.assertIn('title="Direct message, agent-002, +0:05 (00:00:05 UTC)"', render.markdown_to_html("[A02.t0001.r]", ctx))
         self.assertEqual(render.kind_class("Direct message"), "dm")
         multi = render.markdown_to_html("Both [A02.t0001.r, A02.t0002.x] cost \\$5.", ctx)
         self.assertEqual(multi.count('class="cite"'), 2)
@@ -458,3 +471,80 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RelayoutTests(unittest.TestCase):
+    """Owner request of October 25, 2026: no "The agents, one by one" or "Where to look" section, and every
+    event time shown run-relative plus absolute; already rendered reports are rewritten host-side."""
+
+    OLD_PAGE = ("<!doctype html><html><head><style>\na.cite{font:0.8em mono}\n</style></head><body><main>"
+                '<h1>T</h1><p class="runline">generated 2026-10-24 21:43 UTC</p>'
+                '<h2 id="summary">Summary</h2><p>See <a class="cite" href="#rec-A01_t0001_r" '
+                'title="Reasoning, agent-001, 2026-10-21 00:01:05 UTC">A01.t0001.r</a>.</p>'
+                '<figure class="excerpt"><figcaption><span class="meta">agent-001 · 2026-10-21 00:01:05 UTC · '
+                '<code>A01.t0001.r</code></span></figcaption><blockquote>x</blockquote><div class="links">'
+                '<a href="https://x/inspect">Open in Inspect View</a> · <a href="#rec-A01_t0001_r">Where to look</a>'
+                '</div></figure><figure class="excerpt"><blockquote>y</blockquote><div class="links">'
+                '<a href="#rec-A01_t0002_r">Where to look</a></div></figure>'
+                '<h2 id="what-to-try-next">What to try next</h2><p>More.</p>'
+                '<h2 id="the-agents-one-by-one">The agents, one by one</h2><p><strong>agent-001</strong> did.</p>'
+                '<h2 id="where-to-look">Where to look</h2><table><tr id="rec-A01_t0001_r"><td>2026-10-21 00:01:05 UTC'
+                "</td></tr></table><footer>f</footer></main></body></html>")
+    OLD_MD = ("> **Model-generated.** Generated 2026-10-24 21:43 UTC.\n\n# T\n\n## Summary\n\n"
+              "> **Reasoning** · agent-001 · 2026-10-21 00:01:05 UTC · `A01.t0001.r`\n\n"
+              "## What to try next\n\nMore.\n\n## The agents, one by one\n\n**agent-001** did.\n\n"
+              "## Where to look\n\n| Record | Time |\n| --- | --- |\n| x | 2026-10-21 00:01:05 UTC |\n")
+
+    def evidence(self):
+        return {"run_id": RUN_ID, "contagion": {"clock": {"start_ts": T0, "length_min": 10.0,
+                                                          "basis": "runtime.jsonl common_start"},
+                                                "available": True, "source": "detectors", "techniques": [],
+                                                "behavior_findings": "Behavior findings: none."}}
+
+    def test_relayout_removes_sections_and_restamps(self):
+        page, md = render.relayout(self.OLD_PAGE, self.OLD_MD, self.evidence())
+        for text in (page, md):
+            self.assertNotIn("one by one", text)
+            self.assertNotIn("Where to look", text)
+            self.assertNotIn("2026-10-21 00:01:05 UTC", text)
+            self.assertIn("+1:05 (00:01:05 UTC)", text)
+            self.assertIn("What to try next", text)
+            self.assertIn("2026-10-24 21:43 UTC", text)          # generation time, not a run event
+            self.assertIn("How the exploit spread", text)        # re-inserted from evidence.json
+        self.assertNotIn('href="#rec-', page)
+        self.assertNotIn('<div class="links"></div>', page)
+        self.assertIn('<a href="https://x/inspect">Open in Inspect View</a></div>', page)
+        self.assertIn('<span class="cite" title="Reasoning, agent-001, +1:05 (00:01:05 UTC)">A01.t0001.r</span>', page)
+        self.assertIn("\n.cite{font:", page)
+        self.assertIn("<footer>f</footer>", page)
+        toc = re.search(r'<nav class="toc".*?</nav>', page, re.S).group(0)
+        self.assertNotIn("agents-one-by-one", toc)
+        self.assertIn("#how-the-exploit-spread", toc)
+        ids = set(re.findall(r'\bid="([^"]+)"', page))
+        self.assertEqual([h for h in re.findall(r'href="#([^"]+)"', page) if h not in ids], [])
+        self.assertEqual(render.relayout(page, md, self.evidence()), (page, md))   # idempotent
+
+    def test_relayout_cli_touches_only_the_two_pages(self):
+        import run_incident_report as cli
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / RUN_ID
+            out = run / "analysis" / "incident"
+            out.mkdir(parents=True)
+            (run / "results.json").write_text(json.dumps({"run": RUN_ID, "start_utc": iso(0)}))
+            evidence = self.evidence()
+            del evidence["contagion"]                  # the start then comes from results.json
+            (out / "report.html").write_text(self.OLD_PAGE)
+            (out / "report.md").write_text(self.OLD_MD)
+            (out / "evidence.json").write_text(json.dumps(evidence))
+            before = (out / "evidence.json").read_bytes()
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                self.assertEqual(cli.main(["--run-dir", str(run), "--rerender-layout"]), 0)
+            self.assertEqual(json.loads(buffer.getvalue())["run_start"], T0)
+            self.assertEqual((out / "evidence.json").read_bytes(), before)
+            page = (out / "report.html").read_text()
+            self.assertIn("+1:05 (00:01:05 UTC)", page)
+            self.assertNotIn("Where to look", (out / "report.md").read_text())
+            with contextlib.redirect_stdout(io.StringIO()) as again:
+                self.assertEqual(cli.main(["--run-dir", str(run), "--rerender-layout"]), 0)
+            self.assertEqual(json.loads(again.getvalue())["written"], [])
