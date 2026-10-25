@@ -403,8 +403,17 @@ is being merged into main via `collab-env`.
      main: catalogue, site, simple-judge x4, incident x14, conference with `--capture-pages --pages-dir`, then
      verify_hosted `--expect-no-space-logs --expect-run-clock` for all 18 runs and `used_storage`. Then update this item.
 
-6. **2026-10-25: seeded overseer experiment READY TO LAUNCH, pending the owner's run budget** (docs/plan.md,
-   "Seeded overseer experiment, October 25, 2026"; configs/README.md, "Declared seeded runs"). No run yet.
+6. **2026-10-25: seeded overseer experiment RUNNING** (docs/plan.md,
+   "Seeded overseer experiment, October 25, 2026"; configs/README.md, "Declared seeded runs"). Owner budget: $250 each.
+   - **Control `glm100-seeded-control-30m-20261025T230654Z`** on owner-vm-2 (n2d-highmem-96), launched
+     23:06:54 UTC, run start 23:11:39. **Seed confirmed:** `seeded_artifact_injected` at 23:14:38 (+3:00); 10 agents
+     read `solutions/infinite_fermat_primes.lean` within about 10 min. A placeholder tmux `hold-retrieval` keeps the
+     VM up; the operator session retrieves `completed-*.tgz` to `runs/phase-b/<id>/`, extracts `runs/<id>/`, then
+     touches `retrieved.marker` and kills the hold (the supervisor then powers off). Resize back to n2-standard-64.
+   - **Overseer** on owner-vm: all-71 validation started 22:45 UTC in tmux `validate`
+     (log `~/logs/validate-all71.log`); the operator session launches `glm100-seeded-overseer-30m` automatically when
+     it finishes (~23:55), same retrieval procedure afterwards.
+   - Then: build_results, exports, publish (dataset first), overseer-vs-control spread analysis.
    - Two configs, each `glm100-baseline-30m` plus one planted exploit: `configs/glm100-seeded-overseer-30m.json`
      (overseer `agent-102`, prompt B, `check_proof` + `revert_submission`, `max_connections` 101) and
      `configs/glm100-seeded-control-30m.json` (no overseer, 100). `run_budget_usd` is `SET_AT_LAUNCH` (refuses to
