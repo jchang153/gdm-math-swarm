@@ -18,6 +18,12 @@ scope; ledger label run id "simple-judge-<run id>", so it never counts against t
 incident report's budget). Earlier invocations into the same output directory count against it. No other control.
 The route record (simple-judge-route-<UTC>.json, unpaid public catalog) is refreshed automatically when missing or
 older than 72 h. --mock uses a deterministic offline model, a rehearsal ledger and no key.
+
+Seeded runs (track "seeded"; research/analysis/roles.py): the seeded participant (agent-101, role "seed") is the
+planted source, not a model agent. It is never judged (no case file, no call; --agents naming it is refused) and
+report.json records it under "seeded" (with the injection minute); a likely source naming it counts as "seeded",
+never "independent". Non-solver agents that are judged (the overseer) carry their role in agents.jsonl and on the
+page.
 """
 from __future__ import annotations
 
@@ -72,6 +78,24 @@ def route_settings(args, keys, log):
     path, record = freeze(ROUTE_DIR, sorted(sroute.CANDIDATES))
     log(f"route record written: {path} (valid: {record['valid']})")
     return SimpleRouteSettings.from_record(path, keys)
+
+
+def seeded_record(run_dir):
+    """(seed agents, report.json "seeded" block or None, {agent: non-solver role})."""
+    from research.analysis import roles as participant_roles
+    from research.analysis.incident.contagion import run_clock
+    roles = participant_roles.special_roles(run_dir)
+    seeds = {a for a, r in roles.items() if r == participant_roles.SEED}
+    info = participant_roles.seeded_info(run_dir)
+    if not seeds or info is None:
+        return seeds, None, roles
+    injected = participant_roles.injection(run_dir)
+    record = dict(info, label=participant_roles.SEED_LABEL, judged=False, injected=injected is not None,
+                  injected_utc=(injected or {}).get("time"), injected_min=None,
+                  note="planted by the researchers; not a model agent, no transcript, never judged")
+    if injected and isinstance(injected.get("timestamp"), (int, float)):
+        record["injected_min"] = round((injected["timestamp"] - run_clock(run_dir)[0]) / 60, 2)
+    return seeds, record, roles
 
 
 def load_cases(path, agents):
@@ -138,9 +162,16 @@ def _run(args, run_dir, out_dir, log):
     log(f"simple judge: budget ${budget} (already committed ${prior['committed_usd']}); ledger {ledger}; "
         f"model {settings.route(args.model).model_id}" + (f", fallback {settings.route(fallback_key).model_id}"
                                                          if fallback_key else ""))
-    agents = sorted(sample_index(run_dir))
+    seeds, seeded, roles = seeded_record(run_dir)
+    agents = sorted(a for a in sample_index(run_dir) if a not in seeds)
+    if seeded:
+        log(f"seeded run: {', '.join(sorted(seeds))} is the seeded source (planted by researchers); not judged")
     if args.agents:
         wanted = [a.strip() for a in args.agents.split(",") if a.strip()]
+        planted = [a for a in wanted if a in seeds]
+        if planted:
+            log(f"refused: {planted} is the seeded source (planted by researchers), which is never judged")
+            return 2
         missing = [a for a in wanted if a not in agents]
         if missing:
             log(f"refused: no Inspect sample for {missing}")
@@ -186,6 +217,10 @@ def _run(args, run_dir, out_dir, log):
             "agents_requested": len(agents), "wall_seconds": round(time.monotonic() - started, 1),
             "case_build_seconds": round(build_seconds, 1), "judging_seconds": round(judge_seconds, 1),
             "budget": run_limit.record()}
+    if seeded:
+        meta["seeded"] = seeded
+    if any(role != "seed" for role in roles.values()):
+        meta["roles"] = {a: r for a, r in roles.items() if r != "seed"}
     report = pipeline.write_outputs(out_dir, run_dir.name, rows, meta=meta, comparison=comparison)
     summary = {"status": "done", "out_dir": str(out_dir), "cost_usd": report["cost_usd"],
                "wall_seconds": meta["wall_seconds"], "counts": {k: report["counts"][k] for k in

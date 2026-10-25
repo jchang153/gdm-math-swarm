@@ -51,6 +51,12 @@ held, with a warning) and "cumulative_budget" is RUN/budget-final.json. A run wi
 budget (docs/plan.md "One per-run budget, no manual approvals (October 20, 2026)") reports that
 budget as the pilot row's cap (from the ledger's runs table, else RUN/run-budget.json); the
 cumulative rows show an older ledger's legacy caps only, "not recorded" otherwise.
+
+Seeded runs (track "seeded", owner design 2026-10-25; research/analysis/roles.py): the seeded participant
+(agent-101, role "seed": no container, model or transcript) is left out of the per-agent rows and the solver
+counts; a researcher-only "seeded" block records it (task, channel, trigger, injection time from the
+seeded_artifact_injected event and its run minute, its submissions, and credited tasks by role, seed shown
+separately). Runs without a seed are unchanged.
 """
 import argparse
 import collections
@@ -70,6 +76,9 @@ from incident_site import add_incident_tab, has_incident_report  # noqa: E402
 from simple_judge_site import add_simple_judge_tab, has_simple_judge, simple_report  # noqa: E402
 import run_clock  # noqa: E402
 from site_theme import BASE as STYLE, badge_class  # noqa: E402
+if str(Path(__file__).resolve().parents[1]) not in sys.path:  # research/analysis/roles.py (participant roles)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from research.analysis import roles as participant_roles  # noqa: E402
 
 NANO = Decimal('1e-9')
 ACCEPTED = ('accepted', 'accepted_after_close')
@@ -374,6 +383,8 @@ def oversight(settings, every, accepted, reverted, checks, agents):
     overseer_id = (overseer or {}).get('agent_id')
     if overseer_id:
         roles.setdefault(overseer_id, 'overseer')
+    for agent in participant_roles.seed_agents(settings):  # seeded runs: the planted seed, never a solver
+        roles[agent] = participant_roles.SEED
     for agent in agents:
         roles.setdefault(agent, 'solver')
     net = {}  # task -> final credited row (accepted and not reverted)
@@ -381,7 +392,7 @@ def oversight(settings, every, accepted, reverted, checks, agents):
         if row['operational_outcome'] == 'accepted' and row['_serial'] not in reverted:
             net[row['task']] = row
     by_role = {}
-    for role in ('solver', 'overseer'):
+    for role in ('solver', 'overseer') + (('seed',) if 'seed' in roles.values() else ()):
         members = {a for a, r in roles.items() if r == role}
         subs = [r for r in every if r['agent'] in members]
         by_role[role] = {'agents': sorted(members), 'submissions': len(subs),
@@ -407,6 +418,36 @@ def oversight(settings, every, accepted, reverted, checks, agents):
                              'by_validity': dict(sorted(collections.Counter(c['validity'] for c in checks).items())),
                              'by_target': dict(sorted(collections.Counter(c['target'] for c in checks).items())),
                              'checks': checks}}
+
+
+def seeded(run, settings, runtime, every, first_accept):
+    """Researcher-only facts of a seeded run (None otherwise): the planted seed, its injection and the
+    credits by role with the seed separate."""
+    info = participant_roles.seeded_info(settings)
+    if info is None:
+        return None
+    seeds = set(info['seed_agents'])
+    roles = participant_roles.special_roles(settings)
+    injected = participant_roles.injection(run)
+    when = (injected or {}).get('timestamp')
+    credited = collections.Counter(roles.get(f['agent'], 'solver') for f in first_accept.values())
+    return {'researcher_only': True,
+            'note': (f'{info["seed_agent"]} is the seeded source, planted by the researchers: a silent participant '
+                     'with no container, model or transcript, credited with the seeded artifact at the trigger. It '
+                     'is not a solver and is left out of the per-agent rows.'),
+            'track': 'seeded', 'seed_agent': info['seed_agent'], 'label': participant_roles.SEED_LABEL,
+            'task': info['task_id'], 'channel': info['channel'], 'path': info['path'], 'trigger': info['trigger'],
+            'artifact_sha256': info['artifact_sha256'], 'source': info['source'],
+            'injection_recorded': injected is not None,
+            'injected_utc': utc(when).isoformat() if isinstance(when, (int, float)) else None,
+            'injected_minute': round((when - runtime['start']) / 60, 2) if isinstance(when, (int, float)) else None,
+            'injection': (injected or {}).get('payload'),
+            'submissions': [{'submission': r['submission'], 'task': r['task'], 'operational_outcome':
+                             r['operational_outcome'], 'submitted_utc': r['submitted_utc']}
+                            for r in every if r['agent'] in seeds],
+            'credited_tasks_by_role': dict(sorted(credited.items())),
+            'seed_credited_tasks': sorted(t for t, f in first_accept.items() if f['agent'] in seeds),
+            'solver_credited_tasks': sum(n for role, n in credited.items() if role == 'solver')}
 
 
 def evaluate(run, accepted):
@@ -483,7 +524,9 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
         # (identical to the first accepted submission when nothing was reverted).
         if r['operational_outcome'] == 'accepted' and r['task'] not in first_accept and r['_serial'] not in reverted:
             first_accept[r['task']] = {'agent': r['agent'], 'submitted_utc': r['submitted_utc']}
-    agents = sorted(set(runtime['agents']) | set(by_agent))
+    seeds = participant_roles.seed_agents(settings)  # empty except in seeded runs
+    agents = sorted((set(runtime['agents']) | set(by_agent)) - seeds)
+    seed_facts = seeded(run, settings, runtime, every, first_accept) if seeds else None
     overseen = oversight(settings, every, accepted, reverted, proof_checks(run), agents)
     roles = overseen['roles'] if overseen else {}
     results = {
@@ -520,6 +563,15 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
             mark = reverted.get(row['_serial'])
             row.update(reverted=mark is not None, reverted_utc=mark and mark['reverted_utc'],
                        revert_reason=mark and mark['reason'], reverted_by=mark and mark['reverted_by'])
+    if seed_facts:
+        results['condition'].update(seed_agent=seed_facts['seed_agent'],
+                                    solvers=sum(r == 'solver' for a, r in (overseen['roles'] if overseen else {
+                                        a: 'solver' for a in agents}).items()))
+        if not overseen:
+            results['condition']['participants'] = len(agents) + len(seeds)
+        for row in accepted:
+            if row['agent'] in seeds:
+                row['seeded'] = True
     public = [{k: v for k, v in row.items() if not k.startswith('_')} for row in accepted]
     keys = ('submission', 'agent', 'task', 'operational_outcome', 'independent_validity', 'source_sha256')
     results.update({
@@ -547,6 +599,8 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
             t['credit_history'] = history.get(t['task'], [])
         results['oversight'] = overseen
         results['reverted_submissions'] = overseen['reverted_submissions']
+    if seed_facts:
+        results['seeded'] = seed_facts
     page = render(results, title, inspect_logs(run))
     if has_simple_judge(run):  # navigation only: the simplified judge becomes the Behavior judge tab
         page = add_simple_judge_tab(page, simple_report(run))
@@ -642,7 +696,9 @@ def summary_card(results):
     tiles = [('Model', c['model'], c['provider_route'] or c['provider']),
              ('Prompt variant', c['prompt_variant'] or 'not recorded', 'as recorded in settings.json'
               if c['prompt_variant'] else 'settings.json names none'),
-             ('Agents', f'{c["solvers"]} solvers + overseer' if c.get('overseer') else c['agents'],
+             ('Agents', (f'{c["solvers"]} solvers' + (' + overseer' if c.get('overseer') else '')
+                         + (' + seed' if c.get('seed_agent') else '')) if c.get('overseer') or c.get('seed_agent')
+              else c['agents'],
               f'{voluntary} ended on their own · {errors} errors'),
              ('Duration', duration(results['elapsed_seconds']), f'stop: {results["stop_reason"]}'),
              ('Accepted tasks', f'{results["operationally_accepted_tasks"]} of {tasks}',
@@ -729,6 +785,25 @@ def oversight_section(ov):
     return out
 
 
+def who(agent, results):
+    """An agent id, with "(seeded, planted by researchers)" for a seeded run's seed."""
+    return participant_roles.label(agent, {(results.get('seeded') or {}).get('seed_agent'): 'seed'})
+
+
+def seeded_section(sd):
+    """Seeded runs: the planted seed (researcher-only)."""
+    return ['<h2 id="seeded">Seeded source (researcher-only)</h2>', f'<p>{esc(sd["note"])}</p>', facts([
+        ('Track', sd['track']), ('Seed agent', f'{sd["seed_agent"]} ({sd["label"]})'), ('Task', sd['task']),
+        ('Channel', sd['channel']), ('Library path', sd['path']), ('Trigger', sd['trigger']),
+        ('Injected (UTC)', sd['injected_utc'] or ('not injected' if not sd['injection_recorded'] else None)),
+        ('Injected (run minute)', sd['injected_minute']), ('Artifact SHA-256', sd['artifact_sha256']),
+        ('Seed submissions', ', '.join(f'{r["submission"]} ({r["operational_outcome"]})'
+                                       for r in sd['submissions']) or 'none'),
+        ('Credited tasks by role', sd['credited_tasks_by_role'] or 'none'),
+        ('Tasks credited to the seed', ', '.join(sd['seed_credited_tasks']) or 'none'),
+        ('Tasks credited to solvers', sd['solver_credited_tasks'])])]
+
+
 def render(results, title, inspect_logs=()):
     c, ev, judge = results['condition'], results['independent_evaluation'], results['behavior_judge']
     pilot = results['budget']['pilot']
@@ -756,6 +831,7 @@ def render(results, title, inspect_logs=()):
                 ('Prompt variant', c['prompt_variant']), ('Auto-restart', c['auto_restart']),
                 ('Max run seconds', c['max_run_seconds']), ('Budget track', c['budget_track']),
                 ('Seeded contagion', c['seeded_contagion_enabled']), ('Mitigations', c['mitigations_enabled'])]
+                + ([('Seed agent', f'{c["seed_agent"]} ({participant_roles.SEED_LABEL})')] if c.get('seed_agent') else [])
                 + ([('Solvers', c['solvers']), ('Participants', c['participants']),
                     ('Overseer', c['overseer'])] if 'overseer' in c else [])),
             '<h2>Agents</h2>', table([(esc(a['agent'] + (f' ({a["role"]})' if a.get('role') == 'overseer' else '')),
@@ -766,7 +842,7 @@ def render(results, title, inspect_logs=()):
                                      ('Agent', 'Requests', 'Finished', 'Unbilled', 'Restarts', 'Exit', 'Exit time',
                                       'Submissions')),
             '<h2>Submissions by task</h2>', table([(esc(t['task']), esc(value(t['submissions'])), esc(
-                f'{t["first_accepted"]["agent"]} at {t["first_accepted"]["submitted_utc"]}'
+                f'{who(t["first_accepted"]["agent"], results)} at {t["first_accepted"]["submitted_utc"]}'
                 if t['first_accepted'] else 'none')) for t in results['tasks']],
                 ('Task', 'Submissions by outcome', 'First accepted')),
             '<h2>Accepted submissions</h2>']
@@ -783,11 +859,13 @@ def render(results, title, inspect_logs=()):
             cell += ' ' + badge('reverted') + '<br><small>' + esc(
                 f'by {row["reverted_by"]} at {row["reverted_utc"]}: {row["revert_reason"]}') + '</small>'
         return cell
-    body.append(table([(esc(r['submission']), esc(r['agent']), esc(r['task']), conference_cell(r),
+    body.append(table([(esc(r['submission']), esc(who(r['agent'], results)), esc(r['task']), conference_cell(r),
                         esc(r['submitted_utc']), validity(r)) for r in results['accepted_submissions']],
                       ('Submission', 'Agent', 'Task', 'Conference', 'Submitted (UTC)', 'Independent validity')))
     if 'oversight' in results:
         body += oversight_section(results['oversight'])
+    if results.get('seeded'):
+        body += seeded_section(results['seeded'])
     if ev['status'] == 'not_run':
         body.append('<p>Proof checker: not run</p>')
     else:

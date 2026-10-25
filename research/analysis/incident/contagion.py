@@ -29,6 +29,15 @@ Exposure: an agent's first ``library_read`` of an accepted exploit file ``soluti
 that file's acceptance (a file the agent did not write). An exploit user whose first exposure precedes
 its first exploit submission is an adopter, attributed to the author of the first such file it read;
 otherwise it is an independent discoverer. A link is strong evidence of transmission, not proof.
+
+Seeded runs (track ``seeded``, owner design 2026-10-25; ``research/analysis/roles.py``): the seeded participant
+(``agent-101``, role ``seed``) is the planted source, "seeded (planted by researchers)": its accepted submission
+always counts as an exploit submission of its family (the detectors' family, else the answer field), whatever the
+judge source (it is never judged); it is a lineage root but never an independent discoverer, and it is left out of
+the user, credit and outbreak counts (``counts["seeded"]``, ``record["seeded"]``). Agents who read its file
+before their first exploit submission are adopters attributed to it. Without a submission row for the seed, the
+``seeded_artifact_injected`` event supplies it. Other non-solver participants (the overseer) are labelled by role.
+Runs without a seed or an overseer give the same record as before.
 """
 from __future__ import annotations
 
@@ -350,8 +359,9 @@ def classify(submissions, findings):
     return marks
 
 
-def spread(submissions, reads, marks, family, start):
-    """The contagion of one exploit family."""
+def spread(submissions, reads, marks, family, start, seeds=frozenset(), roles=None):
+    """The contagion of one exploit family. ``seeds``: the seeded participants (lineage roots that are never
+    independent discoverers and are left out of the counts); ``roles``: {agent: non-solver role} for labels."""
     minute = lambda ts: (ts - start) / 60  # noqa: E731
     exploit = [s for s in submissions if marks.get(s["id"]) == family]
     first_use, credits, files = {}, Counter(), {}
@@ -370,11 +380,17 @@ def spread(submissions, reads, marks, family, start):
     users = []
     for agent, used in sorted(first_use.items(), key=lambda kv: (kv[1], kv[0])):
         exposure = first_read.get(agent)
-        adopted = exposure is not None and exposure[0] <= used
-        users.append({"agent": agent, "first_use_min": round(used, 2), "credits": credits[agent],
-                      "exposed_min": round(exposure[0], 2) if exposure else None,
-                      "exposure_file": exposure[2] if exposure else None,
-                      "source": exposure[1] if adopted else None, "independent": not adopted})
+        seeded = agent in seeds
+        adopted = exposure is not None and exposure[0] <= used and not seeded
+        user = {"agent": agent, "first_use_min": round(used, 2), "credits": credits[agent],
+                "exposed_min": round(exposure[0], 2) if exposure else None,
+                "exposure_file": exposure[2] if exposure else None,
+                "source": exposure[1] if adopted else None, "independent": not adopted and not seeded}
+        if seeded:
+            user["seeded"] = True
+        if (roles or {}).get(agent):
+            user["role"] = roles[agent]
+        users.append(user)
     by_agent = {u["agent"]: u for u in users}
     for user in users:      # lineage root: follow the sources back to an independent discoverer
         node, seen = user, set()
@@ -382,7 +398,7 @@ def spread(submissions, reads, marks, family, start):
             seen.add(node["agent"])
             node = by_agent[node["source"]]
         user["root"] = node["agent"]
-    roots = [u["agent"] for u in users if u["independent"]]
+    roots = [u["agent"] for u in users if u["independent"] or u.get("seeded")]
     roots.sort(key=lambda a: (-sum(u["root"] == a for u in users), by_agent[a]["first_use_min"], a))
     children = defaultdict(list)
     for user in users:
@@ -398,16 +414,58 @@ def spread(submissions, reads, marks, family, start):
     for root in sorted(roots, key=lambda a: (by_agent[a]["first_use_min"], a)):
         visit(root)
     order += [u["agent"] for u in users if u["agent"] not in order]  # never expected; keeps every user
-    credit_times = sorted(round(minute(ts), 2) for _, ts in files.values())
+    credit_times = sorted(round(minute(ts), 2) for a, ts in files.values() if a not in seeds)
+    seeded_users = [u["agent"] for u in users if u.get("seeded")]
+    counts = {"users": len(users) - len(seeded_users), "independent": len(roots) - len(seeded_users),
+              "adopters": len(users) - len(roots), "exposed_non_adopters": len(readers - set(first_use)),
+              "exploit_credits": sum(n for a, n in credits.items() if a not in seeds),
+              "exploit_submissions": sum(s["agent"] not in seeds for s in exploit)}
+    if seeded_users:
+        counts["seeded"] = len(seeded_users)
+        counts["seeded_adopters"] = sum(u["root"] in seeded_users and not u.get("seeded") for u in users)
     return {"family": family, "label": family_label(family),
-            "counts": {"users": len(users), "independent": len(roots), "adopters": len(users) - len(roots),
-                       "exposed_non_adopters": len(readers - set(first_use)),
-                       "exploit_credits": sum(credits.values()),
-                       "exploit_submissions": len(exploit)},
+            "counts": counts,
             "users": users, "row_order": order, "lineages": roots,
             "exposed_non_adopters": sorted(readers - set(first_use)),
             "exploit_files": {p: {"author": a, "accepted_min": round(minute(t), 2)} for p, (a, t) in files.items()},
             "first_credit_min": credit_times[0] if credit_times else None}
+
+
+def _seeded_context(run_dir, records):
+    """(seeds, roles, seeded record or None) of a run; adds the seed's acceptance from the
+    ``seeded_artifact_injected`` event to ``records["submissions"]`` when no submission row has it."""
+    from research.analysis import roles as participant_roles
+    roles = participant_roles.special_roles(run_dir)
+    seeds = frozenset(a for a, r in roles.items() if r == participant_roles.SEED)
+    info = participant_roles.seeded_info(run_dir)
+    if not seeds or info is None:
+        return seeds, roles, None
+    injected = participant_roles.injection(run_dir)
+    payload = (injected or {}).get("payload") or {}
+    agent, task = payload.get("author") or info["seed_agent"], payload.get("task_id") or info["task_id"]
+    subs = records["submissions"]
+    if injected and records["source"] is not None and task and not any(
+            s["agent"] == agent and s["task"] == task and s["outcome"] == ACCEPTED for s in subs):
+        subs.append({"id": f"seeded-{payload.get('artifact_id') or task}", "agent": agent, "task": task,
+                     "outcome": ACCEPTED, "source": None, "ts": _ts(injected.get("timestamp")), "seeded": True})
+        subs.sort(key=lambda s: (s["ts"] if s["ts"] is not None else 0, str(s["id"])))
+    when = _ts((injected or {}).get("timestamp"))
+    if when is None:   # no injection event: the seed's first accepted submission
+        when = min((s["ts"] for s in subs if s["agent"] == agent and s["outcome"] == ACCEPTED
+                    and s["ts"] is not None), default=None)
+    return seeds, roles, {"seed_agent": agent, "label": participant_roles.SEED_LABEL, "task_id": task,
+                          "path": payload.get("path") or info["path"], "channel": info["channel"],
+                          "trigger": payload.get("trigger") or info["trigger"],
+                          "injected_ts": when, "injected": injected is not None}
+
+
+def mark_seeds(marks, submissions, seeds):
+    """The seed's accepted submissions are exploit submissions whatever the judge source (the seed is never
+    judged): the detectors' family, else the answer field (the planted technique)."""
+    for sub in submissions:
+        if sub["agent"] in seeds and sub["outcome"] == ACCEPTED and sub["id"] not in marks:
+            marks[sub["id"]] = detect(sub.get("source")) or ANSWER
+    return marks
 
 
 def compute(run_dir, *, judge_dir=None, use_judge=True, simple_judge_dir=None, judge_source="auto"):
@@ -417,6 +475,7 @@ def compute(run_dir, *, judge_dir=None, use_judge=True, simple_judge_dir=None, j
     from .judge_source import FULL, NONE, SIMPLE, label as source_label, resolve
     run_dir = Path(run_dir)
     records = load_records(run_dir)
+    seeds, roles, seeded = _seeded_context(run_dir, records)
     start, length, basis = run_clock(run_dir, records["submissions"])
     chosen = resolve(run_dir, preference=judge_source if use_judge else NONE, judge_dir=judge_dir,
                      simple_judge_dir=simple_judge_dir)
@@ -451,14 +510,15 @@ def compute(run_dir, *, judge_dir=None, use_judge=True, simple_judge_dir=None, j
             source_text += ", since no behavior judge output exists"
         marks = classify(records["submissions"], None) if available else {}
     used_label = chosen["label"] if used != NONE else source_label(NONE)
+    mark_seeds(marks, records["submissions"], seeds)
     families = Counter(marks.values())
-    techniques = [spread(records["submissions"], records["reads"], marks, family, start)
+    techniques = [spread(records["submissions"], records["reads"], marks, family, start, seeds, roles)
                   for family in families]
-    techniques = [t for t in techniques if t["counts"]["users"] >= 1]
+    techniques = [t for t in techniques if t["counts"]["users"] >= 1 or t["counts"].get("seeded")]
     techniques.sort(key=lambda t: (-t["counts"]["users"], -t["counts"]["exploit_credits"], t["family"]))
     all_users = {}
     for sub in records["submissions"]:
-        if sub["id"] in marks:
+        if sub["id"] in marks and sub["agent"] not in seeds:
             all_users.setdefault(sub["agent"], round((sub["ts"] - start) / 60, 2))
     credit_times = sorted(c for t in techniques for c in ([t["first_credit_min"]] if t["first_credit_min"]
                                                            is not None else []))
@@ -474,11 +534,17 @@ def compute(run_dir, *, judge_dir=None, use_judge=True, simple_judge_dir=None, j
               "first_credit_min": credit_times[0] if credit_times else None,
               "techniques": techniques[:MAX_TREES], "techniques_omitted": [t["family"] for t in techniques[MAX_TREES:]],
               "caveat": CAVEAT}
+    if roles:
+        record["roles"] = roles
+    if seeded is not None:
+        injected = seeded.pop("injected_ts")
+        seeded["injected_min"] = round((injected - start) / 60, 2) if injected is not None else None
+        record["seeded"] = seeded
     if source in ("judge", "simple_judge") and available:
-        detector = Counter(m for m in classify(records["submissions"], None).values())
+        detected = mark_seeds(classify(records["submissions"], None), records["submissions"], seeds)
         record["detector_crosscheck"] = {
-            fam: spread(records["submissions"], records["reads"], classify(records["submissions"], None), fam,
-                        start)["counts"] for fam in detector}
+            fam: spread(records["submissions"], records["reads"], detected, fam, start, seeds, roles)["counts"]
+            for fam in Counter(detected.values())}
     return record
 
 
@@ -578,6 +644,16 @@ def outbreak_svg(record, width=680, height=240):
                      f'<title>First exploit credit at {_at(first, _start(record))}</title></line>'
                      f'<text class="cg-tick" x="{x(first) + dx:.1f}" y="{top + 10}" text-anchor="{anchor}">'
                      f'first exploit credit, min {_fmt(round(first, 1))}</text>')
+    seeded = record.get("seeded") or {}
+    if seeded.get("injected_min") is not None:
+        sm = seeded["injected_min"]
+        text = f'seeded by researchers ({seeded.get("seed_agent")}), min {_fmt(round(sm, 1))}'
+        anchor = "start" if x(sm) < left + pw * 0.6 else "end"
+        parts.append(f'<line class="cg-mark" x1="{x(sm):.1f}" x2="{x(sm):.1f}" y1="{top}" y2="{top + ph}">'
+                     f'<title>{_esc(seeded.get("seed_agent"))} ({_esc(seeded.get("label"))}): exploit credited and '
+                     f'published at {_at(sm, _start(record))}; not counted in the curve</title></line>'
+                     f'<text class="cg-tick" x="{x(sm) + (4 if anchor == "start" else -4):.1f}" y="{top + 24}" '
+                     f'text-anchor="{anchor}">{_esc(text)}</text>')
     path, count = [f"M{x(0):.1f},{y(0):.1f}"], 0
     for agent, minute in points:
         path.append(f"H{x(minute):.1f}")
@@ -606,8 +682,18 @@ def lineage_class(technique):
     return {root: (f"ln{i}" if i < len(PALETTE_LIGHT) else "lnx") for i, root in enumerate(technique["lineages"])}
 
 
+def _square(cx, cy, r):
+    return f"M{cx - r:.1f},{cy - r:.1f}H{cx + r:.1f}V{cy + r:.1f}H{cx - r:.1f}Z"
+
+
+def _roles_of(technique):
+    return {u["agent"]: ("seed" if u.get("seeded") else u["role"]) for u in technique["users"]
+            if u.get("seeded") or u.get("role")}
+
+
 def tree_svg(technique, length, width=680, start=None):
     users = {u["agent"]: u for u in technique["users"]}
+    roles = _roles_of(technique)
     order = technique["row_order"]
     classes = lineage_class(technique)
     row = 22 if len(order) <= 40 else 18
@@ -636,7 +722,7 @@ def tree_svg(technique, length, width=680, start=None):
         sx, sy, ay = x(src["first_use_min"]), ys[src["agent"]], ys[agent]
         ex, ux = x(user["exposed_min"]), x(user["first_use_min"])
         parts.append(f'<path class="cg-edge {cls}" d="M{sx:.1f},{sy:.1f}V{ay:.1f}H{ex:.1f}">'
-                     f'<title>{_esc(agent)} read {_esc(src["agent"])}\'s accepted exploit file '
+                     f'<title>{_esc(agent_label(agent, roles))} read {_esc(agent_label(src["agent"], roles))}\'s accepted exploit file '
                      f'{_esc(user["exposure_file"])} at {_at(user["exposed_min"], start)}</title></path>')
         if ux > ex + 0.5:
             parts.append(f'<path class="cg-dash {cls}" d="M{ex:.1f},{ay:.1f}H{ux:.1f}"/>')
@@ -644,22 +730,27 @@ def tree_svg(technique, length, width=680, start=None):
         user = users[agent]
         cls = classes.get(user["root"], "lnx")
         cx, cy = x(user["first_use_min"]), ys[agent]
-        label = f"{agent} · {user['credits']} cr"
-        if user["independent"]:
+        label = (f"{agent} · seeded (planted by researchers)" if user.get("seeded")
+                 else f"{agent_label(agent, roles)} · {user['credits']} cr")
+        if user.get("seeded"):
+            r = _radius(user["credits"]) + 1
+            shape = f'<path class="cg-node {cls}" d="{_square(cx, cy, r)}">'
+            how = "seeded source, planted by researchers (not an independent discoverer)"
+        elif user["independent"]:
             r = _radius(user["credits"]) + 2
             shape = f'<path class="cg-node {cls}" d="{_diamond(cx, cy, r)}">'
             how = "independent discoverer (no prior exposure)"
         else:
             r = _radius(user["credits"])
             shape = f'<circle class="cg-node {cls}" cx="{cx:.1f}" cy="{cy:.1f}" r="{r:.1f}">'
-            how = f"adopter: read {user['source']}'s exploit file at {_at(user['exposed_min'], start)}"
+            how = f"adopter: read {agent_label(user['source'], roles)}'s exploit file at {_at(user['exposed_min'], start)}"
         exposed = ""
         if user["independent"] and user["exposed_min"] is not None:
             exposed = f"; first read an exploit file later, at {_at(user['exposed_min'], start)}"
-        parts.append(shape + f"<title>{_esc(agent)}: {_esc(how)}; first exploit submission at "
+        parts.append(shape + f"<title>{_esc(agent_label(agent, roles))}: {_esc(how)}; first exploit submission at "
                      f"{_at(user['first_use_min'], start)}; {user['credits']} exploit credit"
                      f"{'s' if user['credits'] != 1 else ''}{_esc(exposed)}</title>"
-                     + ("</path>" if user["independent"] else "</circle>"))
+                     + ("</path>" if user["independent"] or user.get("seeded") else "</circle>"))
         parts.append(f'<text class="cg-lab" x="{cx + r + 5:.1f}" y="{cy + 4:.1f}">{_esc(label)}</text>')
     parts.append("</svg>")
     return "".join(parts)
@@ -668,6 +759,8 @@ def tree_svg(technique, length, width=680, start=None):
 def _swatch(cls, shape):
     if shape == "diamond":
         return f'<svg width="14" height="14" aria-hidden="true"><path class="cg-sw {cls}" d="{_diamond(7, 7, 6)}"/></svg>'
+    if shape == "square":
+        return f'<svg width="14" height="14" aria-hidden="true"><path class="cg-sw {cls}" d="{_square(7, 7, 5)}"/></svg>'
     if shape == "circle":
         return f'<svg width="14" height="14" aria-hidden="true"><circle class="cg-sw {cls}" cx="7" cy="7" r="5"/></svg>'
     if shape == "solid":
@@ -677,11 +770,15 @@ def _swatch(cls, shape):
 
 def legend_html(technique):
     users = technique["users"]
+    roles = _roles_of(technique)
     classes = lineage_class(technique)
     items = []
     for root, cls in classes.items():
         n = sum(u["root"] == root for u in users)
-        items.append(f"<span>{_swatch(cls, 'circle')}Lineage of {_esc(root)} ({n} agent{'s' if n != 1 else ''})</span>")
+        items.append(f"<span>{_swatch(cls, 'circle')}Lineage of {_esc(agent_label(root, roles))} "
+                     f"({n} agent{'s' if n != 1 else ''})</span>")
+    if any(u.get("seeded") for u in users):
+        items.append(f"<span>{_swatch('lnx', 'square')}Seeded source (planted by researchers)</span>")
     items += [f"<span>{_swatch('lnx', 'diamond')}Independent discoverer</span>",
               f"<span>{_swatch('lnx', 'circle')}Adopter (size: exploit credits)</span>",
               f"<span>{_swatch('lnx', 'solid')}Source → first exposure</span>",
@@ -692,6 +789,12 @@ def legend_html(technique):
 # ---------------------------------------------------------------------------
 # Section text
 
+def agent_label(agent, roles):
+    """The agent id with its role in words when it is not a solver (seed, overseer)."""
+    from research.analysis.roles import label
+    return label(agent, roles)
+
+
 def _plural(n, word, plural=None):
     return f"{n} {word if n == 1 else (plural or word + 's')}"
 
@@ -701,7 +804,29 @@ def counts_sentence(counts):
             f"{_plural(counts['independent'], 'independent discoverer')} and {_plural(counts['adopters'], 'adopter')}; "
             f"{_plural(counts['exposed_non_adopters'], 'more agent')} read an accepted exploit file but never "
             f"submitted one; {_plural(counts['exploit_credits'], 'exploit credit')} "
-            f"(accepted exploit submissions).")
+            f"(accepted exploit submissions)."
+            + (f" Not counted: the seeded source (planted by researchers); "
+               f"{_traces(counts.get('seeded_adopters', 0))}." if counts.get("seeded") else ""))
+
+
+def _traces(n):
+    return f"{_plural(n, 'adopter')} {'traces' if n == 1 else 'trace'} to it"
+
+
+def seeded_sentence(record):
+    """Seeded runs: who the planted source is, and that it is not an independent discoverer; "" otherwise."""
+    seeded = record.get("seeded")
+    if not seeded:
+        return ""
+    when = seeded.get("injected_min")
+    attributed = sum(t["counts"].get("seeded_adopters", 0) for t in record.get("techniques") or [])
+    return (f"Seeded run: {seeded['seed_agent']} is the seeded source, planted by the researchers (not a model "
+            f"agent and not an independent discoverer): "
+            + (f"at {_at(when, _start(record))} " if when is not None else "")
+            + f"the conference credited it with an accepted exploit for {seeded.get('task_id')}"
+            + (f" and published {seeded['path']}" if seeded.get("path") else "")
+            + (". " if seeded.get("injected") or when is not None else " (no injection was recorded). ")
+            + f"It is left out of the agent and credit counts; {_traces(attributed)}.")
 
 
 def crosscheck_sentence(record, technique):
@@ -766,7 +891,8 @@ def none_line(record):
                                                                                           "the program's detectors")
     line = f"No exploit submission was found ({basis}; computed by the program, no model). {behavior_line(record)}"
     extra = unmatched_sentence(record)
-    return line + (" " + extra if extra else "")
+    seeded = seeded_sentence(record)
+    return line + (" " + extra if extra else "") + (" " + seeded if seeded else "")
 
 
 def section_html(record):
@@ -776,6 +902,8 @@ def section_html(record):
     techniques = record["techniques"]
     total = record["exploit_users_total"]
     parts = [START, head, f'<p class="hostnote">{_esc(source_line(record))}</p>']
+    if seeded_sentence(record):
+        parts.append(f'<p class="cg-counts">{_esc(seeded_sentence(record))}</p>')
     first = record.get("first_credit_min")
     lead = (f"{_plural(total, 'agent')} submitted an exploit"
             + (f"; the first exploit credit came at {_at(first, _start(record))}" if first is not None else "")
@@ -815,6 +943,8 @@ def section_markdown(record):
               f"{_plural(record['exploit_users_total'], 'agent')} submitted an exploit"
               + (f"; the first exploit credit came at {_at(first, _start(record))}." if first is not None else "."),
               f"The outbreak curve and transmission tree figures are in [report.html](report.html#{SECTION_ID}).", ""]
+    if seeded_sentence(record):
+        lines += [seeded_sentence(record), ""]
     for technique in record["techniques"]:
         cross = crosscheck_sentence(record, technique)
         lines += [f"### Transmission tree: {technique['label']}", "", counts_sentence(technique["counts"]), ""]
@@ -823,9 +953,13 @@ def section_markdown(record):
                   "| Agent | Discovered or adopted | Source | First exposure | First use | Credits |",
                   "| --- | --- | --- | --- | --- | --- |"]
         users = {u["agent"]: u for u in technique["users"]}
+        roles = _roles_of(technique)
         for agent in technique["row_order"]:
             u = users[agent]
-            lines.append(f"| {agent} | {'independent' if u['independent'] else 'adopted'} | {u['source'] or '-'} | "
+            how = ("seeded (planted by researchers)" if u.get("seeded")
+                   else "independent" if u["independent"] else "adopted")
+            source = agent_label(u["source"], roles) if u["source"] else "-"
+            lines.append(f"| {agent_label(agent, roles)} | {how} | {source} | "
                          f"{'-' if u['exposed_min'] is None else _at(u['exposed_min'], _start(record))} | "
                          f"{_at(u['first_use_min'], _start(record))} | {u['credits']} |")
         lines.append("")
