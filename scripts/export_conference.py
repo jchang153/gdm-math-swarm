@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:  # research/analysis/roles.py (participant roles)
     sys.path.insert(0, str(ROOT))
 from research.analysis import roles as participant_roles  # noqa: E402
+from research.analysis import agent_badges  # noqa: E402
 STYLE = '''
 :root{font-family:system-ui,sans-serif;color:var(--fg);background:var(--bg);line-height:1.55}
 body{max-width:1280px;margin:32px auto;padding:0 24px}a{color:var(--accent)}h1{margin-bottom:8px}
@@ -135,6 +136,7 @@ def export(run):
         raise ValueError('Conference output must not be a symlink')
     out.mkdir(exist_ok=True)
     events = json_lines(run / 'conference/events.jsonl')
+    badge_map = agent_badges.run_badges(run)  # behavior judge labels next to agent ids (owner, 2026-10-26)
     start = run_clock.run_start(run)  # results.json start_utc (the runtime's common_start)
     runtime = json_lines(run / 'runtime.jsonl')
     db = sqlite3.connect((run / 'conference/state.sqlite').as_uri() + '?mode=ro', uri=True)
@@ -282,10 +284,11 @@ def export(run):
                             f'{html.escape(str(row["mode"]))} capture · {row["bytes"]} recorded bytes</p>'
                             f'<p>Runtime line {row["runtime_line"]} · blob SHA-256 <code>{row["blob_sha256"]}</code></p>'
                             '<pre>' + html.escape(row['content']) + '</pre></article>')
-        (out / filename).write_text(page(agent + ' · ' + path,
+        (out / filename).write_text(agent_badges.decorate_page(page(agent + ' · ' + path,
             '<p><a href="index.html#files">← Captured files</a></p><h1>' + html.escape(agent + ' · ' + path) + '</h1>'
             '<p class="banner">Private researcher record. Captures are observations, not a complete edit history. '
-            'A partial capture may omit content. Recorded times are capture times, not necessarily edit times.</p>' + ''.join(sections)))
+            'A partial capture may omit content. Recorded times are capture times, not necessarily edit times.</p>' + ''.join(sections)),
+            'conference-view/' + filename, badge_map))
         note = 'All captured versions are empty.' if all(not r['content'] for r in rows) else 'Open to inspect captured contents and versions.'
         records.append(record('files', identity, path, f'{len(rows)} captured version(s). {note}', rows[-1]['timestamp'], [agent],
                        detail={'captures': len(rows), 'empty': all(not r['content'] for r in rows),
@@ -318,7 +321,7 @@ def export(run):
         data['run_start'] = start
     if len(overseer_ids) > 1:
         data['overseers'] = overseer_ids
-    (out / 'index.html').write_text(render_index(data))
+    (out / 'index.html').write_text(agent_badges.decorate_page(render_index(data), 'conference-view/index.html', badge_map))
     manifest = {'schema': SCHEMA, 'run': run.name, 'counts': counts, 'captured_files': len(versions),
                 'conference_events': len(events), 'timeline_entries': 0, 'timeline_location': 'dataset',
                 'warnings': warnings,

@@ -985,6 +985,15 @@ def restamp_page(document, start):
     return head + body
 
 
+def with_agent_badges(page, run):
+    """results.html with the behavior judge's one-letter agent labels (research/analysis/agent_badges.py)."""
+    root = str(Path(__file__).resolve().parents[1])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from research.analysis import agent_badges
+    return agent_badges.decorate_page(page, 'results.html', agent_badges.run_badges(run))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0],
                                      formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1022,6 +1031,7 @@ def main(argv=None):
             page = add_simple_judge_tab(page, simple_report(run))
         if has_incident_report(run):
             page = add_incident_tab(page)
+        page = with_agent_badges(page, run)
         target = (args.output_dir or run).resolve() / 'results.html'
         if (target.exists() or target.is_symlink()) and not args.overwrite:
             raise SystemExit(f'Refusing to replace existing {target} (pass --overwrite or --output-dir)')
@@ -1040,6 +1050,7 @@ def main(argv=None):
     json_text, page = build(run, ledger=args.ledger, key_usage_log=args.key_usage_log, notes=notes,
                             title=args.title, stop_reason=args.stop_reason, stop_utc=args.stop_utc,
                             ids=args.submission_ids)
+    page = with_agent_badges(page, run)
     output = (args.output_dir or run).resolve()
     targets = [output / 'results.json', output / 'results.html']
     existing = [str(p) for p in targets if p.exists() or p.is_symlink()]

@@ -1021,6 +1021,7 @@ def rerender(run_dir, out_dir, *, judge_dir=None, record=None, simple_judge_dir=
     layout = {"contagion": record}
     if page_path.exists():
         page, _ = render.relayout(page_path.read_text(encoding="utf-8"), None, layout)
+        page = render.with_agent_badges(page, run_dir)
         page_path.write_text(page, encoding="utf-8")
         written.append(str(page_path))
     if md_path.exists():

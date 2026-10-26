@@ -118,6 +118,15 @@ RUN/results.html (adding the simplified judge's counts when it is published) and
 from the published pages alone (maintain_site_published); --scope incident without --bundle reads the three
 incident files from --runs-dir (for reports re-rendered with run_incident_report.py --rerender-layout).
 
+Agent labels (owner, October 26, 2026: a small coloured one-letter label per behavior-judge class next to every
+agent id inside a run; research/analysis/agent_badges.py): --scope site (no --bundle) and --scope conference also
+decorate the pages they re-render (results.html, rubric-3.1 judge pages, conference view and, with
+--capture-pages, captured-file pages) with labels computed from --runs-dir/RUN (simplified judge agents.jsonl,
+else the rubric-3.1 report.json, plus settings.json roles; no model). A run absent from --runs-dir keeps its pages
+as published. --scope simple-judge renders them (with the Labels definitions) into its report.html, and --scope
+incident (no --bundle) adds them to the local report.html in memory before upload. The legends link the label
+definitions only when that judge page is published.
+
 Default: read-only plan pinned to the current Space revision. --commit first writes the
 receipt, a before-inventory, backups of the originals and the plan, then uploads in guarded
 batches (catalogue or manifest last), verifies the result against the original pre-maintenance
@@ -1256,7 +1265,9 @@ def maintain_incident(bundle, api, download, *, run, commit=False, repo=DEFAULT_
 
     if bundle is None:  # the local page as prepare_hf_library.py would publish it (theme, Space navigation, links)
         name = prefix + INCIDENT_REPORT
-        local[name] = hosted_page(local[name].decode('utf-8'), run, archive, INCIDENT_REPORT).encode('utf-8')
+        # Agent labels (October 26, 2026), linking the label definitions only when that judge page is published.
+        labelled = _with_badges(name, run, local[name].decode('utf-8'), run_badge_map(run, runs_dir, remote))
+        local[name] = hosted_page(labelled, run, archive, INCIDENT_REPORT).encode('utf-8')
         if SECRET.search(local[name]):
             raise ValueError('Credential-like content detected; upload refused: ' + name)
     page = add_incident_tab(fetch(page_name).decode('utf-8')).encode('utf-8')  # published page + the tab
@@ -2085,7 +2096,8 @@ def hosted_page(document, run, archive, relative):
 
 
 def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_REPO, receipt=None,
-                        backup_dir=None, operation=None, capture_pages=False, workers=16, pages_dir=None):
+                        backup_dir=None, operation=None, capture_pages=False, workers=16, pages_dir=None,
+                        runs_dir=None):
     """--scope conference (owner, October 23, 2026): re-render the published conference views without the
     embedded activity timeline, which stays only in the private logs dataset (RUN/analysis/timeline.jsonl).
 
@@ -2176,7 +2188,9 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
         start = run_clock.results_start(fetch(results_name)) if results_name in remote else None
         if start is not None:
             data['run_start'] = start
-        page = hosted_conference_page(export_conference.render_index(data), run, archive)
+        badge_map = run_badge_map(run, runs_dir, remote)
+        page = _with_badges(f'{run}/{CONFERENCE_PAGE}', run,
+                            hosted_conference_page(export_conference.render_index(data), run, archive), badge_map)
         if export_conference.published_data(page) != data \
                 or data['records'] != [r for r in old_data['records'] if r['category'] != 'activity']:
             raise ValueError('Re-rendered conference records differ from the published ones: ' + run)
@@ -2208,11 +2222,13 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
             for name in sorted(n for n in remote if n.startswith(f'{run}/{CONFERENCE_PREFIX}')
                                and _CAPTURE_PAGE.fullmatch(n)):
                 old = fetch(name)
-                new = export_conference.restamp_capture_page(old.decode('utf-8'), start).encode('utf-8')
+                new = _with_badges(name, run, export_conference.restamp_capture_page(old.decode('utf-8'), start),
+                                   badge_map).encode('utf-8')
                 if new != old:
                     captures[name] = new
             planned.update(captures)
         per_run[run] = {'run_start': start,
+                        'agent_badges': badge_map['source'] if badge_map else 'none (no local judge records)',
                         'capture_pages': ({'published': sum(1 for n in remote if n.startswith(f'{run}/{CONFERENCE_PREFIX}')
                                                             and _CAPTURE_PAGE.fullmatch(n)),
                                            'restamped': len(captures), 'bytes': sum(map(len, captures.values()))}
@@ -2338,7 +2354,37 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
 SIMPLE_JUDGE_REPORT_JSON = 'analysis/simple_judge/report.json'
 
 
-def _published_page_restamps(run, remote, fetch):
+def run_badge_map(run, runs_dir, remote=None, reader=None):
+    """The one-letter agent labels of a run (research/analysis/agent_badges.py; owner, October 26, 2026),
+    read from its saved judge records and settings under ``runs_dir`` (iCloud placeholders downloaded first),
+    or None when the run is not there or has neither a judge nor a special role: then pages are left as they
+    are (never stripped). With ``remote`` (the published file set), the legend links the label definitions
+    only when that judge page is published."""
+    root = str(Path(__file__).resolve().parents[1])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from research.analysis import agent_badges
+    if runs_dir is None:
+        return None
+    folder = Path(runs_dir) / run
+    if folder.is_symlink() or not folder.is_dir():
+        return None
+    badge_map = agent_badges.run_badges(folder, reader=reader or _read_local)
+    if badge_map is not None and remote is not None:
+        target = agent_badges.definitions_page(badge_map['source'])
+        badge_map['link'] = bool(target) and f'{run}/{target}' in remote
+    return badge_map
+
+
+def _with_badges(name, run, document, badge_map):
+    """``document`` (the published page RUN/...) with the run's agent labels; unchanged without a badge map."""
+    if badge_map is None:
+        return document
+    from research.analysis import agent_badges
+    return agent_badges.decorate_page(document, name[len(run) + 1:], badge_map)
+
+
+def _published_page_restamps(run, remote, fetch, badge_map=None):
     """{name: new bytes} of one run's published pages restamped host-side (no local file read): RUN/results.html
     (build_results.restamp_page; plus simple_judge_site.add_simple_judge_tab with the published simplified
     judge report.json when there is one) and every HTML page of the published rubric-3.1 judge under
@@ -2362,13 +2408,14 @@ def _published_page_restamps(run, remote, fetch):
         page = add_simple_judge_tab(page, json.loads(fetch(report_name)))
         if f'{run}/{JUDGE_PREFIX}report.html' in remote:  # the rubric-3.1 judge as its own tab (repeat2's gap)
             page = add_rubric_tab(page)
+    page = _with_badges(page_name, run, page, badge_map)
     if SITE_THEME_MARKER in old.decode('utf-8') and SITE_THEME_MARKER not in page:
         raise ValueError('The restamped run page lost the site theme: ' + page_name)
     if page.encode('utf-8') != old:
         out[page_name] = page.encode('utf-8')
     for name in sorted(n for n in remote if n.startswith(f'{run}/{JUDGE_PREFIX}') and n.endswith('.html')):
         old = fetch(name)
-        new = restamp_judge_page(old.decode('utf-8'), start).encode('utf-8')
+        new = _with_badges(name, run, restamp_judge_page(old.decode('utf-8'), start), badge_map).encode('utf-8')
         if new != old:
             out[name] = new
     review = f'{run}/{JUDGE_PREFIX}review/'
@@ -2383,7 +2430,7 @@ def _published_page_restamps(run, remote, fetch):
 
 
 def maintain_site_published(api, download, *, runs=None, commit=False, repo=DEFAULT_REPO, receipt=None,
-                            backup_dir=None, operation=None):
+                            backup_dir=None, operation=None, runs_dir=None):
     """--scope site without --bundle (owner, October 25, 2026: every time on the site shows the run clock and
     UTC; run pages show the simplified judge's counts): restamp already published pages host-side, from the
     published pages themselves, with no local run file and no bundle.
@@ -2429,7 +2476,8 @@ def maintain_site_published(api, download, *, runs=None, commit=False, repo=DEFA
             raise ValueError('Run is not published with results.html and results.json: ' + run)
     planned, per_run = {}, {}
     for run in selected:
-        start, pages = _published_page_restamps(run, remote, fetch)
+        badge_map = run_badge_map(run, runs_dir, remote)
+        start, pages = _published_page_restamps(run, remote, fetch, badge_map)
         planned.update(pages)
         per_run[run] = {'run_start': start,
                         'results_page': 'restamped' if f'{run}/results.html' in pages else 'unchanged',
@@ -2438,7 +2486,8 @@ def maintain_site_published(api, download, *, runs=None, commit=False, repo=DEFA
                                                          and n.endswith('.html')),
                                         'restamped': sum(1 for n in pages if n.startswith(f'{run}/{JUDGE_PREFIX}')
                                                          and n.endswith('.html'))},
-                        'bytes': sum(map(len, pages.values()))}
+                        'bytes': sum(map(len, pages.values())),
+                        'agent_badges': badge_map['source'] if badge_map else 'none (no local judge records)'}
     files = dict(archive['files'])
     for name, data in planned.items():
         files[name] = digest(data)
@@ -2620,7 +2669,8 @@ def main(argv=None):
                                      runs=None if args.all_published_runs else [args.maintain_run],
                                      commit=args.commit, repo=args.repo_id, receipt=args.receipt,
                                      backup_dir=args.backup_dir, operation=CommitOperationAdd,
-                                     capture_pages=args.capture_pages, pages_dir=args.pages_dir)
+                                     capture_pages=args.capture_pages, pages_dir=args.pages_dir,
+                                     runs_dir=args.runs_dir)
         print(json.dumps(result, indent=2))
         return
     if args.scope == 'site' and args.bundle is None:
@@ -2632,7 +2682,8 @@ def main(argv=None):
         print(json.dumps(maintain_site_published(HfApi(), hf_hub_download,
                                                  runs=None if args.all_published_runs else [args.maintain_run],
                                                  commit=args.commit, repo=args.repo_id, receipt=args.receipt,
-                                                 backup_dir=args.backup_dir, operation=CommitOperationAdd), indent=2))
+                                                 backup_dir=args.backup_dir, operation=CommitOperationAdd,
+                                                 runs_dir=args.runs_dir), indent=2))
         return
     if args.scope == 'migrate-logs' or args.all_published_runs:
         if args.scope != 'migrate-logs' or args.bundle is not None or args.resume_from is not None:

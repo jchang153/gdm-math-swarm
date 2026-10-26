@@ -13,6 +13,7 @@ except ImportError:  # scripts/ (the shared run clock) is not on the path when i
     from run_clock import absolute, clock_minutes
 
 from .pipeline import names_seed as _names_seed
+from .. import agent_badges
 
 STYLE = """
 :root{--bg:#fbfbfa;--fg:#1d1d1b;--muted:#5f5e5a;--line:#dcdbd5;--card:#fff;--pos:#b4441f;--ok:#2f7d4f;--warn:#9a6a00}
@@ -176,7 +177,9 @@ def render_html(report, rows, old_judge_href=None, run_start=None):
                else "<p>No disagreements.</p>"))
     parts.append(agents_section(rows, run_start, report.get("seeded")))
     parts.append(f"</main><script>{SCRIPT}</script></body></html>")
-    return "".join(parts)
+    # One-letter agent labels with the full Labels definitions block (owner, October 26, 2026).
+    return agent_badges.decorate_html("".join(parts), agent_badges.badges_from_simple(rows, report),
+                                      page_rel=agent_badges.SIMPLE_PAGE, definitions=True)
 
 
 def _yn(value):

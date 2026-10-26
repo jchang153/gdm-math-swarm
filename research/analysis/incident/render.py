@@ -594,7 +594,18 @@ window.addEventListener('resize',update);update();
 
 
 def _heading_text(fragment):
-    return html.unescape(re.sub(r"<[^>]+>", "", fragment)).strip()
+    from .. import agent_badges
+    return html.unescape(re.sub(r"<[^>]+>", "", agent_badges.strip(fragment))).strip()
+
+
+REPORT_PAGE = "analysis/incident/report.html"
+
+
+def with_agent_badges(page, run_dir):
+    """report.html with the behavior judge's one-letter labels next to agent ids (owner, October 26, 2026;
+    research/analysis/agent_badges.py); idempotent, read from the run's saved judge records and settings."""
+    from .. import agent_badges
+    return agent_badges.decorate_page(page, REPORT_PAGE, agent_badges.run_badges(run_dir))
 
 
 def toc_entries(page):

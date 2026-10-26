@@ -628,6 +628,7 @@ class IncidentPipeline:
         page = render.render_html(body, checks, self.locator, digest, generated_at=generated, models=self.models,
                                   evidence=evidence, start=start)
         page = render.add_toc(contagion.insert_html(page, spread))
+        page = render.with_agent_badges(page, self.run_dir)
         (self.out_dir / "report.html").write_text(page, encoding="utf-8")
         record = {"schema": SCHEMA, "run_id": digest["run_id"], "generated_at": generated, "mode": self.mode,
                   "model_generated": True, "post_hoc": True, "models": self.models, "prompts": prompts.VERSION,

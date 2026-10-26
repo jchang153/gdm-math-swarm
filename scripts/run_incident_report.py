@@ -209,6 +209,7 @@ def _relayout(run_dir, out_dir, log):
     old_page = page_path.read_text(encoding="utf-8")
     old_md = md_path.read_text(encoding="utf-8") if md_path.is_file() else None
     page, md = render.relayout(old_page, old_md, evidence, start)
+    page = render.with_agent_badges(page, run_dir)  # one-letter behavior labels (owner, October 26, 2026)
     written = []
     for path, old, new in ((page_path, old_page, page), (md_path, old_md, md)):
         if new is not None and new != old:

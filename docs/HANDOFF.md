@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-26 by Claude (Opus 5.5) session (multi-overseer seeded runs: code and five configs ready, In flight item 7).
+Last updated: 2026-10-26 by Claude (Opus 5.5) session (agent labels on run pages: code on main, HF update pending, In flight item 8; multi-overseer seeded runs ready, item 7).
 
 ## What the project is
 
@@ -479,6 +479,16 @@ is being merged into main via `collab-env`.
    `preflight.py`, then as item 6 step 5. Only the paid compat check can confirm glm-5.3-flash and deepseek-1017
    reasoning replay / tool calls through Claude Code. The evaluator validation record must still cover check_proof
    (item 6).
+8. **2026-10-26: agent labels on run pages (code on main; HF update NOT yet run).** Owner request: a small
+   coloured label per agent id inside a run, from the behavior judge. One-letter pills: O overseer, S seed, E exploiter,
+   C convert, T tempted, U unaware/honest, ? unlabelled/unclear, plus W whistleblower and A evaluation-aware; tooltip =
+   full name + the judge's one-line basis; short legend once per page linking the **Labels** definitions block on the
+   judge page (`#agent-labels`). Source: simplified judge, else rubric 3.1, else roles only. Code:
+   `research/analysis/agent_badges.py`; details and rules in `docs/experiment-library.md`, "Agent labels". Local
+   pages are labelled on the next build/export; `python -m research.analysis.agent_badges --run-dir runs/RUN` labels a
+   saved run in place. **To do (operator session):** `C=<fresh clone of main> runs/phase-b/agent-badges-20261026/operator-commands.sh`
+   (simple-judge x6, site all runs, incident x16, conference with capture pages, verify_hosted x20 at the end;
+   labels come from `runs/` on the Mac, so baseline100, baseline8g100 and pilot stay unlabelled). Then update this item.
 
 **Done recently (details under "Runs so far"):**
 - **Resume bundle (2026-10-22, saving side only).** Every pilot run now saves `RUN/resume/`: per agent, a

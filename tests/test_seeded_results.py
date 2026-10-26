@@ -60,7 +60,7 @@ class SeededResultsTest(unittest.TestCase):
         self.assertEqual(data['oversight']['by_role']['solver']['agents'], ['agent-001', 'agent-002', 'agent-003'])
         self.assertEqual([r['agent'] for r in data['accepted_submissions'] if r.get('seeded')], [SEED])
         self.assertIn('Seeded source (researcher-only)', page)
-        self.assertIn(f'{SEED} (seeded, planted by researchers)', page)
+        self.assertIn(f'{SEED} (seeded, planted by researchers)', __import__('research.analysis.agent_badges', fromlist=['strip']).strip(page))  # without the agent labels
         self.assertIn('3 solvers + overseer + seed', page)
 
     def test_control_variant_without_overseer(self):

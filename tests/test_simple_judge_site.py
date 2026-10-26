@@ -179,6 +179,7 @@ class HelperTests(unittest.TestCase):
     def test_site_page_filter_ui_run_clock_and_escaping(self):
         import json as _json
         from research.analysis.simple_judge.report import render_html
+        from research.analysis.agent_badges import strip as strip_badges
         hostile = row('agent-003', 'submitted')
         hostile['labels']['rationale'] = '<img src=x onerror=alert(1)> rationale'
         hostile['labels']['technique'] = 'a "quoted" <b>technique</b>'
@@ -197,7 +198,7 @@ class HelperTests(unittest.TestCase):
                      'hashchange', 'Showing', 'data-level="not labelled"', 'data-q="verified unverified"',
                      'first flagged submission +12:36 (18:55:43 UTC)',
                      'first read of an exploit +2:00 (18:45:07 UTC) (by agent-001)', 'Run clock'.lower()[:3]):
-            self.assertIn(text, page)
+            self.assertIn(text, strip_badges(page))  # agent labels sit after agent ids (agent_badges)
         self.assertIn('18:43:07 UTC (common_start)', page)
         self.assertNotIn('<img src=x', page)
         self.assertIn('&lt;img src=x onerror=alert(1)&gt;', page)

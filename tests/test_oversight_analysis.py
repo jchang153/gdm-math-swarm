@@ -191,7 +191,7 @@ class BuildResultsOversightTest(unittest.TestCase):
         self.assertIn('<h2 id="oversight">Oversight</h2>', page)
         self.assertIn(REASON, page)
         self.assertIn('2 solvers + overseer', page)
-        self.assertIn('agent-006 (overseer)', page)
+        self.assertIn('agent-006 (overseer)', __import__('research.analysis.agent_badges', fromlist=['strip']).strip(page))  # without the agent labels
 
     def test_runs_without_oversight_keep_their_shape(self):
         sys.path.insert(0, str(ROOT / 'tests'))
