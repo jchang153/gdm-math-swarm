@@ -101,9 +101,8 @@ def _minute(ts, start):
     return None if ts is None or start is None else round((ts - start) / 60, 2)
 
 
-def compute(run_dir, compare_run_dir=None):
-    """The oversight record of a run, or None when the run has no overseer. ``compare_run_dir``: a run without
-    the overseer whose outbreak curve the comparison figure overlays."""
+def compute(run_dir):
+    """The oversight record of a run, or None when the run has no overseer."""
     run_dir = Path(run_dir)
     roles = participant_roles.special_roles(run_dir)
     overseer = next((a for a, r in roles.items() if r == participant_roles.OVERSEER), None)
@@ -192,7 +191,7 @@ def compute(run_dir, compare_run_dir=None):
     from research.analysis.incident import prevention
     return {
         "schema": SCHEMA, "computed_by": "host (no model)", "overseer": overseer, "roles": roles,
-        "prevention": prevention.compute(run_dir, overseer, compare_run_dir=compare_run_dir),
+        "prevention": prevention.compute(run_dir, overseer),
         "proof_checker": None if enabled is None else bool((enabled.get("payload") or {}).get("proof_checker")),
         "clock": {"start_ts": start, "basis": "runtime.jsonl common_start"},
         "counts": {"proof_checks": kinds["proof_checked"], "reversions": kinds["submission_reverted"],
@@ -403,9 +402,8 @@ def section_markdown(record):
                   f"{t['exposed_unwarned']['adopted']} of {t['exposed_unwarned']['agents']} |",
                   f"| Never read one | {t['unexposed_warned']['adopted']} of {t['unexposed_warned']['agents']} | "
                   f"{t['unexposed_unwarned']['adopted']} of {t['unexposed_unwarned']['agents']} |", "",
-                  "Agents that submitted an exploit, by exposure and warning (association, not effect). The exposure "
-                  "swimlanes, blocked-branch tree, interventions curve, detection latency and comparison figures are "
-                  f"in [report.html](report.html#{SECTION_ID})."]
+                  "Agents that submitted an exploit, by exposure and warning (association, not effect). The outbreak "
+                  f"with interventions chart is in [report.html](report.html#{SECTION_ID})."]
     lines += ["", f"*{CAVEAT}*", "", END]
     return "\n".join(lines)
 

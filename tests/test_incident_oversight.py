@@ -95,7 +95,7 @@ class OversightSectionTests(unittest.TestCase):
         db.executemany("INSERT INTO agents VALUES (?)", [(f"agent-{i:03d}",) for i in range(1, 11)])
         db.commit()
         db.close()
-        record = oversight.compute(self.run, compare_run_dir=self.run)
+        record = oversight.compute(self.run)
         prev = record["prevention"]
         self.assertEqual([f["submission"] for f in prev["files"]], ["sub-a"])     # sub-b was never published
         self.assertEqual(prev["files"][0]["reads"], [{"agent": "agent-003", "minute": 6.67}])
@@ -105,10 +105,13 @@ class OversightSectionTests(unittest.TestCase):
         readers = record["actions"][0]["readers"]
         self.assertEqual(readers, [{"agent": "agent-004", "minute": 8.33}])
         page = oversight.section_html(record)
-        for ident in ("oversight-exposure", "oversight-warned-table", "oversight-blocked-tree",
-                      "oversight-interventions", "oversight-latency", "oversight-comparison"):
+        for ident in ("oversight-warned-table", "oversight-interventions"):
             self.assertIn(f'id="{ident}"', page)
-        self.assertEqual(page.count("<svg viewBox"), 5)
+        for gone in ("oversight-exposure", "oversight-blocked-tree", "oversight-latency", "oversight-comparison"):
+            self.assertNotIn(gone, page)
+        self.assertEqual(page.count("<svg viewBox"), 1)
+        self.assertIn("Accepted fake proofs (not yet reverted)", page)
+        self.assertEqual(prev["standing"], [[3.0, 1]])
         self.assertIn("1 agent read this post; 0 of them submitted an exploit afterwards.", page)
 
     def test_inserted_after_contagion_and_survives_relayout(self):
