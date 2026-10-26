@@ -29,10 +29,10 @@
     "model": {
       "requested_model": "DeepSeek V4.1 Flash (1017)",
       "candidate_model_id": "deepseek/deepseek-v4.1-flash-1017",
-      "provider_route": "deepseek",
+      "provider_route": "deepinfra/fp8",
       "provider_settings": {
-        "prompt_usd_per_token": "0.0000003",
-        "output_usd_per_token": "0.0000012",
+        "prompt_usd_per_token": "0.000000098",
+        "output_usd_per_token": "0.000000294",
         "model_id": "deepseek/deepseek-v4.1-flash-1017",
         "context_length": 1048576,
         "max_tokens": 16384,
