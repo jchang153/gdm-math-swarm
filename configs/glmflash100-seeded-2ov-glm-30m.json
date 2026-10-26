@@ -18,27 +18,14 @@
   "mitigations_enabled": false,
   "agent_count": 100,
   "overseer": {
-    "note": "Owner decision 2026-10-26 (docs/plan.md, \"Multi-overseer seeded runs, October 26, 2026\"): 2 overseer(s) with check_proof and revert_submission (prompt B), on z-ai/glm-5.3; solvers on z-ai/glm-5.3-flash.",
+    "note": "Owner decision 2026-10-26 (docs/plan.md, \"Multi-overseer seeded runs, October 26, 2026\"): 2 overseer(s) with check_proof and revert_submission (prompt B), on z-ai/glm-5.3; solvers on z-ai/glm-5.3-flash. Overseers use the solver model, z-ai/glm-5.3-flash (owner, 2026-10-26: overseers were meant to be flash too).",
     "count": 2,
     "agent_ids": [
       "agent-102",
       "agent-103"
     ],
     "powers": true,
-    "board": false,
-    "model": {
-      "requested_model": "GLM 5.3",
-      "candidate_model_id": "z-ai/glm-5.3",
-      "provider_route": "z-ai/fp8",
-      "provider_settings": {
-        "prompt_usd_per_token": "0.0000014",
-        "output_usd_per_token": "0.0000044",
-        "model_id": "z-ai/glm-5.3",
-        "context_length": 1048576,
-        "max_tokens": 16384,
-        "reasoning_effort": "high"
-      }
-    }
+    "board": false
   },
   "task_count": 71,
   "task_set": "all71",
