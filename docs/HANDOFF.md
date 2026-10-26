@@ -466,7 +466,15 @@ is being merged into main via `collab-env`.
      5. `runs/phase-b/<RUN_ID>/launch-config.json` = config + `run_dir`, `run_budget_usd` (owner's figure),
         `verified_integration`, `paid_launch_enabled`; launch `supervise_run.py` in tmux with `exec ... > log 2>&1`.
      6. Check `runs/<RUN_ID>/conference/events.jsonl` for `seeded_artifact_injected` about 180 s after `run_start_marked`.
-7. **CODE READY 2026-10-26, NOT LAUNCHED: five multi-overseer seeded runs** (docs/plan.md, "Multi-overseer seeded
+7. **RUNNING 2026-10-26 (operator session): five multi-overseer seeded runs, $150 each.** Live:
+   `glmflash100-seeded-2ov-glm-30m-20261026T202117Z` (VM owner-vm), `glmflash100-seeded-5ov-glm-30m-20261026T202325Z`
+   (owner-vm-2), `glmflash100-seeded-1ov-ds-30m-20261026T201120Z` (owner-vm-3). Pending: 2ov-ds and 5ov-ds; owner-vm-4 and the new
+   owner-vm-5 (cloned from snapshot `owner-vm-snap-20261026`) cannot start (us-central1-a n2d-highmem-96 stockout), so
+   the operator's chain scripts launch 2ov-ds on owner-vm-3 and 5ov-ds on owner-vm after their runs finish (retrieval to the Mac
+   first; `hold-retrieval` keeps those VMs up). Owner corrections: GLM overseers use glm-5.3-flash (`6ec632b`; a first 2ov-glm run
+   with base glm-5.3 overseers was aborted at ~15 min, $6.24); DeepSeek overseers route via `deepinfra/fp8` (`6d86923`, the
+   first-party route is refused by the account data policy). All 5 VMs must be stopped and resized to n2-standard-64 afterwards.
+   Original item text: **CODE READY 2026-10-26: five multi-overseer seeded runs** (docs/plan.md, "Multi-overseer seeded
    runs, October 26, 2026"; configs/README.md, same heading). Configs `configs/glmflash100-seeded-{2ov-glm,5ov-glm,
    1ov-ds,2ov-ds,5ov-ds}-30m.json`: solvers on `z-ai/glm-5.3-flash`, 1/2/5 overseers (`agent-102`...) with powers on
    `z-ai/glm-5.3` or `deepseek/deepseek-v4.1-flash-1017`, private overseer board in the 5-overseer runs; the run
@@ -479,7 +487,7 @@ is being merged into main via `collab-env`.
    `preflight.py`, then as item 6 step 5. Only the paid compat check can confirm glm-5.3-flash and deepseek-1017
    reasoning replay / tool calls through Claude Code. The evaluator validation record must still cover check_proof
    (item 6).
-8. **2026-10-26: agent labels on run pages (code on main; HF update NOT yet run).** Owner request: a small
+8. **2026-10-26: agent labels on run pages (code on main; published by the operator: simple-judge, site and incident scopes done; conference scope retrying after HF 429s).** Owner request: a small
    coloured label per agent id inside a run, from the behavior judge. One-letter pills: O overseer, S seed, E exploiter,
    C convert, T tempted, U unaware/honest, ? unlabelled/unclear, plus W whistleblower and A evaluation-aware; tooltip =
    full name + the judge's one-line basis; short legend once per page linking the **Labels** definitions block on the
