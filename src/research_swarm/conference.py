@@ -438,8 +438,10 @@ class ConferenceService:
         self._observer_join_timeout = observer_join_timeout
         self._clock = clock
         self._fixed_agents = frozenset(agent_ids) if agent_ids is not None else None
-        # Overseer with oversight powers (enable_oversight); None in every other run.
-        self._overseer = None
+        # Overseers with oversight powers (enable_oversight); empty in every other run.
+        self._overseers = frozenset()
+        # Overseers sharing the private overseer board (enable_overseer_board); empty otherwise.
+        self._board_overseers = frozenset()
         self._proof_checker = None
         self._lock = threading.RLock()
         self._activity = threading.Condition(threading.Lock())
@@ -474,6 +476,8 @@ class ConferenceService:
             "get_conference_status": self._get_conference_status,
             "check_proof": self._check_proof,
             "revert_submission": self._revert_submission,
+            "post_overseer_board": self._post_overseer_board,
+            "read_overseer_board": self._read_overseer_board,
         }
         try:
             self._db.execute("PRAGMA journal_mode=WAL")
@@ -817,7 +821,8 @@ class ConferenceService:
             if not isinstance(agent_id, str) or not _AGENT_ID.fullmatch(agent_id):
                 raise ToolError("Invalid calling agent identity.")
             if not isinstance(tool, str) or tool not in self._handlers or (
-                    tool in self._OVERSIGHT_TOOLS and (self._overseer is None or agent_id != self._overseer)):
+                    tool in self._OVERSIGHT_TOOLS and agent_id not in self._overseers) or (
+                    tool in self._BOARD_TOOLS and agent_id not in self._board_overseers):
                 raise ToolError(f"Unknown tool: {tool}")
             if args is None:
                 args = {}
@@ -1394,20 +1399,72 @@ class ConferenceService:
     # -------------------------------------------------------------- oversight
     _OVERSIGHT_TOOLS = frozenset({"check_proof", "revert_submission"})
 
-    def enable_oversight(self, overseer_id: str, proof_checker: Callable | None) -> None:
-        """Give ``overseer_id`` the oversight tools (research_swarm.oversight, ``powers``).
+    def enable_oversight(self, overseer_id, proof_checker: Callable | None) -> None:
+        """Give ``overseer_id`` (one identifier, or a list of them for several overseers) the
+        oversight tools (research_swarm.oversight, ``powers``).
 
         ``proof_checker(task, source)`` returns a dict with ``verified`` (bool), ``validity``,
         ``reason``, ``comparator_status`` and optional ``details`` (agent-visible, sanitized by
         the checker) and ``evidence`` (researcher-side only). Every other caller is refused
         the oversight tools as unknown tools."""
-        if not isinstance(overseer_id, str) or not _AGENT_ID.fullmatch(overseer_id):
+        ids = self._overseer_ids(overseer_id)
+        self._overseers, self._proof_checker = frozenset(ids), proof_checker
+        # One overseer keeps the earlier event payload; several are listed.
+        named = {"overseer": overseer_id} if isinstance(overseer_id, str) else {"overseers": ids}
+        self._record_quietly("oversight_enabled", None, {**named, "proof_checker": proof_checker is not None})
+
+    def _overseer_ids(self, value):
+        ids = [value] if isinstance(value, str) else list(value or ())
+        if not ids or len(set(ids)) != len(ids):
             raise ValueError("Invalid overseer identifier")
-        if self._fixed_agents is not None and overseer_id not in self._fixed_agents:
-            raise ValueError("The overseer must be a participant")
-        self._overseer, self._proof_checker = overseer_id, proof_checker
-        self._record_quietly("oversight_enabled", None, {"overseer": overseer_id,
-                                                         "proof_checker": proof_checker is not None})
+        for agent in ids:
+            if not isinstance(agent, str) or not _AGENT_ID.fullmatch(agent):
+                raise ValueError("Invalid overseer identifier")
+            if self._fixed_agents is not None and agent not in self._fixed_agents:
+                raise ValueError("The overseer must be a participant")
+        return ids
+
+    # ---------------------------------------------------------- overseer board
+    _BOARD_TOOLS = frozenset({"post_overseer_board", "read_overseer_board"})
+
+    def enable_overseer_board(self, overseer_ids) -> None:
+        """Open the private overseer board (research_swarm.oversight, ``overseer.board``) to
+        ``overseer_ids``. Every other caller is refused both board tools as unknown tools. The
+        ``overseer_board`` table exists only in runs with the board."""
+        ids = self._overseer_ids(overseer_ids)
+        with self._transaction() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS overseer_board (post_id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                       "agent_id TEXT NOT NULL, message TEXT NOT NULL, posted_at REAL NOT NULL)")
+        self._board_overseers = frozenset(ids)
+        self._record_quietly("overseer_board_enabled", None, {"overseers": ids})
+
+    def _post_overseer_board(self, agent_id, args, call_id):
+        a = self._arguments(args, ("message",))
+        message = self._listable_text(a["message"], "message")
+        with self._transaction() as db:
+            now = self._clock()
+            post_id = db.execute("INSERT INTO overseer_board (agent_id, message, posted_at) VALUES (?, ?, ?)",
+                                 (agent_id, message, now)).lastrowid
+            identifier = f"ovpost-{post_id:06d}"
+            self._emit("overseer_board_post", agent_id, {"post_id": identifier, "message": message},
+                       "post_overseer_board", call_id)
+        return {"ok": True, "post_id": identifier, "seq": post_id, "posted_at": _iso(now)}
+
+    def _read_overseer_board(self, agent_id, args, call_id):
+        a = self._arguments(args, (), ("since_seq", "limit"))
+        since, limit = self._paging(a)
+        with self._transaction() as db:
+            posts = [{"seq": post_id, "post_id": f"ovpost-{post_id:06d}", "agent_id": author, "message": message,
+                      "posted_at": _iso(posted_at)}
+                     for post_id, author, message, posted_at in db.execute(
+                         "SELECT post_id, agent_id, message, posted_at FROM overseer_board ORDER BY post_id")]
+            page, paging = _paginate(posts, since, limit, "read_overseer_board", "message")
+            self._emit("overseer_board_read", agent_id, {
+                "since_seq": since, "limit": limit, "paging": paging,
+                "post_ids": [post["post_id"] for post in page],
+                "shortened_post_ids": [post["post_id"] for post in page if post.get("text_truncated")]},
+                "read_overseer_board", call_id)
+        return {"ok": True, **paging, "posts": page}
 
     def _revert_submission(self, agent_id, args, call_id):
         a = self._arguments(args, ("problem_id", "reason"))

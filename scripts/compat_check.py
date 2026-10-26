@@ -94,6 +94,14 @@ committed total at run end (uncertain holds at their full reservation); ``run_bu
 and ``run_id`` record the check's budget.
 
     PYTHONPATH=src .venv/bin/python scripts/compat_check.py [--config configs/pilot.json]
+
+Per-role models (research_swarm.oversight ``overseer.model``, docs/plan.md "Multi-overseer seeded
+runs, October 26, 2026"): a config whose overseers run on another model gets one check per model
+(``compat_plan``), one after the other: the solvers' model, then the overseers'. Each is its own
+paid invocation with its own ledger run of ``run_budget_usd``, its own ``--max-requests`` bound
+(so at most twice ``--max-requests`` agent requests plus two probes in all) and its own evidence
+record (``role`` recorded); the launch gates ``compatibility`` and ``compatibility_overseer``
+each read the newest record made for their model's settings.
 """
 from __future__ import annotations
 import argparse
@@ -732,7 +740,20 @@ async def reasoning_cap_probe(model, ledger, settings, record, *, cap=DEFAULT_CA
     return None
 
 
-async def run_check(config, args, stamp, *, images, ledger, ledger_path, provider_name=None):
+def compat_plan(config):
+    """[(role, config-shaped dict)]: one compatibility check per model the run calls, in order: the
+    solvers' model, then the overseers' own model (research_swarm.oversight ``overseer.model``) when
+    the config has one. Each check is its own paid invocation with its own ledger run (budget
+    ``run_budget_usd``) and admits at most ``--max-requests`` agent requests plus the probe."""
+    from research_swarm.oversight import role_model_configs
+    return list(role_model_configs(config).items())
+
+
+def route_gate_name(role):
+    return "route_pricing" if role == "solver" else f"route_pricing_{role}"
+
+
+async def run_check(config, args, stamp, *, images, ledger, ledger_path, provider_name=None, role_config=None):
     from inspect_ai import eval_async
     from research_swarm.inspect_adapter import (InstructionArchive, budget_filter, claude_code_env,
                                                 credentials_in_environment, disable_inspect_dotenv)
@@ -758,7 +779,8 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path, provide
     record("inspect_dotenv_disabled", None, dotenv)
     record("images_pinned", None, images)
     # live_compatibility_verified stays False: this run is what establishes it.
-    settings = settings_from_config(config, pricing_verified=True, live_compatibility_verified=False)
+    settings = settings_from_config(config if role_config is None else role_config, pricing_verified=True,
+                                    live_compatibility_verified=False)
     listing, task_files = runtime.export_public_tasks(ROOT)
     warm_up = None
     if not args.no_warm_up:
@@ -923,9 +945,8 @@ def checked_run(args, config, settings, path, *, gates, environment, run, refres
             from freeze_route import refresh_if_needed as refresh
         refresh(config, args.config)
     report = (gates or evaluate_gates)(config)
-    problems += gate_problems(report)
-    # The pinned endpoint's catalog name, from the route freeze the route_pricing gate checked.
-    provider_name = (((report or {}).get("evidence") or {}).get("route_pricing") or {}).get("provider_name")
+    plan = compat_plan(config)
+    problems += gate_problems(report, REQUIRED_GATES + tuple(route_gate_name(r) for r, _ in plan if r != "solver"))
     override = {}
     env_problems, images = (environment or (lambda c: environment_check(c, override_record=override)))(config)
     concurrent_run_override = override or None
@@ -933,23 +954,53 @@ def checked_run(args, config, settings, path, *, gates, environment, run, refres
     if concurrent_run_override is not None and concurrent_run_override["applied"]:
         print("WARNING: concurrent-run override (" + concurrent_run_override["approval"] + "): starting while "
               + "; ".join(concurrent_run_override["warnings"]) + ". Recorded in the evidence.")
-    if args.cap_probe_max_tokens >= settings.max_tokens:
-        problems.append(f"--cap-probe-max-tokens {args.cap_probe_max_tokens} must be below the frozen max_tokens "
-                        f"{settings.max_tokens} (the probe must truncate below the agent's cap)")
+    role_settings = {}
+    for role, role_config in plan:
+        try:
+            role_settings[role] = settings if role == "solver" else settings_from_config(role_config,
+                                                                                          pricing_verified=True)
+        except ValueError as ex:
+            problems.append(f"{role} model provider settings are invalid ({ex})")
+            continue
+        if args.cap_probe_max_tokens >= role_settings[role].max_tokens:
+            problems.append(f"--cap-probe-max-tokens {args.cap_probe_max_tokens} must be below the frozen max_tokens "
+                            f"{role_settings[role].max_tokens} of the {role} model (the probe must truncate below "
+                            "the agent's cap)")
     if problems:
         print("Refusing (nothing was spent and no credential was read):")
         print("\n".join(f"  - {p}" for p in problems))
         return 2
+    codes = []
+    for role, role_config in plan:
+        if len(plan) > 1:
+            print(f"Compatibility check of the {role} model {role_settings[role].model_id} "
+                  f"(at most {args.max_requests} agent request(s); its own run budget).")
+        # The pinned endpoint's catalog name, from the route freeze the route_pricing gate checked.
+        provider_name = (((report or {}).get("evidence") or {}).get(route_gate_name(role)) or {}).get("provider_name")
+        codes.append(run_role(args, config, role if len(plan) > 1 else None, role_config if role != "solver" else None,
+                              role_settings[role], budget, budget_source, path, images, provider_name,
+                              concurrent_run_override, run))
+    return max(codes)
+
+
+def run_role(args, config, role, role_config, settings, budget, budget_source, path, images, provider_name,
+             concurrent_run_override, run):
+    """One model's paid check (its own ledger run and evidence record). ``role`` is None for a run
+    with one model (earlier evidence shape), else ``solver``/``overseer`` (recorded in the evidence)."""
     print(describe_budget(budget, budget_source))
     stamp = utc_stamp()
+    while (Path(args.output_dir) / f"{PREFIX}-{stamp}.json").exists() or (Path(args.runs_dir) / f"compat-{stamp}").exists():
+        time.sleep(1)  # two models checked within one second: distinct stamps
+        stamp = utc_stamp()
     ledger = BudgetLedger(path)
     ledger.start_run(f"compat-{stamp}", SCOPE, budget, source=budget_source,
-                     note=f"live compatibility check ({rel(args.config)})")
+                     note=f"live compatibility check ({rel(args.config)})" + (f", {role} model" if role else ""))
     print(render_run(path, ledger.run_snapshot()))
     started = time.time()
     try:
         result = asyncio.run((run or run_check)(config, args, stamp, images=images, ledger=ledger, ledger_path=path,
-                                                **({"provider_name": provider_name} if provider_name else {})))
+                                                **({"provider_name": provider_name} if provider_name else {}),
+                                                **({"role_config": role_config} if role_config is not None else {})))
     except Exception as ex:  # no evidence without a finished run; show what the run now holds
         print(f"Compatibility check aborted before evidence could be written: {type(ex).__name__}: {ex}")
         print(render_run(path, ledger.end_run()))
@@ -976,7 +1027,8 @@ def checked_run(args, config, settings, path, *, gates, environment, run, refres
         duration_seconds=round(time.time() - started, 1), credential_source="host only (secrets.load_openrouter_key)",
         credentials_in_environment=bool(credentials), provider_limit=result.get("provider_limit"),
         compose_sha256=result.get("compose_sha256"), cap_probe_error=result.get("cap_probe_error"),
-        frozen_provider_name=provider_name, concurrent_run_override=concurrent_run_override)
+        frozen_provider_name=provider_name, concurrent_run_override=concurrent_run_override,
+        **({"role": role} if role else {}))
     out = write_evidence(args.output_dir, stamp, record)
     print(json.dumps({k: (v["passed"], v["required"]) for k, v in record["checks"].items()}, indent=2))
     print(f"spent ${record['spent_usd']} in {record['requests']} admitted request(s) of run budget ${budget}; "

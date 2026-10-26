@@ -13,6 +13,8 @@ is still stale, or whose catalog no longer validates against the config's reserv
 blocks the paid launch (nothing is sent).
 
     .venv/bin/python scripts/freeze_route.py [--config configs/pilot.json]
+
+A config whose overseers have their own model (``overseer.model``) gets one record per model.
 """
 import argparse, datetime, hashlib, json, sys, urllib.request
 from dataclasses import asdict
@@ -30,9 +32,22 @@ def main(argv=None):
     parser.add_argument("--config", type=Path, default=ROOT / "configs" / "pilot.json")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "data" / "validation")
     args = parser.parse_args(argv)
-    settings = settings_from_config(json.loads(args.config.read_text()))
-    if not settings.provider_route:
-        parser.error("config provider_route is not set")
+    config = json.loads(args.config.read_text())
+    # One freeze per model the run calls: the solvers' and, when the overseers have their own model
+    # (research_swarm.oversight ``overseer.model``), the overseers'.
+    from research_swarm.launch_gates import role_configs
+    roles = role_configs(config)
+    codes = []
+    for role, role_config in roles.items():
+        settings = settings_from_config(role_config)
+        if not settings.provider_route:
+            parser.error(f"config provider_route is not set ({role} model)")
+        codes.append(freeze(args, settings, role if len(roles) > 1 else None))
+    return max(codes)
+
+
+def freeze(args, settings, role=None):
+    """Freeze one model's route; returns 0 when the record is valid."""
     request = urllib.request.Request(URL.format(model=settings.model_id), headers={"User-Agent": "gdm-math-swarm-route-freeze"})
     with urllib.request.urlopen(request, timeout=30) as response:
         raw = response.read()
@@ -40,7 +55,8 @@ def main(argv=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     record = {"kind": "public_route_pricing_freeze", "retrieved_utc": now.isoformat(),
               "url": URL.format(model=settings.model_id), "catalog_sha256": hashlib.sha256(raw).hexdigest(),
-              "credential_used": False, "paid_calls": 0, "config": str(args.config), "settings": asdict(settings)}
+              "credential_used": False, "paid_calls": 0, "config": str(args.config), "settings": asdict(settings),
+              **({"role": role} if role else {})}
     try:
         endpoint = validate_catalog(catalog, settings)
         prompt, completion = route_price_bounds(endpoint)
@@ -53,9 +69,19 @@ def main(argv=None):
     record["all_required_passed"] = record["valid"]
     (args.output_dir / "catalog-snapshots").mkdir(parents=True, exist_ok=True)
     (args.output_dir / "catalog-snapshots" / f"{record['catalog_sha256']}.json").write_bytes(raw)
-    path = write_evidence(args.output_dir, "route-pricing", record, now)
-    print(json.dumps({"path": str(path), "valid": record["valid"], "reason": record.get("reason")}))
+    path = write_evidence(args.output_dir, "route-pricing", record, _distinct_stamp(args.output_dir, now))
+    print(json.dumps({"path": str(path), "model_id": settings.model_id, "valid": record["valid"],
+                      "reason": record.get("reason")}))
     return 0 if record["valid"] else 1
+
+
+def _distinct_stamp(output_dir, now):
+    """``now``, moved forward by whole seconds while a route-pricing record of that second exists (two
+    models frozen in the same second must not overwrite each other)."""
+    from research_swarm.launch_gates import evidence_name
+    while (Path(output_dir) / evidence_name("route-pricing", now)).exists():
+        now += datetime.timedelta(seconds=1)
+    return now
 
 REFRESH_DELAYS_SECONDS = (10, 30)   # waits before the second and third attempts
 

@@ -24,7 +24,13 @@ CLAUDE_MODEL_ID = "anthropic/claude-opus-5.5"
 # Code's replay; research_swarm.openrouter_params keeps the route's max_tokens.
 GPT_SOL_MODEL_ID = "openai/gpt-5.6-sol"
 OWNER_MULTIMODEL_IDS = (GEMINI4_MODEL_ID, CLAUDE_MODEL_ID, GPT_SOL_MODEL_ID, GLM_MODEL_ID)
-GEMINI_MODEL_IDS = (GEMINI_MODEL_ID, *OWNER_MULTIMODEL_IDS)
+# Multi-overseer seeded runs (docs/plan.md, "Multi-overseer seeded runs, October 26, 2026"): solvers on
+# GLM 5.3 Flash, overseers on GLM 5.3 or DeepSeek V4.1 Flash (1017 snapshot). IDs and first-party
+# routes (z-ai/fp8; deepseek) verified in the public OpenRouter catalog on October 26, 2026.
+GLM_FLASH_MODEL_ID = "z-ai/glm-5.3-flash"
+DEEPSEEK_FLASH_1017_MODEL_ID = "deepseek/deepseek-v4.1-flash-1017"
+MULTI_OVERSEER_MODEL_IDS = (GLM_FLASH_MODEL_ID, DEEPSEEK_FLASH_1017_MODEL_ID)
+GEMINI_MODEL_IDS = (GEMINI_MODEL_ID, *OWNER_MULTIMODEL_IDS, *MULTI_OVERSEER_MODEL_IDS)
 # Models each budget track (budget.BUDGET_TRACKS) may run; the launch gates check this table.
 # Budget track "gemini" is the owner's track (its name predates the multi-model runs).
 TRACK_MODEL_IDS = {"ablation": ABLATION_MODEL_IDS, "gemini": GEMINI_MODEL_IDS}

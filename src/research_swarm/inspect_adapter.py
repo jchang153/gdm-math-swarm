@@ -851,7 +851,7 @@ def _settle_unbilled(ledger, request_id, record, agent_id):
 
 
 def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", archive=None, stop=None,
-                  neutral=False):
+                  neutral=False, model_override=None):
     """Bridge GenerateFilter: barrier, admission, frozen settings, settlement.
 
     The returned coroutine function carries ``.state`` which the solver reads at
@@ -867,6 +867,10 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     ``neutral`` (neutral collaborative environment): before admission, the request is
     passed through ``neutral_env.neutralize_request`` (deterministic; versioned
     ``NEUTRAL_ENVIRONMENT_VERSION``), which removes the scaffold's product identity text.
+
+    ``model_override`` (per-role model, research_swarm.oversight ``overseer.model``): the Model this
+    agent's requests are generated with instead of the bridge's task model; ``settings`` must then
+    be that model's ProviderSettings (reservation, frozen request options and settlement).
     """
     from inspect_ai.model import Model
     from inspect_ai.util import LimitExceededError
@@ -926,7 +930,7 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
         state["requests"] += 1
         state["in_flight"] += 1
         try:
-            return await _generate(model, messages, tools, tool_choice, config, request, request_id, reservation,
+            return await _generate(model_override or model, messages, tools, tool_choice, config, request, request_id, reservation,
                                    normalized_counters, neutralized)
         finally:
             state["in_flight"] -= 1

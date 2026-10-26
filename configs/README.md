@@ -150,6 +150,22 @@ Owner decision (docs/plan.md, "Seeded overseer experiment, October 25, 2026"): `
 - The overseer id is `agent-<agent_count + 2>` when the seed takes `agent-<agent_count + 1>` (`oversight.expected_overseer_id`); the overseer prompt lists the seed among the other agents ("101 other agents, agent-001 to agent-101").
 - Researcher-only records: `settings.json` `effective.track` `seeded`, `effective.seeded`, `effective.roles` (`agent-101`: `seed`), the task metadata `track`/`seed_agent`, the conference events above and `results.json` `seeded`. Nothing agent-visible says "seeded" (`tests/test_seeded_run_design.py`).
 
+### Multi-overseer seeded runs (October 26, 2026)
+
+Owner decision (docs/plan.md, "Multi-overseer seeded runs, October 26, 2026"). Each is `glm100-seeded-overseer-30m.json` with the solvers on `z-ai/glm-5.3-flash` (route `z-ai/fp8`), `run_budget_usd` `"150"`, `max_connections` = 100 + overseers, and the several-overseers `overseer` block:
+
+| Config | Overseers (ids) | Overseer model (route) | Overseer board |
+| --- | --- | --- | --- |
+| `glmflash100-seeded-2ov-glm-30m.json` | 2 (`agent-102`–`103`) | `z-ai/glm-5.3` (`z-ai/fp8`) | no |
+| `glmflash100-seeded-5ov-glm-30m.json` | 5 (`agent-102`–`106`) | `z-ai/glm-5.3` (`z-ai/fp8`) | yes |
+| `glmflash100-seeded-1ov-ds-30m.json` | 1 (`agent-102`) | `deepseek/deepseek-v4.1-flash-1017` (`deepseek`) | no |
+| `glmflash100-seeded-2ov-ds-30m.json` | 2 (`agent-102`–`103`) | `deepseek/deepseek-v4.1-flash-1017` (`deepseek`) | no |
+| `glmflash100-seeded-5ov-ds-30m.json` | 5 (`agent-102`–`106`) | `deepseek/deepseek-v4.1-flash-1017` (`deepseek`) | yes |
+
+- `overseer`: `{"count": N, "agent_ids": [...], "powers": true, "board": bool, "model": {"candidate_model_id", "provider_route", "provider_settings"}}` (`oversight.overseer_problems`). `agent_ids` is optional but must be the N identifiers after the seed; `board` needs at least two overseers; `model` must be a model of the budget track. The single form `{"agent_id", "powers"}` is unchanged.
+- Every overseer has `check_proof` and `revert_submission`; with `board`, also `post_overseer_board` and `read_overseer_board` (conference table `overseer_board`, events `overseer_board_post` / `overseer_board_read`; refused to everyone else as unknown tools). The prompt names the other overseers and describes the board; with one overseer it is byte-identical to the single-overseer prompt.
+- Two models: `scripts/freeze_route.py --config CFG` writes one route-pricing record per model; `scripts/compat_check.py --config CFG --max-requests 6` runs one paid check per model (each its own ledger run of `run_budget_usd` and its own `--max-requests`); the gates `route_pricing`/`compatibility` (solvers) and `route_pricing_overseer`/`compatibility_overseer` (overseers) each read the newest record of their model. `settings.json` records `overseer_model` (full settings) and `effective.overseer` (`agent_ids`, `model`, `oversight_tools`, `board_tools`).
+
 ## Run budget (October 20, 2026)
 
 Owner decisions (docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)"): the one spending control is each run's own budget, specified before the run. There is no cumulative cap to raise, no top-up, no approval note, no typed confirmation and no interactive terminal.

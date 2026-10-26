@@ -1659,8 +1659,12 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     # never acts (DMs to it go unanswered). It is credited with the planted solution at the trigger.
     from .seeded import seed_agent
     seed = seed_agent(config)
-    agent_ids = solver_ids + ([overseer["agent_id"]] if overseer else [])  # Inspect samples
-    conference_ids = solver_ids + ([seed] if seed else []) + ([overseer["agent_id"]] if overseer else [])
+    overseer_ids = oversight.overseer_ids(overseer)
+    agent_ids = solver_ids + overseer_ids  # Inspect samples
+    conference_ids = solver_ids + ([seed] if seed else []) + overseer_ids
+    # Per-role model (docs/plan.md, "Multi-overseer seeded runs, October 26, 2026"): the overseers'
+    # own OpenRouter model, checked by the same route-pricing and compatibility gates; None: one model.
+    overseer_settings = oversight.overseer_settings(config, pricing_verified=True, live_compatibility_verified=True)
     roles = oversight.roles(solver_ids, overseer, seed)
     from .dataset import task_set_of
     task_set = task_set_of(config)
@@ -1680,6 +1684,15 @@ async def _run_pilot(config, repo_root, conference_factory=None):
         model, provider_limit = build_openrouter_model(
             settings, repo_root, connections, run_budget_usd=budget, record=record,
             record_dir=Path(repo_root) / "data" / "validation")
+        overseer_model = None
+        if overseer_settings is not None:
+            # The key's provider-side limit was recorded above; this builder only constructs the model.
+            overseer_model, _ = build_openrouter_model(
+                overseer_settings, repo_root, len(overseer_ids), run_budget_usd=budget, record=record,
+                check_limit=lambda key, limit: {"informational": True, "note": "recorded with the solvers' model"})
+            record("role_model", None, {"role": oversight.OVERSEER_ROLE, "agents": overseer_ids,
+                                        "model_id": overseer_settings.model_id,
+                                        "provider_route": overseer_settings.provider_route})
         effective = {
             "agent_count": agent_count, "persona_seed": persona_seed, "persona_counts": persona_counts(personas),
             "agent_image": images["agent"]["tag"], "lean_image": images["lean"]["tag"], "images": images,
@@ -1707,12 +1720,13 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "roles": roles, "participant_count": len(agent_ids),
             "conference_participants": len(conference_ids),
             "seeded": None if seed is None else seeded_settings(config),
-            "overseer": None if overseer is None else {
-                **overseer, "oversight_tools": [d["name"] for d in oversight.overseer_extra_definitions(overseer)],
-                "proof_checker": proof_checker,
-                "claude_code_env": oversight.claude_code_env_for(overseer["agent_id"], overseer)}}
+            "overseer": None if overseer is None else oversight.effective_overseer(overseer, proof_checker,
+                                                                                    overseer_settings)}
         (run_dir / "settings.json").write_text(json.dumps({"config": config, "effective": effective,
-                                                            "model": asdict(settings), "personas": personas,
+                                                            "model": asdict(settings),
+                                                            **({"overseer_model": asdict(overseer_settings)}
+                                                               if overseer_settings is not None else {}),
+                                                            "personas": personas,
                                                             "tasks": listing, "budget": ledger.snapshot(),
                                                             "run_budget": ledger.run_snapshot(),
                                                             "preflight": report}, indent=2, default=str))
@@ -1726,11 +1740,16 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                              run_info=_safe_resume_run_info(config, effective, settings, repo_root,
                                                                             agent_ids, listing, record))
         def prompt_for(agent, persona):
-            if overseer is not None and agent == overseer["agent_id"]:
+            if oversight.is_overseer(agent, overseer):
                 # The seed is one more "other agent" to the overseer, like to everyone else.
-                return oversight.build_overseer_prompt(agent, solver_ids + ([seed] if seed else []), listing, variant,
-                                                       overseer["powers"])
+                return oversight.prompt_for(agent, overseer, solver_ids + ([seed] if seed else []), listing, variant)
             return build_prompt(agent, persona, listing, variant, reviewing)
+
+        def filter_for(agent):
+            # Overseers with their own model reserve, request and settle with its settings.
+            own = overseer_settings is not None and oversight.is_overseer(agent, overseer)
+            return budget_filter(agent, ledger, overseer_settings if own else settings, barrier, record, "pilot",
+                                 archive, clock.stop, **neutral_args, model_override=overseer_model if own else None)
 
         solver = peer_solver(conference=conference, definitions=tool_definitions(neutral), personas=personas,
                              prompt_for=prompt_for, roles=({a: r for a, r in roles.items() if a in agent_ids}
@@ -1738,8 +1757,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                              definitions_for=lambda a: oversight.definitions_for(a, overseer, tool_definitions(neutral)),
                              continue_for=lambda a: oversight.continue_message_for(a, overseer),
                              env_for=lambda a: oversight.claude_code_env_for(a, overseer),
-                             filter_for=lambda a: budget_filter(a, ledger, settings, barrier, record, "pilot", archive,
-                                                                clock.stop, **neutral_args),
+                             filter_for=filter_for,
                              run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,
                              auto_memory=auto_memory, in_flight_grace=in_flight_grace,
                              auto_restart=config.get("auto_restart") is True, resume=resume, **neutral_args)
@@ -1749,7 +1767,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                     **({"track": "seeded", "seed_agent": seed} if seed else {}),
                                     **({"neutral_environment": NEUTRAL_ENVIRONMENT_VERSION} if neutral else {})},
                           initial_message=initial_message(variant),
-                          initial_messages=({overseer["agent_id"]: oversight.OVERSEER_INITIAL_MESSAGE}
+                          initial_messages=({a: oversight.OVERSEER_INITIAL_MESSAGE for a in overseer_ids}
                                             if overseer else None))
         return await supervise(eval_async(task, model=model, **eval_options(len(agent_ids), run_dir, config)),
                                clock, conference, record, config)

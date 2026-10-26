@@ -257,6 +257,15 @@ class Supervisor:
                 "new_settled_usd": None if self.settled_at_launch is None else str(settled - self.settled_at_launch),
                 "agent_exits": [e for e in events if e.get("kind") == "agent_exit"],
                 "run_stop": [e for e in events if e.get("kind") == "run_stop"]}
+        by_model = {}
+        for event, u in zip(finished, usage):  # per-role models (overseer.model): one entry per model
+            model = (event.get("payload") or {}).get("provider_model") or "unknown"
+            entry = by_model.setdefault(model, {"requests": 0, "prompt_tokens": 0, "cached_tokens": 0})
+            entry["requests"] += 1
+            entry["prompt_tokens"] += u.get("prompt_tokens", 0) or 0
+            entry["cached_tokens"] += (u.get("prompt_tokens_details") or {}).get("cached_tokens", 0) or 0
+        if len(by_model) > 1:
+            data["cache"]["by_model"] = by_model
         (self.phase / "live-checkpoint.json").write_text(json.dumps(data, indent=2))
 
     # -- steps -----------------------------------------------------------------

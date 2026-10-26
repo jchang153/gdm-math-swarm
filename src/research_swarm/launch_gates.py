@@ -319,12 +319,48 @@ def newest_evidence(validation_dir, prefix):
     return files[-1], json.loads(files[-1].read_text())
 
 
+def newest_evidence_for(validation_dir, prefix, settings):
+    """(path, data) of the newest ``prefix`` record made for ``settings.model_id`` (its recorded
+    settings name that model), else of the newest record at all (so the gate names what differs);
+    (None, None) without any record. A run with a per-role model (research_swarm.oversight
+    ``overseer.model``) keeps one record per model side by side; with one model this is the newest
+    record of that model, which the gate then checks in full (settings, route, age...)."""
+    files = evidence_files(validation_dir, prefix)
+    if not files:
+        return None, None
+    for path in reversed(files):
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        recorded = record.get("settings") if isinstance(record.get("settings"), dict) else {}
+        if recorded.get("model_id", record.get("model_id")) == settings.model_id:
+            return path, record
+    return files[-1], json.loads(files[-1].read_text())
+
+
+def role_configs(config):
+    """{role: config-shaped dict} of every model the run calls (research_swarm.oversight.role_model_configs)."""
+    from .oversight import role_model_configs
+    return role_model_configs(config or {})
+
+
 def route_pricing_refresh_reason(config, validation_dir, now=None):
     """Why the launch scripts should refresh the route-pricing freeze (scripts/freeze_route.py,
     unpaid) before launching, or None: no freeze yet, a newest freeze that is not valid (for example
     a catalog that briefly reported the pinned route unavailable), one older than
-    ``route_pricing_max_age_hours`` (default 72), or one frozen for other settings."""
-    path, record = newest_evidence(validation_dir, "route-pricing")
+    ``route_pricing_max_age_hours`` (default 72), or one frozen for other settings. A run whose
+    overseers have their own model needs a freeze for each model."""
+    reasons = []
+    for role, role_config in role_configs(config).items():
+        reason = _route_pricing_refresh_reason(config, role_config, validation_dir, now)
+        if reason is not None:
+            reasons.append(reason if role == "solver" else f"{role} model: {reason}")
+    return "; ".join(reasons) or None
+
+
+def _route_pricing_refresh_reason(config, role_config, validation_dir, now=None):
+    path, record = newest_evidence_for(validation_dir, "route-pricing", settings_from_config(role_config or {}))
     if path is None:
         return "no route-pricing freeze yet"
     if record.get("valid") is not True:
@@ -335,7 +371,7 @@ def route_pricing_refresh_reason(config, validation_dir, now=None):
     if age > limit or age < -0.1:
         return f"the newest freeze is {age:.1f} h old (refresh after {limit:g} h)"
     frozen = {k: v for k, v in (record.get("settings") or {}).items() if k in CONFIG_OVERRIDABLE}
-    if frozen != frozen_fields(settings_from_config(config or {})):
+    if frozen != frozen_fields(settings_from_config(role_config or {})):
         return "the newest freeze was made for other provider settings"
     return None
 
@@ -588,6 +624,18 @@ class _Gates:
             drift[MAX_CONNECTIONS_KEY] = {"config": self.config.get(MAX_CONNECTIONS_KEY),
                                           "approved": "equal to agent_count"}
         problems += connections
+        overseer_model = role_configs(self.config).get("overseer")
+        if overseer_model is not None:
+            # The overseers' own model (research_swarm.oversight): one of the track's models.
+            allowed = TRACK_MODEL_IDS.get(track, (MODEL_ID,)) if track is not None else ()
+            try:
+                own = settings_from_config(overseer_model).model_id
+            except (TypeError, ValueError):
+                own = None
+            if own not in allowed:
+                drift["overseer.model"] = {"config": own, "approved": list(allowed)}
+                problems.append(f"overseer.model {own!r} is not a model of budget track {track!r} "
+                                "(provider.TRACK_MODEL_IDS; a per-role model needs a budget track)")
         if PROMPT_CACHE_NORMALIZATION_KEY in self.config:
             from .prompt_cache import TOKEN_COUNTER_NORMALIZATION_VERSION
             named = self.config.get(PROMPT_CACHE_NORMALIZATION_KEY)
@@ -660,13 +708,16 @@ class _Gates:
         self.add("persona_reviewing", not problems, "; ".join(problems) or f"persona reviewing lines {reviewing!r}",
                  persona_reviewing=reviewing)
 
-    def route_pricing(self):
-        path, record = newest_evidence(self.validation, "route-pricing")
+    def route_pricing(self, role_config=None, name="route_pricing"):
+        """The route-pricing freeze for the solvers' model (``role_config`` None) or, as gate
+        ``route_pricing_overseer``, for the overseers' own model."""
+        role_config = self.config if role_config is None else role_config
+        settings = settings_from_config(role_config)
+        path, record = newest_evidence_for(self.validation, "route-pricing", settings)
         if path is None:
-            return self.add("route_pricing", False, "no route-pricing evidence; scripts/run_pilot.py and "
+            return self.add(name, False, "no route-pricing evidence; scripts/run_pilot.py and "
                             "scripts/compat_check.py run scripts/freeze_route.py (unpaid) automatically")
         problems, warnings = [], []
-        settings = settings_from_config(self.config)
         if record.get("valid") is not True:
             problems.append(f"freeze invalid: {record.get('reason')} (the config's reservation prices must cover the "
                             "route's current prices)")
@@ -690,8 +741,8 @@ class _Gates:
                 validate_catalog(json.loads(snapshot.read_bytes()), settings)
             except ValueError as ex:
                 problems.append(f"offline catalog validation failed: {ex}")
-        self.add("route_pricing", not problems, "; ".join(problems) or "valid and equal to the launch settings",
-                 path, age_hours=round(age, 2), provider_route=settings.provider_route,
+        self.add(name, not problems, "; ".join(problems) or "valid and equal to the launch settings",
+                 path, age_hours=round(age, 2), model_id=settings.model_id, provider_route=settings.provider_route,
                  provider_name=(record.get("endpoint") or {}).get("provider_name"),
                  prompt_usd_per_token=settings.prompt_usd_per_token, output_usd_per_token=settings.output_usd_per_token,
                  warnings=warnings)
@@ -799,14 +850,16 @@ class _Gates:
         details["pilot_self_compare_gaps"] = gaps
         return problems
 
-    def compatibility(self, ledger_path=None):
+    def compatibility(self, ledger_path=None, role_config=None, name="compatibility"):
         """Evidence from the live compatibility check (scripts/compat_check.py): the frozen model,
         route and settings work with Claude Code on the current agent image (research integrity).
         The ledger state of the requests it admitted is reported (warnings), never refused: the
         check had its own run budget and spending has no other control."""
-        path, record = newest_evidence(self.validation, "compatibility")
+        role_config = self.config if role_config is None else role_config
+        settings = settings_from_config(role_config)
+        path, record = newest_evidence_for(self.validation, "compatibility", settings)
         if path is None:
-            return self.add("compatibility", False, "no compatibility-<UTC>.json evidence; run the live compatibility "
+            return self.add(name, False, "no compatibility-<UTC>.json evidence; run the live compatibility "
                             "check (scripts/compat_check.py; its own run budget, ledger scope 'compatibility')")
         problems = []
         if record.get("schema") != COMPATIBILITY_SCHEMA:
@@ -814,7 +867,6 @@ class _Gates:
         if record.get("all_required_passed") is not True:
             problems.append("all_required_passed is not true")
         checks = record.get("checks") if isinstance(record.get("checks"), dict) else {}
-        settings = settings_from_config(self.config)
         problems += check_problems(checks, compatibility_required_checks(settings.model_id))
         if record.get("model_id") != settings.model_id:
             problems.append(f"model_id {record.get('model_id')!r} is not {settings.model_id!r}")
@@ -839,7 +891,7 @@ class _Gates:
                          for name in COMPATIBILITY_INFORMATIONAL_CHECKS}
         warnings += [f"informational check {name} not observed"
                      for name, value in informational.items() if value is not True]
-        self.add("compatibility", not problems, "; ".join(problems) or
+        self.add(name, not problems, "; ".join(problems) or
                  "live compatibility evidence passed for the frozen model, route, settings and agent image", path,
                  created_at=record.get("created_at"), images=matched, spent_usd=record.get("spent_usd"),
                  run_budget_usd=record.get("run_budget_usd"), requests=requests, ledger_requests=ledger_requests,
@@ -970,6 +1022,9 @@ def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy
     gates.run("prompt_variant", gates.prompt_variant)
     gates.run("persona_reviewing", gates.persona_reviewing)
     gates.run("route_pricing", gates.route_pricing)
+    overseer_model = role_configs(config).get("overseer")
+    if overseer_model is not None:  # the overseers' own model (research_swarm.oversight ``overseer.model``)
+        gates.run("route_pricing_overseer", lambda: gates.route_pricing(overseer_model, "route_pricing_overseer"))
     for prefix, required, optional in EVIDENCE_GATES:
         gates.run(prefix, lambda p=prefix, r=required, o=optional: gates.evidence(p, r, o))
     state = {"snapshot": None}
@@ -978,6 +1033,9 @@ def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy
         state["snapshot"] = gates.ledger(ledger_path, legacy)
     gates.run("ledger", ledger_gate)
     gates.run("compatibility", lambda: gates.compatibility(ledger_path))
+    if overseer_model is not None:
+        gates.run("compatibility_overseer",
+                  lambda: gates.compatibility(ledger_path, overseer_model, "compatibility_overseer"))
     gates.run("provider_limit", gates.provider_limit)
     gates.run("credential_presence", gates.credentials)
     blockers = [f"{name}: {result['reason']}" for name, result in gates.results.items() if not result["passed"]]

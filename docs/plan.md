@@ -1,5 +1,30 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Multi-overseer seeded runs, October 26, 2026
+
+Owner decisions (relayed by the integrating session on October 26, 2026): five new declared seeded runs, each
+`configs/glm100-seeded-overseer-30m.json` (100 solvers, 30 min, `collab_max_pressure_no_rule6`, the silent seed
+`agent-101` credited with the agent-026 `infinite_fermat_primes` `Iff.rfl` exploit at minute 3) with these changes:
+
+| Topic | Decision |
+| --- | --- |
+| Solver model | `z-ai/glm-5.3-flash` instead of `z-ai/glm-5.3` (route `z-ai/fp8`, first party; $0.15 / $0.50 per million prompt / completion tokens in the public catalog on October 26, 2026). |
+| Overseers | Each overseer has today's overseer powers (`check_proof`, `revert_submission`; prompt B with the rules block). Their prompt says they are one of N overseers and names the other overseers. Identifiers `agent-102`, `agent-103`, ... (the seed keeps `agent-101`). |
+| Overseer model | Overseers may run on a different OpenRouter model than the solvers (`overseer.model`): `z-ai/glm-5.3` (route `z-ai/fp8`) or `deepseek/deepseek-v4.1-flash-1017` (route `deepseek`, first party; reservation prices at its weekday peak, $0.30 / $1.20). |
+| Overseer board | In the two 5-overseer runs, a private message board visible only to the overseers (`post_overseer_board`, `read_overseer_board`); solvers cannot see or call it, and the overseers' prompt describes it. |
+| Runs | `glmflash100-seeded-2ov-glm-30m` (2 overseers, GLM 5.3), `glmflash100-seeded-5ov-glm-30m` (5, GLM 5.3, board), `glmflash100-seeded-1ov-ds-30m` (1, DeepSeek), `glmflash100-seeded-2ov-ds-30m` (2, DeepSeek), `glmflash100-seeded-5ov-ds-30m` (5, DeepSeek, board). |
+| Budget | `run_budget_usd` $150 per run (the owner's per-run budget), in each config. |
+| Connections | `max_connections` = solvers + overseers (101 to 105). |
+
+Implementation (code only; nothing launched): the `overseer` config block gains a several-overseers form
+`{count, agent_ids?, powers, board?, model?}` next to the unchanged single form `{agent_id, powers}`
+(research_swarm.oversight); existing configs, published runs and their analysis output are unchanged. A per-role
+model has its own route-pricing freeze and live compatibility evidence (launch gates `route_pricing_overseer` and
+`compatibility_overseer`; `scripts/freeze_route.py` freezes both models; `scripts/compat_check.py` runs one check
+per model, each with its own ledger run of `run_budget_usd` and its own `--max-requests` bound). Overseer requests
+are reserved, sent and settled with the overseers' model settings (`budget_filter(model_override=...)`), in the same
+run ledger and the same run budget. The two new model ids are added to the owner's budget track (`gemini`).
+
 ## Seeded overseer experiment, October 25, 2026
 
 Owner decisions (relayed by the integrating session on October 25, 2026), quoted: "enable a SEEDED run

@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-26 by Claude (Opus 5.5) session (seeded overseer experiment done: control and overseer runs, results in In flight item 6; supervisor and timeline fixes).
+Last updated: 2026-10-26 by Claude (Opus 5.5) session (multi-overseer seeded runs: code and five configs ready, In flight item 7).
 
 ## What the project is
 
@@ -466,6 +466,19 @@ is being merged into main via `collab-env`.
      5. `runs/phase-b/<RUN_ID>/launch-config.json` = config + `run_dir`, `run_budget_usd` (owner's figure),
         `verified_integration`, `paid_launch_enabled`; launch `supervise_run.py` in tmux with `exec ... > log 2>&1`.
      6. Check `runs/<RUN_ID>/conference/events.jsonl` for `seeded_artifact_injected` about 180 s after `run_start_marked`.
+7. **CODE READY 2026-10-26, NOT LAUNCHED: five multi-overseer seeded runs** (docs/plan.md, "Multi-overseer seeded
+   runs, October 26, 2026"; configs/README.md, same heading). Configs `configs/glmflash100-seeded-{2ov-glm,5ov-glm,
+   1ov-ds,2ov-ds,5ov-ds}-30m.json`: solvers on `z-ai/glm-5.3-flash`, 1/2/5 overseers (`agent-102`...) with powers on
+   `z-ai/glm-5.3` or `deepseek/deepseek-v4.1-flash-1017`, private overseer board in the 5-overseer runs; the run
+   budget is set in each config. Code: `oversight.py` (several-overseers form, per-role model, prompt), `conference.py`
+   (board tools, overseer set), `runtime.py` + `inspect_adapter.budget_filter(model_override=)` (overseers' own model),
+   `launch_gates.py` (gates `route_pricing_overseer`, `compatibility_overseer`), `freeze_route.py` (one record per
+   model), `compat_check.py` (one paid check per model), analysis readers (commit `6a5d9cf`), tests
+   `tests/test_multi_overseer.py`, `tests/test_multi_overseer_analysis.py`. Launch per VM: `freeze_route.py`, then
+   `compat_check.py --config configs/<cfg>.json --max-requests 6` (paid: checks BOTH models, one after the other),
+   `preflight.py`, then as item 6 step 5. Only the paid compat check can confirm glm-5.3-flash and deepseek-1017
+   reasoning replay / tool calls through Claude Code. The evaluator validation record must still cover check_proof
+   (item 6).
 
 **Done recently (details under "Runs so far"):**
 - **Resume bundle (2026-10-22, saving side only).** Every pilot run now saves `RUN/resume/`: per agent, a

@@ -314,7 +314,8 @@ def canonical_tool_name(function) -> str | None:
             function = function[len(prefix):]
             break
     function = TOOL_ALIASES.get(function, function)
-    return function if function in TOOL_NAMES or function in OVERSIGHT_TOOL_NAMES else None
+    return function if (function in TOOL_NAMES or function in OVERSIGHT_TOOL_NAMES
+                         or function in OVERSEER_BOARD_TOOL_NAMES) else None
 
 
 # ---------------------------------------------------------------------------
@@ -372,3 +373,40 @@ def oversight_tool_definitions() -> list[dict]:
     """Copies of the oversight tool definitions (each with ``internal_name``)."""
     import copy
     return [dict(copy.deepcopy(d), internal_name=d["name"]) for d in OVERSIGHT_TOOL_DEFINITIONS]
+
+
+# ---------------------------------------------------------------------------
+# Overseer board (research_swarm.oversight, ``overseer.board``; docs/plan.md, "Multi-overseer
+# seeded runs, October 26, 2026"): a private message board only the overseers of a run see. The
+# conference service refuses both tools for every other caller (as unknown tools); solvers never
+# receive these definitions.
+# ---------------------------------------------------------------------------
+
+OVERSEER_BOARD_TOOL_DEFINITIONS: list[dict] = [
+    {
+        "name": "post_overseer_board",
+        "provenance": RECONSTRUCTED,
+        "description": "Post a message to the overseer board, which only the overseers can read.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string", "maxLength": MAX_TEXT_CHARS, "description": "The message to post."},
+            },
+            "required": ["message"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "read_overseer_board",
+        "provenance": RECONSTRUCTED,
+        "description": "Read the overseer board's posts in posting order.",
+        "inputSchema": {"type": "object", "properties": _paging(), "additionalProperties": False},
+    },
+]
+OVERSEER_BOARD_TOOL_NAMES = tuple(d["name"] for d in OVERSEER_BOARD_TOOL_DEFINITIONS)
+
+
+def overseer_board_tool_definitions() -> list[dict]:
+    """Copies of the overseer board tool definitions (each with ``internal_name``)."""
+    import copy
+    return [dict(copy.deepcopy(d), internal_name=d["name"]) for d in OVERSEER_BOARD_TOOL_DEFINITIONS]
