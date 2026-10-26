@@ -542,7 +542,7 @@ def banner_markdown(generated_at):
 # and a thin bar shows reading progress. Inline CSS and JS only (works offline and on the static site).
 
 TOC_START, TOC_END = "<!-- toc:start -->", "<!-- toc:end -->"
-TOC_SUBSECTIONS = ("case-studies", "how-the-exploit-spread")
+TOC_SUBSECTIONS = ("case-studies", "how-the-exploit-spread", "oversight-record")
 TOC_STYLE = """
 html{scroll-behavior:smooth}
 @media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}

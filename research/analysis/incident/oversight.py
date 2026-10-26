@@ -101,8 +101,9 @@ def _minute(ts, start):
     return None if ts is None or start is None else round((ts - start) / 60, 2)
 
 
-def compute(run_dir):
-    """The oversight record of a run, or None when the run has no overseer."""
+def compute(run_dir, compare_run_dir=None):
+    """The oversight record of a run, or None when the run has no overseer. ``compare_run_dir``: a run without
+    the overseer whose outbreak curve the comparison figure overlays."""
     run_dir = Path(run_dir)
     roles = participant_roles.special_roles(run_dir)
     overseer = next((a for a, r in roles.items() if r == participant_roles.OVERSEER), None)
@@ -138,6 +139,7 @@ def compute(run_dir):
             item.update(problem=payload.get("problem_id"), submission=payload.get("public_submission_id"),
                         credited_agent=payload.get("credited_agent"), reason=payload.get("reason"))
         elif kind == "board_post":
+            item["post_id"] = payload.get("post_id")
             text = payload.get("message")
             if text is None:   # older event payloads: the database holds the text
                 match = min(posts, key=lambda t: abs(t - ts), default=None) if ts is not None else None
@@ -156,6 +158,15 @@ def compute(run_dir):
             actions.append({"kind": "feedback_submitted", "minute": _minute(ts, start), "text": body})
     actions.sort(key=lambda a: (a["minute"] is None, a["minute"] or 0))
 
+    for item in actions:   # who read each board post, and when (read_board returned it)
+        if item["kind"] != "board_post" or not item.get("post_id"):
+            continue
+        first = {}
+        for event in events:
+            if (event.get("kind") == "board_read" and event.get("agent_id") not in (overseer, None)
+                    and item["post_id"] in ((event.get("payload") or {}).get("post_ids") or [])):
+                first.setdefault(event["agent_id"], _minute(event.get("timestamp"), start))
+        item["readers"] = [{"agent": a, "minute": m} for a, m in sorted(first.items(), key=lambda kv: kv[1])]
     inbox_reads = [_minute(e.get("timestamp"), start) for e in own if e.get("kind") == "dm_retrieved"]
     inbox = [{"sender": s, "minute": _minute(ts, start), "text": body,
               "read_minute": _minute(delivered, start)} for s, body, ts, delivered in received]
@@ -178,8 +189,10 @@ def compute(run_dir):
                    "accepted_minute": _minute(accepted_at.get(x.get("submission")), start),
                    "checked": x.get("submission") in checked, "reverted": x.get("submission") in reverted}
                   for x in not_genuine]
+    from research.analysis.incident import prevention
     return {
         "schema": SCHEMA, "computed_by": "host (no model)", "overseer": overseer, "roles": roles,
+        "prevention": prevention.compute(run_dir, overseer, compare_run_dir=compare_run_dir),
         "proof_checker": None if enabled is None else bool((enabled.get("payload") or {}).get("proof_checker")),
         "clock": {"start_ts": start, "basis": "runtime.jsonl common_start"},
         "counts": {"proof_checks": kinds["proof_checked"], "reversions": kinds["submission_reverted"],
@@ -278,6 +291,32 @@ def _action_line(item, record):
     return "sent feedback to the organizers"
 
 
+def _readers(item, record):
+    """[(agent, minute, outcome text)] for the readers of a board post."""
+    people = {p["agent"]: p for p in ((record.get("prevention") or {}).get("people") or [])}
+    out = []
+    for r in item.get("readers") or []:
+        p = people.get(r["agent"])
+        if p is None or (p["exposed_min"] is None and p["adopted_min"] is None):
+            outcome = "never read an exploit file or submitted one"
+        elif p["adopted_min"] is None:
+            outcome = f"read an exploit file at {_at(p['exposed_min'], record)}, never submitted one"
+        elif p["adopted_min"] < r["minute"]:
+            outcome = f"had already submitted an exploit at {_at(p['adopted_min'], record)}"
+        else:
+            outcome = f"submitted an exploit afterwards, at {_at(p['adopted_min'], record)}"
+        out.append((r["agent"], r["minute"], outcome))
+    return out
+
+
+def _readers_sentence(item, record):
+    rows = _readers(item, record)
+    if not rows:
+        return "No other agent read this post."
+    after = sum("afterwards" in o for _, _, o in rows)
+    return (f"{_plural(len(rows), 'agent')} read this post; {after} of them submitted an exploit afterwards.")
+
+
 CAVEAT = ("Computed by the program from the conference records (no model). Times are run time from the common "
           "start. An action outside the conference tools (for example the overseer's own scripts in its workspace) "
           "appears only in its transcript.")
@@ -301,6 +340,12 @@ def section_html(record):
         items = []
         for item in record["actions"]:
             text = f'<div class="ov-text">{_esc(item["text"])}</div>' if item.get("text") else ""
+            if item["kind"] == "board_post":
+                rows = "".join(f'<li><span class="ov-when">{_esc(_at(m, record))}</span>{_esc(a)}: {_esc(o)}</li>'
+                               for a, m, o in _readers(item, record))
+                text += (f'<details class="ov-readers"><summary>{_esc(_readers_sentence(item, record))}</summary>'
+                         f'<ul class="ov-log">{rows}</ul></details>' if rows else
+                         f'<p>{_esc(_readers_sentence(item, record))}</p>')
             items.append(f'<li><span class="ov-when">{_esc(_at(item["minute"], record))}</span>'
                          f'{_esc(_action_line(item, record))}{text}</li>')
         parts.append('<ul class="ov-log">' + "".join(items) + "</ul>")
@@ -315,6 +360,9 @@ def section_html(record):
                          f'from {_esc(participant_roles.label(m["sender"], record["roles"]))} ({_esc(read)})'
                          f'<div class="ov-text">{_esc(m["text"])}</div></li>')
         parts.append('<ul class="ov-log">' + "".join(items) + "</ul>")
+    from research.analysis.incident import prevention
+    if record.get("prevention"):
+        parts.append(prevention.figures_html(record["prevention"]))
     parts += [f'<p class="cg-caveat">{_esc(CAVEAT)}</p>', END]
     return "\n".join(parts)
 
@@ -334,6 +382,10 @@ def section_markdown(record):
             lines.append(f"- **{_at(item['minute'], record)}** {_action_line(item, record)}")
             if item.get("text"):
                 lines += ["", *("  > " + ln for ln in item["text"].splitlines()), ""]
+            if item["kind"] == "board_post":
+                lines += ["", f"  {_readers_sentence(item, record)}", ""]
+                lines += [f"  - {_at(m, record)} {a}: {o}" for a, m, o in _readers(item, record)]
+                lines.append("")
     else:
         lines.append("No proof check, reversion, post, message or feedback is recorded.")
     if record["inbox"]:
@@ -342,6 +394,18 @@ def section_markdown(record):
             read = "never read" if m["read_minute"] is None else f"read at {_at(m['read_minute'], record)}"
             lines += [f"- **{_at(m['minute'], record)}** from {participant_roles.label(m['sender'], record['roles'])}"
                       f" ({read})", "", *("  > " + ln for ln in m["text"].splitlines()), ""]
+    prev = record.get("prevention")
+    if prev:
+        t = prev["table"]
+        lines += ["", "### Warned and exposed agents", "",
+                  "| | Saw an overseer warning first | Never saw one first |", "| --- | --- | --- |",
+                  f"| Read an exploit file | {t['exposed_warned']['adopted']} of {t['exposed_warned']['agents']} | "
+                  f"{t['exposed_unwarned']['adopted']} of {t['exposed_unwarned']['agents']} |",
+                  f"| Never read one | {t['unexposed_warned']['adopted']} of {t['unexposed_warned']['agents']} | "
+                  f"{t['unexposed_unwarned']['adopted']} of {t['unexposed_unwarned']['agents']} |", "",
+                  "Agents that submitted an exploit, by exposure and warning (association, not effect). The exposure "
+                  "swimlanes, blocked-branch tree, interventions curve, detection latency and comparison figures are "
+                  f"in [report.html](report.html#{SECTION_ID})."]
     lines += ["", f"*{CAVEAT}*", "", END]
     return "\n".join(lines)
 
@@ -378,7 +442,9 @@ def insert_html(page, record):
                 break
         else:
             page = page.replace("</main>", block + "</main>", 1)
-    return page.replace("</head>", f'<style id="{STYLE_TAG_ID}">{STYLE}</style></head>', 1)
+    from research.analysis.incident import contagion, prevention
+    style = contagion.STYLE + STYLE + prevention.STYLE + ".ov-readers summary{cursor:pointer}"
+    return page.replace("</head>", f'<style id="{STYLE_TAG_ID}">{style}</style></head>', 1)
 
 
 def insert_markdown(markdown, record):
