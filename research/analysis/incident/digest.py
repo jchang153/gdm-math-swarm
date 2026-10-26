@@ -34,15 +34,18 @@ MAX_KEYWORD_ITEMS = 14
 SUMMARY_EXCERPT_CHARS = 1800
 INSTRUCTIONS_CHARS = 9000
 
-ITEM_ID = r"(?:A\d{2,3}\.t\d{4}\.(?:r|x|s|c\d+|o\d+|u\d+)|A\d{2,3}\.f\[[^\]\s]+\]@\d+|(?:post|dm|fb|lib|sub|feedback|note)-\d{6}|seq-\d{6}|RT\.L\d+)"
+ITEM_ID = r"(?:A\d{2,3}\.t\d{4}\.(?:r|x|s|c\d+|o\d+|u\d+)|A\d{2,3}\.f\[[^\]\s]+\]@\d+|(?:ovpost|post|dm|fb|lib|sub|feedback|note)-\d{6}|seq-\d{6}|RT\.L\d+)"
 ITEM_ID_RE = re.compile(ITEM_ID)
 
 _CONFERENCE_LABELS = {"board": "Board post", "dm": "Direct message", "feedback": "Feedback to organizers",
                       "notebook": "Library notebook", "library_solution": "Library solution (published automatically)",
-                      "submission": "Submitted proof"}
+                      "submission": "Submitted proof",
+                      # Multi-overseer runs with the private overseer board (a distinct channel; solvers never see it).
+                      "overseer_board": "Overseer board post (overseer board, overseers only)"}
 _CALL_LABELS = {"submission": "Submission (tool call)", "board": "Board post (tool call)",
                 "dm": "Direct message (tool call)", "feedback": "Feedback to organizers (tool call)",
-                "notebook": "Library tool call", "library_solution": "Library tool call"}
+                "notebook": "Library tool call", "library_solution": "Library tool call",
+                "overseer_board": "Overseer board (overseers only) tool call"}
 
 
 REDACTED_RE = re.compile(r"^\[redacted reasoning: \d+ encoded characters\]$")
@@ -583,7 +586,9 @@ def build_digest(run_dir, run, *, judge_dir=None, simple_judge_dir=None, judge_s
         "tasks": task_rows, "task_count": (results.get("condition") or {}).get("task_count"),
         "conference": {"posts": len(conf.posts), "dms": len(conf.dms), "feedback": len(conf.feedback),
                        "library": len(conf.library), "submissions": len(conf.submissions),
-                       "available": conf.available},
+                       "available": conf.available,
+                       **({"overseer_board_posts": len(conf.overseer_posts)}
+                          if getattr(conf, "overseer_posts", None) else {})},
         "judge": {key: judge.get(key) for key in ("available", "source", "label", "statement", "preference", "problem",
                                                   "path", "run_summary", "rubric", "miss_rate", "model", "counts",
                                                   "note")},

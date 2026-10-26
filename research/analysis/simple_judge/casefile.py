@@ -119,6 +119,9 @@ def collect_facts(run, agent_id, start):
                                          "flags": flags, "reason": _one_line(meta.get("reason"), 120) or None})
         elif item["channel"] == "board":
             facts["posts"].append({"id": record_id, "minute": when, "text": item["text"]})
+        elif item["channel"] == "overseer_board":  # multi-overseer runs only (key absent otherwise)
+            facts.setdefault("overseer_board_posts", []).append({"id": record_id, "minute": when,
+                                                                 "text": item["text"]})
         elif item["channel"] == "dm":
             facts["dms_sent"].append({"id": record_id, "minute": when, "to": meta.get("recipient"),
                                       "text": item["text"]})
@@ -129,7 +132,11 @@ def collect_facts(run, agent_id, start):
                                        "text": item["text"]})
     for entry in history.exposure_ledger:
         when = minute(entry.get("time"), start)
-        if entry.get("kind") == "dm":
+        if entry.get("kind") == "overseer_board_post":  # another overseer's post on the overseer board
+            facts.setdefault("overseer_board_read", []).append(
+                {"id": entry.get("source_id") or entry["item_id"], "via": entry["item_id"], "minute": when,
+                 "from": entry.get("author"), "text": entry.get("text_returned") or ""})
+        elif entry.get("kind") == "dm":
             facts["dms_received"].append({"id": entry.get("source_id") or entry["item_id"], "via": entry["item_id"],
                                           "minute": when, "from": entry.get("author"),
                                           "text": entry.get("text_returned") or ""})
@@ -164,6 +171,7 @@ def summarize_facts(facts):
             "posts": len(facts["posts"]), "dms_sent": len(facts["dms_sent"]),
             "dms_received": len(facts["dms_received"]), "feedback": len(facts["feedback"]),
             "notebooks": len(facts["notebooks"]),
+            **{key: len(facts[key]) for key in ("overseer_board_posts", "overseer_board_read") if key in facts},
             **_seeded_summary(facts, first_flagged)}
 
 
@@ -214,7 +222,11 @@ def render_facts(facts, run, records):
                      f"(detector: {read['family']}, {','.join(read['flags']) or '-'})")
     for title, key in (("BOARD POSTS BY THIS AGENT", "posts"), ("DIRECT MESSAGES SENT", "dms_sent"),
                        ("DIRECT MESSAGES RECEIVED", "dms_received"), ("FEEDBACK TO THE ORGANIZERS", "feedback"),
-                       ("NOTEBOOKS PUBLISHED", "notebooks")):
+                       ("NOTEBOOKS PUBLISHED", "notebooks"),
+                       ("OVERSEER BOARD POSTS BY THIS AGENT (overseer board, overseers only)", "overseer_board_posts"),
+                       ("OVERSEER BOARD POSTS READ (overseer board, overseers only)", "overseer_board_read")):
+        if key not in facts:  # the overseer-board keys exist only in runs with the overseer board
+            continue
         rows = facts[key]
         lines.append(f"{title} ({len(rows)})")
         for row in rows:

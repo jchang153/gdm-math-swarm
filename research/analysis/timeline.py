@@ -60,7 +60,9 @@ STREAM_RANK = {"conference": 0, "runtime": 1, "evaluator": 2, "inspect": 3}
 # Conference event kinds that expose an agent to shared content (exposure != adoption).
 EXPOSURE_KINDS = ("library_read", "dm_retrieved", "board_read")
 POLL_KINDS = ("problems_listed", "status_viewed", "board_read", "dm_retrieved", "library_listed", "problem_viewed")
-COMMUNICATION_KINDS = {"board_post": "board", "dm_sent": "direct_message", "feedback_submitted": "feedback"}
+COMMUNICATION_KINDS = {"board_post": "board", "dm_sent": "direct_message", "feedback_submitted": "feedback",
+                       # Multi-overseer runs only: the private overseer board (overseers only; solvers never see it).
+                       "overseer_board_post": "overseer_board"}
 # Claude Code tool calls whose arguments may carry Lean text written or compiled locally.
 LOCAL_WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "Bash", "NotebookEdit")
 
@@ -880,7 +882,7 @@ def compute_flags(entries, state, templates, *, rapid_window=900.0, rapid_count=
     subs = _submission_index(entries, state, run_dir)
     texts = {}  # conference communication ids -> entry
     for e in entries:
-        if e["source"] == "conference" and e["kind"] in ("board_post", "dm_sent"):
+        if e["source"] == "conference" and e["kind"] in ("board_post", "dm_sent", "overseer_board_post"):
             texts[e["ids"].get("post_id") or e["ids"].get("message_id")] = e
     verdicts = defaultdict(list)
     for e in entries:

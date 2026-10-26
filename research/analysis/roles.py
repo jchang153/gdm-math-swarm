@@ -1,7 +1,8 @@
 """Participant roles of a run, read from its researcher-side records (no model, read only).
 
 Roles come from ``RUN/settings.json``: ``effective.roles`` ({agent: "solver"|"overseer"|"seed"}), the
-overseer's ``agent_id`` (``effective.overseer`` / ``config.overseer``), and, in a seeded run (track
+overseers' ids (``effective.overseer`` / ``config.overseer``: ``agent_ids`` for several overseers, else the
+legacy single ``agent_id``), and, in a seeded run (track
 ``"seeded"``), the seeded author (``effective.seeded.seed_agent`` or ``config.seeded.author``). The seed is a
 silent participant planted by the researchers (owner design, 2026-10-25): it has no container, model, Inspect
 sample or transcript; the conference credits it with the seeded artifact at the trigger time
@@ -57,14 +58,46 @@ def seed_agents(source):
     return seeds
 
 
+def overseer_ids(block):
+    """The overseer ids of an overseer block: ``agent_ids`` (multi-overseer form) else ``[agent_id]``
+    (legacy single form) else []."""
+    if not isinstance(block, dict):
+        return []
+    ids = block.get("agent_ids")
+    if isinstance(ids, (list, tuple)) and ids:
+        return [str(a) for a in ids if a]
+    return [block["agent_id"]] if block.get("agent_id") else []
+
+
+def overseer_block(source):
+    """``effective.overseer`` (else ``config.overseer``) of the run's settings, or None."""
+    settings = _settings(source)
+    block = (settings.get("effective") or {}).get("overseer") or (settings.get("config") or {}).get("overseer")
+    return block if isinstance(block, dict) else None
+
+
+def overseers(source):
+    """Every overseer of the run, sorted: ``effective.roles`` entries with role overseer plus the overseer
+    block's ids (both forms); [] in runs without an overseer."""
+    settings = _settings(source)
+    out = {a for a, r in ((settings.get("effective") or {}).get("roles") or {}).items() if r == OVERSEER}
+    out.update(overseer_ids(overseer_block(settings)))
+    return sorted(out)
+
+
+def board_enabled(source):
+    """True when the run's overseer block enables the private overseer board."""
+    return bool((overseer_block(source) or {}).get("board"))
+
+
 def special_roles(source):
     """{agent: role} for the participants that are not solvers (overseer, seed); {} in ordinary runs."""
     settings = _settings(source)
     config, effective = settings.get("config") or {}, settings.get("effective") or {}
     out = {a: r for a, r in (effective.get("roles") or {}).items() if r and r != SOLVER}
     overseer = effective.get("overseer") or config.get("overseer")
-    if isinstance(overseer, dict) and overseer.get("agent_id"):
-        out.setdefault(overseer["agent_id"], OVERSEER)
+    for agent in overseer_ids(overseer):
+        out.setdefault(agent, OVERSEER)
     for agent in seed_agents(settings):
         out[agent] = SEED
     return dict(sorted(out.items()))

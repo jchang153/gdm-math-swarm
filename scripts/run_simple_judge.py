@@ -22,7 +22,7 @@ older than 72 h. --mock uses a deterministic offline model, a rehearsal ledger a
 Seeded runs (track "seeded"; research/analysis/roles.py): the seeded participant (agent-101, role "seed") is the
 planted source, not a model agent. It is never judged (no case file, no call; --agents naming it is refused) and
 report.json records it under "seeded" (with the injection minute); a likely source naming it counts as "seeded",
-never "independent". Non-solver agents that are judged (the overseer) carry their role in agents.jsonl and on the
+never "independent". Non-solver agents that are judged (every overseer) carry their role in agents.jsonl and on the
 page.
 """
 from __future__ import annotations

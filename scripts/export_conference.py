@@ -56,7 +56,17 @@ TIMELINE_NOTE_OFFLINE = ('<p id="timeline-note" class="muted">Full activity time
 TIMELINE_LOCATIONS = ('dataset', 'offline')
 # Optional data field (October 25, 2026): the run start (epoch seconds, run_clock.run_start), so every time in
 # the view reads "+12:34 (05:17:40 UTC)" (run_clock.CLOCK_JS). Pages exported earlier lack it.
-OPTIONAL_KEYS = ('run_start',)
+# Optional data field (multi-overseer runs, October 26, 2026): the overseers' ids when a run has several,
+# so the Oversight intro names every overseer. Single-overseer and earlier pages lack it.
+OPTIONAL_KEYS = ('run_start', 'overseers')
+# Section of the private overseer board (multi-overseer runs with the board); inserted into the page script
+# only when the run has it, so every other page is unchanged.
+OVERSEER_BOARD_SECTION = ("overseer_board:['Overseer board','Posts on the private overseer board, in posting order. "
+                          "Only the overseers could post to or read this board; the solvers never saw it.',"
+                          "'No overseer-board posts were recorded.'],")
+MULTI_OVERSIGHT_INTRO = ("'Credits the overseers reverted (with the stated reason and the reverting overseer) and the "
+                         "proof checks they ran. A reverted credit removed the credit and the library entry and "
+                         "reopened the problem; the original submission stays in the records.'")
 # The capture-time line of a captured-file page, as exported before October 25, 2026 (America/Los_Angeles).
 _CAPTURE_LINE = re.compile(r'(<h2>Capture \d+</h2><p>)([A-Z][a-z]{2} \d{1,2}, \d{4} \d{1,2}:\d{2}:\d{2} [AP]M) '
                            r'(PDT|PST|UTC)( · )')
@@ -136,10 +146,15 @@ def export(run):
     present = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     reversions = ([dict(row) for row in db.execute('SELECT * FROM reversions ORDER BY reversion_id')]
                   if 'reversions' in present else [])
+    # Private overseer board (multi-overseer runs with the board); absent in every other run.
+    overseer_posts = ([dict(row) for row in db.execute('SELECT * FROM overseer_board ORDER BY post_id')]
+                      if 'overseer_board' in present else [])
     db.close()
     settings_path = run / 'settings.json'
     settings = json.loads(settings_path.read_text()) if settings_path.is_file() else {}
     overseer = ((settings.get('effective') or {}).get('overseer') or (settings.get('config') or {}).get('overseer'))
+    overseer_ids = participant_roles.overseer_ids(overseer)  # every overseer (agent_ids, or the legacy agent_id)
+    board_on = participant_roles.board_enabled(settings) or 'overseer_board' in present
     roles = participant_roles.special_roles(settings)  # {} unless the run has an overseer or a seed
     seeds = {a for a, r in roles.items() if r == participant_roles.SEED}
     reverted_submissions = {row['submission_id']: row for row in reversions}
@@ -228,6 +243,12 @@ def export(run):
                               f"{p.get('target')}: {target}. {p.get('reason') or ''}", event['timestamp'],
                               [event.get('agent_id')], p.get('problem_id'), detail=p))
 
+    # Overseer board (overseers only): posts in posting order, with author and time.
+    for row in overseer_posts:
+        records.append(record('overseer_board', 'ovpost-%06d' % row['post_id'], 'Overseer board post',
+                              row['message'], row['posted_at'], [row['agent_id']],
+                              detail={'channel': 'overseer board (overseers only)'}))
+
     # Browse only workspace working files and notes; SDK sessions are in the Inspect logs.
     versions = defaultdict(list)
     for line_number, entry in enumerate(runtime, 1):
@@ -274,6 +295,8 @@ def export(run):
     categories = ('board', 'dms', 'library', 'submissions', 'feedback', 'files')
     if overseer or reversions or proof_checks:  # the Oversight section exists only in overseer runs
         categories = categories[:5] + ('oversight',) + categories[5:]
+    if board_on:  # the Overseer board section exists only in runs with the board
+        categories = categories[:-1] + ('overseer_board',) + categories[-1:]
     counts = {category: 0 for category in categories}
     counts.update(Counter(r['category'] for r in records))
     warnings = ['Private files are researcher-only and were not automatically shared with peers.',
@@ -293,6 +316,8 @@ def export(run):
                 captured_files=len(versions))
     if start is not None:
         data['run_start'] = start
+    if len(overseer_ids) > 1:
+        data['overseers'] = overseer_ids
     (out / 'index.html').write_text(render_index(data))
     manifest = {'schema': SCHEMA, 'run': run.name, 'counts': counts, 'captured_files': len(versions),
                 'conference_events': len(events), 'timeline_entries': 0, 'timeline_location': 'dataset',
@@ -346,6 +371,12 @@ const links=node('p');for(const [label,url] of r.links){if(!url)continue;const a
 if(r.detail){const d=node('details');d.append(node('summary',selected==='submissions'?'Judge feedback & evidence':'Record details & provenance'),node('pre',JSON.stringify(r.detail,null,2)));card.append(d);}main.append(card);}}
 for(const id of ['search','agent','task'])el(id).addEventListener(id==='search'?'input':'change',()=>{pageNo=0;render();});el('previous').onclick=()=>{pageNo--;render();};el('next').onclick=()=>{pageNo++;render();};window.addEventListener('hashchange',()=>{if(sections[location.hash.slice(1)]&&selected!==location.hash.slice(1)){selected=location.hash.slice(1);pageNo=0;options();render();}});options();render();
 '''
+    if 'overseer_board' in data['counts']:
+        script = script.replace("files:['Private notes", OVERSEER_BOARD_SECTION + "files:['Private notes", 1)
+    if len(data.get('overseers') or ()) > 1:
+        script = script.replace("'Credits the overseer reverted (with its stated reason) and the proof checks it ran. "
+                                "A reverted credit removed the credit and the library entry and reopened the problem; "
+                                "the original submission stays in the records.'", MULTI_OVERSIGHT_INTRO, 1)
     return compact_browser_page(page('Conference · ' + data['run'], body + '<script id="data" type="application/json">' + encoded + '</script><script>' + script + '</script>'))
 
 

@@ -36,7 +36,7 @@ always counts as an exploit submission of its family (the detectors' family, els
 judge source (it is never judged); it is a lineage root but never an independent discoverer, and it is left out of
 the user, credit and outbreak counts (``counts["seeded"]``, ``record["seeded"]``). Agents who read its file
 before their first exploit submission are adopters attributed to it. Without a submission row for the seed, the
-``seeded_artifact_injected`` event supplies it. Other non-solver participants (the overseer) are labelled by role.
+``seeded_artifact_injected`` event supplies it. Other non-solver participants (every overseer, one or several) are labelled by role.
 Runs without a seed or an overseer give the same record as before.
 """
 from __future__ import annotations

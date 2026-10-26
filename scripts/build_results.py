@@ -381,8 +381,9 @@ def oversight(settings, every, accepted, reverted, checks, agents):
         return None
     roles = dict(effective.get('roles') or {})
     overseer_id = (overseer or {}).get('agent_id')
-    if overseer_id:
-        roles.setdefault(overseer_id, 'overseer')
+    overseer_ids = participant_roles.overseer_ids(overseer)  # both forms: agent_ids (several) or agent_id
+    for agent in overseer_ids:
+        roles.setdefault(agent, 'overseer')
     for agent in participant_roles.seed_agents(settings):  # seeded runs: the planted seed, never a solver
         roles[agent] = participant_roles.SEED
     for agent in agents:
@@ -400,8 +401,15 @@ def oversight(settings, every, accepted, reverted, checks, agents):
                          'reverted_credits': sum(r['_serial'] in reverted for r in subs),
                          'net_credited_tasks': sum(row['agent'] in members for row in net.values())}
     verified_net = {t for t, row in net.items() if row.get('independent_validity') == 'genuine'}
-    return {'overseer': {'agent_id': overseer_id, 'powers': (overseer or {}).get('powers'),
-                         'oversight_tools': (overseer or {}).get('oversight_tools')} if overseer else None,
+    if overseer and 'agent_ids' in overseer:  # multi-overseer form (added keys; the single form is unchanged)
+        every_overseer = sorted({a for a, r in roles.items() if r == 'overseer'})
+        overseer_facts = {'agent_ids': every_overseer, 'count': len(every_overseer),
+                          'powers': overseer.get('powers'), 'board': bool(overseer.get('board')),
+                          'oversight_tools': overseer.get('oversight_tools')}
+    else:
+        overseer_facts = {'agent_id': overseer_id, 'powers': (overseer or {}).get('powers'),
+                          'oversight_tools': (overseer or {}).get('oversight_tools')} if overseer else None
+    return {'overseer': overseer_facts,
             'roles': dict(sorted(roles.items())),
             'net_credited_tasks': len(net),
             'net_credits_by_agent': dict(sorted(collections.Counter(r['agent'] for r in net.values()).items())),
@@ -417,7 +425,14 @@ def oversight(settings, every, accepted, reverted, checks, agents):
             'proof_checks': {'count': len(checks),
                              'by_validity': dict(sorted(collections.Counter(c['validity'] for c in checks).items())),
                              'by_target': dict(sorted(collections.Counter(c['target'] for c in checks).items())),
-                             'checks': checks}}
+                             'checks': checks},
+            # Multi-overseer runs only: what each overseer did (absent for a single overseer).
+            **({'by_overseer': {
+                agent: {'submissions': sum(r['agent'] == agent for r in every),
+                        'reverted_credits_made': sum(m['reverted_by'] == agent for m in reverted.values()),
+                        'proof_checks': sum(c['agent'] == agent for c in checks)}
+                for agent in overseer_facts['agent_ids']}} if overseer_facts and 'agent_ids' in overseer_facts
+               else {})}
 
 
 def seeded(run, settings, runtime, every, first_accept):
@@ -696,7 +711,7 @@ def summary_card(results):
     tiles = [('Model', c['model'], c['provider_route'] or c['provider']),
              ('Prompt variant', c['prompt_variant'] or 'not recorded', 'as recorded in settings.json'
               if c['prompt_variant'] else 'settings.json names none'),
-             ('Agents', (f'{c["solvers"]} solvers' + (' + overseer' if c.get('overseer') else '')
+             ('Agents', (f'{c["solvers"]} solvers' + (overseer_tile(c['overseer']) if c.get('overseer') else '')
                          + (' + seed' if c.get('seed_agent') else '')) if c.get('overseer') or c.get('seed_agent')
               else c['agents'],
               f'{voluntary} ended on their own · {errors} errors'),
@@ -748,12 +763,21 @@ def glossary(results):
     return ''.join(out)
 
 
+def overseer_tile(overseer):
+    """' + overseer' (one overseer, unchanged) or ' + N overseers' (multi-overseer form)."""
+    count = overseer.get('count') if isinstance(overseer, dict) else None
+    return f' + {count} overseers' if isinstance(count, int) and count > 1 else ' + overseer'
+
+
 def oversight_section(ov):
-    """Oversight facts: the overseer's role and powers, credit by role, reverted credits and proof checks."""
+    """Oversight facts: the overseers' roles and powers, credit by role, reverted credits and proof checks."""
     o = ov['overseer'] or {}
     checks = ov['proof_checks']
-    out = ['<h2 id="oversight">Oversight</h2>', facts([
-        ('Overseer', o.get('agent_id') or 'none'),
+    multi = 'agent_ids' in o
+    out = ['<h2 id="oversight">Oversight</h2>', facts(([
+        ('Overseers', ', '.join(o['agent_ids']) or 'none'), ('Overseer count', o.get('count')),
+        ('Overseer board', 'enabled (overseers only)' if o.get('board') else 'disabled')] if multi else [
+        ('Overseer', o.get('agent_id') or 'none')]) + [
         ('Oversight tools', ', '.join(o.get('oversight_tools') or []) or ('none' if o else 'not recorded')),
         ('Roles', ov['roles']),
         ('Net credited tasks (after reversions)', ov['net_credited_tasks']),
@@ -768,6 +792,10 @@ def oversight_section(ov):
                                          for role, t in ov['by_role'].items()],
                                         ('Role', 'Agents', 'Submissions', 'Accepted', 'Reverted credits',
                                          'Net credited tasks')),
+        *(['<h3>By overseer</h3>', table([(esc(agent), esc(str(t['submissions'])), esc(str(t['reverted_credits_made'])),
+                                           esc(str(t['proof_checks']))) for agent, t in ov['by_overseer'].items()],
+                                         ('Overseer', 'Submissions', 'Credits reverted', 'Proof checks'))]
+          if 'by_overseer' in ov else []),
         '<h3>Reverted credits</h3>']
     out.append(table([(esc(r['submission']), esc(r['agent']), esc(r['task']), esc(r['reverted_by']),
                        esc(r['reverted_utc']), esc(r['revert_reason']), badge(r['independent_validity'] or 'not_evaluated'))

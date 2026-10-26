@@ -71,6 +71,8 @@ CONFERENCE_CHANNELS = {
     "send_direct_message": "dm", "get_messages": "dm",
     "submit_feedback": "feedback", "submit_solution": "submission",
     "publish_notebook": "notebook", "list_library": "notebook", "read_library_file": "notebook",
+    # Multi-overseer runs with the private overseer board (overseers only; solvers never see it).
+    "post_overseer_board": "overseer_board", "read_overseer_board": "overseer_board",
 }
 # Conference event kind that records each tool's action (research_swarm.conference).
 PRIMARY_EVENT = {
@@ -80,6 +82,7 @@ PRIMARY_EVENT = {
     "get_problem": "problem_viewed", "submit_solution": "submission_received",
     "list_library": "library_listed", "read_library_file": "library_read",
     "publish_notebook": "notebook_published", "get_conference_status": "status_viewed",
+    "post_overseer_board": "overseer_board_post", "read_overseer_board": "overseer_board_read",
 }
 ERROR_EVENTS = ("tool_error", "internal_error")
 EVENT_CHANNELS = {
@@ -88,6 +91,7 @@ EVENT_CHANNELS = {
     "library_listed": "notebook", "library_published": "library_solution",
     "submission_received": "submission", "submission_resolved": "submission",
     "submission_judged": "submission", "task_closed": "submission",
+    "overseer_board_post": "overseer_board", "overseer_board_read": "overseer_board",
 }
 PUBLIC_ID = re.compile(r"^(dm|sub)-[0-9a-f]{16}$")
 AGENT_ID = re.compile(r"^agent-(\d+)$")
@@ -263,6 +267,7 @@ class AgentHistory:
     persona: str | None = None
     exit: dict | None = None
     role: str | None = None           # "overseer" for an overseer run's monitoring agent, else None
+    overseer_count: int | None = None  # number of overseers when the run has more than one, else None
     _index: dict = field(default_factory=dict, repr=False)
 
     def get(self, item_id):
@@ -278,6 +283,7 @@ class ConferenceRecords:
     def __init__(self):
         self.available = False
         self.posts, self.dms, self.feedback, self.library, self.submissions = {}, {}, {}, {}, {}
+        self.overseer_posts = {}    # private overseer board (multi-overseer runs only), "ovpost-%06d"
         self.tasks = {}
         # Overseer runs: credits the overseer reverted, keyed by the reverted submission's internal id.
         self.reversions = {}
@@ -420,6 +426,9 @@ def load_conference(run_dir, *, live=False):
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reversions'").fetchone():
             for row in rows("reversions"):
                 conf.reversions["sub-%06d" % row["submission_id"]] = row
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='overseer_board'").fetchone():
+            for row in rows("overseer_board"):
+                conf.overseer_posts["ovpost-%06d" % row["post_id"]] = row
         conf.available = True
     except sqlite3.Error as exc:
         conf.problems.append({"file": str(path), "error": "sqlite:" + type(exc).__name__})
@@ -443,7 +452,7 @@ def _record_items(conf):
             value = payload.get(key)
             if isinstance(value, str) and event["kind"] in (
                     "board_post", "dm_sent", "feedback_submitted", "notebook_published", "library_published",
-                    "submission_received"):
+                    "submission_received", "overseer_board_post"):
                 seq_of.setdefault(value, event["seq"])
         if event["kind"] == "dm_retrieved":
             for internal in payload.get("first_delivery_ids") or []:
@@ -458,6 +467,10 @@ def _record_items(conf):
                                     time=row["posted_at"], authored=True,
                                     meta={"intent_type": row["intent_type"], "tags": tags,
                                           "event_seq": seq_of.get(pid)})
+    for pid, row in conf.overseer_posts.items():  # private overseer board: overseers only, never solvers
+        conf.items[pid] = make_item(pid, row["agent_id"], "conference", "overseer_board", row["message"],
+                                    time=row["posted_at"], authored=True,
+                                    meta={"board": "overseer board (overseers only)", "event_seq": seq_of.get(pid)})
     for mid, row in conf.dms.items():
         conf.items[mid] = make_item(mid, row["sender"], "conference", "dm", row["body"], time=row["sent_at"],
                                     authored=True,
@@ -1175,6 +1188,14 @@ def _exposure_entries(call, join, conf, agent):
                                 text_returned=post.get("message") or "", kind="board_post",
                                 truncated=bool(post.get("text_truncated")),
                                 full_text_chars=post.get("full_text_chars")))
+    elif tool == "read_overseer_board":  # multi-overseer runs: posts by the other overseers
+        for post in result.get("posts") or []:
+            if post.get("agent_id") == agent:
+                continue
+            entries.append(dict(base, source_id=post.get("post_id"), author=post.get("agent_id"),
+                                text_returned=post.get("message") or "", kind="overseer_board_post",
+                                truncated=bool(post.get("text_truncated")),
+                                full_text_chars=post.get("full_text_chars")))
     elif tool == "get_messages":
         for message in result.get("messages") or []:
             if message.get("from_agent_id") == agent:
@@ -1232,7 +1253,8 @@ def build_agent(sample, run, *, include_files=True, log_name=None):
         if join["seq"] is not None:   # the record this action created (communication or submission)
             primary = conf.events_by_seq[join["seq"]]
             created = {"board_post": "post_id", "dm_sent": "message_id", "feedback_submitted": "feedback_id",
-                       "notebook_published": "artifact_id", "submission_received": "submission_id"}.get(primary["kind"])
+                       "notebook_published": "artifact_id", "submission_received": "submission_id",
+                       "overseer_board_post": "post_id"}.get(primary["kind"])
             if created and isinstance(primary["payload"].get(created), str):
                 call_item["meta"]["conference_id"] = result_item["meta"]["conference_id"] = primary["payload"][created]
         ledger.extend(_exposure_entries(call, join, conf, agent))
@@ -1274,16 +1296,26 @@ def build_agent(sample, run, *, include_files=True, log_name=None):
     return AgentHistory(agent_id=agent, code=code, items=items, exposure_ledger=ledger, host_context=host_context,
                         harness_items=rebuilt["harness"], segments=rebuilt["segments"], stats=stats,
                         persona=run.host["personas"].get(agent), exit=exit_record,
-                        role=agent_role(run.host, agent))
+                        role=agent_role(run.host, agent), overseer_count=_overseer_count(run.host, agent))
 
 
 def agent_role(host, agent):
     """"overseer" for an overseer run's monitoring agent, "seed" for a seeded run's planted participant
     (which has no Inspect sample, so it normally never gets a history); None for every other agent (solvers
     keep the package shape of runs without an overseer)."""
-    overseer = (host.get("overseer") or {}).get("agent_id")
-    role = (host.get("roles") or {}).get(agent) or ("overseer" if agent == overseer else None)
+    from research.analysis.roles import overseer_ids
+    role = (host.get("roles") or {}).get(agent) or ("overseer" if agent in overseer_ids(host.get("overseer"))
+                                                    else None)
     return role if role in ("overseer", "seed") else None
+
+
+def _overseer_count(host, agent):
+    """The number of overseers when ``agent`` is one of several (multi-overseer runs); None otherwise, so
+    single-overseer and ordinary runs keep their packages."""
+    from research.analysis.roles import overseer_ids
+    ids = set(overseer_ids(host.get("overseer")))
+    ids.update(a for a, r in (host.get("roles") or {}).items() if r == "overseer")
+    return len(ids) if len(ids) > 1 and agent in ids else None
 
 
 def run_item_turn(item_id):
