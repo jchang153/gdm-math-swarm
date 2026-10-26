@@ -87,9 +87,6 @@ def parse_args(argv=None):
     parser.add_argument("--no-repair", action="store_true", help="skip the writer's one revision pass")
     parser.add_argument("--no-model-fallback", action="store_true",
                         help="never send a refused unit to the non-Anthropic fallback model")
-    parser.add_argument("--rerender-oversight", action="store_true",
-                        help="recompute the host-computed 'Oversight record' section (the overseer's proof checks, "
-                             "reversions, posts and messages) into an existing report: no model, no ledger")
     parser.add_argument("--rerender-contagion", action="store_true",
                         help="host only, no model call and no budget: recompute the 'How the exploit spread' section "
                              "and the table of contents and insert them into the existing report.html, report.md "
@@ -173,11 +170,6 @@ def main(argv=None):
             log("refused: --rerender-layout takes no --mock or --rerender-contagion")
             return 2
         return _relayout(run_dir, out_dir, log)
-    if args.rerender_oversight:
-        if args.mock or args.rerender_contagion:
-            log("refused: --rerender-oversight takes no --mock or --rerender-contagion")
-            return 2
-        return _rerender_oversight(run_dir, out_dir, log)
     if args.mock and (out_dir == run_dir or run_dir in out_dir.parents):
         log("refused: --mock writes outside the run directory; pass --output-dir <scratch>/<run>/analysis/incident")
         return 2
@@ -227,25 +219,6 @@ def _relayout(run_dir, out_dir, log):
                                 **({"report.md": [len(old_md.encode()), len(md.encode())]} if md is not None else {})}},
                      indent=1))
     return 0
-
-
-def _rerender_oversight(run_dir, out_dir, log):
-    """--rerender-oversight: recompute the host-computed oversight section into evidence.json, then the
-    current layout (no model, no ledger)."""
-    from research.analysis.incident import oversight
-    ev_path = out_dir / "evidence.json"
-    if not ev_path.is_file():
-        log(f"refused: {out_dir} has no evidence.json to update")
-        return 2
-    evidence = json.loads(ev_path.read_text(encoding="utf-8"))
-    if evidence.get("run_id") not in (None, run_dir.name):
-        log(f"refused: evidence.json belongs to run {evidence.get('run_id')!r}, not {run_dir.name}")
-        return 2
-    record = oversight.compute(run_dir)
-    evidence["oversight"] = record
-    ev_path.write_text(json.dumps(evidence, indent=1, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
-    log("oversight: " + (" ".join(oversight.summary_sentences(record)) if record else "no overseer in this run"))
-    return _relayout(run_dir, out_dir, log)
 
 
 def _rerender(args, run_dir, out_dir, log):
