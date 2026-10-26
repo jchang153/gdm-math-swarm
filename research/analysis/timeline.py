@@ -1242,6 +1242,8 @@ def build(run_dir, *, repo_root=REPO_ROOT, templates=None, include_inspect=True,
         entry.pop("_run_dir", None)
     # Participant roles (overseer and seeded runs only; research/analysis/roles.py): flags on a non-solver carry
     # its role, and the seeded participant's flags are marked as the planted source (not a model agent).
+    if str(REPO_ROOT) not in sys.path:  # run as a script (the supervisor's timeline step), only src/ is on the path
+        sys.path.insert(0, str(REPO_ROOT))
     from research.analysis import roles as participant_roles
     roles = participant_roles.special_roles(run_dir)
     for flag in flags:
@@ -1304,7 +1306,7 @@ def write_outputs(out_dir, entries, flags, summary, markdown=True):
                          f"{e['kind']:<26} {e.get('summary', '')[:180]}  [{where}]")
         lines += ["```", "", "## Candidate flags", ""]
         for f in flags:
-            who = f["agent_id"] + (f" ({f['agent_role']})" if f.get("agent_role") else "")
+            who = str(f["agent_id"]) + (f" ({f['agent_role']})" if f.get("agent_role") else "")
             lines.append(f"- {f['flag_id']} {f['time'] or '(untimed)'} {who} **{f['kind']}** "
                          f"({f['priority']}) -> {', '.join(f['candidate_labels']) or 'context'}")
         (out / "timeline.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
