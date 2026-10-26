@@ -241,6 +241,12 @@ The full reference is `docs/gcp-vm.md` and `docs/validation.md`.
      8 credits; repeat2 20 users, 2 independent (008, 064), 24 credits; repeat3 2 users, both independent
      (058, 020), 1 credit. The reports use the judge where one exists; its findings give the same users but
      7 credits on baseline-30m (it missed agent-032's Erdos567 credit), shown as a cross-check line.
+   - **Oversight record (2026-10-26, owner: the overseer's own actions must be stated):** a host-computed section
+     after "How the exploit spread" in every report of a run with an overseer (`research/analysis/incident/oversight.py`):
+     proof checks, reversions, board posts with full text, DMs sent/received and whether it ever read them, feedback,
+     library reads, and how many not-genuine accepted submissions it checked or reverted. Backfill with
+     `--rerender-oversight` (no model). Applied and published for glm-overseer, glm-overseer-powers and
+     glm100-seeded-overseer-30m (records: `runs/phase-b/oversight-section-20261026/`).
    - If Anthropic refuses a step, that step goes once to openai/gpt-5.6-sol and is
      flagged. Refused, unbilled calls settle at $0 through OpenRouter's generation
      lookup.
