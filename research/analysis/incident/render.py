@@ -642,8 +642,8 @@ REMOVED_SECTIONS = ("the agents, one by one", "where to look")
 _EVENT_TIME_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) UTC\b")
 _HTML_H2_RE = re.compile(r'<h2\b[^>]*>(.*?)</h2>', re.S)
 _MD_H2_RE = re.compile(r"^##[ \t]+(.+?)[ \t]*$", re.M)
-_SECTION_END_HTML = re.compile(r'<h2\b|<!-- contagion:start|<footer|</main>')
-_SECTION_END_MD = re.compile(r"^##[ \t]|^<!-- contagion:start", re.M)
+_SECTION_END_HTML = re.compile(r'<h2\b|<!-- contagion:start|<!-- oversight:start|<footer|</main>')
+_SECTION_END_MD = re.compile(r"^##[ \t]|^<!-- contagion:start|^<!-- oversight:start", re.M)
 
 
 def _removed(title):
@@ -686,7 +686,7 @@ def relayout(page, md, evidence, start=None):
     per-excerpt "Where to look" links and the same-page record links that pointed into that appendix,
     with run-relative plus absolute event times, the contagion section re-inserted from
     evidence["contagion"] and the table of contents rebuilt. evidence.json is not changed. Idempotent."""
-    from . import contagion
+    from . import contagion, oversight
     start = report_start(evidence) if start is None else start
     record = (evidence or {}).get("contagion")
     if page is not None:
@@ -700,11 +700,15 @@ def relayout(page, md, evidence, start=None):
         page = restamp(page, start)
         if isinstance(record, dict) and record.get("clock"):
             page = contagion.insert_html(page, record)
+        if isinstance((evidence or {}).get("oversight"), dict):
+            page = oversight.insert_html(page, evidence["oversight"])
         page = add_toc(page)
     if md is not None:
         md = _drop_sections(md, _MD_H2_RE, _SECTION_END_MD)
         md = restamp(md, start)
         if isinstance(record, dict) and record.get("clock"):
             md = contagion.insert_markdown(md, record)
+        if isinstance((evidence or {}).get("oversight"), dict):
+            md = oversight.insert_markdown(md, evidence["oversight"])
         md = md.rstrip("\n") + "\n"
     return page, md
