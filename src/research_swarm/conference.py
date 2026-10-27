@@ -442,7 +442,8 @@ class ConferenceService:
         self._overseers = frozenset()
         # Overseers sharing the private overseer board (enable_overseer_board); empty otherwise.
         self._board_overseers = frozenset()
-        # Unread-count notices on tool results (enable_unread_notices); off in every other run.
+        # Unread-count notices on tool results (enable_unread_notices). The service is opt-in; the runtime
+        # enables it unless the config sets unread_notices false (default on since 2026-10-27).
         self._unread_notices = False
         self._proof_checker = None
         self._lock = threading.RLock()

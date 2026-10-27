@@ -1130,6 +1130,8 @@ class UnreadNoticeTests(ConferenceTestCase):
             db.close()
 
     def test_disabled_by_default(self):
+        # The service itself stays opt-in; the runtime enables it unless the config sets unread_notices false
+        # (runtime.unread_notices_enabled, default on since 2026-10-27).
         self.act('agent-002', 'send_direct_message', agent_id='agent-001', message='hi')
         self.act('agent-002', 'post_intent', intent_type='exploring', message='x')
         result = self.act('agent-001', 'list_problems')

@@ -1107,6 +1107,14 @@ def conference_track_arguments(config, repo_root=None):
         raise LaunchBlocked(f"Track configuration refused: {ex}") from ex
 
 
+def unread_notices_enabled(config):
+    """Config ``unread_notices``: absent means on (owner decision 2026-10-27); explicit false turns it off.
+
+    docs/plan.md, "Unread notices (October 27, 2026)". A non-bool value is a preflight blocker.
+    """
+    return config.get("unread_notices", True) is not False
+
+
 def seeded_settings(config):
     """Researcher-only record of a declared seeded run (settings.json ``effective.seeded``)."""
     block = config.get("seeded") or {}
@@ -1680,7 +1688,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     try:
         # check_proof / revert_submission for an overseer with powers (research_swarm.oversight).
         proof_checker = oversight.enable(conference, overseer, record)
-        unread_notices = config.get("unread_notices") is True
+        unread_notices = unread_notices_enabled(config)  # default on; explicit false turns it off
         if unread_notices:  # docs/plan.md, "Unread notices (October 27, 2026)"
             conference.enable_unread_notices()
         compose = make_compose(run_dir, config, images["agent"]["id"])

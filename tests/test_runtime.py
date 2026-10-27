@@ -660,6 +660,18 @@ class PreflightTests(unittest.TestCase):
             broken = dict(config, seeded=dict(config["seeded"], artifact_sha256="0" * 64))
             self.assertTrue(any(b.startswith("Declared seeded run:") for b in self._preflight(broken, ok)["blockers"]))
 
+    def test_unread_notices_default_on(self):
+        """docs/plan.md, "Unread notices (October 27, 2026)": absent -> on, false -> off, non-bool blocks."""
+        self.assertTrue(runtime.unread_notices_enabled({}))
+        self.assertTrue(runtime.unread_notices_enabled({"unread_notices": True}))
+        self.assertFalse(runtime.unread_notices_enabled({"unread_notices": False}))
+        ok = lambda c, r: {"ready": True, "blockers": [], "evidence": {}, "ledger": {}}  # noqa: E731
+        for value in (None, "true", 1, 0):
+            blockers = self._preflight(self.base(unread_notices=value), ok)["blockers"]
+            self.assertIn("unread_notices must be true or false", blockers, value)
+        for config in (self.base(), self.base(unread_notices=True), self.base(unread_notices=False)):
+            self.assertNotIn("unread_notices must be true or false", self._preflight(config, ok)["blockers"])
+
     def test_missing_launch_gates_blocks(self):
         report = self._preflight(self.base())
         self.assertFalse(report["ready"])
@@ -1180,13 +1192,17 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
 
         class Conference:
             closed = False
+            unread_notices = False
+
+            def enable_unread_notices(self):
+                self.unread_notices = True
 
             def close(self):
                 self.closed = True
 
             def is_depleted(self):
                 return False
-        conference = Conference()
+        conference = self.conference = Conference()
         compiler = types.SimpleNamespace(image=self.images["lean"]["id"], timeout=120, memory="2g", cpus=1,
                                          max_concurrent=None)
 
@@ -1236,6 +1252,10 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(effective["compose_sha256"], runtime.compose_fingerprint(self.config, self.images["agent"]["id"]))
         self.assertTrue(effective["inspect_dotenv"]["dotenv_disabled"])
         self.assertEqual(effective["in_flight_grace_seconds"], runtime.IN_FLIGHT_GRACE_SECONDS)
+        # Unread notices default on when the key is absent (docs/plan.md, "Unread notices (October 27, 2026)").
+        self.assertNotIn("unread_notices", self.config)
+        self.assertIs(effective["unread_notices"], True)
+        self.assertTrue(self.conference.unread_notices)
         records = [json.loads(line) for line in (run_dir / "runtime.jsonl").read_text().splitlines()]
         credential = [r["payload"] for r in records if r["kind"] == "credential_environment"]
         self.assertEqual(credential, [{"credentials_in_environment": "OPENROUTER_API_KEY" in os.environ}])
@@ -1264,6 +1284,13 @@ class RunPilotOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings["effective"]["max_connections"], runtime.APPROVED_AGENT_COUNT)
         self.assertEqual(settings["config"]["max_connections"], runtime.APPROVED_AGENT_COUNT)
         self.assertEqual(settings["effective"]["track"], "spontaneous")
+
+    async def test_explicit_false_turns_unread_notices_off(self):
+        self.config["unread_notices"] = False
+        _, _, conference = await self.run_pilot()
+        self.assertFalse(conference.unread_notices)
+        settings = json.loads((Path(self.config["run_dir"]) / "settings.json").read_text())
+        self.assertIs(settings["effective"]["unread_notices"], False)
 
     async def test_default_budget_of_one_hundred_applies_when_unset(self):
         del self.config["run_budget_usd"]

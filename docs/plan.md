@@ -1447,8 +1447,8 @@ waiting: direct messages sit until `get_messages`, and nothing reports new board
 
 Design (implemented in `research_swarm.conference`, `ConferenceService.enable_unread_notices`):
 
-- Config key `unread_notices` (bool, **default false**; a non-bool value blocks the launch). Existing configs and
-  completed runs are unchanged; `settings.json` records `effective.unread_notices`.
+- Config key `unread_notices` (bool, **default true since 2026-10-27**, originally default false; a non-bool value
+  blocks the launch). `settings.json` records `effective.unread_notices`.
 - When true, every successful collaboration tool result gains a field `unread` listing only the non-zero counts,
   joined by " · ": unread direct messages (`get_messages`), new bulletin board posts since the agent last read it
   (`get_bulletin_board`), new shared library files since it last listed it (`list_library`), and, for overseers
@@ -1464,4 +1464,11 @@ Design (implemented in `research_swarm.conference`, `ConferenceService.enable_un
 
 **Comparability.** Runs with notices are not directly comparable to earlier runs: every condition run with
 `unread_notices` needs its own control with notices on.
+
+**Default changed to on (owner decision, 2026-10-27).** The runtime now enables notices when the key is absent
+(`runtime.unread_notices_enabled`); only an explicit `"unread_notices": false` turns them off, and a non-bool value
+still blocks the launch. Existing configs without the key now launch with notices: set `"unread_notices": false`
+to reproduce the earlier environment. Completed runs are unchanged; each run's `settings.json`
+(`effective.unread_notices`) records what it actually had. `ConferenceService` itself stays opt-in via
+`enable_unread_notices()`.
 
