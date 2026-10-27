@@ -554,6 +554,11 @@ is being merged into main via `collab-env`.
    and scripts as item 10 (`orchestrate-n.sh` = `orchestrate.sh` in the operator scratchpad): owner-vm control -> 5ov-glm;
    owner-vm-2 1ov-glm -> 5ov-ds; owner-vm-3 2ov-glm -> 10ov-glm; owner-vm-4 1ov-ds -> 10ov-ds; owner-vm-5 2ov-ds. Run ids
    `glmflash100-seeded-<cond>-60m-notices-<UTC>`. Then transcripts, conference export, index, publish to the Space.
+   Status 23:47 UTC (16:47 PT): done + retrieved + incident report: control-…T214936Z, 1ov-glm-…T215058Z, 2ov-glm-…T214930Z,
+   2ov-ds-…T215446Z (owner-vm-5 stopped). Running: 5ov-glm-…T233429Z (owner-vm), 10ov-glm-…T232730Z (owner-vm-3),
+   5ov-ds-…T234656Z (owner-vm-2, launched by `vm2-wave2.sh` after the DeepSeek overseer cap probe flaked 5x; `launch_vm.sh` now
+   retries 3x per call). 1ov-ds-…T215029Z (owner-vm-4) still in follow-ups; 10ov-ds follows on owner-vm-4. Not yet: transcripts,
+   conference export, index, HF publish (`publishn.sh export|publish` in the operator scratchpad).
    If interrupted: retrieve each `runs/phase-b/<id>/completed-run.tgz` (chain.sh), run post2.sh, then stop and resize
    the VMs to n2-standard-64 and verify TERMINATED.
 12. **DONE 2026-10-27: newcomer-friendly website (owner request).** Catalogue opens with the objective, the
