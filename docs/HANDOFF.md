@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-27 by Claude (Opus 5.5) site subagent (newcomer site: objective, paper, glossary, run cards by series, run-page intro; published).
+Last updated: 2026-10-27 by Claude (Opus 5.5) Cloudflare-migration subagent (library moved to Cloudflare Pages; HF left as is).
 
 ## What the project is
 
@@ -66,7 +66,16 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
   - Port 22 times out. Push over 443 with:
     `GIT_SSH_COMMAND="ssh -o HostKeyAlias=github.com" git push ssh://git@ssh.github.com:443/jchang153/gdm-math-swarm.git main`
   - Git binary: `/Library/Developer/CommandLineTools/usr/bin/git`.
-- **Shared results site:** the HF Space (URL under "Hosts and access"). **Public since 2026-10-24 (the owner made it
+- **Shared results site (since 2026-10-27): the public Cloudflare Pages site https://gdm-math-swarm-experiments.pages.dev**
+  (owner decision, docs/plan.md "Experiment library on Cloudflare (October 27, 2026)"). Publish with
+  `scripts/publish_cloudflare.py` (`publish --bundle`, `mirror-space`, `verify`; preview unless `--commit`);
+  receipts in `runs/phase-b/cloudflare/receipts/`. Everything public on the HF Space is mirrored there; nothing
+  private (Inspect logs, raw records) is on Cloudflare: R2 is not enabled on the account and the wrangler login
+  cannot manage Access, so no private Cloudflare store exists (owner step if wanted: enable R2 and Zero Trust in
+  the dashboard). Inspect View pages show a "logs are private" bar linking the HF logs dataset folder. The HF Space
+  and HF logs dataset are untouched; the owner decides on deleting them. Details: `docs/experiment-library.md`,
+  "Cloudflare site".
+- **Former results site:** the HF Space (URL under "Hosts and access"). **Public since 2026-10-24 (the owner made it
   public themselves; docs/plan.md "Public results Space, private logs dataset").** The logs dataset stays private.
   `scripts/hf_visibility.py` records both; every write refuses when the actual visibility differs, and no tool
   ever makes anything public. Every Space commit goes through `publish_hf_library.space_commit` (credential and

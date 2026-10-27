@@ -1,5 +1,18 @@
 # GDM Math Swarm Reconstruction and Pilot Plan
 
+## Experiment library on Cloudflare (October 27, 2026)
+
+Owner decision of October 27, 2026 (relayed by the integrating session): migrate the experiment website from the
+HF Space to Cloudflare, replacing HF entirely. Clarifications: the HF Space is public; only the HF logs dataset
+(raw Inspect logs served to the Space's Inspect View) is private.
+
+| Topic | Decision |
+| --- | --- |
+| Public site | Everything public on the Space becomes a public Cloudflare Pages site (preferred over Workers static assets; within Pages' limits of 20,000 files per deployment and 25 MiB per file). Done: https://gdm-math-swarm-experiments.pages.dev. |
+| Private part | Anything private (the dataset's raw Inspect logs and every other private category in docs/experiment-library.md) must not become public: R2 (private bucket) served only behind Cloudflare Access restricted to the owner's account email. If R2/Access cannot be configured with the available login, publish the public site only and keep raw logs off Cloudflare. Outcome: R2 is not enabled on the account and the wrangler login has no Access scope, so no private Cloudflare store exists; raw logs stay off Cloudflare (private HF dataset and local `runs/`). Enabling R2 and Zero Trust in the dashboard is the owner's step if wanted later. |
+| Tooling | `scripts/publish_cloudflare.py` with the HF flow's guarantees: preview by default, `--commit` deploys, guarded deployments, immutable run records, receipts, other collaborators' runs preserved, no credentials or auth caches uploaded, a `verify` step; no manual approvals, typed confirmations or extra spending checks. |
+| HF | The HF Space and the HF logs dataset are not changed or deleted; the owner decides on deletion separately. |
+
 ## Multi-overseer seeded runs, October 26, 2026
 
 Owner decisions (relayed by the integrating session on October 26, 2026): five new declared seeded runs, each

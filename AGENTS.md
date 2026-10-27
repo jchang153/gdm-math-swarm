@@ -57,16 +57,17 @@ Use scripts/export_transcripts.py --run-dir runs/<run-id> for the offline HTML
 transcript view and scripts/build_experiment_index.py after saving results.json and
 results.html. The local experiment library is runs/index.html. Preserve raw records;
 exports are derived views. Raw runs are Git-ignored and require separate backup.
-The user also authorized a shared HF library at
-https://huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments; the owner
-made this Space public on October 24, 2026. Its Inspect logs and raw records stay in
-the private dataset HF-ORG/LOGS-DATASET. scripts/hf_visibility.py records
-both visibilities; tools refuse to write when either differs and never make anything public.
-Follow docs/experiment-library.md for preparation, privacy and guarded updates;
-preserve other collaborators' runs and never upload host credentials or auth caches.
-Use scripts/publish_hf_library.py --bundle PREPARED_DIRECTORY for a read-only
-publication preview; --commit merges and publishes using the operator's own HF
-login, guarded revisions and immutable run records. Install the publication extra.
+The shared experiment library is the public Cloudflare Pages site
+https://gdm-math-swarm-experiments.pages.dev (owner decision, October 27, 2026); it
+replaces the former HF Space, which the owner will retire separately. Do not change or
+delete the HF Space or the private HF logs dataset HF-ORG/LOGS-DATASET.
+Private files (Inspect logs, raw records, snapshots, timelines, resume bundles) never
+go to the public site. Follow docs/experiment-library.md for preparation, privacy and
+guarded updates; preserve other collaborators' runs and never upload host credentials
+or auth caches. Use scripts/publish_cloudflare.py publish --bundle PREPARED_DIRECTORY
+for a read-only preview; --commit deploys with the operator's own wrangler login,
+guarded deployments and immutable run records; `verify` checks the served site.
+Install the publication extra.
 Use scripts/export_conference.py --run-dir runs/<run-id> to browse saved board
 posts, DMs, library revisions, judging, organizer feedback, captured private files
 and the existing activity timeline. Keep empty sections and capture limits explicit.

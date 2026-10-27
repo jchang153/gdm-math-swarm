@@ -1,5 +1,94 @@
 # Shared experiment library
 
+## Cloudflare site (October 27, 2026): the current library
+
+Owner decision of October 27, 2026 (docs/plan.md, "Experiment library on Cloudflare (October 27, 2026)"): the
+library moves from the HF Space to Cloudflare, replacing HF. **The library is the public Cloudflare Pages site
+https://gdm-math-swarm-experiments.pages.dev.** The HF Space and the private HF logs dataset are left exactly as
+they are; the owner decides separately whether to delete them. Everything below this section describes the HF
+Space and remains the record of how its content was produced (bundles from `prepare_hf_library.py` are still the
+input of a Cloudflare publication).
+
+**Visibility, same split as on HF.** Everything that was public on the Space is public on the Cloudflare site:
+catalogue, run pages and `results.json`, conference views (with their captured-file packs), behavior judge and
+simplified judge reports, incident reports and the Inspect View app with its `logs/listing.json`. Nothing private
+goes to Cloudflare: Inspect `.eval` logs, raw `.jsonl`, snapshots, databases, old transcript pages, activity
+timelines and resume bundles (`dataset_logs.category`) are refused by the deploy gate, and `verify` fails a site
+that records or serves one. A private Cloudflare store behind Access was requested but **could not be set up with
+the available login** (October 27, 2026): R2 is not enabled on the account ("Please enable R2 through the
+Cloudflare Dashboard", code 10042; enabling it needs the owner to accept terms and billing in the dashboard), and
+the wrangler login has no Zero Trust/Access scope. So the private files stay where they were: the private HF logs
+dataset and the researchers' machines (`runs/`).
+
+**Inspect View on Cloudflare.** Each run's `inspect-view/index.html` carries `scripts/cf_site/private-logs.js`
+(inlined, `id="private-logs"`) instead of the HF sign-in shim (`signin.html` is not deployed: HF OAuth only works on
+the Space host). A request for `logs/<name>.eval` answers 404 locally (nothing is fetched or sent) and a bar says
+the logs are private, linking the run's folder in the private HF logs dataset at its pinned commit (organization
+members only; the link is read from the HF shim the page had). Runs published only to Cloudflare without
+`--dataset-commit` show "kept offline by the researchers". Links of a page to a private file of an unpinned bundle
+point to the site's `private-records.html` notice. Links to the HF logs dataset (moved-file links, timelines) are
+kept as they are and work only while that dataset exists.
+
+**Limits.** Cloudflare Pages allows 20,000 files per deployment and 25 MiB per file. The first deployment
+(mirror of Space revision `227e31e9`) has 10,131 files, 860.4 MB, largest 5.5 MB (each run's Inspect View
+`assets/index.js`; Pages stores identical files once). A 100-agent run adds about 400 files, so roughly 24 more
+such runs fit; past that, pack more per run (as for snapshots and captured files) or move to Workers static assets
+on a paid plan (100,000 files). `publish_cloudflare.py` refuses a deployment over either limit.
+
+**Tool: `scripts/publish_cloudflare.py`** (tests: `tests/test_publish_cloudflare.py`). Every subcommand plans
+read-only unless `--commit` is given; there are no approval prompts or extra spending checks (no paid calls).
+
+- `publish --bundle PREPARED_DIRECTORY [--dataset-commit SHA] [--replace-pages] [--commit] [--receipt FILE]`:
+  merge a `prepare_hf_library.py` bundle (checked by `publish_hf_library.load_bundle`: checksums, credential
+  screens, allowlists). New runs are added; every existing run file is immutable, except that with
+  `--replace-pages` the bundle runs' `.html` pages may change (each replacement recorded with old and new
+  digests); records (`results.json` and other non-HTML files) never change. The catalogue is merged newest first
+  (`publish_hf_library.merge_entries`; an existing entry may not change; unlisted runs stay out). The bundle's
+  `dataset-files/` are never deployed; with `--dataset-commit` (the HF logs-dataset commit holding them, while
+  HF exists) pages are pinned to it, otherwise private links point to `private-records.html`.
+- `mirror-space [--revision SHA] [--commit]`: copy the public HF Space at a pinned revision (anonymous shallow Git
+  checkout; no credential). Runs present only on Cloudflare (another collaborator's) are preserved and kept in the
+  catalogue; changes to runs present in both come from the Space's guarded HF maintenance and are listed in the
+  receipt (`changed_files`). This is how runs published to HF during the transition reach Cloudflare.
+- `verify [--url URL] [--run RUN ...] [--full]`: read-only; the served site against its `site-manifest.json`:
+  manifest served; each checked file (all pages, `results.json` and `listing.json`, root files; every file with
+  `--full`) with HTTP 200 and its exact recorded bytes, pages as `text/html`; no private file recorded; a probe of
+  each run's first Inspect log gets no log (`no_private_logs_served`); every Inspect View has the notice and no HF
+  shim; no raw `.eval` download link; every same-site link of a checked page names a recorded file; an unknown
+  path answers 404 (the site's `404.html`, so no single-page fallback); limits.
+
+**Guarantees.** The site's state is its own `site-manifest.json` (schema `gdm-cloudflare-site/1`: every file with
+bytes and SHA-256, runs, a history of the last 50 deployments' sources). A deployment rebuilds the full tree from
+the current production deployment (each file fetched from that pinned deployment URL, or from the local
+content-addressed cache `runs/phase-b/cloudflare/cache/`, and checked against the manifest), applies the change,
+and deploys it whole, so no collaborator's run is lost. The production deployment must be the same at planning and
+just before deploying, and the new deployment must directly follow it (otherwise rerun). Every file passes
+`site_gate`: path rules and credential file names (`publish_hf_library.safe_path`), the credential screen
+including captured-file packs (`SECRET`, `packed_text`), no private category, no Pages special files (`_worker.js`,
+`_headers`, `_redirects`, `_routes.json`, `functions/`), the 25 MiB limit. HF configuration (`README.md`,
+`.gitattributes`) and `signin.html` are never deployed. Wrangler runs with the operator's own login from a scratch
+directory outside the repository (so it never sees the host-only `.env`); the default command is
+`npx --yes wrangler@4.154.0` (override with `WRANGLER`). After `--commit` the receipt records the deployment and
+the `verify` result; keep receipts under `runs/phase-b/cloudflare/receipts/`.
+
+**Collaborators** need the owner to add them to the Cloudflare account (Pages edit) and use their own
+`wrangler login`; never share a login, token or auth cache. Maintenance scopes of `maintain_hf_run.py` (judge,
+incident, site re-renders) still produce their pages through the HF tools; until they are ported, re-render pages
+into a prepared bundle and publish it with `--replace-pages`, or (while the Space exists) maintain on HF and run
+`mirror-space`.
+
+**Adding a run** (new runs from now on):
+
+```bash
+python scripts/prepare_hf_library.py ...            # as below, unchanged
+python scripts/publish_cloudflare.py publish --bundle PREPARED_DIRECTORY            # preview
+python scripts/publish_cloudflare.py publish --bundle PREPARED_DIRECTORY --commit \
+    --receipt runs/phase-b/cloudflare/receipts/RUN.json
+python scripts/publish_cloudflare.py verify --run RUN
+```
+
+## HF Space (the library until October 27, 2026)
+
 The library is https://huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments, a **public** Space
 since October 24, 2026 (see "Visibility and privacy" below); its Inspect logs and raw records are in the
 **private** dataset https://huggingface.co/datasets/HF-ORG/LOGS-DATASET.
