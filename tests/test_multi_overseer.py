@@ -229,6 +229,16 @@ class OverseerBoardServiceTests(unittest.TestCase):
         self.assertEqual(effective["oversight_tools"], ["check_proof", "revert_submission"])
         self.assertNotIn("agent_id", effective)
 
+    def test_unread_overseer_board_counts_only_for_board_overseers(self):
+        self.service.enable_unread_notices()
+        self.service.action("agent-006", "post_overseer_board", {"message": "watch task_0"})
+        self.service.action("agent-006", "post_overseer_board", {"message": "and task_1"})
+        self.assertEqual(self.service.action("agent-007", "list_problems", {})["unread"],
+                         "2 new overseer board posts (read_overseer_board)")
+        self.assertNotIn("unread", self.service.action("agent-006", "list_problems", {}))  # own posts
+        self.assertNotIn("unread", self.service.action("agent-001", "list_problems", {}))  # solver
+        self.assertNotIn("unread", self.service.action("agent-007", "read_overseer_board", {}))
+
     def test_no_board_table_without_the_board(self):
         import sqlite3
         with tempfile.TemporaryDirectory() as other:

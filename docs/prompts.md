@@ -330,6 +330,13 @@ On October 13, 2026 the integrator accepted these as documented reconstruction c
   with a `new` flag (never returned before) and `never_retrieved_remaining`. Only messages
   actually returned are logged as delivered. Message ids are opaque and `seq` counts
   the caller's own inbox (see "Identifiers").
+* **Unread notices (config `unread_notices`, default off; docs/plan.md, "Unread notices (October 27,
+  2026)").** When on, every successful tool result carries an `unread` field listing only non-zero counts, e.g.
+  `3 unread direct messages (get_messages) · 14 new bulletin board posts since you last read it
+  (get_bulletin_board) · 2 new shared library files since you last listed it (list_library)`, plus
+  `N new overseer board posts (read_overseer_board)` for overseers with the private board. Reading advances the
+  caller's mark to the newest entry returned; the caller's own posts, messages and files never count. Counts only,
+  never text. The field is omitted when everything is zero and on errors.
 * **Feedback.** The tool returns only `{"ok": true, "status": "received"}`. Content is
   stored and logged researcher-side, and nobody reads it during the run.
 * **Status.** The status shows total, open and closed counts, each problem's credited

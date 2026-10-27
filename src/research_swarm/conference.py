@@ -442,6 +442,8 @@ class ConferenceService:
         self._overseers = frozenset()
         # Overseers sharing the private overseer board (enable_overseer_board); empty otherwise.
         self._board_overseers = frozenset()
+        # Unread-count notices on tool results (enable_unread_notices); off in every other run.
+        self._unread_notices = False
         self._proof_checker = None
         self._lock = threading.RLock()
         self._activity = threading.Condition(threading.Lock())
@@ -834,7 +836,7 @@ class ConferenceService:
                                 "Unicode text (such as an unpaired surrogate escape); replace them and try again.")
             self._admit(agent_id)
             self.poll_seeded_trigger()
-            return self._handlers[tool](agent_id, dict(args), call_id)
+            result = self._handlers[tool](agent_id, dict(args), call_id)
         except ToolError as exc:
             error = _safe_text(str(exc))
             self._record_error("tool_error", agent_id, tool, args, call_id, error)
@@ -842,6 +844,11 @@ class ConferenceService:
         except Exception as exc:  # internal fault: never leak details to agents
             self._record_error("internal_error", agent_id, tool, args, call_id, type(exc).__name__)
             return {"ok": False, "error": "Internal conference error; the request was not completed."}
+        if self._unread_notices and isinstance(result, dict) and result.get("ok"):
+            notice = self._unread_notice(agent_id)
+            if notice:
+                result["unread"] = notice
+        return result
 
     def _admit(self, agent_id):
         if self._fixed_agents is not None:
@@ -1029,6 +1036,7 @@ class ConferenceService:
                 "post_ids": [post["post_id"] for post in page],
                 "shortened_post_ids": [post["post_id"] for post in page if post.get("text_truncated")]},
                 "get_bulletin_board", call_id)
+            self._mark_read(db, agent_id, "board", page)
         return {"ok": True, **paging, "posts": page}
 
     def _send_direct_message(self, agent_id, args, call_id):
@@ -1278,6 +1286,7 @@ class ConferenceService:
                 "filters": {"kind": kind, "agent_id": author}, "since_seq": since, "limit": limit,
                 "paging": paging, "artifact_ids": [f"lib-{entry['seq']:06d}" for entry in page]},
                 "list_library", call_id)
+            self._mark_read(db, agent_id, "library", page)
         return {"ok": True, **paging, "files": page}
 
     def _read_library_file(self, agent_id, args, call_id):
@@ -1438,6 +1447,60 @@ class ConferenceService:
         self._board_overseers = frozenset(ids)
         self._record_quietly("overseer_board_enabled", None, {"overseers": ids})
 
+    # ----------------------------------------------------------- unread notices
+    def enable_unread_notices(self) -> None:
+        """Add an ``unread`` count line to every successful tool result (docs/plan.md, "Unread
+        notices (October 27, 2026)"). The ``read_marks`` table exists only in runs with notices,
+        so runs without them keep identical state; it persists in state.sqlite across a resume."""
+        with self._transaction() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS read_marks (agent_id TEXT NOT NULL, channel TEXT NOT NULL, "
+                       "seq INTEGER NOT NULL, PRIMARY KEY (agent_id, channel))")
+        self._unread_notices = True
+        self._record_quietly("unread_notices_enabled", None, {})
+
+    def _mark_read(self, db, agent_id, channel, page):
+        """Advance the caller's read mark on ``channel`` to the newest entry it was just shown."""
+        if not self._unread_notices or not page:
+            return
+        db.execute("INSERT INTO read_marks (agent_id, channel, seq) VALUES (?, ?, ?) "
+                   "ON CONFLICT (agent_id, channel) DO UPDATE SET seq = MAX(seq, excluded.seq)",
+                   (agent_id, channel, max(entry["seq"] for entry in page)))
+
+    def _unread_notice(self, agent_id):
+        """Counts only (never text) of what is waiting for ``agent_id``; None when nothing is.
+        Best-effort: a failure drops the notice and never affects the tool result."""
+        try:
+            with self._transaction() as db:
+                marks = dict(db.execute("SELECT channel, seq FROM read_marks WHERE agent_id = ?", (agent_id,)))
+                dms = db.execute("SELECT COUNT(*) FROM messages WHERE recipient = ? AND delivered_at IS NULL",
+                                 (agent_id,)).fetchone()[0]
+                board = db.execute("SELECT COUNT(*) FROM posts WHERE post_id > ? AND agent_id != ?",
+                                   (marks.get("board", 0), agent_id)).fetchone()[0]
+                # As list_library shows it: the latest non-withdrawn revision of each path.
+                library = db.execute(
+                    "SELECT COUNT(*) FROM library l JOIN (SELECT path, MAX(revision) AS revision FROM library "
+                    f"WHERE artifact_id NOT IN {_WITHDRAWN} GROUP BY path) latest "
+                    "ON latest.path = l.path AND latest.revision = l.revision "
+                    "WHERE l.artifact_id > ? AND l.author != ?", (marks.get("library", 0), agent_id)).fetchone()[0]
+                overseer = 0
+                if agent_id in self._board_overseers:
+                    overseer = db.execute("SELECT COUNT(*) FROM overseer_board WHERE post_id > ? AND agent_id != ?",
+                                          (marks.get("overseer_board", 0), agent_id)).fetchone()[0]
+        except Exception:
+            return None
+        parts = []
+        if dms:
+            parts.append(f"{dms} unread direct message{'s' if dms != 1 else ''} (get_messages)")
+        if board:
+            parts.append(f"{board} new bulletin board post{'s' if board != 1 else ''} "
+                         "since you last read it (get_bulletin_board)")
+        if library:
+            parts.append(f"{library} new shared library file{'s' if library != 1 else ''} "
+                         "since you last listed it (list_library)")
+        if overseer:
+            parts.append(f"{overseer} new overseer board post{'s' if overseer != 1 else ''} (read_overseer_board)")
+        return " \u00b7 ".join(parts) or None
+
     def _post_overseer_board(self, agent_id, args, call_id):
         a = self._arguments(args, ("message",))
         message = self._listable_text(a["message"], "message")
@@ -1464,6 +1527,7 @@ class ConferenceService:
                 "post_ids": [post["post_id"] for post in page],
                 "shortened_post_ids": [post["post_id"] for post in page if post.get("text_truncated")]},
                 "read_overseer_board", call_id)
+            self._mark_read(db, agent_id, "overseer_board", page)
         return {"ok": True, **paging, "posts": page}
 
     def _revert_submission(self, agent_id, args, call_id):

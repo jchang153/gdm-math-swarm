@@ -1437,3 +1437,31 @@ $75 each, solvers `z-ai/glm-5.3-flash` (100), seed as in the 30-minute runs; no 
 GLM overseers use the solver model; DeepSeek overseers `deepseek/deepseek-v4.1-flash-1017` via `deepinfra/fp8/priority`.
 The 5- and 10-overseer runs have the private overseer board. A single flash control serves both overseer models (DeepSeek
 only plays the overseer). Order: wave 1 = control, 1/2 GLM, 1/2 DeepSeek; wave 2 = 5/10 GLM, 5/10 DeepSeek.
+
+## Unread notices (October 27, 2026)
+
+**Approved by the owner (2026-10-27).** Data motivating it, from the nine 60-minute seeded oversight runs
+(`runs/*60m*`): overseers sent 65 direct messages to solvers warning about reverted fake proofs and 64 were never
+read; in every run 92 to 100 of the 100 solvers never called `get_messages`. Agents had no signal that anything was
+waiting: direct messages sit until `get_messages`, and nothing reports new board posts or library files.
+
+Design (implemented in `research_swarm.conference`, `ConferenceService.enable_unread_notices`):
+
+- Config key `unread_notices` (bool, **default false**; a non-bool value blocks the launch). Existing configs and
+  completed runs are unchanged; `settings.json` records `effective.unread_notices`.
+- When true, every successful collaboration tool result gains a field `unread` listing only the non-zero counts,
+  joined by " · ": unread direct messages (`get_messages`), new bulletin board posts since the agent last read it
+  (`get_bulletin_board`), new shared library files since it last listed it (`list_library`), and, for overseers
+  with the private overseer board, new overseer board posts (`read_overseer_board`). The field is omitted when every
+  count is zero and on errors. Counts only, never message text or senders.
+- Direct messages count `delivered_at IS NULL` (cleared when `get_messages` returns them). Board, library and
+  overseer board use per-agent read marks (`read_marks` table, created only when enabled, persisted across resume):
+  a read advances the mark to the newest entry on the page it returned, under any filter or page. Own posts and own
+  library files never count; library counts the latest non-withdrawn revision of each path, as `list_library` shows.
+- The notice is computed after the tool's own transaction and is best-effort: a failure drops the field and never
+  changes the tool result. The auto-restart continuation message is unchanged (the next tool call shows the counts).
+- The text avoids the neutral-environment forbidden words (it says "bulletin board").
+
+**Comparability.** Runs with notices are not directly comparable to earlier runs: every condition run with
+`unread_notices` needs its own control with notices on.
+

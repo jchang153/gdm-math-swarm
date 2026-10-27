@@ -19,6 +19,7 @@ from research_swarm.conference import (CLOSED_DURING_CHECK_REASON, DEFAULT_PAGE_
                                        _paginate, audit_event_log, operational_judge)
 from research_swarm.judge import JudgeResult, TaskTemplate, judge_submission
 from research_swarm.lean import CompileResult
+from research_swarm.prompts import NEUTRAL_FORBIDDEN
 from research_swarm.seeded import SeededConfigError
 from research_swarm.tools import TOOL_DEFINITIONS
 
@@ -1116,6 +1117,86 @@ def load_validation_script():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+class UnreadNoticeTests(ConferenceTestCase):
+    """docs/plan.md, "Unread notices (October 27, 2026)"."""
+
+    def tables(self):
+        db = sqlite3.connect(self.run_dir / 'conference' / 'state.sqlite')
+        try:
+            return {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        finally:
+            db.close()
+
+    def test_disabled_by_default(self):
+        self.act('agent-002', 'send_direct_message', agent_id='agent-001', message='hi')
+        self.act('agent-002', 'post_intent', intent_type='exploring', message='x')
+        result = self.act('agent-001', 'list_problems')
+        self.assertTrue(result['ok'])
+        self.assertNotIn('unread', result)
+        self.assertNotIn('read_marks', self.tables())
+        self.assertNotIn('unread_notices_enabled', self.kinds())
+
+    def test_counts_and_resets(self):
+        self.service.enable_unread_notices()
+        self.assertIn('read_marks', self.tables())
+        self.assertIn('unread_notices_enabled', self.kinds())
+        self.assertNotIn('unread', self.act('agent-001', 'list_problems'))  # nothing waiting: no field
+        for i in range(3):
+            self.act('agent-002', 'send_direct_message', agent_id='agent-001', message=f'secret {i}')
+        self.act('agent-002', 'post_intent', intent_type='exploring', message='p1')
+        self.act('agent-003', 'post_intent', intent_type='building', message='p2')
+        own = self.act('agent-001', 'post_intent', intent_type='exploring', message='mine')
+        self.act('agent-003', 'publish_notebook', file_path='/workspace/a.md', content='a')
+        self.act('agent-001', 'publish_notebook', file_path='/workspace/b.md', content='b')
+        self.assertEqual(own['unread'], '3 unread direct messages (get_messages) \u00b7 '
+                         '2 new bulletin board posts since you last read it (get_bulletin_board)')
+        notice = self.act('agent-001', 'list_problems')['unread']
+        self.assertEqual(notice, '3 unread direct messages (get_messages) \u00b7 '
+                         '2 new bulletin board posts since you last read it (get_bulletin_board) \u00b7 '
+                         '1 new shared library file since you last listed it (list_library)')
+        self.assertNotIn('secret', notice)
+        self.assertIsNone(NEUTRAL_FORBIDDEN.search(notice))
+        # The sender's own DMs and post are not counted for it.
+        self.assertEqual(self.act('agent-002', 'get_problem', problem_id='task_0')['unread'],
+                         '2 new bulletin board posts since you last read it (get_bulletin_board) \u00b7 '
+                         '2 new shared library files since you last listed it (list_library)')
+        page = self.act('agent-001', 'get_messages', limit=2)
+        self.assertTrue(page['unread'].startswith('1 unread direct message (get_messages)'))
+        self.assertTrue(self.act('agent-001', 'get_messages')['unread'].startswith('2 new bulletin'))
+        board = self.act('agent-001', 'get_bulletin_board')
+        self.assertEqual(board['unread'], '1 new shared library file since you last listed it (list_library)')
+        self.assertNotIn('unread', self.act('agent-001', 'list_library'))
+        # A newer library revision of an already-listed path counts again; reading a filtered board page
+        # advances the mark only to what it showed.
+        self.act('agent-003', 'publish_notebook', file_path='/workspace/a.md', content='a2')
+        self.act('agent-004', 'post_intent', intent_type='building', message='p3')
+        self.act('agent-004', 'post_intent', intent_type='exploring', message='p4')
+        notice = self.act('agent-001', 'get_bulletin_board', intent_type='building')['unread']
+        self.assertEqual(notice, '1 new bulletin board post since you last read it (get_bulletin_board) \u00b7 '
+                         '1 new shared library file since you last listed it (list_library)')
+        # Errors carry no notice.
+        self.assertNotIn('unread', self.act('agent-001', 'get_problem', problem_id='nope'))
+
+    def test_resume_keeps_marks(self):
+        self.service.enable_unread_notices()
+        self.act('agent-002', 'post_intent', intent_type='exploring', message='p1')
+        self.act('agent-001', 'get_bulletin_board')
+        self.act('agent-002', 'post_intent', intent_type='exploring', message='p2')
+        self.service.close()
+        self.service = self.make_service()
+        self.service.enable_unread_notices()
+        self.assertEqual(self.act('agent-001', 'list_problems')['unread'],
+                         '1 new bulletin board post since you last read it (get_bulletin_board)')
+
+    def test_notice_failure_never_breaks_the_result(self):
+        self.service.enable_unread_notices()
+        self.act('agent-002', 'post_intent', intent_type='exploring', message='p1')
+        self.service._db.execute('DROP TABLE read_marks')  # forces the count query to fail
+        result = self.act('agent-001', 'list_problems')
+        self.assertTrue(result['ok'])
+        self.assertNotIn('unread', result)
 
 
 class ValidationScriptTests(unittest.TestCase):

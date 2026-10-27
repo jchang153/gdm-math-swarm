@@ -170,6 +170,7 @@ ConferenceService(run_dir, tasks, judge, observer=None, agent_ids=None, clock=ti
     .mark_run_started(timestamp=None)            # called by RunClock at the start barrier
     .poll_seeded_trigger()                       # no-op outside an enabled seeded track
     .event_log_status() -> {logged_seq, stored_seq, complete, append_failures}
+    .enable_unread_notices()                     # config unread_notices: `unread` count field on results
     .close(observer_timeout=...)                 # finish in-flight calls, join observers
 audit_event_log(conference_dir) -> dict          # events.jsonl vs SQLite, read-only
 ```
@@ -177,7 +178,10 @@ audit_event_log(conference_dir) -> dict          # events.jsonl vs SQLite, read-
 * Tools: `post_intent`, `get_bulletin_board`, `send_direct_message`, `get_messages`,
   `submit_feedback`, `list_problems`, `get_problem`, `submit_solution`, `list_library`,
   `read_library_file`, `publish_notebook`, `get_conference_status`. Results are
-  JSON-serializable dicts with `ok`; errors are `{"ok": False, "error": text}`.
+  JSON-serializable dicts with `ok`; errors are `{"ok": False, "error": text}`. With
+  `enable_unread_notices()` (config `unread_notices`), successful results may carry `unread`: a short text of
+  non-zero counts (unread DMs, new board posts, new library files, new overseer board posts for board
+  overseers) since the caller last read each; omitted when all are zero (docs/plan.md, "Unread notices").
 * The judge runs outside every lock. Acceptance is an atomic compare-and-set: the first
   passing submission closes the task, is credited, and its full source is published as
   `solutions/<task_id>.lean`. Submission outcomes: `accepted`, `accepted_after_close`

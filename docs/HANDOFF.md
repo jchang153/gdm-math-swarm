@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-26 by Claude (Opus 5.5) operator session (five multi-overseer seeded runs done, results in In flight item 7; agent labels publishing, item 8).
+Last updated: 2026-10-27 by Claude (Opus 5.5) dev subagent (unread notices feature on main, Next steps).
 
 ## What the project is
 
@@ -542,6 +542,11 @@ is being merged into main via `collab-env`.
    use); the other repos moved to `~/code/GitHub`, Codex folders to `~/code` (symlinks left for session repos).
 ## Next steps / open items
 
+- **Unread notices landed on main (2026-10-27, owner-approved; docs/plan.md "Unread notices (October 27, 2026)").**
+  Config key `unread_notices` (default false; no existing config uses it) adds an `unread` count field to
+  successful tool results (unread DMs, new board posts, new library files, new overseer board posts for board
+  overseers). Motivation: in the nine 60-minute runs, 64 of 65 overseer warning DMs were never read. Runs with it
+  need their own controls with notices on. No config or run uses it yet.
 - Logs dataset, in order (details: `docs/experiment-library.md`, "Logs and raw records in the dataset repo"):
   1. deploy the test area:
      `PYTHONPATH=scripts:src .venv/bin/python scripts/migrate_dataset.py deploy-test --run glm100-baseline-30m-20261022T050055Z --dataset-commit b4f10b1082dbae32d81d6bd52b78f2f433450c99 --receipt runs/phase-b/hf-library-preparation/logs-migration-20261022/logs-test-receipt.json`,

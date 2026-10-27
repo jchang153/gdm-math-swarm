@@ -1181,6 +1181,8 @@ def preflight(config, repo_root):
     blockers.extend(persona_reviewing_problems(config))  # docs/prompts.md, "Persona reviewing lines"
     from .oversight import overseer_problems
     blockers.extend(overseer_problems(config))  # docs/prompts.md, "Overseer role"
+    if "unread_notices" in config and not isinstance(config["unread_notices"], bool):
+        blockers.append("unread_notices must be true or false")  # docs/plan.md, "Unread notices"
     allocation = None
     try:
         allocation = persona_counts(assign_personas(int(config.get("agent_count", APPROVED_AGENT_COUNT)),
@@ -1678,6 +1680,9 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     try:
         # check_proof / revert_submission for an overseer with powers (research_swarm.oversight).
         proof_checker = oversight.enable(conference, overseer, record)
+        unread_notices = config.get("unread_notices") is True
+        if unread_notices:  # docs/plan.md, "Unread notices (October 27, 2026)"
+            conference.enable_unread_notices()
         compose = make_compose(run_dir, config, images["agent"]["id"])
         # Loads the key and records its provider-side limit (unpaid, informational) before any
         # paid request; the run's budget is the spending control.
@@ -1717,6 +1722,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "provider_limit": provider_limit, "in_flight_grace_seconds": in_flight_grace,
             "max_connections": connections, "track": getattr(conference, "track", config.get("track")),
             "auto_restart": config.get("auto_restart") is True,
+            "unread_notices": unread_notices,
             "roles": roles, "participant_count": len(agent_ids),
             "conference_participants": len(conference_ids),
             "seeded": None if seed is None else seeded_settings(config),
