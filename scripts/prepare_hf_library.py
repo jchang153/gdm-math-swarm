@@ -212,6 +212,44 @@ SNAPSHOT_LINK = re.compile(r'''(?:href|src)\s*=\s*["'](?:\.\.?/)*snapshots/|fetc
                            re.I)
 
 
+def legacy_capture_file(relative):
+    """True for a conference view's captured-file pages or packs (conference-view/file-<hash>.html,
+    conference-view/files/...): the bundle gets the packed form exported afresh (pack_conference_view)."""
+    parts = Path(relative).parts
+    return (len(parts) == 2 and parts[0] == 'conference-view' and re.fullmatch(r'file-[0-9a-f]{20}\.html', parts[1])
+            is not None) or (len(parts) >= 2 and parts[:2] == ('conference-view', 'files'))
+
+
+def legacy_capture_pages(source):
+    """True when a run's saved conference view still has one page per captured file (exported before
+    October 26, 2026)."""
+    folder = Path(source) / 'conference-view'
+    return folder.is_dir() and any(re.fullmatch(r'file-[0-9a-f]{20}\.html', p.name) for p in folder.iterdir())
+
+
+def conference_records(source):
+    """True when a run has the records its conference view is exported from."""
+    source = Path(source)
+    return all((source / name).is_file() for name in ('conference/state.sqlite', 'conference/events.jsonl',
+                                                      'runtime.jsonl'))
+
+
+def pack_conference_view(source, out, run_id):
+    """A run whose saved conference view still has one page per captured file gets the packed form in the bundle
+    (October 26, 2026, HF's 20,000-file limit; scripts/export_conference.py: files.html plus at most ten
+    files/pack-NN.json), exported afresh from the run's records (read only). A view exported with the current
+    exporter is copied as it is."""
+    import export_conference
+    source = Path(source)
+    if not legacy_capture_pages(source):
+        return
+    if conference_records(source):
+        export_conference.export(source, out=out)
+    else:
+        raise ValueError(f'{run_id}: the conference view has per-file captured-file pages and the run lacks the '
+                         'records to pack them; export it with the current export_conference.py')
+
+
 def snapshot_files(source):
     """The run's snapshot files as sorted (path relative to the run, file path), under the record rules
     of copy_records: hidden files and __pycache__ are left out, symlinks and credential names refused."""
@@ -452,9 +490,11 @@ def main():
             raise ValueError('Output must be outside the sources')
     output.mkdir(parents=True, exist_ok=False)
     for run_id, source, viewer in selected:
+        repack = legacy_capture_pages(source)  # the packed conference view is exported afresh below
         copy_records(source, output / run_id,
                      skip=lambda relative: run_excluded(relative, args.include_transcript_export)
-                     or relative.parts[:1] == (SNAPSHOTS_DIR,))
+                     or relative.parts[:1] == (SNAPSHOTS_DIR,) or (repack and legacy_capture_file(relative)))
+        pack_conference_view(source, output / run_id / 'conference-view', run_id)
         packed = snapshot_archive(source, run_id)
         if packed is not None:
             for name, data in zip((SNAPSHOT_ARCHIVE, SNAPSHOT_MANIFEST), packed):

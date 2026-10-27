@@ -85,6 +85,8 @@ def screen(path):
     safe_path(path.name)
     if SECRET.search(path.read_bytes()):
         raise ValueError('Credential-like content detected; upload refused')
+    if SECRET.search(packed_text(path.as_posix(), path.read_bytes())):
+        raise ValueError('Credential-like content in a captured-file pack; upload refused')
     if path.name.endswith('.tar.gz') and 'resume' in path.parts:
         # a resume-bundle agent archive (research_swarm.resume_bundle), bound for the private dataset only:
         # every regular member is screened (its names include the agent's dot-folders by design)
@@ -107,6 +109,19 @@ def screen(path):
             for name in archive.namelist():
                 if SECRET.search(archive.read(name)):
                     raise ValueError('Credential-like content in Inspect archive; upload refused')
+
+
+def packed_text(name, data):
+    """The decoded contents of a conference view's captured-file pack (RUN/conference-view/files/pack-NN.json:
+    gzip, base64 in JSON), so that the credential screen sees the captured files themselves; b'' for any other
+    file. A pack that does not decode is refused."""
+    from export_conference import is_pack_path, pack_text
+    if not is_pack_path(name):
+        return b''
+    try:
+        return pack_text(data)
+    except Exception as error:
+        raise ValueError('Captured-file pack does not decode; upload refused: ' + name) from error
 
 
 def _operation_bytes(operation):
@@ -139,7 +154,7 @@ def space_gate(repo, operations):
             raise ValueError('Host-only or credential filename in a Space upload')
         if name != '.gitattributes':
             safe_path(name)
-        if SECRET.search(data):
+        if SECRET.search(data) or SECRET.search(packed_text(name, data)):
             raise ValueError('Credential-like content in a Space upload; refused: ' + name)
         parts = name.split('/')
         if parts[0] == 'live':
@@ -335,7 +350,7 @@ def validate_lfs_additions(old, new, selected, changed, final_files):
 
 
 def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=None,
-            operation=None, unlisted=None, dataset_repo=DATASET_REPO, records_in_space=False):
+            operation=None, unlisted=None, dataset_repo=DATASET_REPO, records_in_space=False, delete_operation=None):
     """records_in_space: accept a legacy-layout bundle (prepare_hf_library.py --records-in-space); only for
     reproducing runs published before the logs dataset (no CLI flag: new runs put their logs and raw records
     in the dataset)."""
@@ -375,8 +390,20 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
     # Never remove an existing run or alter an existing run file. Matching partial
     # uploads can resume after a failed batch; conflicting IDs fail closed.
     selected = set(manifest['runs'])
+    # Leftovers of an interrupted publication (October 26, 2026: a publish refused at HF's 20,000-file limit left
+    # one page per captured file of a run in the Space): when archive-manifest.json records neither the selected
+    # run nor any of its files (the catalogue and manifest are committed last, so the run was never published),
+    # its per-file captured-file pages RUN/conference-view/file-<hash>.html that the bundle (packed form) lacks are
+    # deleted in a first commit. Any other unstaged or differing file still refuses, and recorded runs stay
+    # immutable.
+    recorded = set(old_manifest.get('runs', [])) | {n.split('/')[0] for n in old_manifest.get('files', {}) if '/' in n}
+    leftover_runs = {name.split('/')[0] for name in remote if name.split('/')[0] in selected} - recorded
+    capture_page = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]*/conference-view/file-[0-9a-f]{20}\.html')
+    stale = sorted(name for name in remote if name.split('/')[0] in leftover_runs and name not in manifest['files']
+                   and capture_page.fullmatch(name))
+    leftover_runs = {name.split('/')[0] for name in stale}
     for name in remote:
-        if name.split('/')[0] in selected and name not in manifest['files']:
+        if name.split('/')[0] in selected and name not in manifest['files'] and name not in stale:
             raise ValueError('Remote run contains an unstaged file: ' + name)
     # The dataset goes first (no commit spans both repositories); its commit is then pinned into every
     # Space page that carries the placeholder (Inspect View shims, repointed record links).
@@ -447,6 +474,10 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
     root_uploads = [(n, d) for n, d in root_uploads if n not in remote or not matches(d, remote[n])]
     result = {'repo': repo, **hf_visibility.record(repo, 'space'), 'base_revision': info.sha,
               'runs': [x['run'] for x in entries], 'new_run_files': len(uploads),
+              **({'unpublished_leftovers': {'runs': sorted(leftover_runs), 'deleted': len(stale),
+                                            'examples': stale[:5]}} if leftover_runs else {}),
+              'space_files_after': len(set(remote) - set(stale)) + sum(1 for n, _ in uploads if n not in remote)
+              + sum(1 for n, _ in root_uploads if n not in remote),
               'catalogue_files': len(root_uploads), 'committed': False,
               **({'dataset': dataset_result} if dataset_result else {})}
     if not commit:
@@ -458,6 +489,19 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
         raise ValueError('Page(s) still carry the dataset commit placeholder (no dataset files to pin): '
                          + ', '.join(unpinned[:5]))
     revision = info.sha
+    if stale:  # delete the unpublished leftovers first (one commit), then upload as usual
+        if delete_operation is None:
+            raise ValueError('Deleting the leftovers of an interrupted publication needs a delete operation')
+        current = api.repo_info(repo, repo_type='space')
+        if not hf_visibility.unchanged(current, repo, 'space', revision):
+            raise ValueError('Space changed concurrently or its visibility differs from the record; rerun')
+        response = space_commit(api, dataset_repo=dataset_repo, repo_id=repo, repo_type='space', parent_commit=revision,
+            commit_message='Remove leftovers of an interrupted publication: ' + ', '.join(sorted(leftover_runs)),
+            operations=[delete_operation(path_in_repo=n) for n in stale])
+        revision = response.oid
+        if receipt:
+            Path(receipt).write_text(json.dumps({**result, 'last_revision': revision,
+                'status': f'{len(stale)} leftover file(s) deleted; uploading'}, indent=2))
     for batch in [*batches(uploads), *([root_uploads] if root_uploads else [])]:
         current = api.repo_info(repo, repo_type='space')
         if not hf_visibility.unchanged(current, repo, 'space', revision):
@@ -476,10 +520,10 @@ def publish(bundle, api, download, *, commit=False, repo=DEFAULT_REPO, receipt=N
                          'the latest revision')
     final_files = remote_files(api, repo, final.sha)
     changed = dict(uploads + root_uploads)
-    if set(final_files) != set(remote) | set(changed):
+    if set(final_files) != (set(remote) - set(stale)) | set(changed):
         raise ValueError('Remote file inventory changed unexpectedly')
     for name, old in remote.items():
-        if name not in changed:
+        if name not in changed and name not in stale:
             new = final_files[name]
             if old.blob_id != new.blob_id or old.lfs != new.lfs:
                 if name != '.gitattributes':
@@ -508,10 +552,10 @@ def main():
     args = parser.parse_args()
     if args.receipt and args.receipt.resolve().is_relative_to(args.bundle.resolve()):
         parser.error('--receipt must be outside the immutable prepared bundle')
-    from huggingface_hub import HfApi, CommitOperationAdd, hf_hub_download
+    from huggingface_hub import HfApi, CommitOperationAdd, CommitOperationDelete, hf_hub_download
     api = HfApi()
     print(json.dumps(publish(args.bundle, api, hf_hub_download, commit=args.commit,
-          repo=args.repo_id, receipt=args.receipt, operation=CommitOperationAdd,
+          repo=args.repo_id, receipt=args.receipt, operation=CommitOperationAdd, delete_operation=CommitOperationDelete,
           dataset_repo=args.dataset_repo), indent=2))
 
 

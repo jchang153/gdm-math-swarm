@@ -43,6 +43,24 @@ footer{margin:30px 0;color:var(--muted)}[hidden]{display:none!important}
 '''
 
 
+# Captured private files (October 26, 2026): HF limits a repository to 20,000 files, and one page per captured
+# file (file-<hash>.html, 1,500-2,100 per 100-agent run) filled the Space. Every captured version of a run is now
+# packed into at most MAX_PACKS data files RUN/conference-view/files/pack-NN.json (gzip, base64 in JSON: text, so
+# HF never stores them as LFS and the credential screen can decode them) that one viewer page,
+# RUN/conference-view/files.html, loads on demand; files.html#file=<id> deep-links one captured file
+# (&version=N one capture). Pages exported earlier still have the per-file pages (layout "pages").
+FILES_PAGE = 'files.html'
+PACK_DIR = 'files'
+PACK_SCHEMA = 'gdm-conference-files/1'
+FILES_INDEX_SCHEMA = 'gdm-conference-files-index/1'
+PACKED_LAYOUT = 'packed'
+PACK_NAME = re.compile(r'pack-\d{2}\.json')
+CAPTURE_PAGE = re.compile(r'file-[0-9a-f]{20}\.html')
+PACK_TARGET_BYTES = 1_500_000  # per pack; raised when a run would need more than MAX_PACKS packs
+PACK_LIMIT_BYTES = 7_000_000  # below the site's 8 MB page limit and HF's ~10 MB LFS threshold
+MAX_PACKS = 10
+# Optional manifest fields of a packed export (absent from manifests written before October 26, 2026).
+MANIFEST_OPTIONAL_KEYS = ('captured_file_layout', 'captured_file_packs')
 TIMELINE = 'analysis/timeline.jsonl'
 SCHEMA = 'gdm-conference-view/1'
 DATA_KEYS = ('run', 'records', 'counts', 'warnings', 'conference_events', 'timeline_entries', 'captured_files')
@@ -127,14 +145,21 @@ const data=JSON.parse(await new Response(stream).text());
     return result
 
 
-def export(run):
+def export(run, out=None):
+    """Export the conference view of a saved run into RUN/conference-view/, or into ``out`` (a prepared
+    publication bundle, prepare_hf_library.py: the run's records are then only read, and the run may live in
+    another clone's runs directory)."""
     run = Path(run).resolve()
-    if not run.is_relative_to(ROOT / 'runs') or run == ROOT / 'runs' or run.is_symlink():
+    if out is None and (not run.is_relative_to(ROOT / 'runs') or run == ROOT / 'runs' or run.is_symlink()):
         raise ValueError('Use a saved run under this repository runs directory')
-    out = run / 'conference-view'
+    if run.is_symlink() or not run.is_dir():
+        raise ValueError('Not a saved run directory: ' + str(run))
+    out = run / 'conference-view' if out is None else Path(out)
+    if out != run / 'conference-view' and out.resolve().is_relative_to(run):
+        raise ValueError('An export outside the run must not write into its records')
     if out.is_symlink():
         raise ValueError('Conference output must not be a symlink')
-    out.mkdir(exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
     events = json_lines(run / 'conference/events.jsonl')
     badge_map = agent_badges.run_badges(run)  # behavior judge labels next to agent ids (owner, 2026-10-26)
     start = run_clock.run_start(run)  # results.json start_utc (the runtime's common_start)
@@ -251,49 +276,11 @@ def export(run):
                               row['message'], row['posted_at'], [row['agent_id']],
                               detail={'channel': 'overseer board (overseers only)'}))
 
-    # Browse only workspace working files and notes; SDK sessions are in the Inspect logs.
-    versions = defaultdict(list)
-    for line_number, entry in enumerate(runtime, 1):
-        p = entry.get('payload', {})
-        path = p.get('path', '')
-        if entry['kind'] != 'file_snapshot' or not path.startswith('/workspace/'):
-            continue
-        relative = Path(path).relative_to('/workspace')
-        if relative.parts[0] == 'problems' or relative.name in {'lakefile.toml', 'lake-manifest.json'}:
-            continue
-        agent = entry['agent_id']; digest = p.get('blob_sha256')
-        if not re.fullmatch(r'agent-\d+', agent) or not digest or not re.fullmatch(r'[0-9a-f]{64}', digest):
-            raise ValueError('Unsafe snapshot identity')
-        blob = run / 'snapshots' / agent / digest
-        if blob.is_symlink() or not blob.is_file():
-            raise ValueError('Missing or linked snapshot blob')
-        content = blob.read_bytes()
-        if hashlib.sha256(content).hexdigest() != digest:
-            raise ValueError('Snapshot blob hash mismatch')
-        text = content.decode('utf-8', errors='replace')
-        versions[agent, path].append(dict(timestamp=entry['timestamp'], sha256=p.get('sha256'),
-                  blob_sha256=digest, bytes=p.get('bytes'), mode=p.get('mode'), content=text, runtime_line=line_number))
-    for (agent, path), rows in sorted(versions.items()):
-        rows.sort(key=lambda x: (x['timestamp'], x['runtime_line']))
-        identity = 'file-' + hashlib.sha256((agent + ':' + path).encode()).hexdigest()[:20]
-        filename = identity + '.html'
-        sections = []
-        for i, row in enumerate(rows, 1):
-            captured_at = run_clock.clock(row['timestamp'], start)
-            sections.append(f'<article id="version-{i}"><h2>Capture {i}</h2><p>{captured_at} · '
-                            f'{html.escape(str(row["mode"]))} capture · {row["bytes"]} recorded bytes</p>'
-                            f'<p>Runtime line {row["runtime_line"]} · blob SHA-256 <code>{row["blob_sha256"]}</code></p>'
-                            '<pre>' + html.escape(row['content']) + '</pre></article>')
-        (out / filename).write_text(agent_badges.decorate_page(page(agent + ' · ' + path,
-            '<p><a href="index.html#files">← Captured files</a></p><h1>' + html.escape(agent + ' · ' + path) + '</h1>'
-            '<p class="banner">Private researcher record. Captures are observations, not a complete edit history. '
-            'A partial capture may omit content. Recorded times are capture times, not necessarily edit times.</p>' + ''.join(sections)),
-            'conference-view/' + filename, badge_map))
-        note = 'All captured versions are empty.' if all(not r['content'] for r in rows) else 'Open to inspect captured contents and versions.'
-        records.append(record('files', identity, path, f'{len(rows)} captured version(s). {note}', rows[-1]['timestamp'], [agent],
-                       detail={'captures': len(rows), 'empty': all(not r['content'] for r in rows),
-                               'capture_modes': dict(Counter(r['mode'] for r in rows))},
-                       links=[['View captured versions', filename]]))
+    # Browse only workspace working files and notes; SDK sessions are in the Inspect logs. Captured versions
+    # are packed into a few data files that the viewer page (files.html) loads on demand (October 26, 2026:
+    # one page per captured file filled the Space's 20,000-file limit).
+    versions = captured_versions(run)
+    records.extend(captured_file_records(versions, seeds))
 
     categories = ('board', 'dms', 'library', 'submissions', 'feedback', 'files')
     if overseer or reversions or proof_checks:  # the Oversight section exists only in overseer runs
@@ -322,13 +309,262 @@ def export(run):
     if len(overseer_ids) > 1:
         data['overseers'] = overseer_ids
     (out / 'index.html').write_text(agent_badges.decorate_page(render_index(data), 'conference-view/index.html', badge_map))
+    packs, index = pack_captures(run.name, versions)
+    write_packed_files(out, packs, index, start, badge_map)
     manifest = {'schema': SCHEMA, 'run': run.name, 'counts': counts, 'captured_files': len(versions),
                 'conference_events': len(events), 'timeline_entries': 0, 'timeline_location': 'dataset',
-                'warnings': warnings,
+                'warnings': warnings, 'captured_file_layout': PACKED_LAYOUT,
+                'captured_file_packs': {name: digest(data) for name, data in sorted(packs.items())},
                 'sources': {str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else 'absent'
                             for p in [run/'conference/state.sqlite', run/'conference/events.jsonl',run/'runtime.jsonl',run/'evaluations/evaluations.jsonl']}}
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2))
     return manifest
+
+
+def digest(data):
+    return {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+
+
+def captured_versions(run, read=None):
+    """{(agent, path): [captured version]} of a saved run's workspace working files and notes, from
+    RUN/runtime.jsonl file_snapshot entries and their content-addressed blobs RUN/snapshots/AGENT/SHA256, each
+    checked against its SHA-256. ``read(path) -> bytes`` reads a local file (default Path.read_bytes)."""
+    run = Path(run)
+    read = read or (lambda path: Path(path).read_bytes())
+    versions = defaultdict(list)
+    lines = read(run / 'runtime.jsonl').decode('utf-8').splitlines()
+    for line_number, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        entry = json.loads(line)
+        p = entry.get('payload', {})
+        path = p.get('path', '')
+        if entry['kind'] != 'file_snapshot' or not path.startswith('/workspace/'):
+            continue
+        relative = Path(path).relative_to('/workspace')
+        if relative.parts[0] == 'problems' or relative.name in {'lakefile.toml', 'lake-manifest.json'}:
+            continue
+        agent = entry['agent_id']
+        blob_sha = p.get('blob_sha256')
+        if not re.fullmatch(r'agent-\d+', agent) or not blob_sha or not re.fullmatch(r'[0-9a-f]{64}', blob_sha):
+            raise ValueError('Unsafe snapshot identity')
+        blob = run / 'snapshots' / agent / blob_sha
+        if blob.is_symlink() or not blob.is_file():
+            raise ValueError('Missing or linked snapshot blob')
+        content = read(blob)
+        if hashlib.sha256(content).hexdigest() != blob_sha:
+            raise ValueError('Snapshot blob hash mismatch')
+        text = content.decode('utf-8', errors='replace')
+        versions[agent, path].append(dict(timestamp=entry['timestamp'], sha256=p.get('sha256'),
+                                          blob_sha256=blob_sha, bytes=p.get('bytes'), mode=p.get('mode'),
+                                          content=text, runtime_line=line_number))
+    for rows in versions.values():
+        rows.sort(key=lambda x: (x['timestamp'], x['runtime_line']))
+    return dict(sorted(versions.items()))
+
+
+def file_identity(agent, path):
+    """The stable identifier of one captured file (agent, workspace path): 'file-' + 20 hex digits."""
+    return 'file-' + hashlib.sha256((agent + ':' + path).encode()).hexdigest()[:20]
+
+
+def file_link(identity):
+    """The viewer deep link of a captured file, relative to RUN/conference-view/."""
+    return FILES_PAGE + '#file=' + identity
+
+
+def captured_file_records(versions, seeds=()):
+    """The conference view's 'files' records (one per captured file) linking the packed viewer."""
+    records = []
+    for (agent, path), rows in versions.items():
+        identity = file_identity(agent, path)
+        empty = all(not r['content'] for r in rows)
+        note = 'All captured versions are empty.' if empty else 'Open to inspect captured contents and versions.'
+        title = path + (f' · {participant_roles.SEED_LABEL}' if agent in set(seeds) else '')
+        records.append(dict(category='files', id=identity, title=title,
+                            text=f'{len(rows)} captured version(s). {note}', timestamp=rows[-1]['timestamp'],
+                            agents=[agent], task='', detail={'captures': len(rows), 'empty': empty,
+                                                             'capture_modes': dict(Counter(r['mode'] for r in rows))},
+                            links=[['View captured versions', file_link(identity)]]))
+    return records
+
+
+def _encode_pack(run_name, number, entries):
+    payload = json.dumps(entries, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    packed = base64.b64encode(gzip.compress(payload, compresslevel=9, mtime=0)).decode('ascii')
+    document = {'schema': PACK_SCHEMA, 'run': run_name, 'pack': 'pack-%02d.json' % number, 'files': len(entries),
+                'content_sha256': hashlib.sha256(payload).hexdigest(), 'encoding': 'gzip+base64', 'data': packed}
+    return (json.dumps(document, indent=0) + '\n').encode('ascii')
+
+
+def pack_captures(run_name, versions, target=PACK_TARGET_BYTES, limit=PACK_LIMIT_BYTES, max_packs=MAX_PACKS):
+    """({pack name: bytes}, files index) of a run's captured versions. Every captured file goes whole into one
+    pack, in identity order; packs are filled up to ``target`` bytes (raised until at most ``max_packs`` are
+    needed). Deterministic: the same records give the same bytes. The index maps every identity to
+    [pack name, agent, path, captures]."""
+    entries = {}
+    for (agent, path), rows in versions.items():
+        entries[file_identity(agent, path)] = {'agent': agent, 'path': path, 'versions': [
+            {k: row[k] for k in ('timestamp', 'sha256', 'blob_sha256', 'bytes', 'mode', 'runtime_line', 'content')}
+            for row in rows]}
+    if len(entries) != len(versions):
+        raise ValueError('Captured-file identity collision')
+    ordered = sorted(entries)
+    sizes = {i: len(base64.b64encode(gzip.compress(json.dumps(entries[i], ensure_ascii=False).encode(), 6, mtime=0)))
+             for i in ordered}
+    if ordered:
+        target = max(target, -(-sum(sizes.values()) * 11 // (10 * max_packs)))
+    while True:
+        groups, current, size = [], [], 0
+        for i in ordered:
+            if current and size + sizes[i] > target:
+                groups.append(current)
+                current, size = [], 0
+            current.append(i)
+            size += sizes[i]
+        if current:
+            groups.append(current)
+        if len(groups) <= max_packs or target >= limit:
+            break
+        target = min(limit, int(target * 1.25))
+    packs, index = {}, {}
+    for number, group in enumerate(groups, 1):
+        name = 'pack-%02d.json' % number
+        packs[name] = _encode_pack(run_name, number, {i: entries[i] for i in group})
+        if len(packs[name]) > limit:
+            raise ValueError(f'Captured-file pack {name} is {len(packs[name])} bytes, above {limit}')
+        for i in group:
+            index[i] = [name, entries[i]['agent'], entries[i]['path'], len(entries[i]['versions'])]
+    if len(packs) > max_packs:
+        raise ValueError(f'{len(packs)} captured-file packs needed, more than {max_packs}')
+    return packs, {'schema': FILES_INDEX_SCHEMA, 'run': run_name,
+                   'packs': {name: {**digest(data), 'files': sum(1 for v in index.values() if v[0] == name)}
+                             for name, data in packs.items()},
+                   'files': index}
+
+
+def read_pack(data):
+    """The {identity: {agent, path, versions}} of one pack file, checked (schema, encoding, content digest)."""
+    document = json.loads(data)
+    if not isinstance(document, dict) or document.get('schema') != PACK_SCHEMA \
+            or document.get('encoding') != 'gzip+base64':
+        raise ValueError('Not a captured-file pack')
+    payload = gzip.decompress(base64.b64decode(document['data'], validate=True))
+    if hashlib.sha256(payload).hexdigest() != document.get('content_sha256'):
+        raise ValueError('Captured-file pack content digest mismatch')
+    entries = json.loads(payload)
+    if not isinstance(entries, dict) or len(entries) != document.get('files'):
+        raise ValueError('Captured-file pack entry count mismatch')
+    return entries
+
+
+def pack_text(data):
+    """The decoded contents of a pack (for the credential screen)."""
+    return gzip.decompress(base64.b64decode(json.loads(data)['data'], validate=True))
+
+
+def is_pack_path(name):
+    """True for RUN/conference-view/files/pack-NN.json (or the run-relative form)."""
+    parts = name.split('/')
+    return len(parts) >= 3 and parts[-3:-1] == ['conference-view', PACK_DIR] and bool(PACK_NAME.fullmatch(parts[-1]))
+
+
+FILES_STYLE = ('#files-list{list-style:none;padding:0;margin:0}#files-list li{padding:6px 0;border-bottom:1px solid '
+               'var(--line)}.vnav{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:16px 0}'
+               '.vnav select{min-width:0;max-width:100%}article h2 a{color:inherit;text-decoration:none}')
+
+
+def render_files_page(index, run_start=None):
+    """The captured-file viewer RUN/conference-view/files.html: the files index embedded, the captured
+    versions loaded from the packs on demand. #file=<id>[&version=N] opens one captured file (every version
+    stacked, as the former per-file pages showed them); no hash lists every captured file."""
+    if index.get('schema') != FILES_INDEX_SCHEMA:
+        raise ValueError('Unexpected captured-file index')
+    meta = {**index, 'run_start': run_start}
+    encoded = json.dumps(meta, ensure_ascii=True, sort_keys=True).replace('<', '\\u003c').replace('>', '\\u003e') \
+        .replace('&', '\\u0026')
+    body = '''<p><a href="index.html#files">← Captured files</a> · <a href="index.html">Conference view</a></p>
+<h1 id="title">Captured private files</h1><p id="run" class="muted"></p>
+<p class="banner">Private researcher record. Captures are observations, not a complete edit history. A partial capture may omit content. Recorded times are capture times, not necessarily edit times.</p>
+<div id="list" hidden><div class="filters"><input id="search" aria-label="Search captured files" placeholder="Search agents and paths…"></div><ul id="files-list"></ul></div>
+<div class="vnav" id="vnav" hidden><button id="prev-version">Previous capture</button><select id="jump" aria-label="Jump to capture"></select><button id="next-version">Next capture</button></div>
+<p id="status" aria-live="polite"></p><main id="captures"></main>
+<footer>Captured versions are packed in <code>files/pack-NN.json</code> (gzip, base64) and loaded when a file is opened. <a href="manifest.json">Export manifest</a></footer>
+'''
+    script = r'''
+const meta=JSON.parse(document.getElementById('files-index').textContent);
+const el=id=>document.getElementById(id);const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=String(text);if(cls)n.className=cls;return n;};
+''' + run_clock.CLOCK_JS + r'''
+const cache={};let shown=null,versionCount=0;
+el('run').textContent=meta.run+' · '+Object.keys(meta.files).length+' captured files'+(meta.run_start!=null?' · times are run clock (from the run start) and UTC':'');
+function pack(name){if(!cache[name])cache[name]=(async()=>{
+ if(typeof DecompressionStream==='undefined')throw new Error('This viewer needs a browser with gzip decompression support. Please use a current Chrome, Firefox, Edge or Safari.');
+ const r=await fetch('files/'+name);if(!r.ok)throw new Error('HTTP '+r.status+' for files/'+name);
+ const j=await r.json();if(j.schema!=='gdm-conference-files/1'||j.encoding!=='gzip+base64')throw new Error('Unexpected data file files/'+name);
+ const bytes=Uint8Array.from(atob(j.data),c=>c.charCodeAt(0));
+ return JSON.parse(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text());
+})().catch(e=>{delete cache[name];throw e;});return cache[name];}
+function params(){return new URLSearchParams(location.hash.slice(1));}
+function listing(){el('list').hidden=false;el('vnav').hidden=true;el('captures').replaceChildren();el('title').textContent='Captured private files';document.title='Captured files · '+meta.run;
+ const q=el('search').value.toLowerCase(),ul=el('files-list');ul.replaceChildren();let n=0;
+ const rows=Object.entries(meta.files).sort((a,b)=>(a[1][1]+a[1][2]).localeCompare(b[1][1]+b[1][2]));
+ for(const [id,[,agent,path,count]] of rows){if(q&&!(agent+' '+path).toLowerCase().includes(q))continue;n++;const li=node('li');const a=node('a',agent+' · '+path);a.href='#file='+id;li.append(a,node('span',' · '+count+' captured version(s)','muted'));ul.append(li);}
+ el('status').textContent=n+' captured files';}
+function go(i){if(!shown)return;i=Math.max(1,Math.min(versionCount,i));el('jump').value=String(i);history.replaceState(null,'','#file='+shown+'&version='+i);const t=el('version-'+i);if(t)t.scrollIntoView();el('prev-version').disabled=i<=1;el('next-version').disabled=i>=versionCount;}
+async function route(){const p=params(),id=p.get('file');
+ if(!id){shown=null;listing();return;}
+ const entry=meta.files[id];el('list').hidden=true;
+ if(!entry){shown=null;el('captures').replaceChildren();el('vnav').hidden=true;el('title').textContent='Captured file not found';el('status').textContent='No captured file '+id+' in this run. Open the list of captured files.';const a=node('a','All captured files');a.href='#';el('captures').append(a);return;}
+ const [name,agent,path]=entry;el('title').textContent=agent+' · '+path;document.title=agent+' · '+path;
+ if(shown!==id){el('captures').replaceChildren();el('vnav').hidden=true;el('status').textContent='Loading captured versions…';
+  let data;try{data=(await pack(name))[id];}catch(e){el('status').textContent='Could not load captured versions: '+e.message;return;}
+  if(!data){el('status').textContent='Captured versions missing from files/'+name;return;}
+  shown=id;versionCount=data.versions.length;const main=el('captures'),jump=el('jump');jump.replaceChildren();
+  data.versions.forEach((v,k)=>{const i=k+1,card=node('article');card.id='version-'+i;const h=node('h2');const a=node('a','Capture '+i);a.href='#file='+id+'&version='+i;h.append(a);
+   const code=node('code',v.blob_sha256),line=node('p','Runtime line '+v.runtime_line+' · blob SHA-256 ');line.append(code);
+   card.append(h,node('p',runClock(v.timestamp,meta.run_start)+' · '+v.mode+' capture · '+v.bytes+' recorded bytes'),line,node('pre',v.content));main.append(card);
+   jump.append(new Option('Capture '+i+' of '+versionCount+' · '+runClock(v.timestamp,meta.run_start),String(i)));});
+  el('status').textContent=versionCount+' captured version(s)';el('vnav').hidden=versionCount<2;}
+ const v=parseInt(p.get('version')||'',10);if(v)go(v);else{el('prev-version').disabled=true;el('next-version').disabled=versionCount<2;el('jump').value='1';}}
+el('search').addEventListener('input',()=>{if(!shown)listing();});
+el('jump').addEventListener('change',()=>go(parseInt(el('jump').value,10)));
+el('prev-version').onclick=()=>go(parseInt(el('jump').value,10)-1);el('next-version').onclick=()=>go(parseInt(el('jump').value,10)+1);
+window.addEventListener('hashchange',route);route();
+'''
+    return page('Captured files · ' + index['run'], body + '<style>' + FILES_STYLE
+                + '</style><script id="files-index" type="application/json">' + encoded
+                + '</script><script>' + script + '</script>')
+
+
+def files_page_index(document):
+    """The files index embedded in a files.html viewer page."""
+    match = re.search(r'<script id="files-index" type="application/json">(.*?)</script>', document, re.S)
+    if match is None:
+        raise ValueError('Missing captured-file index')
+    index = json.loads(match[1])
+    if not isinstance(index, dict) or index.get('schema') != FILES_INDEX_SCHEMA:
+        raise ValueError('Unexpected captured-file index')
+    return index
+
+
+def write_packed_files(out, packs, index, run_start, badge_map):
+    """Write files.html and files/pack-NN.json into a conference-view directory, removing per-file pages
+    (file-<hash>.html) and packs of an earlier export there."""
+    out = Path(out)
+    for stale in out.glob('file-*.html'):
+        if CAPTURE_PAGE.fullmatch(stale.name) and not stale.is_symlink():
+            stale.unlink()
+    folder = out / PACK_DIR
+    if folder.is_symlink():
+        raise ValueError('Captured-file folder must not be a symlink')
+    folder.mkdir(exist_ok=True)
+    for stale in folder.glob('pack-*.json'):
+        if stale.name not in packs:
+            stale.unlink()
+    for name, data in packs.items():
+        (folder / name).write_bytes(data)
+    (out / FILES_PAGE).write_text(agent_badges.decorate_page(render_files_page(index, run_start),
+                                                             'conference-view/' + FILES_PAGE, badge_map))
 
 
 def render_index(data):
@@ -422,6 +658,7 @@ def strip_timeline(document, manifest, location='dataset'):
                     'captured_files': manifest['captured_files'], 'conference_events': manifest['conference_events'],
                     'timeline_entries': 0, 'timeline_location': location, 'warnings': manifest['warnings'],
                     'sources': sources}
+    new_manifest.update({k: manifest[k] for k in MANIFEST_OPTIONAL_KEYS if k in manifest})
     extra = set(manifest) - set(new_manifest)
     if extra:
         raise ValueError('Unexpected conference manifest fields: ' + ', '.join(sorted(extra)))

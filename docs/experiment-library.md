@@ -563,6 +563,55 @@ catalogue with `maintain_hf_run.py --rerender-catalogue --commit` (index.html on
 compare view), then regenerate each run's `results.html` and replace it per run with the site scope (or
 `--scope results`). `verify_hosted.py` fails a served page that still links a raw `RUN/inspect/*.eval`.
 
+### Captured private files (packed, October 26, 2026)
+
+HF limits a repository to 20,000 files. On October 26, 2026 the Space held 19,984, of which 15,430 were
+captured-file pages (`RUN/conference-view/file-<20 hex>.html`, one per captured agent file, 1,500-2,100 per
+100-agent run), and publishing five new runs (7,713 files) was refused. The owner approved packing them.
+`export_conference.py` now writes, per run:
+
+- `conference-view/files/pack-NN.json`: every captured version (agent, path, times, SHA-256s, recorded bytes,
+  capture mode, runtime line, content) in at most 10 packs (schema `gdm-conference-files/1`; gzip, base64 inside
+  JSON, so the file is text, never LFS, and the credential screen decodes it: `publish_hf_library.packed_text`
+  in `screen` and `space_gate`). Each captured file goes whole into one pack; packs are filled to about 1.5 MB
+  (raised so a run needs at most 10; limit 7 MB). Deterministic bytes. A 100-agent run needs 1-2 packs
+  (0.5-1.3 MB in all).
+- `conference-view/files.html`: one viewer page with the files index embedded (identity -> pack, agent, path,
+  capture count). `files.html#file=<id>` loads the pack on demand and shows every captured version as the old
+  pages did (capture number, run clock and UTC, mode, recorded bytes, runtime line, blob SHA-256, contents as
+  text), with Previous/Next capture and a capture menu; `&version=N` deep-links one capture; no hash lists every
+  captured file with a search box. Agent labels are added in the browser (`agent_badges.DYNAMIC_PAGES`), with
+  the shared theme (light/dark) and phone layout.
+- The conference view's "View captured versions" links point to `files.html#file=<id>`; the manifest records
+  `captured_file_layout: packed` and the packs' digests. Old `file-<hash>.html` URLs 404 after migration (a
+  redirect page per file would recreate the file count); the ids are unchanged, so
+  `files.html#file=file-<hash>` opens the same file.
+
+Publication: `prepare_hf_library.py` re-exports the conference view of a run whose saved view still has per-file
+pages into the bundle (the run is only read; `export(run, out=...)`), and refuses such a run without its records.
+`publish_hf_library.py` deletes, in a first commit, per-file pages left in the Space by an interrupted
+publication of a run that `archive-manifest.json` does not record (any other leftover still refuses).
+
+Migration of published runs: `maintain_hf_run.py --maintain-run RUN --scope conference --pack-files --runs-dir
+runs` (or `--all-published-runs`) rebuilds the packs from the LOCAL records (`runtime.jsonl` and `snapshots/`;
+no mass downloads), re-renders `index.html` from the published records (strip_timeline) with the new links, adds
+`files.html` and the packs and deletes the run's per-file pages (and stale packs), with `archive-manifest.json`,
+in one guarded commit per run. Guards: the published captured-file records must equal the local rebuild
+(identity, path, times, counts, modes); the published per-file pages must be exactly the local identities; the
+first and last page are downloaded and compared version by version with the packs; deletions are limited to
+those pages and stale packs; the final inventory must equal the plan and every other file is unchanged. A run
+whose local records are absent or iCloud-offloaded (dataless or `.icloud`) is skipped with the reason, never
+read. Backups hold the replaced originals; the deleted pages stay in the Space's Git history (listed with their
+blob ids in `before-inventory.json`). Re-running finds nothing to do. A read-only simulation against the
+public Space on October 26 (all 20 published runs, 40 pages compared) passed: 14,958 pages deleted, 45 files
+added, 19,984 -> 5,071 files; the five multi-overseer runs then add about 1,895 files and remove 472 leftovers
+(~6,500 in all). `verify_hosted.py` checks the packed form when `files.html` is stored (`--expect-packed-files`
+requires it): `no_capture_pages`, `conference_packs_stored`, `conference_pack_decodes`, `conference_deep_link`,
+and reports `space_files_run` (`--space-file-count` adds `space_files_total`).
+
+The next largest per-run file groups are `instructions/` and `prompts/` (about 300 files per 100-agent run) and
+the rubric-3.1 judge pages; pack those next if the count grows again.
+
 ### Conference scope (no embedded timeline)
 
 `--scope conference` (October 23, 2026) re-renders already published conference views without the
@@ -733,7 +782,7 @@ plan first without `--commit`):
 | Run and old-judge pages | `--all-published-runs --scope site` (no `--bundle`: from the published pages) | `RUN/results.html` (run clock, simplified-judge counts, rubric-3.1 tab), changed `RUN/analysis/judge/**/*.html` and the evidence browser's `review/manifest.json`; one commit per run |
 | Simplified judge | `--maintain-run RUN --scope simple-judge` | `report.html` re-rendered with filters and the run start; run page counts |
 | Incident reports | `--maintain-run RUN --scope incident --runs-dir runs` (no `--bundle`) | `report.html` (wrapped as publication does), `report.md`, `evidence.json` from the local run |
-| Conference views | `--all-published-runs --scope conference --capture-pages --pages-dir DIR` | index pages with `run_start` (from the published results.json), and with `--capture-pages` every captured-file page (one commit per run) |
+| Conference views | `--all-published-runs --scope conference --capture-pages --pages-dir DIR` | index pages with `run_start` (from the published results.json), and with `--capture-pages` every captured-file page (one commit per run); superseded on October 26 by `--pack-files` (see "Captured private files (packed)") |
 
 `--pages-dir` (conference scope, like migrate-logs) names a local copy laid out like the Space; a file there is
 used instead of a download only when it is byte-identical to the published file (git blob id), which avoids
@@ -789,10 +838,10 @@ files". `prepare_hf_library.py` therefore publishes each run's `snapshots/` fold
 deterministic `RUN/snapshots.tar.gz` (sorted members, zero times and owners, fixed modes, no gzip
 name or time: preparing it again gives the same bytes) plus `RUN/snapshots.manifest.json`
 (schema `gdm-snapshot-archive/1`: the archive's size and SHA-256 and every member's path, size and
-SHA-256). No page loads snapshot files at runtime: the conference view embeds each captured file in
-its own pages when it is exported, and Inspect View reads only its logs. Preparation refuses a page
-that links or fetches a loose `snapshots/` path (link the conference view's captured-file pages
-instead), and publication refuses a bundle with loose snapshot files, checks that each manifest
+SHA-256). No page loads snapshot files at runtime: the conference view packs every captured file into
+`conference-view/files/pack-NN.json` when it is exported (see "Captured private files (packed)"), and Inspect
+View reads only its logs. Preparation refuses a page that links or fetches a loose `snapshots/` path (link the
+conference view's captured-file viewer instead), and publication refuses a bundle with loose snapshot files, checks that each manifest
 describes its archive exactly and screens every archive member for credential patterns. The archive
 matches the Space's existing `*.tar.*` LFS rule, so it is stored as LFS (a download) with
 `.gitattributes` unchanged.

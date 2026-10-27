@@ -66,6 +66,9 @@ class Hub:
             raise RuntimeError('simulated upload interruption')
         self.commits.append(kwargs)
         for op in kwargs['operations']:
+            if getattr(op, 'delete', False):
+                del self.files[op.path_in_repo]
+                continue
             d = op.path_or_fileobj
             self.files[op.path_in_repo] = Path(d).read_bytes() if isinstance(d, str) else d
         self.revision += 1

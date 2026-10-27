@@ -124,6 +124,13 @@ class FakeApi:
         assert revision == self.sha
         return str(self.root / name)
 
+    def list_repo_tree(self, repo, repo_type, revision, recursive, path_in_repo=None):
+        assert revision == self.sha and recursive
+        base = self.root / path_in_repo if path_in_repo else self.root
+        for path in sorted(base.rglob("*")) if base.is_dir() else []:
+            if path.is_file():
+                yield SimpleNamespace(path=path.relative_to(self.root).as_posix(), blob_id="0" * 40, lfs=None)
+
 
 class FakeSession:
     def __init__(self, root, overrides=None):
@@ -137,6 +144,8 @@ class FakeSession:
         data = (self.root / path).read_bytes()
         if headers.get("Range"):
             return FakeResponse(206, data[:64])
+        if not path.endswith(".html"):  # HF injects its creator script into HTML only
+            return FakeResponse(200, data, {"content-type": "application/json"})
         script = b'<script>window.huggingface={variables:{"SPACE_CREATOR_USER_ID":"0a1b"}};</script>'
         return FakeResponse(200, script + data, {"content-type": "text/html; charset=utf-8"})
 

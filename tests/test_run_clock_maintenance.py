@@ -65,8 +65,10 @@ class ExportTests(unittest.TestCase):
         self.assertIn('function runClock(t,s)', page)
         self.assertIn('runClock(value,data.run_start)', page)
         self.assertNotIn('America/Los_Angeles', page)
-        capture = next((self.run / 'conference-view').glob('file-*.html')).read_text()
-        self.assertIn('<p>+0:10 (00:00:15 UTC) · full capture', capture)
+        self.assertEqual(list((self.run / 'conference-view').glob('file-*.html')), [])
+        viewer = (self.run / 'conference-view/files.html').read_text()
+        self.assertEqual(export_conference.files_page_index(viewer)['run_start'], 5.0)
+        self.assertIn("runClock(v.timestamp,meta.run_start)+' · '+v.mode+' capture · '", viewer)
         # strip_timeline keeps the run start; render_index reproduces the page.
         manifest = json.loads((self.run / 'conference-view/manifest.json').read_text())
         old, old_manifest = with_timeline(page, manifest)

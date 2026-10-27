@@ -41,6 +41,13 @@ time as run clock plus UTC, "+12:34 (05:17:40 UTC)" (results_run_clock); the con
 (conference_run_start); when RUN/analysis/incident/report.html is stored it is checked like the other pages and has
 neither "The agents, one by one" nor "Where to look" (incident_sections_removed) and shows its excerpt times as run
 clock (incident_run_clock).
+Packed captured files (October 26, 2026, HF's 20,000-file limit; export_conference.py): when the run's
+RUN/conference-view/files.html is stored (or with --expect-packed-files) it is checked like the other pages, and
+conference_packed, no_capture_pages (no per-file RUN/conference-view/file-*.html left), conference_packs_stored
+(every pack its index lists), conference_pack_decodes (the first pack, served by the Space, has its indexed digest,
+decodes and holds exactly its indexed files) and conference_deep_link (the conference view's first captured-file
+record links files.html#file=<id>, an id in that index and pack). The record gives the run's Space file count
+(space_files_run) and, with --space-file-count, the whole Space's (space_files_total; HF's limit is 20,000).
 Exits 1 when any check fails; the record lists every check.
 """
 import argparse
@@ -59,6 +66,8 @@ import hf_visibility  # noqa: E402
 import simple_judge_site  # noqa: E402
 import run_clock  # noqa: E402
 from incident_site import INCIDENT_REPORT  # noqa: E402
+
+FILES_PAGE = "files.html"  # export_conference.FILES_PAGE, the packed captured-file viewer
 
 REMOVED_INCIDENT_SECTIONS = ('id="the-agents-one-by-one"', 'id="where-to-look"')
 
@@ -86,7 +95,7 @@ def sha256(data):
 
 def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, range_path=None, cache_dir=None,
            dataset_repo=DATASET_REPO, dataset_commit=None, dataset_checks=None, expect_no_space_logs=False,
-           expect_run_clock=False):
+           expect_run_clock=False, expect_packed_files=False, space_file_count=False):
     simple_judge_checks = pages is None
     pages = [page.format(run=run) for page in (pages or PAGES)]
     served = {}
@@ -119,6 +128,10 @@ def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, 
             pages.append(sj_page)
         if incident_page in sj_present and incident_page not in pages:
             pages.append(incident_page)
+        packed_view = f"{run}/conference-view/{FILES_PAGE}"
+        if packed_view in {entry.path for entry in api.get_paths_info(repo, [packed_view], repo_type="space",
+                                                                         revision=info.sha)}:
+            pages.append(packed_view)
     names = pages + ([range_path] if range_path else [])
     lfs = {}
     for start in range(0, len(names), PATHS_INFO_BATCH):  # the Hub refuses very long path lists (HTTP 413)
@@ -174,6 +187,10 @@ def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, 
             check("incident_sections_removed", not any(m in text for m in REMOVED_INCIDENT_SECTIONS),
                   path=incident_page)
             check("incident_run_clock", run_clock.CLOCK_RE.search(text) is not None, path=incident_page)
+    verify_packed(api, session, headers, repo, run, info, check, served, record, expect_packed_files)
+    if space_file_count:
+        record["space_files_total"] = sum(1 for item in api.list_repo_tree(repo, repo_type="space", revision=info.sha,
+                                                                            recursive=True) if hasattr(item, "blob_id"))
     if range_path:
         response = session.get(f"{info.host}/{range_path}", headers={**headers, "Range": "bytes=0-63"}, timeout=45,
                                follow_redirects=True)
@@ -196,6 +213,63 @@ def verify(api, session, headers, repo, run, revision, pages=None, bundle=None, 
                        expect_no_space_logs=expect_no_space_logs)
     record["ok"] = all(item["ok"] for item in record["checks"])
     return record
+
+
+def verify_packed(api, session, headers, repo, run, info, check, served, record, expect_packed_files):
+    """The packed captured-file checks (see the module docstring) and the run's Space file count."""
+    import export_conference
+    prefix = f"{run}/conference-view/"
+    tree = [item.path for item in api.list_repo_tree(repo, path_in_repo=run, repo_type="space", revision=info.sha,
+                                                     recursive=True) if hasattr(item, "blob_id")]
+    record["space_files_run"] = len(tree)
+    capture = [n for n in tree if n.startswith(prefix) and export_conference.CAPTURE_PAGE.fullmatch(n[len(prefix):])]
+    view = prefix + FILES_PAGE
+    record["conference_layout"] = "packed" if view in served else "pages" if capture else "none"
+    if view not in served and not expect_packed_files:
+        return
+    if not check("conference_packed", view in served, path=view):
+        return
+    check("no_capture_pages", not capture, count=len(capture), examples=capture[:3])
+    try:
+        index = export_conference.files_page_index(served[view].decode("utf-8", "replace"))
+    except ValueError as error:
+        check("conference_packs_stored", False, path=view, error=str(error))
+        return
+    packs = sorted(index.get("packs") or {})
+    stored = {n[len(prefix) + len(export_conference.PACK_DIR) + 1:] for n in tree
+              if n.startswith(prefix + export_conference.PACK_DIR + "/")}
+    missing = [n for n in packs if n not in stored]
+    check("conference_packs_stored", (bool(packs) or not index.get("files")) and not missing, packs=len(packs),
+          missing=missing, unlisted=sorted(stored - set(packs)))
+    entries = {}
+    if packs and packs[0] not in stored:
+        check("conference_pack_decodes", False, path=f"{prefix}{export_conference.PACK_DIR}/{packs[0]}", stored=False)
+    elif packs:
+        name = packs[0]
+        response = session.get(f"{info.host}/{prefix}{export_conference.PACK_DIR}/{name}", headers=headers, timeout=45,
+                               follow_redirects=True)
+        ok, detail = response.status_code == 200, {}
+        if ok:
+            body = response.content
+            ok = sha256(body) == index["packs"][name]["sha256"]
+            try:
+                entries = export_conference.read_pack(body)
+                ok = ok and set(entries) == {i for i, v in index["files"].items() if v[0] == name}
+            except (ValueError, KeyError) as error:
+                ok, detail = False, {"error": str(error)}
+        check("conference_pack_decodes", ok, path=f"{prefix}{export_conference.PACK_DIR}/{name}",
+              status=response.status_code, **detail)
+    conference = served.get(prefix + "index.html")
+    if conference is not None and index.get("files"):
+        try:
+            data = export_conference.published_data(conference.decode("utf-8", "replace"))
+            first = next(r for r in data["records"] if r["category"] == "files")
+            link = first["links"][0][1]
+        except (ValueError, StopIteration, KeyError, IndexError):
+            first, link = None, None
+        ok = (first is not None and link == export_conference.file_link(first["id"]) and first["id"] in index["files"]
+              and (not entries or index["files"][first["id"]][0] != packs[0] or first["id"] in entries))
+        check("conference_deep_link", ok, path=prefix + "index.html", link=link)
 
 
 _DATASET_LINK = re.compile(r'href="https://huggingface\.co/datasets/([^/"]+/[^/"]+)/(?:blob|resolve)/([0-9a-f]{40})/'
@@ -343,6 +417,11 @@ def main(argv=None):
                         help="also require the run clock (October 25, 2026): results.html and incident report times "
                              "as '+12:34 (05:17:40 UTC)', the conference view's run start, and no 'The agents, one by "
                              "one' or 'Where to look' section in the incident report")
+    parser.add_argument("--expect-packed-files", action="store_true",
+                        help="also require the packed captured-file viewer (files.html, files/pack-NN.json) and no "
+                             "per-file captured-file pages (October 26, 2026)")
+    parser.add_argument("--space-file-count", action="store_true",
+                        help="also count every file of the Space (HF limits a repository to 20,000 files)")
     parser.add_argument("--output", help="also write the record as JSON here")
     args = parser.parse_args(argv)
     from huggingface_hub import HfApi
@@ -350,7 +429,8 @@ def main(argv=None):
     record = verify(HfApi(), get_session(), build_hf_headers(token=True), args.repo, args.run, args.revision,
                     args.page, args.bundle, args.range_path, args.cache_dir, dataset_repo=args.dataset_repo,
                     dataset_commit=args.dataset_commit, dataset_checks=args.dataset_checks,
-                    expect_no_space_logs=args.expect_no_space_logs, expect_run_clock=args.expect_run_clock)
+                    expect_no_space_logs=args.expect_no_space_logs, expect_run_clock=args.expect_run_clock,
+                    expect_packed_files=args.expect_packed_files, space_file_count=args.space_file_count)
     text = json.dumps(record, indent=2)
     if args.output:
         Path(args.output).write_text(text + "\n")

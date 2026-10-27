@@ -303,9 +303,10 @@ class VerifyTests(unittest.TestCase):
                 assert repo_type == 'dataset'
                 return SimpleNamespace(private=test.dataset_private, sha=test.COMMIT)
 
-            def list_repo_tree(self, repo, repo_type, revision, recursive):
+            def list_repo_tree(self, repo, repo_type, revision, recursive, path_in_repo=None):
                 assert repo_type == 'space'
-                return [SimpleNamespace(path=n, blob_id='x') for n in test.space]
+                return [SimpleNamespace(path=n, blob_id='x') for n in test.space
+                        if path_in_repo is None or n.startswith(path_in_repo + '/')]
 
             def get_paths_info(self, repo, paths, repo_type, revision):
                 store = test.space if repo_type == 'space' else test.dataset

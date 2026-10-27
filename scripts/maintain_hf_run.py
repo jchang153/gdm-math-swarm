@@ -99,6 +99,11 @@ views without the embedded activity timeline (owner, October 23, 2026: the timel
 logs dataset, linked from the view). Only RUN/conference-view/index.html and its manifest.json change, from the
 records embedded in the published page minus the activity records; see maintain_conference.
 
+--scope conference --pack-files (October 26, 2026: HF's 20,000-file repository limit) replaces a published run's
+per-file captured-file pages RUN/conference-view/file-*.html with the packed viewer (files.html plus at most ten
+files/pack-NN.json, export_conference.py), rebuilt from the local run records under --runs-dir, and deletes the
+pages in the same guarded commit (one per run); see maintain_conference_packed.
+
 --scope simple-judge (no --bundle; --runs-dir, default runs/) adds or replaces a published run's simplified
 behavior judge (owner, October 24, 2026: the default judge; scripts/simple_judge_site.py). It reads only
 RUN/analysis/simple_judge/report.json and agents.jsonl (iCloud placeholders are downloaded first), never the
@@ -2351,6 +2356,364 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
     write_receipt('verified')
     return result
 
+# --- conference scope, packed captured files (--pack-files) ------------------------------------------------
+# HF limits a repository to 20,000 files (October 26, 2026: the Space held 19,984, 15,430 of them per-file
+# captured-file pages). --scope conference --pack-files replaces a published run's per-file pages
+# RUN/conference-view/file-<hash>.html with the packed form of export_conference.py (files.html plus at most
+# ten files/pack-NN.json), rebuilt from the LOCAL run records under --runs-dir, and deletes the per-file pages.
+FILES_VIEW = CONFERENCE_PREFIX + 'files.html'
+_PACK_FILE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]*/conference-view/files/pack-\d{2}\.json')
+_SAMPLE_PAGES = 2  # published per-file pages compared with the packs per run (first and last)
+_VERSION = re.compile(r'<article id="version-(\d+)">.*?blob SHA-256 <code>([0-9a-f]{64})</code>.*?<pre>(.*?)</pre>'
+                      r'</article>', re.S)
+DATALESS_FLAG = 0x40000000  # macOS SF_DATALESS: an iCloud-offloaded file whose bytes are not on this Mac
+
+
+def offloaded_records(run_dir):
+    """Run-relative paths of the records the packed view is built from (runtime.jsonl and the snapshot blobs)
+    that are iCloud-offloaded ("dataless" files or .icloud placeholders). Reading one would start a download
+    that can hang, so such a run is skipped, never read."""
+    import os
+    run_dir = Path(run_dir)
+    found = []
+    candidates = [run_dir / 'runtime.jsonl']
+    snapshots = run_dir / 'snapshots'
+    if snapshots.is_dir() and not snapshots.is_symlink():
+        candidates += [p for p in snapshots.rglob('*')]
+    for path in candidates:
+        if path.name.startswith('.') and path.name.endswith('.icloud'):
+            found.append(path.relative_to(run_dir).as_posix())
+            continue
+        try:
+            flags = getattr(os.lstat(path), 'st_flags', 0)
+        except OSError:
+            continue
+        if flags & DATALESS_FLAG:
+            found.append(path.relative_to(run_dir).as_posix())
+    if not (run_dir / 'runtime.jsonl').exists() and (run_dir / '.runtime.jsonl.icloud').exists():
+        found.append('runtime.jsonl')
+    return sorted(set(found))
+
+
+def _check_rerendered(run, old_page, page, datasets, location, remote, extra=()):
+    """The guards of a re-rendered conference page (shared by both conference modes): published head blocks
+    kept, site theme present, no direct link to a dataset file, the timeline link reaching its copy and every
+    same-site link resolving in ``remote`` (plus ``extra`` files the same commit adds)."""
+    import dataset_logs
+    import export_conference
+    head = old_page.find(_BODY_START)
+    old_head, new_head = old_page[:head], page[:page.find(_BODY_START)]
+    kept = _HEAD_BLOCKS.findall(old_head)
+    if head < 0 or not kept or any(block not in new_head for block in kept) or SITE_THEME_MARKER not in new_head:
+        raise ValueError('The re-rendered page head drops the published Space navigation or dataset note, or '
+                         'lacks the site theme: ' + run)
+    if dataset_logs.moved_links(page, CONFERENCE_PAGE, {n[len(run) + 1:] for n in datasets if n.startswith(run + '/')}):
+        raise ValueError('The re-rendered page still links a file moved to the dataset: ' + run)
+    timeline = f'{run}/{export_conference.TIMELINE}'
+    expected_link = (dataset_logs.file_url(datasets[timeline]['path'], datasets[timeline]['commit'],
+                                           datasets[timeline]['repo']) if location == 'dataset'
+                     else '../results.html#raw-records-offline')
+    if f'href="{html.escape(expected_link, quote=True)}"' not in page:
+        raise ValueError('The timeline link does not reach its ' + location + ' copy: ' + run)
+    for _, url in _HREF.findall(page):
+        if not url or url.startswith('#') or re.match(r'[a-z][a-z0-9+.-]*:|//', url, re.I):
+            continue
+        target = posixpath.normpath(posixpath.join(f'{run}/{CONFERENCE_PREFIX}', url.split('#')[0]))
+        if target not in remote and target not in extra:
+            raise ValueError(f'The re-rendered page links a missing file: {run}: {url}')
+    return 'identical' if new_head == old_head else 'current site theme added'
+
+
+def maintain_conference_packed(api, download, *, runs=None, runs_dir, commit=False, repo=DEFAULT_REPO,
+                               receipt=None, backup_dir=None, operation=None, delete_operation=None, pages_dir=None):
+    """--scope conference --pack-files (owner, October 26, 2026: HF's 20,000-file limit): for each selected
+    published run (default: every run in archive-manifest.json with a conference view), rebuild the captured
+    files in the packed form from the local run records (``runs_dir``/RUN: runtime.jsonl and snapshots/, read
+    only; no mass downloads) and, in one guarded commit per run, upload RUN/conference-view/files.html and
+    files/pack-NN.json, re-render index.html (the published records, with every captured-file link pointing to
+    files.html#file=<id>) and manifest.json, and DELETE the run's per-file pages conference-view/file-*.html
+    (and packs a newer export no longer has). archive-manifest.json follows in the same commit.
+
+    Guards: the published captured-file records (id, path, times, agents, capture counts, modes) must equal the
+    ones rebuilt locally, the published per-file pages must be exactly the local identities, and up to two of
+    them (the first and the last) are downloaded and compared version by version (blob SHA-256 and content)
+    with the packs. Deletions are allowed only for those pages and stale packs of the selected runs; the final
+    inventory must equal the planned one and every other file must be unchanged. Runs whose local records are
+    absent or iCloud-offloaded are skipped with the reason (never downloaded). Already packed runs are
+    reproduced byte for byte and skipped. Backups hold the replaced originals; deleted pages stay in the
+    Space's Git history at the base revision (listed with their blob ids in the before-inventory)."""
+    import dataset_logs
+    import export_conference
+    root = str(Path(__file__).resolve().parents[1])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from research.analysis import roles as participant_roles
+    if runs is not None and (not runs or any(not isinstance(r, str) or not RUN_ID.fullmatch(r) for r in runs)):
+        raise ValueError('Invalid run ID')
+    if runs_dir is None:
+        raise ValueError('--pack-files needs --runs-dir (the local run records)')
+    if commit and (operation is None or delete_operation is None or receipt is None or backup_dir is None):
+        raise ValueError('--commit requires --receipt, --backup-dir and the upload and delete operations')
+    info = hf_visibility.check(api.repo_info(repo, repo_type='space', files_metadata=True), repo, 'space')
+    hf_visibility.check_dataset(api)
+    base = info.sha
+    remote = remote_files(api, repo, base)
+    current = inventory(remote)
+    cache = {}
+    reads = {'from_pages_dir': 0, 'downloaded': 0}
+
+    def fetch(name):
+        if name not in cache:
+            if pages_dir is not None:
+                local = Path(pages_dir).joinpath(*name.split('/'))
+                if local.is_file() and not local.is_symlink():
+                    data = local.read_bytes()
+                    if matches(data, remote[name]):
+                        cache[name] = data
+                        reads['from_pages_dir'] += 1
+                        return data
+            data = Path(download(repo, name, repo_type='space', revision=base)).read_bytes()
+            if not matches(data, remote[name]):
+                raise ValueError('Remote metadata mismatch: ' + name)
+            cache[name] = data
+            reads['downloaded'] += 1
+        return cache[name]
+
+    if MANIFEST not in remote:
+        raise ValueError('Remote file required for maintenance is missing: ' + MANIFEST)
+    archive = json.loads(fetch(MANIFEST))
+    if archive.get('schema') != 'gdm-private-space/1':
+        raise ValueError('Unexpected remote archive manifest schema')
+    published = [r for r in archive.get('runs', []) if f'{r}/{CONFERENCE_PAGE}' in remote]
+    selected = published if runs is None else list(runs)
+    for run in selected:
+        if run not in archive.get('runs', []) or not any(n.startswith(run + '/') for n in remote):
+            raise ValueError('Run is not published; use publish_hf_library.py for new runs: ' + run)
+        for name in (CONFERENCE_PAGE, CONFERENCE_MANIFEST):
+            if f'{run}/{name}' not in remote:
+                raise ValueError(f'Remote file required for maintenance is missing: {run}/{name}')
+    datasets, offline = archive.get('dataset_files') or {}, archive.get(OFFLINE_KEY) or {}
+    plans, per_run, skipped = {}, {}, {}
+    for run in selected:
+        folder = Path(runs_dir) / run
+        if folder.is_symlink() or not folder.is_dir():
+            skipped[run] = f'no local run records under {runs_dir}'
+            continue
+        away = offloaded_records(folder)
+        if away:
+            skipped[run] = (f'{len(away)} local record(s) are iCloud-offloaded (dataless), for example {away[0]}; '
+                            f'download them (brctl download {folder}) and run again')
+            continue
+        if not (folder / 'runtime.jsonl').is_file():
+            skipped[run] = 'no local runtime.jsonl'
+            continue
+        prefix = f'{run}/{CONFERENCE_PREFIX}'
+        page_name, manifest_name, view_name = f'{run}/{CONFERENCE_PAGE}', f'{run}/{CONFERENCE_MANIFEST}', f'{run}/{FILES_VIEW}'
+        timeline = f'{run}/{export_conference.TIMELINE}'
+        location = 'dataset' if timeline in datasets else 'offline' if timeline in offline else None
+        if location is None:
+            raise ValueError(f'{timeline} is neither in the logs dataset nor recorded offline; move it to the '
+                             'dataset before removing it from the conference view')
+        old_page = fetch(page_name).decode('utf-8')
+        data, manifest = export_conference.strip_timeline(old_page, json.loads(fetch(manifest_name)), location)
+        results_name = f'{run}/results.json'
+        start = run_clock.results_start(fetch(results_name)) if results_name in remote else None
+        if start is not None:
+            data['run_start'] = start
+        settings_path = folder / 'settings.json'
+        settings = json.loads(_read_local(settings_path)) if settings_path.is_file() else {}
+        seeds = {a for a, r in participant_roles.special_roles(settings).items() if r == participant_roles.SEED}
+        versions = export_conference.captured_versions(folder, read=_read_local)
+        local_records = export_conference.captured_file_records(versions, seeds)
+        published_files = [r for r in data['records'] if r['category'] == 'files']
+
+        def comparable(record):
+            return {k: v for k, v in record.items() if k != 'links'}
+        if [comparable(r) for r in published_files] != [comparable(r) for r in local_records]:
+            differing = sorted({r['id'] for r in published_files} ^ {r['id'] for r in local_records}) or sorted(
+                a['id'] for a, b in zip(published_files, local_records) if comparable(a) != comparable(b))
+            raise ValueError(f'{run}: the captured files rebuilt from {folder} differ from the published conference '
+                             f'view ({len(published_files)} published, {len(local_records)} local; for example '
+                             f'{differing[:3]}); not migrated')
+        allowed = lambda r: {r['id'] + '.html', export_conference.file_link(r['id'])}  # noqa: E731
+        for record in published_files:  # other links (e.g. an early run's transcript link) are kept as published
+            captured = [url for label, url in record['links'] if label == 'View captured versions']
+            if len(captured) != 1 or captured[0] not in allowed(record):
+                raise ValueError(f'{run}: unexpected captured-file link {record["links"]}')
+        if manifest.get('captured_files') != len(versions) or data['captured_files'] != len(versions):
+            raise ValueError(f'{run}: the published captured-file count differs from the local records')
+        capture_pages = sorted(n for n in remote if n.startswith(prefix) and '/' not in n[len(prefix):]
+                               and export_conference.CAPTURE_PAGE.fullmatch(n[len(prefix):]))
+        identities = {r['id'] for r in local_records}
+        if capture_pages and {n[len(prefix):-len('.html')] for n in capture_pages} != identities:
+            raise ValueError(f'{run}: the published captured-file pages are not exactly the local captured files')
+        packs, index = export_conference.pack_captures(run, versions)
+        entries = {}
+        for name, blob in packs.items():
+            entries.update(export_conference.read_pack(blob))
+        sampled = []
+        for name in ([capture_pages[0], capture_pages[-1]] if len(capture_pages) > 1 else capture_pages)[:_SAMPLE_PAGES]:
+            found = [(int(i), sha, html.unescape(text)) for i, sha, text in _VERSION.findall(fetch(name).decode('utf-8'))]
+            versions_packed = entries[name[len(prefix):-len('.html')]]['versions']
+            if found != [(i, v['blob_sha256'], v['content']) for i, v in enumerate(versions_packed, 1)]:
+                raise ValueError(f'{run}: the published page {name} differs from the packed captured versions')
+            sampled.append(name)
+        new_records = [dict(r, links=[[label, export_conference.file_link(r['id']) if label == 'View captured versions'
+                                       else url] for label, url in r['links']])
+                       if r['category'] == 'files' else r for r in data['records']]
+        data = {**data, 'records': new_records}
+        manifest = {**manifest, 'captured_file_layout': export_conference.PACKED_LAYOUT,
+                    'captured_file_packs': {n: export_conference.digest(b) for n, b in sorted(packs.items())}}
+        badge_map = run_badge_map(run, runs_dir, remote)
+        page = _with_badges(page_name, run, hosted_conference_page(export_conference.render_index(data), run, archive),
+                            badge_map)
+        if export_conference.published_data(page) != data:
+            raise ValueError('Re-rendered conference records differ from the planned ones: ' + run)
+        pack_names = {f'{prefix}{export_conference.PACK_DIR}/{n}': b for n, b in packs.items()}
+        head = _check_rerendered(run, old_page, page, datasets, location, remote, extra={view_name})
+        view = _with_badges(view_name, run, hosted_page(export_conference.render_files_page(index, start), run,
+                                                        archive, FILES_VIEW), badge_map)
+        if export_conference.files_page_index(view) != {**index, 'run_start': start}:
+            raise ValueError('The captured-file viewer does not embed the planned index: ' + run)
+        if SITE_THEME_MARKER not in view or 'id="private-space-navigation"' not in view:
+            raise ValueError('The captured-file viewer lacks the site theme or the Space navigation: ' + run)
+        for _, url in _HREF.findall(view):
+            if url and not url.startswith('#') and not re.match(r'[a-z][a-z0-9+.-]*:|//', url, re.I):
+                target = posixpath.normpath(posixpath.join(prefix, url.split('#')[0]))
+                if target not in remote and target not in pack_names and target != view_name:
+                    raise ValueError(f'The captured-file viewer links a missing file: {run}: {url}')
+        planned = {page_name: page.encode('utf-8'), manifest_name: json.dumps(manifest, indent=2).encode('utf-8'),
+                   view_name: view.encode('utf-8'), **pack_names}
+        stale_packs = sorted(n for n in remote if _PACK_FILE.fullmatch(n) and n.startswith(prefix)
+                             and n not in pack_names)
+        deletions = [*capture_pages, *stale_packs]
+        plans[run] = (planned, deletions)
+        per_run[run] = {'captured_files': len(versions), 'captured_versions': sum(map(len, versions.values())),
+                        'packs': {n: len(b) for n, b in sorted(packs.items())}, 'files_page_bytes': len(planned[view_name]),
+                        'capture_pages_deleted': len(capture_pages), 'stale_packs_deleted': len(stale_packs),
+                        'sample_pages_compared': sampled, 'run_start': start, 'timeline_location': location,
+                        'agent_badges': badge_map['source'] if badge_map else 'none (no local judge records)',
+                        'head': head, 'space_files_before': sum(1 for n in remote if n.startswith(run + '/')),
+                        'space_files_after': sum(1 for n in remote if n.startswith(run + '/')) - len(deletions)
+                        + sum(1 for n in planned if n not in remote),
+                        'unchanged': not deletions and all(n in remote and matches(d, remote[n])
+                                                           for n, d in planned.items())}
+    all_planned = {n: d for planned, _ in plans.values() for n, d in planned.items()}
+    all_deleted = sorted(n for _, deleted in plans.values() for n in deleted)
+    files = {n: v for n, v in archive['files'].items() if n not in set(all_deleted)}
+    for name, data in all_planned.items():
+        files[name] = digest(data)
+    new_archive = {**archive, 'files': files, 'total_bytes': sum(x['bytes'] for x in files.values())}
+    names = sorted(all_planned)
+    stored_lfs = sorted(n for n in names if n in remote and remote[n].lfs)
+    ruled = lfs_rule_matches(fetch(ATTRIBUTES), names) if ATTRIBUTES in remote else []
+    large = [f'{n} ({len(all_planned[n])} bytes)' for n in names if len(all_planned[n]) >= LFS_SAFE_BYTES]
+    if stored_lfs or ruled or large:
+        raise ValueError('Planned file(s) stored as LFS, named by an LFS rule or close to the size HF stores as '
+                         'LFS: ' + ', '.join([*stored_lfs, *ruled, *large][:EXAMPLES]))
+    for name in all_deleted:  # deletions: only per-file pages and stale packs of the selected runs
+        run = name.split('/', 1)[0]
+        if run not in plans or not (_CAPTURE_PAGE.fullmatch(name) or _PACK_FILE.fullmatch(name)):
+            raise ValueError('Refusing to delete a file outside the packed conference scope: ' + name)
+    uploads = {run: [(n, d) for n, d in sorted(planned.items()) if n not in remote or not matches(d, remote[n])]
+               for run, (planned, _) in plans.items()}
+    groups = [run for run in plans if uploads[run] or plans[run][1]]
+    result = {'operation': 'maintain-run', 'scope': 'conference', 'mode': 'pack-files', 'repo': repo,
+              **hf_visibility.record(repo, 'space'), 'runs': selected, 'base_revision': base, 'committed': False,
+              'per_run': per_run, 'skipped': skipped,
+              'to_add': sorted(n for n in all_planned if n not in remote),
+              'to_replace': sorted(n for n in all_planned if n in remote and not matches(all_planned[n], remote[n])),
+              'to_delete': {'capture_pages': sum(1 for n in all_deleted if _CAPTURE_PAGE.fullmatch(n)),
+                            'stale_packs': sum(1 for n in all_deleted if _PACK_FILE.fullmatch(n))},
+              'space_files': {'before': len(current), 'after': len(current) - len(all_deleted)
+                              + sum(1 for n in all_planned if n not in remote)},
+              'archive_manifest': {'total_bytes_before': archive.get('total_bytes'),
+                                   'total_bytes_after': new_archive['total_bytes']},
+              'commits': len(groups), 'already_applied': not groups, 'published_files_read': reads}
+    if not commit or not groups:
+        return result
+
+    backup_dir, receipt = Path(backup_dir), Path(receipt)
+    revision = base
+
+    def write_receipt(status):
+        write_json(receipt, {**result, 'last_revision': revision, 'status': status})
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    write_receipt('writing backups; nothing uploaded')
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        write_json(backup_dir / INVENTORY, {'operation': 'maintain-run', 'scope': 'conference', 'mode': 'pack-files',
+                                            'repo': repo, 'runs': selected, 'revision': base, 'origin_revision': base,
+                                            'resume_from': None, 'files': current, 'deleted': all_deleted})
+        saved = sorted(n for n in [*all_planned, ATTRIBUTES, MANIFEST] if n in remote)
+        for name in saved:
+            target = backup_dir / ORIGINAL / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(fetch(name))
+        write_json(backup_dir / PLAN, {**result, 'deleted': all_deleted})
+        result.update(backup_dir=str(backup_dir), backups=saved,
+                      deleted_pages_note=f'deleted pages stay in the Space Git history at revision {base}')
+        write_receipt('backups written; nothing uploaded')
+        done_add, done_del = {}, set()
+        for number, run in enumerate(groups, 1):
+            planned, deleted = plans[run]
+            done_add.update(planned)
+            done_del.update(deleted)
+            if number == len(groups):
+                manifest_now = json.dumps(new_archive, indent=2).encode()
+            else:  # archive-manifest.json with the runs committed so far
+                files_now = {n: v for n, v in archive['files'].items() if n not in done_del}
+                files_now.update({n: digest(d) for n, d in done_add.items()})
+                manifest_now = json.dumps({**archive, 'files': files_now,
+                                           'total_bytes': sum(x['bytes'] for x in files_now.values())},
+                                          indent=2).encode()
+            operations = [operation(path_in_repo=n, path_or_fileobj=d) for n, d in uploads[run]]
+            operations += [delete_operation(path_in_repo=n) for n in deleted]
+            operations.append(operation(path_in_repo=MANIFEST, path_or_fileobj=manifest_now))
+            latest = api.repo_info(repo, repo_type='space')
+            if not hf_visibility.unchanged(latest, repo, 'space', revision):
+                raise ValueError('Space changed concurrently or its visibility differs from the record; rerun the '
+                                 'dry run against the latest revision (it continues from the current state)')
+            response = space_commit(api, repo_id=repo, repo_type='space', parent_commit=revision,
+                                    commit_message=f'Conference view {run}: captured files packed into '
+                                                   f'{len(per_run[run]["packs"])} data file(s) and files.html; '
+                                                   f'{per_run[run]["capture_pages_deleted"]} per-file pages deleted '
+                                                   '(HF 20,000-file limit)',
+                                    operations=operations)
+            revision = response.oid
+            write_receipt(f'committed {number} of {len(groups)} ({run})')
+        write_receipt('committed; verifying')
+        final = api.repo_info(repo, repo_type='space', files_metadata=True)
+        if not hf_visibility.unchanged(final, repo, 'space', revision):
+            raise ValueError('Space changed before verification (or its visibility differs from the record); '
+                             'inspect the latest revision')
+        final_files = remote_files(api, repo, revision)
+        state = inventory(final_files)
+        expected = (set(current) - set(all_deleted)) | set(all_planned)
+        if set(state) != expected:
+            raise ValueError(f'Remote file inventory changed unexpectedly: missing '
+                             f'{sorted(expected - set(state))[:EXAMPLES]}, unexpected '
+                             f'{sorted(set(state) - expected)[:EXAMPLES]}')
+        for name in current:
+            if name not in all_planned and name != MANIFEST and name in state and not same(current[name], state[name]):
+                raise ValueError('Unrelated remote file changed: ' + name)
+        for name, data in [*all_planned.items(), (MANIFEST, json.dumps(new_archive, indent=2).encode())]:
+            if final_files[name].lfs or not matches(data, final_files[name]):
+                raise ValueError('File mismatch or stored as LFS after maintenance: ' + name)
+    except Exception as error:
+        try:
+            write_receipt('failed: ' + type(error).__name__ + (': ' + str(error) if isinstance(error, ValueError) else ''))
+        except Exception as receipt_error:  # never hide the original error
+            print(f'Could not record the failure in the receipt {receipt}: {type(receipt_error).__name__}: '
+                  f'{receipt_error}', file=sys.stderr)
+        raise
+    result.update(committed=True, final_revision=revision, status='verified', verification={
+        'final_files': len(state), 'deleted': len(all_deleted), 'verified_planned_files': len(all_planned),
+        'verified_preserved_files': len(set(current) - set(all_planned) - set(all_deleted))})
+    write_receipt('verified')
+    return result
+
+
 SIMPLE_JUDGE_REPORT_JSON = 'analysis/simple_judge/report.json'
 
 
@@ -2631,6 +2994,10 @@ def main(argv=None):
     parser.add_argument('--capture-pages', action='store_true',
                         help='conference scope: also restamp the published captured-file pages '
                              '(RUN/conference-view/file-*.html) with the run clock; one guarded commit per run')
+    parser.add_argument('--pack-files', action='store_true',
+                        help='conference scope: replace the per-file captured-file pages (file-*.html) with the packed '
+                             'viewer (files.html, files/pack-NN.json) rebuilt from --runs-dir and delete the pages; one '
+                             'guarded commit per run (HF 20,000-file limit, October 26, 2026)')
     parser.add_argument('--replace-judge', action='store_true',
                         help='judge scope only: replace published judge files of another judge build (for example '
                              'a re-run under a newer rubric) instead of refusing them; published judge files the '
@@ -2664,6 +3031,16 @@ def main(argv=None):
             parser.error('--scope conference takes no --bundle, --resume-from or --replace-judge')
         if args.commit and (args.receipt is None or args.backup_dir is None):
             parser.error('--commit requires --receipt and --backup-dir')
+        if args.pack_files:
+            if args.capture_pages:
+                parser.error('--pack-files replaces the captured-file pages; it takes no --capture-pages')
+            from huggingface_hub import HfApi, CommitOperationAdd, CommitOperationDelete, hf_hub_download
+            print(json.dumps(maintain_conference_packed(
+                HfApi(), hf_hub_download, runs=None if args.all_published_runs else [args.maintain_run],
+                runs_dir=args.runs_dir, commit=args.commit, repo=args.repo_id, receipt=args.receipt,
+                backup_dir=args.backup_dir, operation=CommitOperationAdd, delete_operation=CommitOperationDelete,
+                pages_dir=args.pages_dir), indent=2))
+            return
         from huggingface_hub import HfApi, CommitOperationAdd, hf_hub_download
         result = maintain_conference(HfApi(), hf_hub_download,
                                      runs=None if args.all_published_runs else [args.maintain_run],

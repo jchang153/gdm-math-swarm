@@ -208,9 +208,10 @@ class ExportConferenceTests(unittest.TestCase):
             self.assertIn('<script id="ab-map"', index)
             self.assertIn('id="ab-legend"', index)
             export_conference.published_data(index)  # records still load
-            captures = sorted((run / 'conference-view').glob('file-*.html'))
-            self.assertTrue(captures)
-            self.assertIn('class="ab-set"', captures[0].read_text())
+            self.assertEqual(sorted((run / 'conference-view').glob('file-*.html')), [])  # packed (October 26)
+            viewer = (run / 'conference-view/files.html').read_text()
+            self.assertIn('<script id="ab-map"', viewer)  # captured files are drawn in the browser: dynamic labels
+            self.assertIn('id="ab-legend"', viewer)
 
 
 class SiteScopeBadgeTests(clock_tests.SitePublishedTests):

@@ -143,9 +143,14 @@ class ExportWithoutTimelineTests(unittest.TestCase):
         self.assertIn('No direct messages were saved in this run. Inbox checks appear only in the full activity '
                       'timeline', page)
         self.assertIn('These are observations, not a complete edit history.', page)
-        captured = [p for p in (self.run / 'conference-view').glob('file-*.html')]
-        self.assertEqual(len(captured), 1)
-        self.assertIn('# notes', captured[0].read_text())
+        self.assertEqual(list((self.run / 'conference-view').glob('file-*.html')), [])  # packed (October 26)
+        packs = sorted((self.run / 'conference-view/files').glob('pack-*.json'))
+        self.assertEqual([p.name for p in packs], ['pack-01.json'])
+        entry, = export_conference.read_pack(packs[0].read_bytes()).values()
+        self.assertEqual(entry['versions'][0]['content'], '# notes\n')
+        self.assertEqual(manifest['captured_file_layout'], 'packed')
+        files_record, = [r for r in data['records'] if r['category'] == 'files']
+        self.assertEqual(files_record['links'], [['View captured versions', 'files.html#file=' + files_record['id']]])
         self.assertLess(len(page.encode()), 100_000)  # the 500-entry timeline is not embedded
 
     def test_published_view_with_timeline_strips_to_the_fresh_export(self):
@@ -209,8 +214,9 @@ class ConferenceScopeTests(unittest.TestCase):
                           f'{run_id}/conference-view/manifest.json': json.dumps(old_manifest, indent=2).encode(),
                           f'{run_id}/results.html': b'<html>report</html>',
                           f'{run_id}/inspect-view/index.html': b'<html>inspect</html>',
-                          f'{run_id}/conference-view/' + next(run.glob('conference-view/file-*.html')).name:
-                              next(run.glob('conference-view/file-*.html')).read_bytes()})
+                          f'{run_id}/conference-view/files.html': (run / 'conference-view/files.html').read_bytes(),
+                          f'{run_id}/conference-view/files/pack-01.json':
+                              (run / 'conference-view/files/pack-01.json').read_bytes()})
         for run_id, key in ((RUN, 'dataset_files'), (OFFLINE_RUN, 'dataset_files')):
             archive[key][f'{run_id}/conference/events.jsonl'] = {
                 'repo': dataset_logs.DATASET_REPO, 'path': f'{run_id}/conference/events.jsonl', 'commit': COMMIT,

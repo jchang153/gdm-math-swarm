@@ -500,6 +500,20 @@ is being merged into main via `collab-env`.
    (simple-judge x6, site all runs, incident x16, conference with capture pages, verify_hosted x20 at the end;
    labels come from `runs/` on the Mac, so baseline100, baseline8g100 and pilot stay unlabelled). Then update this item.
 
+9. **2026-10-26: captured-file pages packed (HF 20,000-file limit; code on main, NOT yet run on the Space).** The Space
+   held 19,984 files (15,430 per-file captured-file pages) and the publish of the five multi-overseer runs (item 7) was
+   refused at 20,104; it left 480 files of `glmflash100-seeded-1ov-ds` in the Space (472 per-file pages + 8 identical
+   files), unrecorded in `archive-manifest.json`. Owner approved packing: each run's captured files now live in
+   `conference-view/files/pack-NN.json` (1-2 per run) and one viewer `conference-view/files.html#file=<id>`
+   (docs/experiment-library.md, "Captured private files (packed)"). **To do (operator session):**
+   `C=<fresh clone of main> runs/phase-b/conference-pack-20261026/operator-commands.sh` (~35-45 min): stops the
+   superseded agent-label capture-page job (item 8; its labels are re-rendered here), migrates the 20 published runs
+   (`maintain_hf_run.py --scope conference --pack-files`, one guarded commit each, from `runs/`), re-prepares and
+   publishes the five runs (leftovers deleted first; dataset files already present are skipped), then
+   `verify_hosted.py --expect-packed-files` for all 25 and the Space file count. Expected: 19,984 -> ~5,071 after the
+   migration, ~6,500 after the five runs. A read-only simulation against the public Space passed for all 20 runs.
+   Old `file-<hash>.html` URLs 404 afterwards (`files.html#file=file-<hash>` opens the same file).
+
 **Done recently (details under "Runs so far"):**
 - **Resume bundle (2026-10-22, saving side only).** Every pilot run now saves `RUN/resume/`: per agent, a
   full archive of `/workspace`, `/tmp` (wiki) and `/home/researcher` (Claude Code session JSONLs), open tool
@@ -608,6 +622,12 @@ is being merged into main via `collab-env`.
 - **HF download rate limit (2026-10-25).** Plans or updates that download thousands of Space files one by one
   (for example the 10,972 captured-file pages) hit HTTP 429 and wait minutes per retry. Use `--pages-dir` with a
   local copy (used only where byte-identical), as in `runs/phase-b/web-clock-20261025/space-pages/`.
+- **HF 20,000-file limit per repository (2026-10-26).** A commit that would exceed it is refused ("Your push was
+  rejected because it contains too many files"), and a publish can stop part-way, leaving unrecorded files of the
+  run. Keep per-run file counts small: captured files are packed (`conference-view/files/pack-NN.json`), snapshots
+  are one `snapshots.tar.gz` in the dataset. Check `verify_hosted.py --space-file-count` (or
+  `publish_hf_library.py`'s plan, `space_files_after`) before publishing; a 100-agent run adds ~380 files, mostly
+  `instructions/` and `prompts/` (the next candidates to pack).
 - **HF Space storage (1 GB).** See "Where things live". Check `HfApi().space_info(REPO).used_storage` before
   publishing; a run with 100 agents adds about 115-120 MB of LFS.
 - **Per-model fixes.** GPT models need `strict_tools=False`; Claude via OpenRouter
