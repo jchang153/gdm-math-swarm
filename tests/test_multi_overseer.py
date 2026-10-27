@@ -85,6 +85,18 @@ class MultiOverseerConfigTests(unittest.TestCase):
             self.assertEqual(settings and settings.model_id, model, name)
             self.assertEqual(config["candidate_model_id"], base["candidate_model_id"], name)
 
+    def test_sixty_minute_notices_configs(self):
+        # Re-runs with unread notices (docs/plan.md, "Unread notices (October 27, 2026)"): identical to the
+        # 60-minute configs except the experiment name and unread_notices.
+        for name in ["glmflash100-seeded-control-60m", *RUNS_60]:
+            old, new = load(name), load(f"{name}-notices")
+            self.assertIs(new["unread_notices"], True, name)
+            self.assertEqual(new["experiment"], f"{name}-notices")
+            diff = {k for k in set(old) | set(new) if old.get(k) != new.get(k)}
+            self.assertEqual(diff, {"experiment", "unread_notices"}, name)
+            self.assertEqual(launch_gates.max_connections_problems(new), [], name)
+            self.assertEqual(oversight.overseer_problems(new), [], name)
+
     def test_legacy_single_form_unchanged(self):
         config = load("glm100-seeded-overseer-30m")
         self.assertEqual(oversight.overseer_config(config), {"agent_id": "agent-102", "powers": True})
