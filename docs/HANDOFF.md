@@ -466,7 +466,7 @@ is being merged into main via `collab-env`.
      5. `runs/phase-b/<RUN_ID>/launch-config.json` = config + `run_dir`, `run_budget_usd` (owner's figure),
         `verified_integration`, `paid_launch_enabled`; launch `supervise_run.py` in tmux with `exec ... > log 2>&1`.
      6. Check `runs/<RUN_ID>/conference/events.jsonl` for `seeded_artifact_injected` about 180 s after `run_start_marked`.
-7. **DONE 2026-10-26 (operator session): five multi-overseer seeded runs, $150 budget each; NOT yet published to HF.**
+7. **DONE 2026-10-26 (operator session): five multi-overseer seeded runs, $150 budget each; published 2026-10-27 05:36 UTC (Space `4742d361`, verify_hosted OK for all 25 runs).**
    Solvers `z-ai/glm-5.3-flash` (100), seed agent-101 planted at +3:00 in all; follow-ups, simple judge and incident reports done;
    all 5 VMs TERMINATED at n2-standard-64. Records under `runs/<id>/` and `runs/phase-b/<id>/` on the Mac; exports and Inspect
    bundles in the operator's scratch clone.
@@ -531,6 +531,15 @@ is being merged into main via `collab-env`.
 - The three 100-agent x 30-min runs (glm100-baseline-30m, -repeat2, -repeat3) are published, with judges
   and incident reports.
 
+10. **RUNNING 2026-10-27 (operator session): nine 60-minute seeded oversight runs, $75 each** (docs/plan.md, "Sixty-minute
+   seeded oversight runs"; configs `glmflash100-seeded-*-60m.json`, `4fc77b8`). Per-VM schedules on the Mac
+   (`orchestrate.sh` in the operator scratchpad) launch wave 1, retrieve it, launch wave 2 on the same VM, run results +
+   incident reports (`post2.sh`), then stop and resize each VM: owner-vm control -> 5ov-glm; owner-vm-2 1ov-glm -> 5ov-ds;
+   owner-vm-3 2ov-glm -> 10ov-glm; owner-vm-4 1ov-ds -> 10ov-ds; owner-vm-5 2ov-ds. First launches 05:47 UTC. 10-overseer runs
+   overcommit the 7 GB agent caps by 2 GB on 768 GB (caps, not reservations; owner allows reducing if it fails).
+   Not yet published; the Space has 6,494 files after packing (item 9), room for ~35 runs.
+   Repo move: `gdm-math-swarm` copied to `~/code/GitHub/gdm-math-swarm` but NOT swapped (the original under ~/Documents is in
+   use); the other repos moved to `~/code/GitHub`, Codex folders to `~/code` (symlinks left for session repos).
 ## Next steps / open items
 
 - Logs dataset, in order (details: `docs/experiment-library.md`, "Logs and raw records in the dataset repo"):
