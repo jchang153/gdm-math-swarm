@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-27 by Claude (Opus 5.5) operator subagent (nine 60-minute unread-notices runs launched, item 11).
+Last updated: 2026-10-27 by Claude (Opus 5.5) site subagent (newcomer site: objective, paper, glossary, run cards by series, run-page intro; published).
 
 ## What the project is
 
@@ -547,6 +547,20 @@ is being merged into main via `collab-env`.
    `glmflash100-seeded-<cond>-60m-notices-<UTC>`. Then transcripts, conference export, index, publish to the Space.
    If interrupted: retrieve each `runs/phase-b/<id>/completed-run.tgz` (chain.sh), run post2.sh, then stop and resize
    the VMs to n2-standard-64 and verify TERMINATED.
+12. **DONE 2026-10-27: newcomer-friendly website (owner request).** Catalogue opens with the objective, the
+   reconstructed paper (Paglieri et al., arXiv:2609.04170), "How a run works", "How to read this site" and a glossary
+   (fake, standing fake, fake-minutes, seed readers, overseer, revert, genuine, ...). Runs are cards grouped by series
+   (`run_profile.SERIES`, by run ID; add a pattern there for a new series), each with a condition sentence, a
+   standing-fakes sparkline on a series-shared scale and counts; Cards/Table switch, all old filters/sort/compare kept.
+   Run pages get an intro block above the tiles. Code: `scripts/run_profile.py` (profile + JS twin `CARD_JS`),
+   `scripts/catalogue_intro.py`, `build_experiment_index.py`, `build_results.py` (intro), `maintain_hf_run.py`
+   (site scope adds the intro host-side); tests `tests/test_run_profile.py`; docs `docs/experiment-library.md`
+   ("Newcomer layout and run cards"). Published: `--rerender-catalogue` (Space `8e2f3f1f`) then
+   `--all-published-runs --scope site` (34 results.html, Space `227e31e9`, receipt verified); records
+   `runs/phase-b/site-newcomer-20261027/`. Published entries have no `profile`; the page computes it in the browser
+   from each run's results.json/settings.json. New runs (e.g. the notices reruns, item 11) get `profile` in their
+   entries and the intro in results.html automatically; their series is "60-minute overseer series, with unread notices".
+   Local `runs/*/results.html` were given the intro in place (`run_profile.add_intro`).
 ## Next steps / open items
 
 - **Unread notices landed on main (2026-10-27, owner-approved; docs/plan.md "Unread notices (October 27, 2026)").**
