@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-27 by Claude (Opus 5.5) dev subagent (unread notices feature on main, Next steps).
+Last updated: 2026-10-27 by Claude (Opus 5.5) operator subagent (nine 60-minute unread-notices runs launched, item 11).
 
 ## What the project is
 
@@ -531,15 +531,22 @@ is being merged into main via `collab-env`.
 - The three 100-agent x 30-min runs (glm100-baseline-30m, -repeat2, -repeat3) are published, with judges
   and incident reports.
 
-10. **RUNNING 2026-10-27 (operator session): nine 60-minute seeded oversight runs, $75 each** (docs/plan.md, "Sixty-minute
+10. **DONE 2026-10-27 (operator session): nine 60-minute seeded oversight runs, $75 each** (all nine retrieved to `runs/*-60m-20261027T*`, results + incident reports; published to the Space, revision c515b3e) (docs/plan.md, "Sixty-minute
    seeded oversight runs"; configs `glmflash100-seeded-*-60m.json`, `4fc77b8`). Per-VM schedules on the Mac
    (`orchestrate.sh` in the operator scratchpad) launch wave 1, retrieve it, launch wave 2 on the same VM, run results +
    incident reports (`post2.sh`), then stop and resize each VM: owner-vm control -> 5ov-glm; owner-vm-2 1ov-glm -> 5ov-ds;
    owner-vm-3 2ov-glm -> 10ov-glm; owner-vm-4 1ov-ds -> 10ov-ds; owner-vm-5 2ov-ds. First launches 05:47 UTC. 10-overseer runs
    overcommit the 7 GB agent caps by 2 GB on 768 GB (caps, not reservations; owner allows reducing if it fails).
-   Not yet published; the Space has 6,494 files after packing (item 9), room for ~35 runs.
    Repo move: `gdm-math-swarm` copied to `~/code/GitHub/gdm-math-swarm` but NOT swapped (the original under ~/Documents is in
    use); the other repos moved to `~/code/GitHub`, Codex folders to `~/code` (symlinks left for session repos).
+11. **RUNNING 2026-10-27 (operator session, launched 14:41 PT): the nine 60-minute seeded runs again with unread notices**
+   (docs/plan.md, "Unread notices (October 27, 2026)"; configs `glmflash100-seeded-*-60m-notices.json`, `8623ee9`,
+   identical to item 10's configs except the experiment name and `"unread_notices": true`; $75 each). Same per-VM schedule
+   and scripts as item 10 (`orchestrate-n.sh` = `orchestrate.sh` in the operator scratchpad): owner-vm control -> 5ov-glm;
+   owner-vm-2 1ov-glm -> 5ov-ds; owner-vm-3 2ov-glm -> 10ov-glm; owner-vm-4 1ov-ds -> 10ov-ds; owner-vm-5 2ov-ds. Run ids
+   `glmflash100-seeded-<cond>-60m-notices-<UTC>`. Then transcripts, conference export, index, publish to the Space.
+   If interrupted: retrieve each `runs/phase-b/<id>/completed-run.tgz` (chain.sh), run post2.sh, then stop and resize
+   the VMs to n2-standard-64 and verify TERMINATED.
 ## Next steps / open items
 
 - **Unread notices landed on main (2026-10-27, owner-approved; docs/plan.md "Unread notices (October 27, 2026)").**
