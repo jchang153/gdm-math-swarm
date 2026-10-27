@@ -1428,3 +1428,12 @@ environment (`neutral-env-v1`) and the new rule 4 naming both native spellings:
 Implementation: `src/research_swarm/oversight.py`, config key `overseer`; prompts in docs/prompts.md,
 "Overseer role". Settings record `effective.roles` and `effective.overseer`; analysis
 (build_results, export_conference, the behavior judge) separates the overseer from the solvers.
+
+## Sixty-minute seeded oversight runs, October 26, 2026
+
+Owner decisions (2026-10-26, about 22:20 PT): nine declared seeded runs, 60 minutes (`max_run_seconds` 3600), run budget
+$75 each, solvers `z-ai/glm-5.3-flash` (100), seed as in the 30-minute runs; no replicates for now. Configs
+`configs/glmflash100-seeded-{control,1ov-glm,2ov-glm,1ov-ds,2ov-ds,5ov-glm,5ov-ds,10ov-glm,10ov-ds}-60m.json`.
+GLM overseers use the solver model; DeepSeek overseers `deepseek/deepseek-v4.1-flash-1017` via `deepinfra/fp8/priority`.
+The 5- and 10-overseer runs have the private overseer board. A single flash control serves both overseer models (DeepSeek
+only plays the overseer). Order: wave 1 = control, 1/2 GLM, 1/2 DeepSeek; wave 2 = 5/10 GLM, 5/10 DeepSeek.

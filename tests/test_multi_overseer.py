@@ -19,12 +19,15 @@ from tests.test_inspect_adapter import HAVE_INSPECT, run_ledger
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-RUNS = {"glmflash100-seeded-2ov-glm-30m": (2, "z-ai/glm-5.3", False),
-        "glmflash100-seeded-5ov-glm-30m": (5, "z-ai/glm-5.3", True),
+# GLM-overseer runs use the solver model (owner correction 2026-10-26, 6ec632b): no separate overseer model.
+RUNS = {"glmflash100-seeded-2ov-glm-30m": (2, None, False),
+        "glmflash100-seeded-5ov-glm-30m": (5, None, True),
         "glmflash100-seeded-1ov-ds-30m": (1, "deepseek/deepseek-v4.1-flash-1017", False),
         "glmflash100-seeded-2ov-ds-30m": (2, "deepseek/deepseek-v4.1-flash-1017", False),
         "glmflash100-seeded-5ov-ds-30m": (5, "deepseek/deepseek-v4.1-flash-1017", True)}
 SOLVERS = [f"agent-{i:03d}" for i in range(1, 101)]
+RUNS_60 = {f"glmflash100-seeded-{n}ov-{m}-60m": (n, None if m == "glm" else "deepseek/deepseek-v4.1-flash-1017", n >= 5)
+           for n in (1, 2, 5, 10) for m in ("glm", "ds")}
 
 
 def load(name):
@@ -48,8 +51,11 @@ class MultiOverseerConfigTests(unittest.TestCase):
             self.assertEqual(config["run_budget_usd"], "150")
             self.assertEqual(config["candidate_model_id"], "z-ai/glm-5.3-flash")
             self.assertEqual(settings_from_config(config).model_id, "z-ai/glm-5.3-flash")
-            self.assertEqual(oversight.overseer_settings(config).model_id, model)
-            for model_id in ("z-ai/glm-5.3-flash", model):
+            if model is None:
+                self.assertIsNone(oversight.overseer_settings(config))
+            else:
+                self.assertEqual(oversight.overseer_settings(config).model_id, model)
+            for model_id in ("z-ai/glm-5.3-flash", model or "z-ai/glm-5.3-flash"):
                 self.assertIn(model_id, KNOWN_MODEL_IDS)
                 self.assertIn(model_id, TRACK_MODEL_IDS["gemini"])
             # Everything else is the single-overseer seeded design.
@@ -60,6 +66,24 @@ class MultiOverseerConfigTests(unittest.TestCase):
             roles = oversight.roles(SOLVERS, normalized, "agent-101")
             self.assertEqual([a for a, r in roles.items() if r == "overseer"], ids)
             self.assertEqual(roles["agent-101"], "seed")
+
+    def test_sixty_minute_configs(self):
+        base = load("glmflash100-seeded-2ov-glm-30m")
+        control = load("glmflash100-seeded-control-60m")
+        self.assertIsNone(control["overseer"])
+        self.assertEqual((control["max_connections"], control["max_run_seconds"], control["run_budget_usd"]), (100, 3600, "75"))
+        for name, (count, model, board) in RUNS_60.items():
+            config = load(name)
+            self.assertEqual(oversight.overseer_problems(config), [], name)
+            self.assertEqual(launch_gates.max_connections_problems(config), [], name)
+            normalized = oversight.overseer_config(config)
+            self.assertEqual(normalized["agent_ids"], [f"agent-{102 + i:03d}" for i in range(count)], name)
+            self.assertEqual(normalized["board"], board, name)
+            self.assertEqual((config["max_connections"], config["max_run_seconds"], config["run_budget_usd"]),
+                             (100 + count, 3600, "75"), name)
+            settings = oversight.overseer_settings(config)
+            self.assertEqual(settings and settings.model_id, model, name)
+            self.assertEqual(config["candidate_model_id"], base["candidate_model_id"], name)
 
     def test_legacy_single_form_unchanged(self):
         config = load("glm100-seeded-overseer-30m")
@@ -72,7 +96,7 @@ class MultiOverseerConfigTests(unittest.TestCase):
         self.assertEqual(effective["oversight_tools"], ["check_proof", "revert_submission"])
 
     def test_gate_refusals(self):
-        config = load("glmflash100-seeded-2ov-glm-30m")
+        config = load("glmflash100-seeded-2ov-ds-30m")
 
         def problems(**changes):
             changed = copy.deepcopy(config)
@@ -247,15 +271,15 @@ class TwoModelPlanningTests(unittest.TestCase):
                 self.assertEqual(record["settings"]["model_id"], settings.model_id)
 
     def test_reservations_use_each_role_s_prices(self):
-        config = load("glmflash100-seeded-2ov-glm-30m")
+        config = load("glmflash100-seeded-2ov-ds-30m")
         solver = settings_from_config(config, pricing_verified=True)
         overseer = oversight.overseer_settings(config, pricing_verified=True)
         request = "x" * 100_000
         self.assertEqual(solver.reservation(request),
                          Decimal(100_000 + 8192) * Decimal("0.00000015") + Decimal(16384) * Decimal("0.0000005"))
         self.assertEqual(overseer.reservation(request),
-                         Decimal(100_000 + 8192) * Decimal("0.0000014") + Decimal(16384) * Decimal("0.0000044"))
-        self.assertEqual(overseer.request_options()["provider"]["only"], ["z-ai/fp8"])
+                         Decimal(100_000 + 8192) * Decimal("0.000000147") + Decimal(16384) * Decimal("0.000000441"))
+        self.assertEqual(overseer.request_options()["provider"]["only"], ["deepinfra/fp8/priority"])
 
 
 @unittest.skipUnless(HAVE_INSPECT, "pinned Inspect packages not installed (.venv)")
@@ -284,7 +308,7 @@ class ModelOverrideFilterTests(unittest.IsolatedAsyncioTestCase):
                                   lambda *a: events.append(a), scope="validation", model_override=own_model)
         await intercept(bridge_model, [ChatMessageUser(content="hello")], [], None, GenerateConfig())
         self.assertEqual((bridge_model.calls, own_model.calls), (0, 1))
-        self.assertEqual(own_model.config.extra_body["provider"]["only"], ["deepseek"])
+        self.assertEqual(own_model.config.extra_body["provider"]["only"], ["deepinfra/fp8/priority"])
         admitted = next(e for e in events if e[0] == "inference_admitted")
         self.assertEqual(Decimal(admitted[2]["reserved_usd"]), settings.reservation(json.dumps(
             {"messages": [ChatMessageUser(content="hello").model_dump(mode="json")], "tools": []},
