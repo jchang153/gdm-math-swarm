@@ -88,6 +88,12 @@ const byRun=new Map(data.map(e=>[e.run,e]));
 const tbody=$('runs').tBodies[0];
 const rows=[...tbody.rows];
 const rowOf=new Map(rows.map(r=>[r.dataset.run,r]));
+// Run cards grouped by series (owner request, October 27, 2026; scripts/run_profile.py). RP is the JavaScript
+// twin of run_profile.py, used for entries published before profiles existed.
+/*CARDJS*/
+const cards=[...document.querySelectorAll('article.rc[data-run]')];
+const cardOf=new Map(cards.map(c=>[c.dataset.run,c]));
+const cardBoxes=cards.map(c=>c.querySelector('.card-pick')).filter(Boolean);
 const COHORTS=['exploiter','convert','exploit_promoter','whistleblower','no_misbehavior','insufficient_record'];
 const LABELS={exploiter:['exploiter','exploiters'],convert:['convert','converts'],exploit_promoter:['exploit promoter','exploit promoters'],whistleblower:['whistleblower','whistleblowers'],no_misbehavior:['no misbehavior','no misbehavior'],insufficient_record:['insufficient record','insufficient record']};
 const FLAGGED=['exploiter','convert','exploit_promoter','whistleblower','insufficient_record'];
@@ -136,7 +142,8 @@ function apply(){const q=$('filter').value.toLowerCase().trim(),m=$('f-model').v
  for(const r of rows){const e=byRun.get(r.dataset.run),s=judgeState(e);
   const ok=(!q||r.textContent.toLowerCase().includes(q))&&(!m||e.model===m)&&(!v||variant(e)===v)&&
    (!j||(j==='run'?s!=='none':j===s));
-  r.hidden=!ok;shown+=ok;}
+  r.hidden=!ok;shown+=ok;const c=cardOf.get(r.dataset.run);if(c)c.hidden=!ok;}
+ for(const s of document.querySelectorAll('section.series'))s.hidden=![...s.querySelectorAll('article.rc')].some(c=>!c.hidden);
  $('shown').textContent='Showing '+shown+' of '+rows.length+' run'+(rows.length===1?'':'s');}
 for(const id of ['filter','f-model','f-variant','f-judge'])$(id).addEventListener('input',apply);
 // Sorting
@@ -159,11 +166,23 @@ $('sort').addEventListener('input',()=>{sortKey=$('sort').value;descending=!['mo
 $('direction').addEventListener('click',()=>{descending=!descending;sort();});
 // Selection and compare
 const boxes=rows.map(r=>r.querySelector('input[type=checkbox]'));
+const boxOf=new Map(boxes.map(b=>[b.value,b]));
 const picked=()=>boxes.filter(b=>b.checked).map(b=>b.value);
 function selection(){const n=picked().length;
  for(const b of boxes){b.disabled=!b.checked&&n>=MAX;b.closest('tr').classList.toggle('picked',b.checked);}
+ for(const cb of cardBoxes){const b=boxOf.get(cb.value);if(!b)continue;cb.checked=b.checked;cb.disabled=b.disabled;cb.closest('article').classList.toggle('picked',b.checked);}
  $('compare').disabled=n<2;$('compare').textContent='Compare selected ('+n+')'+(n>=MAX?' · max '+MAX:'');}
 for(const b of boxes)b.addEventListener('change',selection);
+for(const cb of cardBoxes)cb.addEventListener('change',()=>{const b=boxOf.get(cb.value);if(b){b.checked=cb.checked;selection();}});
+// Cards or table: a per-browser convenience kept in localStorage (a blocked store just means the default, cards).
+const VIEW='gdm-catalogue-view';
+function view(v,keep){const table=v==='table';if(!$('cards-view')||!$('table-view'))return;$('cards-view').hidden=table;$('table-view').hidden=!table;
+ $('view-cards').setAttribute('aria-pressed',String(!table));$('view-table').setAttribute('aria-pressed',String(table));
+ if(!keep)try{localStorage.setItem(VIEW,table?'table':'cards');}catch(_){}}
+if($('view-cards')){$('view-cards').addEventListener('click',()=>view('cards'));$('view-table').addEventListener('click',()=>view('table'));
+ let saved=null;try{saved=localStorage.getItem(VIEW);}catch(_){}view(saved==='table'?'table':'cards',true);
+ for(const a of document.querySelectorAll('.jump a'))a.addEventListener('click',()=>{const h=a.getAttribute('href');
+  if(h==='#table-view')view('table');else if(h.startsWith('#series-'))view('cards');});}
 $('clear').addEventListener('click',()=>{for(const b of boxes)b.checked=false;selection();closeCompare();});
 function cell(e,row){const v=row[1](e);return v==null||v===''?'<span class="muted">—</span>':v;}
 function bar(value,max){return max>0&&value!=null?'<div class="bar" style="width:'+Math.max(4,Math.round(100*value/max))+'%"></div>':'';}
@@ -210,8 +229,24 @@ window.addEventListener('hashchange',fromHash);
 function render(e){const r=rowOf.get(e.run),s=sum(e);if(!r)return;
  if(s){r.querySelector('.c-variant .v').innerHTML=s.prompt_variant?esc(s.prompt_variant):'<span class="muted">not recorded</span>';
   r.querySelector('.c-accepted').textContent=s.accepted_tasks??'?';}
- r.querySelector('.c-judge .v').innerHTML=judgeCell(e)[0];}
-async function read(path){try{const r=await fetch(path,{credentials:'same-origin'});return r.ok?await r.json():null;}catch(_){return null;}}
+ r.querySelector('.c-judge .v').innerHTML=judgeCell(e)[0];
+ const card=cardOf.get(e.run);if(card&&s)card.querySelector('.rc-accepted').textContent=s.accepted_tasks??'?';}
+const fetched=new Map();
+function read(path){if(!fetched.has(path))fetched.set(path,(async()=>{try{const r=await fetch(path,{credentials:'same-origin'});return r.ok?await r.json():null;}catch(_){return null;}})());
+ return fetched.get(path);}
+// Run cards of entries without a profile: computed from the run's published results.json (and settings.json for the
+// overseer model) with the same rules as run_profile.py; then every card of the series is drawn on the shared scale.
+const prof=e=>{const p=e.profile;return p&&typeof p==='object'&&p.schema===RP.SCHEMA?p:(e._profile||null);};
+async function enrichProfile(e){const base=encodeURIComponent(e.run)+'/',results=await read(base+'results.json');
+ if(!results||typeof results!=='object'||!results.start_utc){e._profileFailed=true;return;}
+ const settings=results.condition&&results.condition.overseer?await read(base+'settings.json'):null;
+ try{e._profile=RP.profile(results,settings);}catch(_){e._profileFailed=true;}}
+function drawSeries(){for(const s of document.querySelectorAll('section.series')){
+ const members=[...s.querySelectorAll('article.rc')].map(c=>byRun.get(c.dataset.run)).filter(Boolean),scale=RP.scaleOf(members.map(prof));
+ const label=s.querySelector('.sc-fakes');if(label)label.textContent=Math.max(scale.fakes,1);
+ for(const e of members){const body=cardOf.get(e.run).querySelector('.rc-body'),p=prof(e);
+  if(p){body.innerHTML=RP.inner(p,scale);body.dataset.profile='1';}
+  else if(e._profileFailed){const note=body.querySelector('.rc-empty');if(note)note.textContent='This run\'s records could not be read here.';}}}}
 function cohorts(report){const c=report&&report.counts;if(!c||typeof c.cohorts!=='object'||!Number.isInteger(c.agents))return null;
  const out={};for(const k of COHORTS)if(k in c.cohorts){if(!Number.isInteger(c.cohorts[k]))return null;out[k]=c.cohorts[k];}
  return {mode:typeof report.mode==='string'?report.mode:null,agents:c.agents,graded:Number.isInteger(c.graded)?c.graded:null,
@@ -228,5 +263,7 @@ async function enrich(e){const base=encodeURIComponent(e.run)+'/',whole=!sum(e),
 options();sort();apply();selection();fromHash();
 const missing=data.filter(needs);
 if(missing.length&&/^https?:$/.test(location.protocol))Promise.all(missing.map(enrich)).then(()=>{options();sort();apply();if(comparing.length)openCompare(comparing,false);});
+const unprofiled=data.filter(e=>!prof(e)&&cardOf.has(e.run));
+if(unprofiled.length&&/^https?:$/.test(location.protocol))Promise.all(unprofiled.map(enrichProfile)).then(drawSeries);
 })();
 '''

@@ -20,6 +20,8 @@ from run_clock import CLOCK_JS
 from catalogue_page import CHEATING, COHORT_GLOSS, COHORT_LABELS, COHORTS, FLAGGED, SCRIPT, STYLE, hidden_link
 from site_style import themed
 from space_navigation import private_space_navigation
+import catalogue_intro
+import run_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 # Runs the owner removed from the library lists (docs/plan.md, October 20, 2026). Their files
@@ -81,7 +83,8 @@ def build(runs, hosted=False, unlisted=None):
         try:
             data = json.loads(path.read_text())
             config_path = path.parent / 'settings.json'
-            config = json.loads(config_path.read_text()).get('config', {}) if config_path.exists() else {}
+            settings = json.loads(config_path.read_text()) if config_path.exists() else None
+            config = settings.get('config', {}) if isinstance(settings, dict) else {}
             # Explicit allowlist: never publish the complete config or provider metadata.
             proof_rows = data.get('verified_submissions', [])
             distinct = {p['task'] for p in proof_rows if p.get('independent_validity') == 'genuine'}
@@ -99,6 +102,8 @@ def build(runs, hosted=False, unlisted=None):
                      'distinct_verified_tasks': len(distinct),
                      'task_count': config.get('task_count'), 'agent_exits': data['agent_exits'],
                      'links': {}, 'summary': run_summary(path.parent, data)}
+            # Visual summary of the run card (scripts/run_profile.py; owner request, October 27, 2026).
+            entry['profile'] = run_profile.profile(data, settings)
             for name, target in [('Report', 'results.html'),
                                  # Transcripts are read in Inspect View (owner, Oct 21, 2026).
                                  ('Conference', 'conference-view/index.html'),
@@ -242,6 +247,83 @@ def judge_text(entry):
     return '<br>'.join(lines), sort
 
 
+def valid_profile(entry):
+    """The entry's run profile when it has the current schema, else None (filled in the browser when hosted)."""
+    p = entry.get('profile')
+    return p if isinstance(p, dict) and p.get('schema') == run_profile.SCHEMA else None
+
+
+_OV = re.compile(r'-(\d+)ov-([a-z]+)-')
+
+
+def card_order(entry):
+    """Cards within a series: by overseer count, then overseer model, then newest first. Entries without a profile
+    take the count and model from their run ID (display order only; the card shows recorded values)."""
+    p = valid_profile(entry)
+    if p:
+        ov = p.get('overseers') or {}
+        count, model = ov.get('count') or 0, run_profile.model_name(ov.get('model')) if ov else ''
+    else:
+        found = _OV.search(entry['run'])
+        count, model = (int(found[1]), found[2]) if found else (0, '')
+    start = datetime.datetime.fromisoformat(entry['start_utc'].replace('Z', '+00:00')).timestamp()
+    return (count, model, -start, entry['run'])
+
+
+def run_card(entry, scale):
+    """One run card: the profile part (condition, chips, sparkline, fake counts; a placeholder the hosted page
+    fills from the run's records when the entry has no profile), the entry's own counts, links and a compare box."""
+    esc = html.escape
+    p = valid_profile(entry)
+    summary = entry.get('summary') if isinstance(entry.get('summary'), dict) else None
+    if p:
+        body = run_profile.card_inner(p, scale)
+    else:
+        body = (f'<h3 class="rc-cond">{esc(str(entry["agents"]))} {esc(run_profile.model_name(entry["model"]))} '
+                f'agents, {esc(duration_text(entry["elapsed_seconds"]))}.</h3><p class="rc-empty">'
+                'Condition and fakes over time are read from the run\'s own records in the browser.</p>')
+    accepted = summary.get('accepted_tasks') if summary else None
+    tasks = entry.get('task_count')
+    stats = [('Genuine tasks', f'{entry["distinct_verified_tasks"]}<small> of {esc(str(tasks if tasks is not None else "?"))}'
+                               '</small>'),
+             ('Accepted tasks', f'<span class="rc-accepted">{accepted if accepted is not None else "?"}</span>'),
+             ('Duration', esc(duration_text(entry['elapsed_seconds']))),
+             ('Spend', f'${Decimal(entry["pilot_spent_usd"]):.2f}')]
+    links = ''.join(f'<a href="{esc(url, quote=True)}">{esc(name)}</a>' for name, url in entry['links'].items()
+                    if not hidden_link(name))
+    run = esc(entry['run'], quote=True)
+    return (f'<article class="rc" data-run="{run}"><div class="rc-body" data-profile="{1 if p else 0}">{body}</div>'
+            '<dl class="rc-stats">' + ''.join(f'<div><dt>{k}</dt><dd>{v}</dd></div>' for k, v in stats) + '</dl>'
+            f'<footer class="rc-foot"><span class="rc-when">{esc(entry["date"])} · <code>{esc(entry["run"])}</code></span>'
+            f'<span class="rc-links">{links}</span><label class="rc-pick"><input type="checkbox" class="card-pick" '
+            f'value="{run}" aria-label="Compare {run}">Compare</label></footer></article>')
+
+
+def series_groups(entries):
+    """[(key, title, description, entries)] in display order: newest series first, cards by card_order."""
+    groups = {}
+    for e in entries:
+        key, title, text = run_profile.series_of(e['run'])
+        groups.setdefault(key, (key, title, text, []))[3].append(e)
+    newest = lambda g: max(e['start_utc'] for e in g[3])  # noqa: E731
+    return [(k, t, d, sorted(es, key=card_order)) for k, t, d, es in sorted(groups.values(), key=newest, reverse=True)]
+
+
+def series_sections(groups):
+    esc = html.escape
+    out = []
+    for key, title, text, members in groups:
+        scale = run_profile.series_scale([valid_profile(e) for e in members])
+        count = f'{len(members)} run' + ('' if len(members) == 1 else 's')
+        out.append(f'<section class="series" id="series-{esc(key, quote=True)}" data-series="{esc(key, quote=True)}">'
+                   f'<div class="series-head"><h2>{esc(title)}<small>{count}</small></h2><p>{esc(text)}</p>'
+                   '<p class="legend"><span><i class="lg-area"></i>standing fakes</span><span><i class="lg-cum"></i>'
+                   'all fakes accepted so far</span><span><i class="lg-seed"></i>exploit planted</span><span>'
+                   f'shared scale: 0 to <b class="sc-fakes">{max(scale["fakes"], 1)}</b> fakes</span></p></div>'
+                   '<div class="rc-grid">' + ''.join(run_card(e, scale) for e in members) + '</div></section>')
+    return ''.join(out)
+
+
 def write_index(runs, entries, warnings=(), *, hosted=False):
     """Render catalogue entries, including previously published remote runs."""
     runs = Path(runs)
@@ -297,13 +379,18 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
     head = ''.join(f'<th scope="col" data-key="{k}"' + (' aria-sort="descending"' if k == 'start' else '')
                    + f'><button type="button">{esc(t)}</button></th>' if k else
                    f'<th scope="col">{"<span class=sr>Select</span>" if not t else esc(t)}</th>' for t, k in headers)
+    groups = series_groups(entries)
     body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
-            '<title>GDM Math Swarm experiments</title><style>' + STYLE + '</style></head><body>'
-            '<h1>GDM Math Swarm experiments</h1>'
-            '<p>A library of saved runs: results, agent transcripts in Inspect View, independent evaluations and timelines.</p>'
-            f'<p><strong>{len(entries)} saved experiment(s)</strong>, newest first. Tick 2 to 4 runs to compare them side by side.</p>'
+            '<title>GDM Math Swarm experiments</title><style>' + STYLE + catalogue_intro.CSS + '</style></head><body>'
+            + catalogue_intro.hero([(k, t) for k, t, _, _ in groups]) + catalogue_intro.how_section()
             + (live_section(entries) if hosted else '') +
+            f'<section class="block" id="runs-top"><h2>The runs</h2><p class="sub"><strong>{len(entries)} saved '
+            'experiment(s)</strong>, grouped into series. Filter them here; tick 2 to 4 runs (on the cards or in the '
+            'table) to compare them side by side.</p>'
+            '<div class="viewbar"><span class="muted">View</span><span class="seg" role="group" aria-label="View">'
+            '<button type="button" id="view-cards" aria-pressed="true">Cards by series</button>'
+            '<button type="button" id="view-table" aria-pressed="false">Table</button></span></div>'
             '<div class="toolbar"><label class="grow">Find<input id="filter" type="search" placeholder="Date, run, model, condition…"></label>'
             '<label>Model<select id="f-model"><option value="">All</option></select></label>'
             '<label>Prompt variant<select id="f-variant"><option value="">All</option></select></label>'
@@ -317,6 +404,8 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
             '<button type="button" id="clear" class="quiet">Clear selection</button></div>'
             '<section id="compare-view" hidden aria-label="Compare runs"><div class="cmp-head"><h2>Compare runs</h2>'
             '<button type="button" id="close-compare" class="quiet">Close</button></div><div class="scroll" id="compare-table"></div></section>'
+            '</section><div id="cards-view">' + series_sections(groups) + '</div>'
+            '<section id="table-view" class="block"><h2>All runs</h2>'
             '<div class="scroll"><table id="runs"><thead><tr>' + head + '</tr></thead><tbody>'
             + ''.join(rows) + '</tbody></table></div>'
             '<details class="help"><summary>What the columns mean</summary><dl>'
@@ -330,10 +419,11 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
             '(compare view) are not comparable with the rubric-3.1 judge\'s. "rubric 3.1": the earlier multi-stage '
             'judge, by cohort (below); a row shows both when both ran. "not run" means no judge outputs are '
             'published for the run; "…" means the entry predates these columns and the run\'s own records could '
-            'not be read here.</dd>' + glossary + '</dl></details>'
+            'not be read here.</dd>' + glossary + '</dl></details></section>'
+            + catalogue_intro.glossary_section() +
             f'<p class="note">{esc(note)}</p>'
             f'<script type="application/json" id="catalogue-data">{blob}</script>'
-            '<script>' + SCRIPT + '</script></body></html>')
+            '<script>' + SCRIPT.replace('/*CARDJS*/', run_profile.CARD_JS) + '</script></body></html>')
     body = themed(body)
     (runs / 'index.html').write_text(private_space_navigation(body) if hosted else body)
     (runs / 'experiments.json').write_text(json.dumps({'schema': 'gdm-experiment-index/1', 'experiments': entries, 'warnings': warnings}, indent=2))

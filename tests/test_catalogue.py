@@ -177,7 +177,8 @@ class CataloguePageTests(unittest.TestCase):
         self.assertIn('prefers-color-scheme:dark', page)
         self.assertIn('@media (max-width:760px)', page)
         self.assertIn('name="viewport"', page)
-        self.assertNotRegex(page, r'(src|href)="(https?:)?//')  # no external scripts, styles or links
+        # No external scripts, styles or links; the one external link is the reconstructed paper (October 27, 2026).
+        self.assertNotRegex(page.replace('href="https://arxiv.org/pdf/2609.04170"', ''), r'(src|href)="(https?:)?//')
         self.assertNotIn('<script src', page)
 
     def test_embedded_json_cannot_close_its_script_and_text_is_escaped(self):

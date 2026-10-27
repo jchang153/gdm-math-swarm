@@ -1408,6 +1408,24 @@ page change, the published `index.html` no longer matches the generator, so main
 regenerate the catalogue refuse until `maintain_hf_run.py --rerender-catalogue --commit` (or the
 next publication) rebuilds it.
 
+**Newcomer layout and run cards (owner request, October 27, 2026).** The page opens with the objective, the
+reconstructed paper (Paglieri et al., arXiv:2609.04170, the only external link), "How a run works", "How to read
+this site" and a glossary (`scripts/catalogue_intro.py`, fixed text). Runs are shown as cards grouped into series
+(`run_profile.SERIES`, matched on the run ID; newest series first, cards by overseer count, overseer model, newest
+first), with a Cards / Table switch (per-browser, `localStorage`); filters, sorting and compare (card or table
+checkboxes) work in both. Each card has a plain-English condition sentence, a sparkline of standing fakes (filled)
+and all fakes accepted so far (dashed) on a scale shared within the series, the fake counts (accepted, reverted,
+standing at the end, fake-minutes; unresolved verdicts listed separately and never counted as fakes), genuine and
+accepted tasks, duration, spend and links. The data is the entry's `profile` (`gdm-run-profile/1`, computed by
+`scripts/run_profile.py` from `results.json` and `settings.json`). Entries published earlier have no profile and
+stay unchanged: the hosted page computes the same profile in the browser from the run's published `results.json`
+(and `settings.json` for overseer runs) with `run_profile.CARD_JS`, the JavaScript twin that
+`tests/test_run_profile.py` checks against the Python output with node. Run pages (`results.html`) carry an intro
+above the summary tiles (`run_profile.add_intro`: condition, series, fake counts with a sparkline, what to look at);
+`build_results.py` writes it and `maintain_hf_run.py --scope site` (without `--bundle`) adds it to published pages
+host-side from the published `results.json`/`settings.json`. Rollout: `--rerender-catalogue --commit`, then
+`--all-published-runs --scope site --commit`.
+
 Uploads use guarded `HfApi.create_commit` batches of at most 120 files and roughly
 4 MB, with larger files alone. The catalogue and manifest are committed last.
 Every batch checks the latest revision and privacy. Concurrent changes cause a

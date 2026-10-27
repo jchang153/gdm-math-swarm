@@ -2749,11 +2749,12 @@ def _with_badges(name, run, document, badge_map):
 
 def _published_page_restamps(run, remote, fetch, badge_map=None):
     """{name: new bytes} of one run's published pages restamped host-side (no local file read): RUN/results.html
-    (build_results.restamp_page; plus simple_judge_site.add_simple_judge_tab with the published simplified
+    (build_results.restamp_page and the run intro of run_profile.add_intro; plus simple_judge_site.add_simple_judge_tab with the published simplified
     judge report.json when there is one) and every HTML page of the published rubric-3.1 judge under
     RUN/analysis/judge/ (research.analysis.judge.review.restamp_judge_page). Only pages whose bytes change are
     returned. The run start comes from the published RUN/results.json."""
     import build_results
+    import run_profile
     root = str(Path(__file__).resolve().parents[1])
     if root not in sys.path:
         sys.path.insert(0, root)
@@ -2766,6 +2767,11 @@ def _published_page_restamps(run, remote, fetch, badge_map=None):
     page_name = f'{run}/results.html'
     old = fetch(page_name)
     page = build_results.restamp_page(old.decode('utf-8'), start)
+    # The newcomer intro above the summary tiles (owner request, October 27, 2026; scripts/run_profile.py), from the
+    # published results.json and settings.json (the overseers' model and unread notices).
+    settings_name = f'{run}/settings.json'
+    page = run_profile.add_intro(page, json.loads(fetch(f'{run}/results.json')),
+                                 json.loads(fetch(settings_name)) if settings_name in remote else None)
     report_name = f'{run}/{SIMPLE_JUDGE_REPORT_JSON}'
     if report_name in remote:
         page = add_simple_judge_tab(page, json.loads(fetch(report_name)))
