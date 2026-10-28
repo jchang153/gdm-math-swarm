@@ -21,13 +21,28 @@ current enough for a new agent to continue without asking.
   run ids. Say what a half-finished job still needs and how to resume it.
 - **Keep it short and factual.** Replace stale text; don't append a diary. Use
   absolute dates (for example 2026-10-21), never "today" or "yesterday".
-- **The repo is private.** If it is ever made public, the owner wants the cloud
-  provider, project and host names removed first; warn them. Never put credential
+- **The repo is public (since 2026-10-28).** Never commit cloud project, zone,
+  host or dataset names, home paths or researcher-only material. Never put credential
   values, account emails or budget figures here: those go in the git-ignored
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-27 by Claude (Opus 5.5) operator subagent (item 11: nine unread-notices runs done, HF published).
+Last updated: 2026-10-28 by Claude (Opus 5.5) operator subagent (history rewrite and public release; local clones switched).
+
+## History rewrite and public release (2026-10-28)
+
+- The Git history was rewritten and the GitHub repository deleted and recreated on
+  2026-10-28 for public release. Old clones and old commit IDs are obsolete; clone afresh.
+- Researcher-only files (problem notes, rubrics, judge prompts, seeds, exploit fixtures,
+  VM setup records) were removed from history. They live in the Git-ignored `private/`
+  folder under their original repository paths and must be copied to a VM before a run.
+- Infrastructure settings are environment variables (`GDM_GCP_PROJECT`, `GDM_GCP_ZONE`,
+  `GCLOUD`, `GDM_LOGS_DATASET`); their values are in the Git-ignored `HANDOFF.local.md`.
+  Export them before VM commands, the live mirror and publication scripts.
+- Run records written before the rewrite cite old commit IDs; `private/commit-map.txt`
+  maps each old ID to its new one.
+- Amelie's branches were deleted on GitHub; they are kept in the owner's local backup
+  (`rewritten.git`).
 
 ## What the project is
 
