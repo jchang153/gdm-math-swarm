@@ -30,6 +30,7 @@ from research.analysis.judge.client import (NOT_RECORDED, FakeTransport, JudgeCl
                                             fake_completion, reconcile_archived_holds, unreported_response)
 from research.analysis.judge.route import FALLBACK_KEY, OBSERVED_FALLBACK, JudgeRouteSettings  # noqa: E402
 from research.analysis.tests.test_incident_report import LONG, Fixture  # noqa: E402
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 TOS = ("This request was blocked as it seems to violate Anthropic's Terms of Service restrictions on reverse "
        "engineering or duplicating model outputs.")
@@ -160,6 +161,7 @@ class StartupPassTests(unittest.TestCase):
 
 
 class ModelFallbackTests(unittest.TestCase):
+    @needs_private("research/analysis/judge/prompts.py")
     def test_refused_extraction_goes_to_the_fallback_model_once(self):
         with tempfile.TemporaryDirectory() as root:
             fx = Fixture(root)

@@ -29,6 +29,7 @@ REPO = ANALYSIS.parents[1]
 sys.path[:0] = [str(ANALYSIS), str(REPO / "src")]
 
 import timeline  # noqa: E402
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 try:
     from research_swarm.conference import ConferenceService, ConferenceTask
@@ -667,11 +668,13 @@ class CompactionTimelineTests(unittest.TestCase):
 
 
 class RubricFreezeTests(unittest.TestCase):
+    @needs_private("research/analysis/rubric.md")
     def test_rubric_hash_matches_footer(self):
         recorded, actual = timeline.rubric_hash()
         self.assertIsNotNone(actual)
         self.assertEqual(recorded, actual, "rubric.md changed after freezing; append a dated amendment instead")
 
+    @needs_private("research/analysis/rubric.md")
     def test_rubric_names_every_label(self):
         text = timeline.RUBRIC_PATH.read_text(encoding="utf-8")
         for label in timeline.RUBRIC_LABELS:

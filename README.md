@@ -38,7 +38,7 @@ the authoritative record of user decisions.
   reuse, conference race, and all 22 evaluator fixtures plus 22 self-comparisons passed.
   Real runtime, strict isolation and the ten-minute 20-agent capacity test passed at
   the approved `2g` per-agent memory cap, with zero memory kills. The initial `1g`
-  failure and all corrections remain in the [setup record](docs/vm-setup-2026-10-14.md).
+  failure and all corrections remain in the setup record (`private/docs/vm-setup-2026-10-14.md`, host-only).
   The VM is stopped and confirmed `TERMINATED`. Paid compatibility checks and pilot
   launches now need no approval step: each run's own budget (`run_budget_usd`, $100 by
   default, printed at launch) is the one spending control.
@@ -150,7 +150,7 @@ PYTHONPATH=src .venv/bin/python research/analysis/timeline.py --run-dir RUN
 * Do not read, print, copy, mount or commit credential values. Inspect only presence and
   permissions.
 * Never put exploit fixtures, reference solutions, researcher reports, rubrics, evaluator
-  output or anything under `research/`, `docs/`, `tests/`, `runs/`, `state/` or
+  output or anything under `private/`, `research/`, `docs/`, `tests/`, `runs/`, `state/` or
   `data/validation/` into an agent image, container, prompt, tool result or the conference
   library. Agents receive only the 14 sanitized templates.
 * Task identities are frozen. Do not edit `data/manifest.json`, `data/pilot_subset.json`
@@ -161,12 +161,31 @@ PYTHONPATH=src .venv/bin/python research/analysis/timeline.py --run-dir RUN
   is a disabled template and the launch gates refuse any seeded configuration. Population,
   limit, resource and inference-concurrency changes need a recorded user decision.
 
+## Private material
+
+Researcher-only files are not in this repository. They live host-only in the Git-ignored
+`private/` directory at the repository root, under their original repository paths:
+`private/docs/` (problem notes, GCP and VM setup records), `private/research/analysis/`
+(the frozen analysis rubric, the behavior-judge rubrics and the judge, simplified-judge and
+incident-report prompts, the judge statement-defect table), `private/research/seeds/` (seeded-run artifacts),
+`private/research/fixtures/` (evaluator and judge exploit fixtures and genuine proofs) and
+`private/research/effective-instructions/` (captured agent instructions).
+`research/fixtures/evaluator/submissions` is a symlink into `private/`.
+`research/analysis/private_material.py` resolves these paths; without `private/` the code
+still imports, the judges and validation scripts that need the files stop with a message
+naming the missing file, and the tests that need them are skipped. Copy `private/` to every
+host that runs experiments, judging or validation (VM checkouts included); never into an
+agent image, container, workspace or the conference library. Infrastructure details
+(cloud project, VM names, logs dataset, accounts) are in the Git-ignored `HANDOFF.local.md`
+and in the environment variables `GDM_GCP_PROJECT`, `GDM_GCP_ZONE`, `GCLOUD` and
+`GDM_LOGS_DATASET`.
+
 ## Documentation
 
 | Document | Contents |
 | --- | --- |
 | [docs/plan.md](docs/plan.md) | Decisions, scope and constraints (authoritative) |
-| [docs/gcp-vm.md](docs/gcp-vm.md) | GCP setup, SSH, transfers, credentials handling, and required shutdown after use |
+| `private/docs/gcp-vm.md` (host-only) | GCP setup, SSH, transfers, credentials handling, and required shutdown after use |
 | [docs/interfaces.md](docs/interfaces.md) | Module contracts, file ownership, evidence files, images, container layout, logs |
 | [docs/validation.md](docs/validation.md) | Ordered Phase B runbook from a fresh VM through the paid launch; capacity guidance |
 | [docs/review-2026-10-13.md](docs/review-2026-10-13.md) | Independent review record: every finding, verdict and fix; remaining VM work (researcher-only) |
@@ -175,6 +194,6 @@ PYTHONPATH=src .venv/bin/python research/analysis/timeline.py --run-dir RUN
 | [docs/evaluator.md](docs/evaluator.md) | Independent evaluator: sandbox, verdicts, answers, validation |
 | [docs/dataset.md](docs/dataset.md) | Dataset reconstruction, frozen identities, deviations |
 | [docs/prompts.md](docs/prompts.md) | Prompt and tool provenance, reconstructed wording, deviations |
-| [docs/problems.md](docs/problems.md) | The 14 pilot problems with references and known status (researcher-only) |
+| `private/docs/problems.md` (host-only) | The 14 pilot problems with references and known status (researcher-only) |
 | [configs/README.md](configs/README.md) | Every key of `configs/pilot.json` (and the seeded template), the compatibility and key-limit gates |
 | [research/analysis/README.md](research/analysis/README.md) | Post-run analysis procedure, rubric and fidelity ledger (researcher-only) |

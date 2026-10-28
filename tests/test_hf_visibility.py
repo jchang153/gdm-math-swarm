@@ -22,7 +22,7 @@ def code(path):
 class RecordTests(unittest.TestCase):
     def test_space_public_dataset_private(self):
         self.assertFalse(hf_visibility.expected_private('gdm-math-swarm/gdm-math-swarm-experiments', 'space'))
-        self.assertTrue(hf_visibility.expected_private('HF-ORG/LOGS-DATASET', 'dataset'))
+        self.assertTrue(hf_visibility.expected_private(hf_visibility.DATASET_REPO, 'dataset'))
         self.assertIn('2026-10-24', hf_visibility.EXPECTED[('space', hf_visibility.SPACE_REPO)][1])
         self.assertTrue(hf_visibility.expected_private('anyone/unrecorded', 'space'))  # fail closed
 

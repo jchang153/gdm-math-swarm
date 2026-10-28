@@ -21,6 +21,8 @@ import dataset_logs  # noqa: E402
 import maintain_hf_run  # noqa: E402
 from maintain_hf_run import maintain_simple_judge  # noqa: E402
 from publish_hf_library import digest, load_bundle, publish  # noqa: E402
+from research.analysis.private_material import skip_unless_available  # noqa: E402
+skip_unless_available("research/analysis/simple_judge/prompts.py")
 from research.analysis.simple_judge.pipeline import write_outputs  # noqa: E402
 import simple_judge_site as site  # noqa: E402
 from test_hf_maintenance import RULE, Hub, blob, operation  # noqa: E402

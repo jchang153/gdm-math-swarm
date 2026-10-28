@@ -18,6 +18,8 @@ for path in (str(REPO), str(REPO / "src"), str(Path(__file__).resolve().parent),
     if path not in sys.path:
         sys.path.insert(0, path)
 
+from research.analysis.private_material import skip_unless_available  # noqa: E402
+skip_unless_available("research/analysis/judge/prompts.py")
 from research.analysis.judge.route import JudgeRouteSettings  # noqa: E402
 import test_judge_estimate  # noqa: E402
 

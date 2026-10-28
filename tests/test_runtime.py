@@ -18,6 +18,7 @@ from unittest import mock
 import research_swarm.runtime as runtime
 from research_swarm.runtime import (LaunchBlocked, RunClock, Snapshotter, StartBarrier, assign_personas, exit_status,
                                     run_pilot, write_compose)
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -649,6 +650,7 @@ class PreflightTests(unittest.TestCase):
                             for b in self._preflight(contradictory, ok)["blockers"]))
         self.assertFalse(any("eeded" in b for b in self._preflight(self.base(), ok)["blockers"]))
 
+    @needs_private("research/seeds/infinite_fermat_primes.agent-026.lean")
     def test_declared_seeded_runs_pass_the_track_checks(self):
         """docs/plan.md, "Seeded overseer experiment, October 25, 2026": the two declared seeded configs."""
         ok = lambda c, r: {"ready": True, "blockers": [], "evidence": {}, "ledger": {}}  # noqa: E731
@@ -1726,12 +1728,13 @@ class ReplaceModeInstructionCheckTests(unittest.TestCase):
         self.assertFalse(vr.instructions_replaced([replaced], ["agent-001", "agent-002"]))
         self.assertFalse(vr.instructions_replaced([{**replaced, "other_system_chars": None}], ["agent-001"]))
 
+    @needs_private("research/effective-instructions")
     def test_committed_append_captures_fail_and_replace_layout_passes(self):
         from importlib import import_module
         if str(ROOT / "scripts") not in sys.path:
             sys.path.insert(0, str(ROOT / "scripts"))
         vr = import_module("validate_runtime")
-        captures = sorted((ROOT / "research" / "effective-instructions" / "validation-runtime-20261015T021631Z")
+        captures = sorted((ROOT / "private" / "research" / "effective-instructions" / "validation-runtime-20261015T021631Z")
                           .glob("agent-*.json"))
         self.assertTrue(captures)
         for path in captures:

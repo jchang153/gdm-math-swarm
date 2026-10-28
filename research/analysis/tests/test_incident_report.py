@@ -34,6 +34,7 @@ from research.analysis.incident.pipeline import IncidentPipeline, StageError, lo
 from research.analysis.judge.client import FakeTransport, JudgeClient, RunLimit  # noqa: E402
 from research.analysis.judge.history import AgentHistory, ConferenceRecords, RunHistory, make_item  # noqa: E402
 from research.analysis.judge.route import JudgeRouteSettings  # noqa: E402
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 RUN_ID = "synthetic-20261021T000000Z"
 LOG = "inspect/2026-10-21T00-00-00-00-00_gdm-math-swarm_abc.eval"
@@ -187,6 +188,7 @@ class DigestTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_digest_facts_and_text(self):
         digest = dg.build_digest(self.fx.run_dir, self.fx.run)
         self.assertTrue(digest["judge"]["available"])
@@ -225,6 +227,7 @@ class PipelineTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_end_to_end_with_repair_and_cache(self):
         fx = Fixture(self.tmp.name, fabricate=True)
         summary = fx.go()
@@ -274,6 +277,7 @@ class PipelineTests(unittest.TestCase):
         fx.go()
         self.assertEqual(len(fx.transport.requests), sent)
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_unverified_quote_is_marked_without_repair(self):
         fx = Fixture(self.tmp.name, fabricate=True, repair=False)
         fx.go()
@@ -283,6 +287,7 @@ class PipelineTests(unittest.TestCase):
         self.assertIn('class="unverified-mark"', (fx.out / "report.html").read_text())
         self.assertIn("unknown excerpt id E999", evidence["verification"]["attempts"][0]["problems"])
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_run_limit_stops_cleanly(self):
         fx = Fixture(self.tmp.name, limit="0.000001")
         with self.assertRaises(StageError) as caught:
@@ -293,6 +298,7 @@ class PipelineTests(unittest.TestCase):
 
 
 class ExtractionFallbackTests(unittest.TestCase):
+    @needs_private("research/analysis/judge/prompts.py")
     def test_refused_extraction_splits_then_falls_back_to_host_excerpt(self):
         from research.analysis.judge.client import fake_completion
         with tempfile.TemporaryDirectory() as root:
@@ -369,6 +375,7 @@ class CritiqueFixTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_encrypted_chain_of_thought_is_reported_and_labelled(self):
         digest = dg.build_digest(self.fx.run_dir, self.fx.run)
         self.assertEqual(digest["agents"]["agent-003"]["reasoning"],
@@ -384,6 +391,7 @@ class CritiqueFixTests(unittest.TestCase):
         self.assertEqual(locator.locate("A03.t0001.r")["label"], dg.REASONING_ENCRYPTED_LABEL)
         self.assertEqual(locator.locate("A01.t0002.x")["label"], "Agent message (assistant text)")
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_submission_template_text_is_labelled(self):
         locator = dg.Locator(self.fx.run, self.fx.run_dir)
         self.assertEqual(locator.excerpt_label("sub-000001", "theorem example_fact : 2 = 2 := by\n  decide +native"),
@@ -416,6 +424,7 @@ class CritiqueFixTests(unittest.TestCase):
         self.assertEqual(len(segments("a\n\nb")), 2)
         self.assertIsNone(segment_span("a\nb", 5, 6))
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_report_flags_fallbacks_and_has_awareness_section(self):
         from research.analysis.judge.client import fake_completion
 
@@ -446,6 +455,7 @@ class CritiqueFixTests(unittest.TestCase):
         self.fx.go()
         self.assertEqual(len(self.fx.transport.requests), sent)
 
+    @needs_private("research/analysis/incident/prompts.py")
     def test_writer_evidence_lists_times_and_labels(self):
         from research.analysis.incident import prompts
         locator = dg.Locator(self.fx.run, self.fx.run_dir)

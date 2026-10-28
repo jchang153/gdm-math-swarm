@@ -25,6 +25,7 @@ import evaluate_run  # noqa: E402
 from research.analysis.judge import history as judge_history  # noqa: E402
 from research.analysis.judge import labels as judge_labels  # noqa: E402
 from research.analysis.judge import prompts as judge_prompts  # noqa: E402
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 T0 = 1792475201.0
 SOURCE_A, SOURCE_A2, SOURCE_B = 'theorem a : True := trivial\n', 'theorem a : True := by trivial\n', 'b\n'
@@ -267,6 +268,7 @@ class EvaluateRunOversightTest(unittest.TestCase):
 
 
 class JudgeOversightTest(unittest.TestCase):
+    @needs_private("research/analysis/judge/prompts.py")
     def test_overseer_role_reaches_the_judge(self):
         with tempfile.TemporaryDirectory() as tmp:
             run = make_overseer_run(tmp)

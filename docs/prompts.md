@@ -507,7 +507,7 @@ instructions change. Every pilot run archives its own copy.
 
 1. Copy the archive of the passing `runtime-e2e` run into the researcher-only record:
    `cp -R runs/validation-runtime-<UTC>/instructions
-   research/effective-instructions/runtime-e2e-<UTC>`. `research/` is never in a build
+   private/research/effective-instructions/runtime-e2e-<UTC>`. `research/` is never in a build
    context, a container or a tool result; `runs/` is git-ignored and may be cleaned.
 2. Check the capture before using it. Each file holds `system_blocks` (the system
    blocks in the order sent), `tools` and `tool_definitions`. The conference prompt
@@ -528,7 +528,7 @@ instructions change. Every pilot run archives its own copy.
    in long excerpts, into anything an agent can reach: `prompts.py`, `tools.py`, task
    templates, the agent image, workspaces, conference messages or the library. Quote
    short headings only in researcher-only files, such as this page or `research/`.
-   The full text stays in `research/effective-instructions/`.
+   The full text stays in `private/research/effective-instructions/`.
 5. After each pilot, compare `RUN/instructions/` with this capture by block hash.
    Record any difference here and in the run report. The fidelity ledger's
    effective-instructions row is updated by its owner to point at the capture.
@@ -536,7 +536,7 @@ instructions change. Every pilot run archives its own copy.
 A short listing helper (researcher-side; prints structure only):
 
 ```sh
-.venv/bin/python - research/effective-instructions/runtime-e2e-<UTC>/<agent>-<sha16>.json <<'EOF'
+.venv/bin/python - private/research/effective-instructions/runtime-e2e-<UTC>/<agent>-<sha16>.json <<'EOF'
 import hashlib, json, re, sys
 data = json.load(open(sys.argv[1]))
 for i, block in enumerate(data["system_blocks"]):

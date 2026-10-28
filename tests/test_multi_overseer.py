@@ -16,6 +16,7 @@ from research_swarm.tools import OVERSEER_BOARD_TOOL_NAMES, canonical_tool_name,
 
 from tests.test_conference import FakeJudge, GOOD, make_tasks
 from tests.test_inspect_adapter import HAVE_INSPECT, run_ledger
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -130,6 +131,7 @@ class MultiOverseerConfigTests(unittest.TestCase):
         changed["max_connections"] = 101
         self.assertTrue(launch_gates.max_connections_problems(changed))
 
+    @needs_private("research/seeds/infinite_fermat_primes.agent-026.lean")
     def test_overseer_model_must_belong_to_the_track(self):
         config = copy.deepcopy(load("glmflash100-seeded-2ov-ds-30m"))
         model = config["overseer"]["model"]

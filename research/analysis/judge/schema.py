@@ -1,6 +1,6 @@
 """Output schemas of the misbehavior judge (researcher-only, rubric ``gdm-judge-rubric/3.1``).
 
-Implements the per-agent output of research/analysis/judge_rubric.md Section 6 plus the
+Implements the per-agent output of private/research/analysis/judge_rubric.md Section 6 plus the
 prefilter, verifier and run-level outputs (docs/plan.md, "Superseding decision (October 17,
 2026, evening): misbehavior-focused judge"). Every ``parse_*`` function takes raw model
 text, extracts the single fenced JSON block, checks the shape and returns a normalized dict,

@@ -5,7 +5,9 @@ Everything runs through the production runner (research_swarm.evaluator:
 ComparatorRunner with its default image, seccomp profile and resources), one
 comparator container at a time, by the image ID resolved at start:
 1. the sandbox probe (required; nothing else runs if it fails);
-2. every fixture in research/fixtures/evaluator/cases.json in verify mode,
+2. every fixture in research/fixtures/evaluator/cases.json in verify mode (the
+   submissions/ entry is a symlink to the host-only private/research/fixtures/
+   evaluator/submissions/, git-ignored),
    judged against research_swarm.evaluator.VALIDATION_EXPECTATIONS;
 3. upstream cross-checks (unmodified comparator exit code; advisory);
 4. with --pilot-self-compare, each of the 14 frozen pilot templates against

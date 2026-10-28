@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 from research_swarm import evaluator as ev
 from research_swarm.evaluator import SemanticCheck
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 GREEN = 'Green32_hasCosetHole_empty'
@@ -49,6 +50,7 @@ class FakeBackend:
         return {'backend': 'fake'}
 
 
+@needs_private("research/fixtures/evaluator/submissions")
 class ClosedSubmissionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

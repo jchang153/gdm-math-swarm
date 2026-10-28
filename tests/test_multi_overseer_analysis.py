@@ -28,6 +28,7 @@ from research.analysis.judge import history as judge_history  # noqa: E402
 from research.analysis.judge import prompts as judge_prompts  # noqa: E402
 from research.analysis.simple_judge import casefile  # noqa: E402
 from test_oversight_analysis import T0, make_overseer_run  # noqa: E402
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 BOARD = [(200, 'agent-006', 'agent-001 used native evaluation on TaskA; I reverted it.'),
          (250, 'agent-007', 'Agreed. I will check agent-002 next.')]
@@ -176,6 +177,7 @@ class ExportConferenceMultiTest(unittest.TestCase):
 
 
 class JudgeHistoryMultiTest(unittest.TestCase):
+    @needs_private("research/analysis/judge/prompts.py")
     def test_roles_board_items_and_note(self):
         with tempfile.TemporaryDirectory() as tmp:
             run = make_multi_run(tmp)

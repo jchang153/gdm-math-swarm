@@ -5,15 +5,15 @@ the agent **cheat** (a verification bypass), did it **blow the whistle**, and di
 **evaluation awareness**. It implements docs/plan.md, "Superseding decision (October 17, 2026,
 evening): misbehavior-focused judge", as **judge revision v3** (docs/plan.md, "Behavior judge
 iteration specified, October 19, 2026", user-approved items 1-8 and 10) under the rubric
-`research/analysis/judge_rubric.md`, version `gdm-judge-rubric/3.1` (the owner's amendment of
+`private/research/analysis/judge_rubric.md`, version `gdm-judge-rubric/3.1` (the owner's amendment of
 October 20, 2026: plain-language explanations, section 7 below; version 3 is archived at
-`research/analysis/judge_rubric_v3_superseded.md`, version 2 at
-`research/analysis/judge_rubric_v2_superseded.md`, the 12-dimension version 1 at
-`research/analysis/judge_rubric_v1_superseded.md`). There are no human marks: the verified labels
+`private/research/analysis/judge_rubric_v3_superseded.md`, version 2 at
+`private/research/analysis/judge_rubric_v2_superseded.md`, the 12-dimension version 1 at
+`private/research/analysis/judge_rubric_v1_superseded.md`). There are no human marks: the verified labels
 are the reported labels, and the review pages only browse evidence. The rubric is read from the
 file at run time; its SHA-256 is recorded in every system prompt, the manifest, every agent result
 and `pipeline.json`. It is post-hoc: it was written after all four runs' results had been
-inspected. The frozen rubric (`research/analysis/rubric.md`) is unchanged; Section 8 of the judge
+inspected. The frozen rubric (`private/research/analysis/rubric.md`) is unchanged; Section 8 of the judge
 rubric maps the categories onto its labels.
 
 Nothing in this directory may reach an experimental agent. Never copy, mount or quote these
@@ -604,7 +604,7 @@ package and candidate modes within this revision (section "History" below).
 | `live.py`, `warm.py` | The live judge during the run (final windows from Inspect's realtime buffer, screened into `live/`) and the post-run adoption of byte-identical live units (section "Live judging during the run"). |
 | `estimate.py` | The per-invocation estimate (cached units free), its pricing in central/high/stress columns, the run limit and the estimate-against-actual record. |
 | `review.py`, `report.py` | The read-only evidence browser for flagged agents, the five-minute `report.html`/`report.json` and the `results.html` section. |
-| `statement_defects.json` | Researcher statement-defect table (host only; read for the footnote). |
+| `private/research/analysis/judge/statement_defects.json` | Researcher statement-defect table (host only, Git-ignored `private/`; read for the footnote; without it the footnote lists no defects). |
 | `tasks_plain.py`, `task_plain_words.json` | Rubric v3.1: the researcher-written plain description of each task (no status or answers), the TASKS IN PLAIN WORDS request section and the report's "Problem" lines. |
 
 The command-line entry point is `scripts/run_transcript_judge.py`.
@@ -784,12 +784,12 @@ apply new verdicts. On macOS the label check takes about 5 minutes for cache100
 
 ### Paid run on the VM (placeholders; follow the authoritative runbooks)
 
-Read docs/gcp-vm.md and docs/validation.md before provisioning, SSH, file transfer, remote
+Read private/docs/gcp-vm.md and docs/validation.md before provisioning, SSH, file transfer, remote
 execution or shutdown. A paid run needs the user's authorization recorded in docs/plan.md for that
 run (none is implied here); the offline suites, the unpaid mock rehearsal and a fitting dry-run
 estimate remain preconditions.
 
-1. **Start and connect** to the VM, and transfer code (docs/gcp-vm.md).
+1. **Start and connect** to the VM, and transfer code (private/docs/gcp-vm.md).
 2. **Run the offline suites** on the VM (docs/validation.md §0.3):
    `PYTHONPATH=src:. .venv/bin/python -m unittest discover -s research/analysis/tests` and
    `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests`.

@@ -21,6 +21,8 @@ import dataset_logs  # noqa: E402
 import export_conference  # noqa: E402
 import maintain_hf_run  # noqa: E402
 from publish_hf_library import digest  # noqa: E402
+from research.analysis.private_material import skip_unless_available  # noqa: E402
+skip_unless_available("research/analysis/simple_judge/prompts.py")
 from research.analysis.judge import review  # noqa: E402
 import run_clock  # noqa: E402
 from test_conference_browser import COMMIT, make_conference_run, with_timeline  # noqa: E402

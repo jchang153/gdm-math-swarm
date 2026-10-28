@@ -54,6 +54,8 @@ for path in (str(REPO), str(REPO / "src"), str(TESTS), str(REPO / "scripts")):
 from research_swarm.inspect_adapter import disable_inspect_dotenv  # noqa: E402
 
 disable_inspect_dotenv()
+from research.analysis.private_material import skip_unless_available  # noqa: E402
+skip_unless_available("research/analysis/judge/prompts.py")
 from research.analysis.judge import history, live  # noqa: E402
 from research.analysis.judge import pipeline as pl  # noqa: E402
 from research.analysis.judge.client import (JudgeClient, RunLimit, committed_for_judging,  # noqa: E402

@@ -7,13 +7,13 @@ runs/validation-conference-<UTC>/ (researcher-side, git-ignored, never mounted
 into an agent container and never reused as a pilot run), and checks:
 
 1. N simultaneous submissions of a genuine Green32 proof (fixture
-   research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean spliced into the
+   private/research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean spliced into the
    frozen template's proof region): exactly one ``accepted``; every other one
    ``accepted_after_close`` (or ``problem_closed``) and credited to the winner.
 2. A later submission is ``problem_closed`` and is not judged.
 3. Library publication with author, time and complete source; credit display in
    list_problems and get_conference_status.
-4. A statement-changing fixture from research/fixtures/evaluator (default: a
+4. A statement-changing fixture from private/research/fixtures/evaluator (default: a
    preamble notation override) whose conference outcome mirrors the operational
    judge's own verdict (the weak judge may accept it; that is a documented
    baseline weakness, not a failure of this check).
@@ -80,13 +80,13 @@ DEFAULT_LEAN_IMAGE = "gdm-math-swarm-lean:local"
 LIMIT_KEYS = {"timeout_seconds": ("compilation_timeout_seconds", 120), "memory": ("judge_memory", "2g"),
               "cpus": ("judge_cpus", 1)}
 GENUINE_TASK = "Green32_hasCosetHole_empty"
-GENUINE_FIXTURE = ROOT / "research" / "fixtures" / "judge" / "Green32_hasCosetHole_empty.proof.lean"
+GENUINE_FIXTURE = ROOT / "private" / "research" / "fixtures" / "judge" / "Green32_hasCosetHole_empty.proof.lean"
 STATEMENT_FIXTURES = {  # researcher-only fixture -> frozen pilot task it targets
     "eulerbrick_notation_override.lean": "EulerBrick_cuboidThree",
     "erdos195_instance_override.lean": "Erdos195_erdos_195_variants_leq_5_bound",
     "erdos6_shadow_definition.lean": "Erdos6_erdos_6_variants_decreasing",
 }
-STATEMENT_DIR = ROOT / "research" / "fixtures" / "evaluator" / "submissions"
+STATEMENT_DIR = ROOT / "private" / "research" / "fixtures" / "evaluator" / "submissions"
 PLACEHOLDER = '  fail "Provide a complete proof."'
 # Strings that would indicate evaluator output in an agent-visible result.
 EVALUATOR_MARKERS = ("validity", "unresolved", "fraudulent", "evaluations.jsonl", "queue.jsonl")

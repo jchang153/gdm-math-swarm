@@ -2,7 +2,7 @@
 
 ``validate_agent_verdict_v2(verdict, agent_history, exposure_ledger)`` checks a verdict
 already normalized by ``schema.parse_judge_v2`` against the agent's own record
-(research/analysis/judge_rubric.md Sections 2-6). It returns ``(ok, problems)``; each
+(private/research/analysis/judge_rubric.md Sections 2-6). It returns ``(ok, problems)``; each
 problem names the finding (``finding F2: ...``) or the category field (``cheating.level:
 ...``) and says what to change, so the list can be sent back verbatim in the single repair
 attempt; ``problem_finding_ids`` returns the findings named, for the salvage step that drops

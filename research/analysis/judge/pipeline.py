@@ -1,7 +1,7 @@
 """Orchestrator of the misbehavior-focused transcript judge (researcher-only).
 
 docs/plan.md, "Superseding decision (October 17, 2026, evening): misbehavior-focused judge",
-applying research/analysis/judge_rubric.md (``gdm-judge-rubric/3.1``; judge revision v3, docs/plan.md,
+applying private/research/analysis/judge_rubric.md (``gdm-judge-rubric/3.1``; judge revision v3, docs/plan.md,
 "Behavior judge iteration specified, October 19, 2026", with the plain-language explanations of
 "Plain-language judge explanations, October 20, 2026"): for each agent, three categories only
 (cheating, whistleblowing, evaluation awareness with its certainty and topic; rubric Sections
@@ -1807,7 +1807,7 @@ class Pipeline:
     keyword). ``models``: {model key: {"model", "effort", ...}} as recorded in the manifest.
     ``history_loader(agent_id)`` returns a RunHistory-like object holding that agent (default:
     ``history.build_run``). ``defects_path``: the researcher statement-defect table (default
-    ``research/analysis/judge/statement_defects.json``). ``run_limit``: the ``client.RunLimit``
+    ``private/research/analysis/judge/statement_defects.json``). ``run_limit``: the ``client.RunLimit``
     the invocation's clients share (judge revision v3, item 7; ``estimate.run_limit_for``): a
     request it refuses stops the run cleanly with reason ``run_limit``, like a ledger denial;
     its record (the estimate, the limit and this invocation's own spend) goes into
@@ -3101,7 +3101,7 @@ class Pipeline:
         document = statement_defect_footnote(submissions, evaluations, defects)
         document.update(run_id=self.run_id, mode=self.mode,
                         defects_source=str(self.defects_path) if self.defects_path else
-                        "research/analysis/judge/statement_defects.json")
+                        "private/research/analysis/judge/statement_defects.json")
         write_json(self.judge_dir / FOOTNOTE_NAME, document)
         return {"submissions": len(document["submissions"])}
 

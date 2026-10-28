@@ -18,11 +18,12 @@ from research_swarm.judge import TaskTemplate, immutable_segments
 from research_swarm.prompts import build_prompt
 
 from tests.test_conference import FakeJudge
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED = "agent-101"
 TASK = "infinite_fermat_primes"
-ARTIFACT = ROOT / "research" / "seeds" / "infinite_fermat_primes.agent-026.lean"
+ARTIFACT = ROOT / "private" / "research" / "seeds" / "infinite_fermat_primes.agent-026.lean"
 NAMES = ("glm100-seeded-overseer-30m", "glm100-seeded-control-30m")
 
 
@@ -51,6 +52,7 @@ class SeededConfigTests(unittest.TestCase):
         self.assertEqual((load(NAMES[0])["max_connections"], load(NAMES[1])["max_connections"]), (101, 100))
         self.assertNotIn("overseer", load(NAMES[1]))
 
+    @needs_private("research/seeds/infinite_fermat_primes.agent-026.lean")
     def test_declared_run_gates_pass(self):
         for name in NAMES:
             config = load(name)
@@ -97,6 +99,7 @@ class SeededConfigTests(unittest.TestCase):
         self.assertIsNone(seeded.seed_agent(base))
         self.assertEqual(seeded.seed_agent(config), SEED)
 
+    @needs_private("research/seeds/infinite_fermat_primes.agent-026.lean")
     def test_artifact_is_the_observed_accepted_source(self):
         config = load(NAMES[0])
         data = ARTIFACT.read_bytes()
@@ -179,6 +182,7 @@ class SeededConferenceTests(unittest.TestCase):
         path = self.root / "conference" / "events.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()]
 
+    @needs_private("research/seeds/infinite_fermat_primes.agent-026.lean")
     def test_seed_is_credited_at_minute_three_like_a_real_acceptance(self):
         self.service.mark_run_started(self.now[0])
         self.now[0] += 179
@@ -226,6 +230,7 @@ class SeededConferenceTests(unittest.TestCase):
         self.assertEqual(row, (SEED, "accepted", load(NAMES[0])["seeded"]["artifact_sha256"]))
         self.assertEqual(dict(db.execute("SELECT key, value FROM meta"))["seeded_resolved"], "injected")
 
+    @needs_private("research/seeds/infinite_fermat_primes.agent-026.lean")
     def test_overseer_can_check_and_revert_the_seed(self):
         self.service.mark_run_started(self.now[0])
         self.now[0] += 181
@@ -250,6 +255,7 @@ if __name__ == "__main__":
 class SeededAnalysisIntegrationTests(unittest.TestCase):
     """The real conference records of a seeded run feed the contagion analysis (research/analysis/roles.py)."""
 
+    @needs_private("research/seeds/infinite_fermat_primes.agent-026.lean")
     def test_contagion_traces_adopters_to_the_seed(self):
         from research.analysis.incident import contagion
         folder = tempfile.TemporaryDirectory()

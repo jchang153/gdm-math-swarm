@@ -52,7 +52,7 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
 | `AGENTS.md` | Hard rules: credentials, budgets, VM shutdown, never expose researcher material to agents |
 | `docs/plan.md` | All owner decisions, with dates |
 | `HANDOFF.local.md` (git-ignored, owner's machine only) | Account email, budget status |
-| "Hosts and access" and "Operating a VM" below, plus `docs/gcp-vm.md` | VM access and step-by-step operation |
+| "Hosts and access" and "Operating a VM" below, plus `private/docs/gcp-vm.md` | VM access and step-by-step operation |
 | `docs/validation.md` | The run procedure; read before touching a VM |
 | `docs/experiment-library.md` | HF Space publishing rules and the guarded update scopes |
 | `docs/prompts.md`, `src/research_swarm/prompts.py` | Prompt variants |
@@ -127,31 +127,33 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
 
 ## Hosts and access
 
-- **Compute:** Google Cloud, project `GCP-PROJECT`, zone `us-central1-a`.
-  - Owner's VMs: `owner-vm`, `owner-vm-2`, `-3`, `-4`.
-  - Don't touch `collab-vm-1` or any other collaborator VM.
-  - Repo on each VM: `~/gdm-math-swarm`, with its own `.venv` and the host-only `.env`
-    holding the owner's OpenRouter key. Never read or print it.
-- **gcloud on the owner's Mac:** `/Users/owner/.local/share/gdm-vm-tools/google-cloud-sdk/bin/gcloud`.
-  - Set `CLOUDSDK_PYTHON=/Users/owner/Documents/GitHub/gdm-math-swarm/.venv/bin/python`.
-  - Always pass `--project GCP-PROJECT --zone us-central1-a --tunnel-through-iap`.
-    There is no public IP; SSH goes through IAP.
+Infrastructure details (cloud project and zone, VM and snapshot names, the gcloud path and
+login account, the private logs dataset, budget and credit status) are host-only: see the
+Git-ignored `HANDOFF.local.md` in the owner's working clone. Researcher-only material
+(problem notes, rubrics, judge prompts, seeds, exploit fixtures, VM setup records) lives in
+the Git-ignored `private/` directory under its original repository paths (README.md,
+"Private material").
+
+- Repo on each VM: `~/gdm-math-swarm`, with its own `.venv`, the host-only `.env` holding
+  the owner's OpenRouter key (never read or print it) and a copy of `private/`.
+- SSH goes through IAP; the VMs have no public IP.
 - **HF Space (public since 2026-10-24):** https://huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments
 
 ## Operating a VM
 
 Steps 2–8 are what the launch agents did for the 2026-10-21 runs. If the gcloud login has expired, the owner must re-run `gcloud auth login` (it opens a browser; the account is in `HANDOFF.local.md`).
+The values of `GCLOUD`, `GDM_GCP_PROJECT`, `GDM_GCP_ZONE` and the VM names are in `HANDOFF.local.md`.
 
 ```bash
-G=/Users/owner/.local/share/gdm-vm-tools/google-cloud-sdk/bin/gcloud
-F="--project GCP-PROJECT --zone us-central1-a --tunnel-through-iap"
-VM=owner-vm-2
+G=$GCLOUD
+F="--project $GDM_GCP_PROJECT --zone $GDM_GCP_ZONE --tunnel-through-iap"
+VM=<owner VM name from HANDOFF.local.md>
 ```
 
 1. **Status:**
-   `$G compute instances describe $VM --project GCP-PROJECT --zone us-central1-a --format='value(status)'`
+   `$G compute instances describe $VM --project $GDM_GCP_PROJECT --zone $GDM_GCP_ZONE --format='value(status)'`
 2. **Start:**
-   `$G compute instances start $VM --project GCP-PROJECT --zone us-central1-a`.
+   `$G compute instances start $VM --project $GDM_GCP_PROJECT --zone $GDM_GCP_ZONE`.
    If it fails with "not enough resources", retry.
 3. **Ship code:** the VM has no GitHub credentials, so use a git bundle.
    - Locally: `git bundle create /tmp/x.bundle <branch>`.
@@ -187,11 +189,11 @@ VM=owner-vm-2
      (or tar it first).
    - Then touch the marker.
 8. **Stop:**
-   - `$G compute instances stop $VM --project GCP-PROJECT --zone us-central1-a`.
+   - `$G compute instances stop $VM --project $GDM_GCP_PROJECT --zone $GDM_GCP_ZONE`.
    - Verify `TERMINATED`. Closing SSH or tmux does NOT stop the VM.
    - If the supervisor refuses because of "other work", stop it manually.
 
-The full reference is `docs/gcp-vm.md` and `docs/validation.md`.
+The full reference is `private/docs/gcp-vm.md` (host-only) and `docs/validation.md`.
 
 ## Owner preferences (also in AGENTS.md and agent memory)
 
@@ -449,7 +451,7 @@ is being merged into main via `collab-env`.
      `configs/glm100-seeded-control-30m.json` (no overseer, 100). `run_budget_usd` is `SET_AT_LAUNCH` (refuses to
      launch until set; suggested 250 each). Behavior judge `simple`.
    - Seed: silent participant `agent-101` (in the participant/status lists, no container/model, DMs unanswered),
-     credited at run minute 3 with `research/seeds/infinite_fermat_primes.agent-026.lean` (agent-026's accepted
+     credited at run minute 3 with `private/research/seeds/infinite_fermat_primes.agent-026.lean` (agent-026's accepted
      `answer(P) ↔ P := by exact Iff.rfl` from glm100-baseline-30m) via the real acceptance state changes and
      events (`submission_received`, `submission_judged`, `task_closed`, `library_published`, all `"seeded": true`
      researcher-side, then `seeded_artifact_injected`). Code: `seeded.py`, `conference.py`

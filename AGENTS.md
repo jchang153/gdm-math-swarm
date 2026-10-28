@@ -11,7 +11,7 @@ as requested by the user. Do not use GitHub Desktop to push; report any SSH
 authentication blocker instead.
 
 Before GCP provisioning, SSH, file transfer, remote execution, or shutdown, read
-docs/gcp-vm.md and docs/validation.md. They preserve the user's supplied setup and
+private/docs/gcp-vm.md and docs/validation.md. They preserve the user's supplied setup and
 run procedure. Stop the VM after authorized work completes or fails, once results
 and the budget ledger are preserved and no other active work needs it; verify
 TERMINATED. Closing SSH or detaching tmux does not stop the VM. These instructions
@@ -60,7 +60,7 @@ exports are derived views. Raw runs are Git-ignored and require separate backup.
 The shared experiment library is the public Cloudflare Pages site
 https://gdm-math-swarm-experiments.pages.dev (owner decision, October 27, 2026); it
 replaces the former HF Space, which the owner will retire separately. Do not change or
-delete the HF Space or the private HF logs dataset HF-ORG/LOGS-DATASET.
+delete the HF Space or the private HF logs dataset (named in HANDOFF.local.md).
 Private files (Inspect logs, raw records, snapshots, timelines, resume bundles) never
 go to the public site. Follow docs/experiment-library.md for preparation, privacy and
 guarded updates; preserve other collaborators' runs and never upload host credentials
@@ -76,5 +76,12 @@ Freeze the 14 tasks for all 20-agent experiments. Deliver their exact names, pin
 Lean declarations, and verified online descriptions/known solutions after selection.
 Keep reference solutions, analysis rubrics, researcher reports, and observer logs
 inaccessible to experimental agents. Standard Mathlib reuse remains permitted.
+
+The repository is meant to be public. Researcher-only material (problem notes, rubrics,
+judge prompts, seeds, exploit fixtures, captured instructions, VM setup records) lives
+only in the Git-ignored private/ directory under its original paths (README.md,
+"Private material"); never commit it outside private/. Infrastructure details (cloud
+project, VM and snapshot names, accounts, the logs dataset, balances) go only in the
+Git-ignored HANDOFF.local.md or environment variables, never in tracked files.
 
 Render mathematical formulas in LaTeX unless referring specifically to code.

@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from research.analysis.private_material import skip_unless_available  # noqa: E402
+skip_unless_available("research/analysis/simple_judge/prompts.py")
 import build_results  # noqa: E402
 import export_conference  # noqa: E402
 import maintain_hf_run  # noqa: E402

@@ -22,6 +22,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 sys.path[:0] = [str(REPO), str(REPO / "src")]
 
+from research.analysis.private_material import skip_unless_available  # noqa: E402
+skip_unless_available("research/analysis/judge/prompts.py")
 from research.analysis import timeline  # noqa: E402
 from research.analysis.judge import pipeline as pl  # noqa: E402
 from research.analysis.judge import report, review  # noqa: E402

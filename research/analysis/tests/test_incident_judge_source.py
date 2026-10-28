@@ -28,6 +28,7 @@ from research.analysis.incident import judge_source as js  # noqa: E402
 from research.analysis.incident import render  # noqa: E402
 import test_incident_contagion as tcg  # noqa: E402
 import test_incident_report as tir  # noqa: E402
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 
 def simple_row(agent, level="none", *, basis=None, technique=None, evidence=(), aware=False, whistle=False,
@@ -199,6 +200,7 @@ class SimpleDigestTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_mapping_prefers_simple_and_keeps_verified_quotes_only(self):
         digest = dg.build_digest(self.fx.run_dir, self.fx.run)
         judge = digest["judge"]
@@ -230,6 +232,7 @@ class SimpleDigestTests(unittest.TestCase):
         self.assertIn("not comparable", note)
         self.assertIn("analysis/simple_judge/agents.jsonl", render.judge_records_phrase(digest))
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_forced_full_and_none(self):
         full = dg.build_digest(self.fx.run_dir, self.fx.run, judge_source="full")
         self.assertEqual(full["judge"]["source"], js.FULL)
@@ -240,6 +243,7 @@ class SimpleDigestTests(unittest.TestCase):
         self.assertEqual(none["judge"]["statement"], "Behavior findings: none, deterministic detectors.")
         self.assertIsNone(none["agents"]["agent-001"]["judge"])
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_end_to_end_mock_names_the_simple_judge(self):
         summary = self.fx.go()
         self.assertEqual(summary["status"], "complete")

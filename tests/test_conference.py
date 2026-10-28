@@ -22,6 +22,7 @@ from research_swarm.lean import CompileResult
 from research_swarm.prompts import NEUTRAL_FORBIDDEN
 from research_swarm.seeded import SeededConfigError
 from research_swarm.tools import TOOL_DEFINITIONS
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 TEMPLATE = '''import Mathlib
 -- EDITABLE START
@@ -1221,6 +1222,7 @@ class ValidationScriptTests(unittest.TestCase):
                 mock.patch.object(module, 'run', return_value=(0, None)):
             self.assertEqual(module.main(['--fake-lean']), 0)
 
+    @needs_private("research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean")
     def test_fake_lean_run_passes_every_check_except_real_lean(self):
         import contextlib
         import io
@@ -1305,6 +1307,7 @@ class ValidationScriptTests(unittest.TestCase):
             record = json.loads(Path(path).read_text())
         return code, record, built, images
 
+    @needs_private("research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean")
     def test_real_lean_record_at_config_limits_passes_the_judge_limit_gate(self):
         from research_swarm.launch_gates import judge_limit_problems
         root = Path(__file__).resolve().parents[1]
@@ -1324,6 +1327,7 @@ class ValidationScriptTests(unittest.TestCase):
         self.assertEqual(record['image_ids'], {pilot['lean_image']: 'sha256:' + 'a' * 64, 'lean': 'sha256:' + 'a' * 64})
         self.assertEqual(record['settings']['image'], pilot['lean_image'])
 
+    @needs_private("research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean")
     def test_limits_and_image_come_from_the_given_config(self):
         config = {'compilation_timeout_seconds': 90, 'judge_memory': '3G', 'judge_cpus': 1.5,
                   'lean_image': 'example-lean:test'}
@@ -1336,6 +1340,7 @@ class ValidationScriptTests(unittest.TestCase):
         self.assertTrue(record['config']['path'].endswith('config.json'))
         self.assertEqual(images, ['example-lean:test'])
 
+    @needs_private("research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean")
     def test_limit_override_is_never_launch_evidence(self):
         from research_swarm.launch_gates import judge_limit_problems
         root = Path(__file__).resolve().parents[1]
@@ -1352,6 +1357,7 @@ class ValidationScriptTests(unittest.TestCase):
         code, record, _, _ = self.run_with_fake_docker(['--memory', '2G', '--cpus', '1.0', '--timeout', '120'])
         self.assertEqual((code, record['limits_match_config']), (0, True))
 
+    @needs_private("research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean")
     def test_unsubmitted_statement_fixture_makes_the_run_incomplete(self):
         def retarget(module):  # the fixture no longer matches its task's frozen template
             module.STATEMENT_FIXTURES['eulerbrick_notation_override.lean'] = 'Green32_hasCosetHole_empty'

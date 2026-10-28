@@ -42,7 +42,8 @@ from urllib.request import pathname2url
 
 ANALYSIS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = ANALYSIS_DIR.parents[1]
-RUBRIC_PATH = ANALYSIS_DIR / "rubric.md"
+# Researcher-only, host-only copy (git-ignored private/; research/analysis/private_material.py).
+RUBRIC_PATH = REPO_ROOT / "private" / "research" / "analysis" / "rubric.md"
 
 SCHEMA_ENTRY = "gdm-timeline-entry/1"
 SCHEMA_FLAG = "gdm-analysis-flag/1"

@@ -91,7 +91,7 @@ python scripts/publish_cloudflare.py verify --run RUN
 
 The library is https://huggingface.co/spaces/gdm-math-swarm/gdm-math-swarm-experiments, a **public** Space
 since October 24, 2026 (see "Visibility and privacy" below); its Inspect logs and raw records are in the
-**private** dataset https://huggingface.co/datasets/HF-ORG/LOGS-DATASET.
+**private** logs dataset (its name is host-only: `GDM_LOGS_DATASET`, recorded in `HANDOFF.local.md`).
 The user authorized the initial private publication on October 15, 2026 and later
 approved creating the `gdm-math-swarm` organization and transferring the library
 there for collaboration. The organization uses the free plan. The transfer
@@ -1008,7 +1008,7 @@ Status (October 22, 2026, 23:40 UTC): **code complete (switch and delete-eval on
 and download-only files copied to the dataset and verified; the owner tested the sign-in end to end; the Space
 deletion of the download-only files, the switch and the `.eval` deletion are approved ("do all of those") and
 await the operator's run (commands under "Pending").** Owner decisions of October 22, 2026: move the
-Inspect `.eval` logs from the Space into the private dataset `HF-ORG/LOGS-DATASET`, read by the
+Inspect `.eval` logs from the Space into the private logs dataset (`GDM_LOGS_DATASET`), read by the
 static Space with the viewer's own "Sign in with HF" token (OAuth `read-repos`, no stored secret); then "go ahead
 and move everything to dataset that's not necessary for current functionality of the website", with deletion
 from the Space authorized for those download-only files only (not the `.eval` logs, which Inspect View still
@@ -1087,7 +1087,7 @@ State on October 22, 2026 (records: `runs/phase-b/hf-library-preparation/logs-mi
   entries never change), but the catalogue page no longer shows it (`catalogue_page.HIDDEN_LINKS`). Existing runs:
   "Timeline migration" below.
 - **Links**: a page link to a moved file points to the dataset file page
-  (`huggingface.co/datasets/HF-ORG/LOGS-DATASET/blob/<commit>/RUN/<path>`, new tab) with the note
+  (`huggingface.co/datasets/<GDM_LOGS_DATASET>/blob/<commit>/RUN/<path>`, new tab) with the note
   "(in the private logs dataset)"; a link to a pruned file without a dataset copy points to the run page's
   "Raw records kept offline" notice. `verify_hosted.py` fails a page that still links a moved or absent file.
 
@@ -1244,7 +1244,7 @@ scoped to the Space and `create_repo` in the organization returned 403.
 
 No server, no secret and no cold start, on the free plan.
 
-- **Dataset.** Private `HF-ORG/LOGS-DATASET`, holding one copy per log at `RUN/inspect/<name>.eval`
+- **Dataset.** Private, named by `GDM_LOGS_DATASET` (scripts/hf_visibility.py), holding one copy per log at `RUN/inspect/<name>.eval`
   (Inspect View's `logs/<name>` maps to it) and live logs at `live/RUN/inspect/<name>.eval`. `listing.json` and
   every page stay in the Space.
 - **Sign-in.**
@@ -1323,7 +1323,7 @@ No server, no secret and no cold start, on the free plan.
 
 #### Owner actions (as proposed)
 
-- Create the private dataset `HF-ORG/LOGS-DATASET` in the organization, and add it with write
+- Create the private logs dataset in the organization, and add it with write
   access to each publisher's fine-grained token. The operator's current token reaches only the Space, and repo
   creation in the organization returned 403.
 - Sign in once on a test deployment to confirm the browser flow end to end, including granting the
@@ -1341,17 +1341,19 @@ inspect view". The mirror therefore publishes the run's Inspect log with the nat
 conference view and a short live summary; it does not publish the custom transcript export
 (`export_transcripts.py` stays in the repository for local use). `scripts/live_mirror.py` runs on the
 operator's own computer, never on a VM, with the operator's own gcloud login and HF login
-(`pip install -e '.[publication]'`, `hf auth login`):
+(`pip install -e '.[publication]'`, `hf auth login`). It takes the GCP project, zone and gcloud binary from
+`GDM_GCP_PROJECT`, `GDM_GCP_ZONE` and `GCLOUD` (or `--project`, `--zone`, `--gcloud`) and the logs dataset
+from `GDM_LOGS_DATASET`; the owner's values are in the Git-ignored `HANDOFF.local.md`:
 
 Start it from the operator's computer with every launch, as soon as the supervisor has started the run
-(docs/gcp-vm.md, "Supervise an authorized run unattended"), naming the launch's VM; it keeps running across
+(private/docs/gcp-vm.md, "Supervise an authorized run unattended"), naming the launch's VM; it keeps running across
 runs, mirrors whatever is running on the named VMs and stops mirroring a run after its final pass. Leave it in
 its own terminal (or `tmux new -s live-mirror`) and stop it with Ctrl-C when no run is going:
 
 ```bash
-PYTHONPATH=src .venv/bin/python scripts/live_mirror.py --vm collab-vm-1 --vm owner-vm
+PYTHONPATH=src .venv/bin/python scripts/live_mirror.py --vm VM_NAME --vm OTHER_VM_NAME
 # one pass without uploading (the bundle is written under runs/phase-b/live-mirror/bundle/RUN/):
-PYTHONPATH=src .venv/bin/python scripts/live_mirror.py --vm collab-vm-1 --once --no-upload
+PYTHONPATH=src .venv/bin/python scripts/live_mirror.py --vm VM_NAME --once --no-upload
 ```
 
 Every `--interval` seconds (default 300) it checks each VM's status and skips a VM that is not RUNNING

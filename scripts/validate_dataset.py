@@ -86,7 +86,7 @@ DEFAULT_CONFIG = ROOT / 'configs' / 'pilot.json'
 DEFAULT_WORKLOADS = ('template:Green32_hasCosetHole_empty', 'genuine:Green32_hasCosetHole_empty',
                      'genuine:Erdos23_erdos_23_variants_n1_tight')
 DEFAULT_REPEATS = 3
-FIXTURES = ROOT / 'research' / 'fixtures' / 'judge'
+FIXTURES = ROOT / 'private' / 'research' / 'fixtures' / 'judge'
 GENUINE = {  # researcher-only genuine proofs (timing workloads)
     'Green32_hasCosetHole_empty': (None, 'Green32_hasCosetHole_empty.proof.lean'),
     'Erdos23_erdos_23_variants_n1_tight': ('Erdos23_erdos_23_variants_n1_tight.preamble.lean',

@@ -79,7 +79,7 @@ Conventions:
 | 6 | `validate_conference.py` | `conference-race-<UTC>.json` | `conference-race` | ~5–10 min (estimate) | — |
 | 7 | `validate_evaluator.py --pilot-self-compare` | `evaluator-<UTC>.json` | `evaluator` | ~2–4 h (estimate; unmeasured) | — |
 | 8 | `validate_runtime.py` | `runtime-e2e-<UTC>.json` | `runtime-e2e` | ~12–17 min | — |
-| 8a | Capture the effective instructions | `research/effective-instructions/` | — | minutes | — |
+| 8a | Capture the effective instructions | `private/research/effective-instructions/` | — | minutes | — |
 | 9 | `isolation_probes.py` | `runtime-isolation-<UTC>.json` | `runtime-isolation` | ~10–20 min | — |
 | 10 | `capacity_probe.py` (choose `judge_max_concurrent`, re-run) | `runtime-capacity-<UTC>.json` | `runtime-capacity` | ~20–30 min per probe | config change via integrator |
 | 11 | Interim preflight | — | report only | ~1 min | — |
@@ -523,8 +523,8 @@ tool definitions. Step 8 produces the first capture from the final agent image u
 `effective_instructions_archived` in the evidence).
 
 ```sh
-mkdir -p research/effective-instructions
-cp -R runs/validation-runtime-<UTC>/instructions research/effective-instructions/runtime-e2e-<UTC>
+mkdir -p private/research/effective-instructions
+cp -R runs/validation-runtime-<UTC>/instructions private/research/effective-instructions/runtime-e2e-<UTC>
 ```
 
 `research/` is researcher-only and never in a build context; `runs/` is git-ignored and may
@@ -742,7 +742,7 @@ No blocker should remain.
    leftover judge or other agent sandbox container is present (S1); `run_pilot.py` has no
    override. Remove only identified leftovers; never start an evaluation or validation
    during the run.
-3. Launch (or use `scripts/supervise_run.py` for an unattended run, docs/gcp-vm.md):
+3. Launch (or use `scripts/supervise_run.py` for an unattended run, private/docs/gcp-vm.md):
 
    ```sh
    PYTHONPATH=src .venv/bin/python scripts/run_pilot.py --launch-paid-pilot
@@ -754,7 +754,7 @@ No blocker should remain.
    key, records its provider-side limit (informational) and starts 20 peers. The run lasts at
    most `max_run_seconds` from the common start, plus up to 120 s in-flight grace and 180 s
    stop grace. Then start the near-live website mirror on your own computer
-   (`PYTHONPATH=src .venv/bin/python scripts/live_mirror.py --vm VM_NAME`; docs/gcp-vm.md).
+   (`PYTHONPATH=src .venv/bin/python scripts/live_mirror.py --vm VM_NAME`; private/docs/gcp-vm.md).
 4. During the run, watch `RUN/runtime.jsonl`, `RUN/conference/events.jsonl`, `docker stats`
    and `scripts/monitor_run.py`; do not start other Docker work. The ledger stops new
    requests when the run's remaining budget cannot cover them.
@@ -813,7 +813,7 @@ Consequences:
 The first GCP probe at `1g` per agent caused container memory kills despite ample
 host memory. The user approved `2g` per agent on October 14; runtime, isolation and
 capacity evidence must all be regenerated at this compose setting. Judge limits stay
-at `2g` / 1 CPU / 120 s. See docs/vm-setup-2026-10-14.md for the measurements.
+at `2g` / 1 CPU / 120 s. See private/docs/vm-setup-2026-10-14.md for the measurements.
 
 Choosing `judge_max_concurrent`:
 

@@ -28,6 +28,7 @@ for path in (ROOT / 'scripts', ROOT / 'src', ROOT):
 import build_experiment_index  # noqa: E402
 import export_conference  # noqa: E402
 import live_mirror  # noqa: E402
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 RUN = 'live-20990101T000000Z'
 
@@ -241,6 +242,7 @@ class FakeVM:
         (self.run_dir / 'runtime.jsonl').write_text(text + ('{"kind": "half' if partial_tail else ''))
 
 
+@needs_private("research/analysis/judge/prompts.py")
 class RemoteProgramTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -331,6 +333,7 @@ class RemoteProgramTests(unittest.TestCase):
             live_mirror.apply_snapshot(target, source, 'another-run')
 
 
+@needs_private("research/analysis/judge/prompts.py")
 class InspectViewTests(unittest.TestCase):
     """The live Inspect log and the native Inspect View bundle, built with the pinned Inspect."""
 
@@ -400,6 +403,7 @@ def zipfile_zstd_open(path):
     return zipfile.ZipFile(path)
 
 
+@needs_private("research/analysis/judge/prompts.py")
 class PassTests(unittest.TestCase):
     """End to end: fabricated VM -> snapshot -> Inspect View and conference rendering -> fake Space."""
 

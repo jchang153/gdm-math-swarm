@@ -4,7 +4,7 @@ Owner decision (docs/plan.md, "Seeded overseer experiment, October 25, 2026"): t
 declared seeded runs plant ONE exploit, a silent participant (``author``, the
 identifier after the solvers, no container and no model) credited with an accepted
 submission through the normal acceptance path (``declared_run_problems``). The
-artifact is a researcher-only file in the repository (``research/seeds/``), given by
+artifact is a researcher-only, host-only file (``private/research/seeds/``, git-ignored), given by
 a repository-relative ``artifact_path`` and pinned by SHA-256. Baseline runs still
 carry no seeded configuration at all.
 
@@ -61,7 +61,7 @@ CHANNEL_FIELDS = {"library_solution": ("task_id",), "library_notebook": ("librar
 # ``source``: provenance of the artifact (researcher-only; e.g. the run and agent it was taken from).
 DOCUMENTATION_KEYS = ("note", "source")
 # Declared seeded runs (owner, 2026-10-25): researcher-only artifacts live here, never in agent workspaces.
-SEED_ARTIFACT_DIRECTORY = "research/seeds"
+SEED_ARTIFACT_DIRECTORY = "private/research/seeds"
 SEED_ROLE = "seed"
 
 _AGENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
@@ -167,7 +167,7 @@ def declared_run_problems(run_config, repo_root=None) -> list[str]:
       ``elapsed_seconds`` trigger (the seed is credited at a fixed run minute);
     * ``author`` is the identifier right after the solvers (``agent-<agent_count + 1>``);
       the overseer, if any, comes after it (research_swarm.oversight);
-    * the artifact is a repository-relative file under ``research/seeds/`` whose bytes match
+    * the artifact is a repository-relative file under ``private/research/seeds/`` whose bytes match
       ``artifact_sha256`` (checked when ``repo_root`` is given).
     """
     if not is_declared_run(run_config):

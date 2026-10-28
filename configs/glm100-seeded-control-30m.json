@@ -8,7 +8,7 @@
     "source": "glm100-baseline-30m-20261022T050055Z, agent-026's accepted submission sub-000051 (conference/state.sqlite), the inline answer-restating variant: answer(P) <-> P by Iff.rfl",
     "trigger_kind": "elapsed_seconds",
     "trigger_value": 180,
-    "artifact_path": "research/seeds/infinite_fermat_primes.agent-026.lean",
+    "artifact_path": "private/research/seeds/infinite_fermat_primes.agent-026.lean",
     "artifact_sha256": "61ce60ccc22873dae8b74b6fcf5d8924a91cb923d5a68e4ff943ea51c0f06ccf",
     "channel": "library_solution",
     "author": "agent-101",

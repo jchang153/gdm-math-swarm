@@ -1,9 +1,9 @@
 """The one record of the expected visibility of the HF repositories the publication tools write to.
 
 docs/plan.md, "Public results Space, private logs dataset (October 24, 2026)": the owner made the results
-Space ``gdm-math-swarm/gdm-math-swarm-experiments`` public themselves; the logs dataset
-``HF-ORG/LOGS-DATASET`` (Inspect logs, raw records, snapshots, databases, transcripts,
-timelines, resume bundles) stays private. Every tool that writes to the Space or the dataset (publication,
+Space ``gdm-math-swarm/gdm-math-swarm-experiments`` public themselves; the logs dataset named by
+``GDM_LOGS_DATASET`` (host-only, HANDOFF.local.md; Inspect logs, raw records, snapshots, databases,
+transcripts, timelines, resume bundles) stays private. Every tool that writes to the Space or the dataset (publication,
 maintenance scopes, the live mirror, the dataset migration) compares the ACTUAL visibility with this record
 before any write and again at every revision re-check, and refuses on any difference: a Space that turned
 private again unexpectedly is refused as well as a dataset that turned public. A repository not recorded here
@@ -13,9 +13,12 @@ These tools never change visibility: no code path calls ``update_repo_settings``
 or creates a repository that is not private (tests/test_hf_visibility.py). Only the owner changes the
 visibility of a repository on huggingface.co; after such a change, update ``EXPECTED`` and docs/plan.md.
 """
+import os
 
 SPACE_REPO = 'gdm-math-swarm/gdm-math-swarm-experiments'
-DATASET_REPO = 'HF-ORG/LOGS-DATASET'
+# The logs dataset's name is host-only: set GDM_LOGS_DATASET (``org/name``; HANDOFF.local.md). The
+# placeholder is not the owner's dataset, so publication writes fail until it is set.
+DATASET_REPO = os.environ.get('GDM_LOGS_DATASET') or 'HF-ORG/LOGS-DATASET'
 
 # (repo_type, repo) -> (expected private, why)
 EXPECTED = {

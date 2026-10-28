@@ -6,8 +6,12 @@ commit passes publish_hf_library.space_commit (credential and dataset-category g
 
 Runs on the operator's own computer, never on a VM:
 
-    python scripts/live_mirror.py --vm collab-vm-1 [--vm owner-vm=~/gdm-math-swarm] [--interval 300]
-    python scripts/live_mirror.py --vm collab-vm-1 --once --no-upload      # one local pass, nothing uploaded
+    python scripts/live_mirror.py --vm VM_NAME [--vm OTHER_VM=~/gdm-math-swarm] [--interval 300]
+    python scripts/live_mirror.py --vm VM_NAME --once --no-upload      # one local pass, nothing uploaded
+
+The GCP project, zone and gcloud binary come from the environment (``GDM_GCP_PROJECT``, ``GDM_GCP_ZONE``,
+``GCLOUD``; the owner's values are in the git-ignored HANDOFF.local.md) or from ``--project``, ``--zone`` and
+``--gcloud``.
 
 Every pass (default every 5 minutes), for each RUNNING VM (never started, stopped or provisioned here):
 
@@ -88,9 +92,11 @@ from site_style import MARKER as THEME_MARKER, themed  # noqa: E402
 from space_navigation import private_space_navigation  # noqa: E402
 import run_clock  # noqa: E402
 
-DEFAULT_GCLOUD = '/Users/owner/.local/share/gdm-vm-tools/google-cloud-sdk/bin/gcloud'
-DEFAULT_PROJECT = 'GCP-PROJECT'
-DEFAULT_ZONE = 'us-central1-a'
+# Infrastructure is host-only (HANDOFF.local.md): set GDM_GCP_PROJECT, GDM_GCP_ZONE and GCLOUD, or pass the
+# flags. The placeholders below fail at gcloud rather than reach someone else's project.
+DEFAULT_GCLOUD = os.environ.get('GCLOUD') or 'gcloud'
+DEFAULT_PROJECT = os.environ.get('GDM_GCP_PROJECT') or 'YOUR-GCP-PROJECT'
+DEFAULT_ZONE = os.environ.get('GDM_GCP_ZONE') or 'YOUR-GCP-ZONE'
 DEFAULT_REMOTE_ROOT = '~/gdm-math-swarm'
 DEFAULT_BUFFER_DIR = '~/.local/share/inspect_ai/samplebuffer'   # Inspect's inspect_data_dir("samplebuffer")
 WORK = ROOT / 'runs' / 'phase-b' / 'live-mirror'                # Git-ignored host-only working copies
@@ -1101,7 +1107,7 @@ def main(argv=None):
                         help='a run counts as running while runtime.jsonl changed within this many seconds (default 3600)')
     parser.add_argument('--remote-buffer-dir', default=DEFAULT_BUFFER_DIR, help="Inspect's sample buffer directory on the VM")
     parser.add_argument('--work-dir', type=Path, default=WORK, help='local working copies (default runs/phase-b/live-mirror)')
-    parser.add_argument('--gcloud', default=os.environ.get('GCLOUD', DEFAULT_GCLOUD if Path(DEFAULT_GCLOUD).exists() else 'gcloud'))
+    parser.add_argument('--gcloud', default=DEFAULT_GCLOUD)
     parser.add_argument('--project', default=DEFAULT_PROJECT)
     parser.add_argument('--zone', default=DEFAULT_ZONE)
     args = parser.parse_args(argv)

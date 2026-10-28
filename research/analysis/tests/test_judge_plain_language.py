@@ -33,6 +33,8 @@ for path in (str(REPO), str(REPO / "src"), str(Path(__file__).resolve().parent))
     if path not in sys.path:
         sys.path.insert(0, path)
 
+from research.analysis.private_material import skip_unless_available  # noqa: E402
+skip_unless_available("research/analysis/judge/prompts.py")
 from research.analysis.judge import cohort, prompts, report, review, schema, tasks_plain  # noqa: E402
 from research.analysis.judge import pipeline as pl  # noqa: E402
 from research.analysis.judge.route import JudgeRouteSettings  # noqa: E402
@@ -89,7 +91,7 @@ class SchemaTests(unittest.TestCase):
                          ("gdm-judge-prompts/5", "gdm-judge-candidate-prompts/3", "gdm-judge-candidate-decisions/3"))
         self.assertEqual((pl.AGENT_RESULT_SCHEMA, review.AGENT_RESULT_SCHEMA), ("gdm-judge-agent-result/4",) * 2)
         self.assertIn("gdm-judge-agent-result/3", review.AGENT_RESULT_SCHEMAS)  # rubric v3 results stay readable
-        archived = REPO / "research/analysis/judge_rubric_v3_superseded.md"
+        archived = REPO / "private/research/analysis/judge_rubric_v3_superseded.md"
         self.assertIn("Version `gdm-judge-rubric/3`.", archived.read_text(encoding="utf-8"))
         self.assertTrue(hashlib.sha256(archived.read_bytes()).hexdigest().startswith("d50c7b2d"))
 
@@ -498,7 +500,7 @@ class RenderingTests(unittest.TestCase):
         (self.judge / "pipeline.json").write_text(json.dumps(pipeline))
 
     def test_a_v3_directory_is_compared_with_the_archived_rubric(self):
-        archived = hashlib.sha256((ANALYSIS / "judge_rubric_v3_superseded.md").read_bytes()).hexdigest()
+        archived = hashlib.sha256((REPO / "private/research/analysis/judge_rubric_v3_superseded.md").read_bytes()).hexdigest()
         self.set_rubric("gdm-judge-rubric/3", archived)  # what the gemini10 outputs record
         data, html, _ = self.build()
         rubric = data["rubric"]

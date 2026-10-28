@@ -19,3 +19,9 @@ Nothing in this package may reach an experimental agent: never copy, mount or qu
 prompts or its outputs into agent images, containers, workspaces, prompts, tool results or the
 conference library.
 """
+
+# The prompts are researcher-only and live host-only in the git-ignored private/ directory
+# (research/analysis/private_material.py); ``from . import prompts`` keeps working.
+from ..private_material import install_module as _install_private_module
+
+_install_private_module(__name__ + ".prompts", "research/analysis/incident/prompts.py")

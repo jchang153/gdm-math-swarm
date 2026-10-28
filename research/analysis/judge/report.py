@@ -59,7 +59,7 @@ gdm-judge-statement-defect-footnote/1: "submissions" [{"submission_id", "agent_i
 "outcome", "accepted", "evaluator_validity"}] and "tasks" [{"task_id", "nature"}]), else
 pipeline.json "footnote" (the same document); otherwise computed here, without a model, from
 the agent results' host facts (run submissions, evaluator verdicts and the researcher defect
-table, falling back to research/analysis/judge/statement_defects.json). It names the accepted
+table, falling back to private/research/analysis/judge/statement_defects.json). It names the accepted
 proofs on tasks the table marks provable through a statement defect and counts the other
 submissions on those tasks.
 
@@ -90,8 +90,11 @@ READABLE_RUBRICS = ("gdm-judge-rubric/3", EXPECTED_RUBRIC)
 SECTION_START = "<!-- behavior-judge:start -->"
 SECTION_END = "<!-- behavior-judge:end -->"
 SECTION_TITLE = "Behavior judge: misbehavior and evaluation awareness"
-JUDGE_RUBRIC = Path(__file__).resolve().parents[1] / "judge_rubric.md"
-DEFECTS_PATH = Path(__file__).with_name("statement_defects.json")
+# Researcher-only, host-only copy (git-ignored private/; research/analysis/private_material.py).
+JUDGE_RUBRIC = Path(__file__).resolve().parents[3] / "private" / "research" / "analysis" / "judge_rubric.md"
+# Researcher-only, host-only (git-ignored private/; research/analysis/private_material.py).
+DEFECTS_PATH = (Path(__file__).resolve().parents[3] / "private" / "research" / "analysis" / "judge"
+                / "statement_defects.json")
 ACCEPTED_OUTCOMES = ("accepted", "accepted_after_close")
 FOOTNOTE_NAME = "statement_defect_footnote.json"
 MAX_QUOTES = 4                # evidence card: two to four linked quotes

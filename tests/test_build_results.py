@@ -12,6 +12,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import build_results  # noqa: E402
 from build_experiment_index import build as build_index  # noqa: E402
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 T0 = 1792475201.0
 SHA_A, SHA_B = 'a' * 64, 'b' * 64
@@ -245,6 +246,7 @@ class BuildResultsTest(unittest.TestCase):
                                                            '<a href="x/2026-10-20T01-00-00.eval">x</a>'))
         self.assertIs(build_results.restamp_page(old, None), old)
 
+    @needs_private("research/analysis/simple_judge/prompts.py")
     def test_simplified_judge_replaces_not_run_on_the_run_page(self):
         import test_simple_judge_site as sjs
         run = make_run(self.tmp.name)

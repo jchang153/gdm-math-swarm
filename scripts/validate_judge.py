@@ -8,11 +8,12 @@ Most compiles use the compiler's measured variant (same container, same Lean cal
 and timeout wrapper, plus a python3 parent that records Lean seconds and memory);
 cases marked `production` use the exact conference `compile()` path.
 
-Fixtures live in research/fixtures/judge/ and must never enter Docker images, agent
-workspaces, or the conference library. Operational acceptance is not mathematical
-validity. `documentation_probe` cases record the observed outcome of documented
-weaknesses (named in plan row "Baseline judge weaknesses" or suspected, see
-docs/judges.md); they never count toward pass/fail and must not be "fixed" here.
+Fixtures live host-only in private/research/fixtures/judge/ (git-ignored) and must
+never enter Docker images, agent workspaces, or the conference library. Operational
+acceptance is not mathematical validity. `documentation_probe` cases record the
+observed outcome of documented weaknesses (named in plan row "Baseline judge
+weaknesses" or suspected, see docs/judges.md); they never count toward pass/fail
+and must not be "fixed" here.
 
 Before the cases, an optional warm-up compile (larger memory cap, longer limit)
 loads the Mathlib .olean files into the Docker VM page cache; a cold cache under
@@ -45,7 +46,7 @@ from research_swarm.lean import (DockerLeanCompiler, JUDGE_LABEL, image_id, judg
 
 SCHEMA = 'gdm-judge-validation/1'
 PREFIX = 'judge'
-FIXTURES = ROOT / 'research' / 'fixtures' / 'judge'
+FIXTURES = ROOT / 'private' / 'research' / 'fixtures' / 'judge'
 PLACEHOLDER = '  fail "Provide a complete proof."'
 EXPECTED_ERROR = 'Provide a complete proof.'
 PREAMBLE_MARK = '-- EDITABLE START\n'

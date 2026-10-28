@@ -24,7 +24,7 @@ enter agent containers.
   # Unpaid rehearsal with the deterministic mock model; output OUTSIDE the run directory.
   PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> --mock \
       --output-dir <scratch>/<run>/analysis/judge
-  # Paid judging (the default mode; GCP VM, authoritative ledger; docs/gcp-vm.md, docs/validation.md).
+  # Paid judging (the default mode; GCP VM, authoritative ledger; private/docs/gcp-vm.md, docs/validation.md).
   PYTHONPATH=src:. .venv/bin/python scripts/run_transcript_judge.py --run-dir runs/<run> \
       [--credentials-root /path/to/main/checkout] [--run-limit USD | --run-config CONFIG]
   # Re-apply host facts (e.g. new evaluator verdicts) from cached units only: no model calls.

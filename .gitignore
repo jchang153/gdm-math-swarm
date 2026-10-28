@@ -20,3 +20,8 @@ state/
 
 # Private handoff details (infrastructure, accounts)
 HANDOFF.local.md
+
+# Researcher-only material (docs, rubrics, judge prompts, seeds, exploit fixtures,
+# captured instructions), kept host-only under the original repository paths (README.md,
+# "Private material").
+private/

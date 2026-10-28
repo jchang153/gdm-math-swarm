@@ -36,6 +36,8 @@ for path in (str(REPO), str(REPO / "src")):
     if path not in sys.path:
         sys.path.insert(0, path)
 
+from research.analysis.private_material import skip_unless_available  # noqa: E402
+skip_unless_available("research/analysis/judge/prompts.py")
 from research.analysis.judge import pipeline as pl  # noqa: E402
 from research.analysis.judge import prompts, schema  # noqa: E402
 from research.analysis.judge.client import FakeTransport, JudgeClient  # noqa: E402

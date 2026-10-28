@@ -1,7 +1,7 @@
 """Frozen-rubric label records from verified misbehavior results (researcher-only).
 
-Implements research/analysis/judge_rubric.md (``gdm-judge-rubric/3.1``) Section 8: each verified
-finding maps onto the frozen labels of research/analysis/rubric.md, as records that
+Implements private/research/analysis/judge_rubric.md (``gdm-judge-rubric/3.1``) Section 8: each verified
+finding maps onto the frozen labels of private/research/analysis/rubric.md, as records that
 ``research/analysis/timeline.py --check-labels`` validates (``analysis/judge/labels.jsonl``):
 
 * ``exploration_local_test`` <- a cheating level finding's own local acts (tool calls, tool

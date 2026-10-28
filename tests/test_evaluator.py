@@ -24,6 +24,7 @@ from research_swarm import evaluator as ev
 from research_swarm.evaluator import (ComparatorRunner, ComparatorValidation, DockerComparatorBackend,
                                       SemanticCheck, evaluate_submission)
 from research_swarm.judge import TaskTemplate
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE_ID = 'sha256:' + 'a' * 64
@@ -516,6 +517,7 @@ def no_live_containers():
     return patch.object(ev, 'live_experiment_containers', return_value=[])
 
 
+@needs_private("research/fixtures/evaluator/submissions")
 class ValidationRecordTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -837,13 +839,15 @@ class ValidationRecordTests(unittest.TestCase):
 
 
 class FixtureTests(unittest.TestCase):
+    @needs_private("research/fixtures/evaluator/submissions")
     def test_manifest_covers_every_category_and_is_operationally_admissible(self):
         script = load_script('validate_evaluator_fixtures', ROOT / 'scripts' / 'validate_evaluator.py')
         manifest = ev.load_fixture_manifest()
         self.assertEqual({c['category'] for c in manifest}, set(ev.VALIDATION_EXPECTATIONS))
         for case in manifest:
             self.assertTrue(script.static_checks(case['template_obj'], case['source'])['passed'], case['name'])
-            self.assertTrue(Path(ev.FIXTURE_DIR / case['submission']).resolve().is_relative_to(ROOT / 'research'))
+            # submissions/ is a symlink to the host-only private/research/fixtures/evaluator/submissions
+            self.assertTrue(Path(ev.FIXTURE_DIR / case['submission']).resolve().is_relative_to(ROOT / 'private'))
         modes = {c['name']: ev.plan_answer(c['template_obj'], c['source']) for c in manifest}
         self.assertEqual(modes['fermat_helper_answer'].review_flags, ('reflexive_helper_answer',))
         self.assertEqual(modes['synthetic_answer_default_genuine'].mode, 'template_default')
@@ -1177,6 +1181,7 @@ class EvaluateRunTests(unittest.TestCase):
             service.close()
         return service
 
+    @needs_private("research/fixtures/evaluator/submissions")
     def test_post_run_evaluation_is_resumable_and_uses_frozen_templates(self):
         script, dataset = self.script, self.dataset
         fake = FakeBackend()
@@ -1201,6 +1206,7 @@ class EvaluateRunTests(unittest.TestCase):
         self.assertEqual(by_task['Green32_hasCosetHole_empty']['submission']['origins'], ['sqlite', 'queue'])
         self.assertEqual({e['schema'] for e in lines}, {ev.EVALUATION_SCHEMA})
 
+    @needs_private("research/fixtures/evaluator/submissions")
     def test_guard_stops_before_the_next_container(self):
         fake = FakeBackend()
         with tempfile.TemporaryDirectory() as folder:
@@ -1227,6 +1233,7 @@ class EvaluateRunTests(unittest.TestCase):
         fake.cleanup_calls = cleanup.call_count
         return code, fake, out.getvalue()
 
+    @needs_private("research/fixtures/evaluator/submissions")
     def test_main_refuses_while_experiment_containers_run(self):
         live = [{'id': 'c2', 'name': 'inspect-gdm_math_swa-iab12cd-default-1', 'image': 'x', 'kind': 'agent',
                  'compose_project': 'inspect-gdm_math_swa-iab12cd'}]
@@ -1256,6 +1263,7 @@ class EvaluateRunTests(unittest.TestCase):
         source = source.replace('-- EDITABLE START\n-- EDITABLE END', f'-- EDITABLE START\n{preamble}-- EDITABLE END', 1)
         return template, source.replace('  fail "Provide a complete proof."', '  exact Iff.rfl')
 
+    @needs_private("research/fixtures/evaluator/submissions")
     def test_restated_answer_direct_and_helper(self):
         claim = '∀ n : ℕ, Squarefree n.fermatNumber'
         restated = self.script.restated_answer
@@ -1300,6 +1308,7 @@ class EvaluateRunTests(unittest.TestCase):
         green = self.dataset.tasks['Green32_hasCosetHole_empty'].template_source(self.dataset.repository)
         self.assertFalse(restated(green, (ev.FIXTURE_DIR / 'submissions' / 'green32_genuine.lean').read_text()))
 
+    @needs_private("research/fixtures/evaluator/submissions")
     def test_summary_lists_accepted_restated_answers(self):
         from research_swarm.conference import ConferenceService, tasks_from_dataset
         from research_swarm.judge import JudgeResult

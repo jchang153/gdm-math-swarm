@@ -17,6 +17,7 @@ from research_swarm.judge import TaskTemplate
 from research_swarm.prompts import NEUTRAL_FORBIDDEN
 
 from tests.test_conference import FakeJudge, agents, make_tasks
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 SECCOMP = ROOT / 'docker' / 'seccomp' / 'comparator-no-af-unix.json'
@@ -195,6 +196,7 @@ class CheckProofRunnerValidationTests(unittest.TestCase):
         self.assertIn('missing', ev.runner_settings_problem(None, validated))
         self.assertIn('exceeds', ev.runner_settings_problem(dict(validated, timeout=None), validated))
 
+    @needs_private("research/fixtures/evaluator/submissions")
     def test_make_proof_checker_loads_a_record_validated_with_the_default_runner(self):
         from tests.test_evaluator import ScriptedRunner, load_script, no_live_containers, scripted_decider
         import contextlib

@@ -3,6 +3,7 @@ import unittest
 from research_swarm.judge import (ACCEPTED_REASON, ADMISSION_REASON, TaskTemplate, answer_span,
                                   immutable_segments, judge_submission)
 from research_swarm.lean import CompileResult
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 SOURCE = '''import Mathlib
 -- EDITABLE START
@@ -168,6 +169,7 @@ def placeholder_error(line):
                          '', 0, 1.0, dict(lean_seconds=0.5))
 
 
+@needs_private("research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean")
 class JudgeValidationScriptTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -344,6 +346,7 @@ class DocumentedWeaknessTests(unittest.TestCase):
                     r = judge_submission(TaskTemplate(source, task.theorem_name, True), edited, c)
                     self.assertEqual((r.stage, c.calls), ('accepted', 1))
 
+    @needs_private("research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean")
     def test_warn_sorry_option_only_literal_forms_are_blocked(self):
         task = self.dataset.tasks['Green32_hasCosetHole_empty']
         source = task.template_source(ROOT)
@@ -358,6 +361,7 @@ class DocumentedWeaknessTests(unittest.TestCase):
         c = Compiler()
         self.assertEqual((judge_submission(template, probe['source'], c).stage, c.calls), ('accepted', 1))
 
+    @needs_private("research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean")
     def test_answer_field_probes_reach_compilation(self):
         cases = {c['id']: c for c in validate_judge.build_cases(self.dataset)}
         ok = CompileResult('success', 0, '', '', 0, 1.0, dict(lean_seconds=0.4))
@@ -435,6 +439,7 @@ class JudgeEvidenceCompletenessTests(_ScriptRun, unittest.TestCase):
         return dict(id=case['id'], required=case['required'], passed=True if case['required'] else None,
                     observed={}, kind=case['kind'], category=case['category'])
 
+    @needs_private("research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean")
     def test_full_run_is_complete_and_records_config_limits(self):
         spy = MagicMock(side_effect=DockerLeanCompiler)
         rc, report = self.run_main(validate_judge, ['--no-warm-up'], judge_containers=lambda: [],
@@ -445,6 +450,7 @@ class JudgeEvidenceCompletenessTests(_ScriptRun, unittest.TestCase):
         self.assertEqual(report['config']['limits'], report['limits'])
         self.assertEqual(spy.call_args.kwargs, dict(timeout=120, memory='2g', cpus=1, max_concurrent=1))
 
+    @needs_private("research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean")
     def test_only_and_skip_timeout_never_pass(self):
         # --only: the keyword case passes without Lean, but the record is partial.
         rc, report = self.run_main(validate_judge, ['--no-warm-up', '--only', 'keyword_axiom'],
@@ -457,10 +463,12 @@ class JudgeEvidenceCompletenessTests(_ScriptRun, unittest.TestCase):
         self.assertEqual((rc, report['complete'], report['all_required_passed'], report['omitted_cases']),
                          (1, False, False, ['timeout']))
 
+    @needs_private("research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean")
     def test_unknown_only_case_is_an_error(self):
         with self.assertRaises(SystemExit):
             self.run_main(validate_judge, ['--no-warm-up', '--only', 'no_such_case'], judge_containers=lambda: [])
 
+    @needs_private("research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean")
     def test_limits_follow_config(self):
         self.config.write_text(json.dumps(dict(compilation_timeout_seconds=150, judge_memory='3g', judge_cpus='1.5')))
         _, report = self.run_main(validate_judge, ['--no-warm-up'], judge_containers=lambda: [],
@@ -523,6 +531,7 @@ class DatasetEvidenceCompletenessTests(_ScriptRun, unittest.TestCase):
         self.assertEqual(report['limits'], dict(timeout_seconds=900, memory='8g', cpus=1))
         self.assertEqual((FakeDockerLean.made[-1].timeout, FakeDockerLean.made[-1].memory), (900, '8g'))
 
+    @needs_private("research/fixtures/judge/Green32_hasCosetHole_empty.proof.lean")
     def test_timing_requires_default_workloads_repeats_and_limits(self):
         rc, report = self.run_dataset(['timing'])
         self.assert_gate(report, rc, True, True)

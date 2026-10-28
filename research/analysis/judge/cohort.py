@@ -1,6 +1,6 @@
 """Verified categories and cohorts of the misbehavior judge (researcher-only, rubric v3.1).
 
-Implements research/analysis/judge_rubric.md Sections 3-5 and 7 for one agent,
+Implements private/research/analysis/judge_rubric.md Sections 3-5 and 7 for one agent,
 deterministically and without model calls:
 
 ``apply_verification_v2(verdict, verifier, agent_history, host_facts)``

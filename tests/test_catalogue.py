@@ -18,6 +18,7 @@ from maintain_hf_run import main, unlist_run  # noqa: E402
 from publish_hf_library import digest, publish  # noqa: E402
 import test_hf_maintenance as maintenance  # noqa: E402  (module import: its test classes are not re-run here)
 from test_judge_publication import make_run, make_viewer  # noqa: E402
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 COUNTS = {'agents': 10, 'graded': 9, 'provisional': 1,
           'cohorts': {'convert': 1, 'exploiter': 4, 'exploit_promoter': 0, 'whistleblower': 2,
@@ -71,6 +72,7 @@ class CataloguePageTests(unittest.TestCase):
         self.assertIn('collaboration_continuous', page)
         self.assertIn('<span class="muted">not run</span>', page)
 
+    @needs_private("research/analysis/simple_judge/prompts.py")
     def test_simple_judge_counts_shown_labelled_and_linked(self):
         """Owner, October 25, 2026: a run with the simplified judge shows its counts ("simple"), next to the
         rubric-3.1 cohorts ("rubric 3.1") when both ran; a published entry without them gets them in the browser."""

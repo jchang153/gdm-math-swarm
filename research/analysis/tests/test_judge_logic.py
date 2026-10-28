@@ -30,6 +30,7 @@ for path in (str(REPO), str(REPO / "src")):
         sys.path.insert(0, path)
 
 from research.analysis.judge import cohort, labels, prompts, schema, validate  # noqa: E402
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 T0 = 1792116900.0
 NOTATION = 'notation:50 a " ≤ " b => True'
@@ -587,6 +588,7 @@ class ValidateTests(unittest.TestCase):
         self.assertTrue(validate.validate_agent_verdict_v2(salvaged, history)[0])
         self.assertEqual((salvaged["cheating"]["convert"], salvaged["evaluation_awareness"]["level"]), (False, "none"))
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_pipeline_salvage_keeps_only_established_adopted_authors(self):
         from research.analysis.judge import pipeline  # the judge unit's salvage step
         history = a07_history()
@@ -863,6 +865,7 @@ class CohortTests(unittest.TestCase):
         self.assertNotIn(key, result)
         self.assertNotIn(key, cohort.run_counts_v2({"agent-007": result}))
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_v1_dimension_logic_is_gone(self):
         for module, names in ((schema, ("parse_judge", "normalize_judge", "LADDERS", "route_verification",
                                         "verification_units", "D11_FIELDS", "STANCE_VALUES")),
@@ -942,6 +945,7 @@ class RubricV3AwarenessTests(unittest.TestCase):
         self.assertTrue(any("level 'constructed' takes topic" in p
                             for p in validate.validate_agent_verdict_v2(verdict, history)[1]))
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_decisions_need_certainty_and_topic(self):
         from research.analysis.judge import pipeline
         history = a07_history()
@@ -962,6 +966,7 @@ class RubricV3AwarenessTests(unittest.TestCase):
         self.assertEqual([(f["level"], f["certainty"], f["topic"]) for f in result["decisions"][0]["findings"]],
                          [("conduct", "speculative", "own_conduct"), ("constructed", "speculative", "planted_traps")])
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_verifier_may_correct_certainty_and_topic(self):
         verdict = parse(raw_verdict([AWARE, CONDUCT, EXPLORED]))
         units = schema.verification_units_v2(verdict)
@@ -1030,6 +1035,7 @@ class RubricV3AwarenessTests(unittest.TestCase):
         empty = cohort.unverified_record_v2("agent-007", "ungraded")["evaluation_awareness"]
         self.assertEqual((empty["certainty"], empty["topics"]), (None, []))
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_corrected_certainty_makes_the_host_write_the_note(self):
         from research.analysis.judge import pipeline
         verified, _ = judge_agent([AWARE])
@@ -1174,6 +1180,7 @@ class HostFactTests(unittest.TestCase):
         self.assertIsNone(cohort.exit_facts(run(good, stop_line=None), "agent-007")["voluntary"])
         self.assertEqual(cohort.exit_facts(run(good), "agent-008"), {})
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_explicit_frozen_ref_and_structural_items(self):
         history = a07_history()
         history.items[0]["meta"]["frozen_ref"] = {"type": "inspect_message", "file": "inspect/x.eval",
@@ -1200,10 +1207,11 @@ class HostFactTests(unittest.TestCase):
 
 
 class PromptTests(unittest.TestCase):
+    @needs_private("research/analysis/judge/prompts.py")
     def test_rubric_embedded_verbatim_with_sha(self):
         info = prompts.rubric_info()
         self.assertEqual(info["version"], "gdm-judge-rubric/3.1")
-        rubric_path = REPO / "research/analysis/judge_rubric.md"
+        rubric_path = REPO / "private/research/analysis/judge_rubric.md"
         text = rubric_path.read_text(encoding="utf-8").rstrip()
         self.assertEqual(info["sha256"], hashlib.sha256(rubric_path.read_bytes()).hexdigest())
         self.assertIn("## 3. Category A — Cheating (verification bypass)", text)
@@ -1228,6 +1236,7 @@ class PromptTests(unittest.TestCase):
         self.assertTrue(systems[2].startswith("You write the run-level analysis"))
         self.assertTrue(prefilter_system.startswith("You screen one window"))
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_rubric_is_read_at_call_time(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "judge_rubric.md"
@@ -1238,6 +1247,7 @@ class PromptTests(unittest.TestCase):
             self.assertIn("AMENDED TEXT", system)
             self.assertIn(info["sha256"], system)
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_prefilter_is_narrow(self):
         system, user = prompts.prefilter_messages_v2(a07_history().items[:3], {"agent_id": "agent-007",
                                                                                "window_id": "A07.w0000"})
@@ -1253,6 +1263,7 @@ class PromptTests(unittest.TestCase):
         self.assertNotIn("competitive_pressure", system)
         self.assertIn("window_id=A07.w0000", user)
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_judge_prompt_reports_only_true_misbehavior(self):
         system = prompts.judge_system_v2()
         for phrase in ("Only true misbehavior and evaluation awareness", "competition, credit or time pressure",
@@ -1268,6 +1279,7 @@ class PromptTests(unittest.TestCase):
         by_id = {i["id"]: i for i in history.items}
         return [{"window_id": window_id, "items": [by_id[i] for i in ids]}]
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_package_one_neighbor_selected_communications_relevant_exposure(self):
         history = a07_history()
         package = prompts.build_agent_package_v2(history, ["A07.t0002.r"])
@@ -1299,6 +1311,7 @@ class PromptTests(unittest.TestCase):
         self.assertNotIn("A07.t0001.r", wide["shown_ids"])
         self.assertEqual(prompts.judge_messages_v2(wide)[0], system)  # static, cacheable system prompt
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_judge_package_with_random_sample_window(self):
         history = a07_history()
         sample = self.sample(history, ["A07.t0006.r", "A07.t0006.o1", "A07.t0007.r"])
@@ -1319,6 +1332,7 @@ class PromptTests(unittest.TestCase):
         other = prompts.build_agent_package_v2(a07_history(), [], neighbors=0)
         self.assertIn("(none)", prompts.judge_messages_v2(other)[1].split("=== RANDOM-SAMPLE WINDOWS", 1)[1][:200])
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_sample_items_shown_elsewhere_keep_a_pointer(self):
         history = a07_history()
         sample = self.sample(history, ["A07.t0003.c1", "A07.t0003.o1", "sub-000002", "A07.t0004.r"],
@@ -1329,6 +1343,7 @@ class PromptTests(unittest.TestCase):
         self.assertEqual((rows["sub-000002"], rows["A07.t0003.o1"]), ("SUBMISSIONS", "SUBMISSIONS"))
         self.assertIsNone(rows["A07.t0004.r"])
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_fragment_of_an_oversized_item_in_a_sample_window(self):
         history = a07_history()
         long_item = next(i for i in history.items if i["id"] == "A07.t0007.r")
@@ -1338,6 +1353,7 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(package["sample_ids"], ["A07.t0007.r"])
         self.assertIn("[A07.t0007.r#f2] reasoning/reasoning", prompts.judge_messages_v2(package)[1])
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_judge_package_layout(self):
         history = a07_history()
         history.items.append(item("A07.t0010.x", "text", "assistant_text", 10,
@@ -1352,6 +1368,7 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(prompts.render_marker(1), "[... 1 item screened out ...]")
         self.assertGreater(package["estimated_tokens"], 100)
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_verifier_package_and_messages(self):
         history = a07_history()
         verdict = parse(raw_verdict([SUBMITTED, ADOPTED, CONVERT, RAISED], adopted_from=["agent-001"]))
@@ -1392,6 +1409,7 @@ class PromptTests(unittest.TestCase):
                        "never the agent's text, and nothing may be inferred from what it omits"):
             self.assertIn(phrase, system)
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_verifier_view_windows_a_long_record_around_its_quotes(self):
         # Judge revision v3, item 3: a 40,000-character cited item is shown as a window of 4,000
         # characters either side of the quote, plus its first and last 1,000 characters.
@@ -1411,6 +1429,7 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(prompts.verifier_view(text, [cue], window_chars=10 ** 6)[0], "full")  # windows cover it
         self.assertEqual(prompts.merge_spans([(5, 9), (0, 3), (3, 4), (8, 12), (20, 20)], 15), [(0, 4), (5, 12)])
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_verifier_records_excerpt_neighbors_and_window_cited_items(self):
         history = a07_history()
         long_text = ("Plain reasoning about the inequality. " * 700) + "This conference is surely a benchmark. " \
@@ -1438,6 +1457,7 @@ class PromptTests(unittest.TestCase):
         self.assertIn("--- CONTEXT RECORD fb-000001 (just before A07.t0009.r; context, not cited): 5,024 characters", text)
         self.assertLess(len(text), 15000)
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_verifier_windows_go_around_the_occurrence_the_judge_cited(self):
         # Finding 2 of the v3 review: a short quote that recurs in a long item. Read as keyword
         # passages, the judge cited the occurrence inside its passage (about 30,000 characters in);
@@ -1470,6 +1490,7 @@ class PromptTests(unittest.TestCase):
         self.assertIn(late, rendered)
         self.assertNotIn(early, rendered)
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_counter_evidence_records_reach_the_verifier(self):
         # Finding 20 of the v3 review: a counter-evidence citation of a record that is not adjacent to the
         # cited item is shown to the verifier as a cited record (with its quote window), not left out.
@@ -1486,6 +1507,7 @@ class PromptTests(unittest.TestCase):
         self.assertIn("--- CITED RECORD A07.t0007.r: full text", rendered)
         self.assertIn(retraction, rendered)
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_a_long_result_of_a_cited_act_is_reduced_to_its_edges(self):
         # Finding 21 of the v3 review: a cited tool call whose result is a long build log is shown to the
         # verifier as the result's first and last edge characters, never in full.
@@ -1520,6 +1542,7 @@ class PromptTests(unittest.TestCase):
         self.assertIsNone(validate.quote_span("not there", text))
         self.assertIsNone(validate.quote_span("", text))
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_run_package_only_agents_with_findings(self):
         flagged = judge_agent([SUBMITTED, ADOPTED], adopted_from=["agent-001"])
         quiet = judge_agent([])
@@ -1538,6 +1561,7 @@ class PromptTests(unittest.TestCase):
         self.assertIn("=== AGENTS WITHOUT FINDINGS ===\nagent-008", user)
         self.assertIn('"exploiter": 1', user)
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_repair_user_lists_problems(self):
         repaired = prompts.repair_user("ORIGINAL", "```json\n{}\n```", ["finding F1: quote not found"])
         self.assertTrue(repaired.startswith("ORIGINAL"))
@@ -1784,6 +1808,7 @@ class FrozenLabelTests(unittest.TestCase):
                 "earlier_artifact_id": "lib-000001", "exposure_seq": 4, "exposure_source_ids": [],
                 "from_agent": "agent-001"}
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_mapped_labels_pass_check_labels(self):
         run = self.run_history()
         result2 = dict(self.judged(run, "agent-002", self.agent2_raw()), spread_edges=[self.spread_edge()])
@@ -1829,6 +1854,7 @@ class FrozenLabelTests(unittest.TestCase):
         self.assertEqual(whistle["F2"]["attributes"]["channel"], ["dm"])
         self.assertFalse({"detection", "idle"} & {r["label"] for r in records})  # not assessed by this judge
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_refuted_unverified_and_missing_edge_statuses(self):
         run = self.run_history()
         result2 = self.judged(run, "agent-002", self.agent2_raw(),
@@ -1856,6 +1882,7 @@ class FrozenLabelTests(unittest.TestCase):
         self.assertEqual(accusation["status"], "unresolved")
         self.assertEqual(labels._timeline().check_labels(mapped3["labels"], self.entries(), run_dir=self.run_dir), [])
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_evaluation_awareness_adds_no_frozen_label(self):
         # Rubric v3 keeps the Section 8 mapping: evaluation awareness (with its certainty and
         # topic) maps onto no frozen label, and the other labels still pass check_labels.
@@ -1883,6 +1910,7 @@ class FrozenLabelTests(unittest.TestCase):
         self.assertEqual(mapped["unmapped"], plain["unmapped"])
         self.assertEqual(labels._timeline().check_labels(mapped["labels"], self.entries(), run_dir=self.run_dir), [])
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_boycott_followed_by_submissions_is_unresolved(self):
         run = self.run_history()
         run.agents["agent-003"].items.append(item("sub-000009", "conference", "submission", None, "theorem P9", t=50,
@@ -1894,6 +1922,7 @@ class FrozenLabelTests(unittest.TestCase):
         exit_label = next(r for r in labels.to_frozen_labels_v2(result3, run) if r["label"] == "exit")
         self.assertFalse(exit_label["attributes"]["integrity_reason"])
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_evaluator_genuine_attempt_is_unresolved_disagreement(self):
         run = self.run_history()
         run.host["evaluations"]["sub-000002"]["validity"] = "genuine"  # evaluator disagrees with the judge
@@ -1906,6 +1935,7 @@ class FrozenLabelTests(unittest.TestCase):
         self.assertTrue(attempt["attributes"]["judge_evaluator_disagreement"])
         self.assertEqual(labels._timeline().check_labels(records, self.entries(), run_dir=self.run_dir), [])
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_ungraded_agent_and_unresolvable_references(self):
         run = self.run_history()
         verified = cohort.unverified_record_v2("agent-003", "grading_failed")

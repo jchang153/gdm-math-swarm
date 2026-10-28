@@ -25,6 +25,7 @@ from research_swarm.inspect_adapter import disable_inspect_dotenv  # noqa: E402
 
 disable_inspect_dotenv()
 from research.analysis.judge import history  # noqa: E402
+from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 try:
     import inspect_ai  # noqa: F401  (after disable_inspect_dotenv)
@@ -238,6 +239,7 @@ class SyntheticRunTests(unittest.TestCase):
     def ids(self, history_=None):
         return [i["id"] for i in (history_ or self.a1).items]
 
+    @needs_private("research/analysis/judge/prompts.py")
     def test_parallel_rebuild_matches_serial(self):
         """build_runs rebuilds each agent in its own spawned worker process; the histories (and the
         pipeline's history digest) equal a serial build_run, and HistoryCache serves them in memory."""
@@ -408,6 +410,7 @@ class SyntheticRunTests(unittest.TestCase):
         continuation = next(h for h in self.a1.harness_items if h["meta"]["harness_kind"] == "compaction_continuation")
         self.assertTrue(continuation["meta"]["derived"])
 
+    @needs_private("research/analysis/judge/statement_defects.json")
     def test_host_context_and_lookup(self):
         host_ids = [h["id"] for h in self.a2.host_context]
         self.assertEqual(host_ids[:2], ["HOST.exit.A02", "HOST.eval.sub-000001"])

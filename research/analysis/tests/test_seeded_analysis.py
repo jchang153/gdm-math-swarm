@@ -29,6 +29,8 @@ for path in (str(REPO), str(REPO / "src"), str(REPO / "scripts"), str(Path(__fil
 from research.analysis import roles as participant_roles  # noqa: E402
 from research.analysis.incident import contagion as cg  # noqa: E402
 from research.analysis.incident import digest as incident_digest  # noqa: E402
+from research.analysis.private_material import skip_unless_available  # noqa: E402
+skip_unless_available("research/analysis/simple_judge/prompts.py")
 from research.analysis.simple_judge import pipeline  # noqa: E402
 from research.analysis.simple_judge.report import render_html  # noqa: E402
 from seeded_fixture import OVERSEER, SEED, SEED_PATH, TASK, make_seeded_run  # noqa: E402

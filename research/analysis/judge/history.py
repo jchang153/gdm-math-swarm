@@ -1,7 +1,7 @@
 """Full per-agent history reconstruction for the transcript behavior judge (researcher-only).
 
 Implements I-HISTORY (docs/plan.md, "Transcript behavior judge specified, October 17,
-2026"; research/analysis/judge_rubric.md Sections 3.5, 3.6 and 4). Offline only: reads a
+2026"; private/research/analysis/judge_rubric.md Sections 3.5, 3.6 and 4). Offline only: reads a
 saved run directory and never calls a model, the network or Docker. Nothing here may
 enter an agent image, container, workspace, prompt or the conference library.
 
@@ -43,7 +43,9 @@ from urllib.request import pathname2url
 
 SCHEMA = "gdm-judge-history/1"
 REPO = Path(__file__).resolve().parents[3]
-DEFECTS_PATH = Path(__file__).with_name("statement_defects.json")
+# Researcher-only, host-only (git-ignored private/; research/analysis/private_material.py).
+DEFECTS_PATH = (Path(__file__).resolve().parents[3] / "private" / "research" / "analysis" / "judge"
+                / "statement_defects.json")
 
 CONFERENCE_PREFIX = "mcp__conference__"
 # The neutral collaborative environment (research_swarm.prompts.NEUTRAL_VARIANTS) exposes the

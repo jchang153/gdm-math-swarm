@@ -3,11 +3,12 @@
 
 The Space hits HF's 1 GB repository cap, so (owner, October 22, 2026):
 
-- **Inspect logs** (``.eval``) go to the private dataset ``HF-ORG/LOGS-DATASET`` at
-  ``RUN/inspect/<name>.eval`` (live logs at ``live/RUN/inspect/<name>.eval``). The static Space reads them
-  with the viewer's own "Sign in with HF" OAuth token (``hf_site/signin.html``) through a fetch shim
-  (``hf_site/evallog-fetch.js``) inlined first into each Inspect View ``index.html``, pinned to the
-  dataset commit. No secret is stored anywhere.
+- **Inspect logs** (``.eval``) go to the private dataset named by ``GDM_LOGS_DATASET``
+  (scripts/hf_visibility.py) at ``RUN/inspect/<name>.eval`` (live logs at
+  ``live/RUN/inspect/<name>.eval``). The static Space reads them with the viewer's own "Sign in
+  with HF" OAuth token (``hf_site/signin.html``) through a fetch shim (``hf_site/evallog-fetch.js``)
+  inlined first into each Inspect View ``index.html``, pinned to the dataset commit. No secret is
+  stored anywhere.
 - **Files the site does not need to render or work** ("go ahead and move everything to dataset that's
   not necessary for current functionality of the website"): raw ``.jsonl`` records, snapshot archives and
   loose snapshot files, ``.db``/``.sqlite`` databases and the old custom transcript pages
