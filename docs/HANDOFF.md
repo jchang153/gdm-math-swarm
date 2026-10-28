@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-28 by Claude (Opus 5.5) operator subagent (180-minute notices replicates launching, item 13).
+Last updated: 2026-10-28 by Claude (Opus 5.5) operator subagent (180-minute notices replicates running, item 13).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -606,7 +606,19 @@ is being merged into main via `collab-env`.
    the operator session's scratchpad (`b180/`: `run_vm.sh` prep + launch, then retrieval and post-processing). After
    each run: retrieve to `runs/`, results, timeline, conference export, transcripts, simple judge (on the VM),
    incident report; then stop each VM and resize back to n2-standard-64 (new VMs stay TERMINATED, not deleted; owner
-   decides). Not published (owner decides). Status: VMs being prepared.
+   decides). Not published (owner decides). The launch gate needed 10800 s added to `OWNER_TRACK_RUN_SECONDS`
+   (`69d1738`). **Status 2026-10-28 13:06 PT: all twelve running**; seed at +180 s and notices verified in all;
+   open-file limit 1048576 on the run processes. Run ids (`glmflash100-seeded-` prefix omitted):
+   | condition | r1 | r2 | r3 |
+   |---|---|---|---|
+   | control | `control-180m-notices-r1-20261028T195741Z` | `control-180m-notices-r2-20261028T194617Z` | `control-180m-notices-r3-20261028T194438Z` |
+   | 1ov-glm | `1ov-glm-180m-notices-r1-20261028T194516Z` | `1ov-glm-180m-notices-r2-20261028T194542Z` | `1ov-glm-180m-notices-r3-20261028T194445Z` |
+   | 2ov-glm | `2ov-glm-180m-notices-r1-20261028T194640Z` | `2ov-glm-180m-notices-r2-20261028T194424Z` | `2ov-glm-180m-notices-r3-20261028T194422Z` |
+   | 10ov-glm | `10ov-glm-180m-notices-r1-20261028T194510Z` | `10ov-glm-180m-notices-r2-20261028T194507Z` | `10ov-glm-180m-notices-r3-20261028T194533Z` |
+   Runs started 12:49-12:52 PT (control r1 13:02 PT, relaunched after a hung compatibility check); clocks end about
+   15:50-16:03 PT. If the operator session is lost: each VM's supervisor packages the run and waits for
+   `runs/phase-b/<id>/retrieved.marker`; retrieve as in "Operating a VM" step 7, run `build_results.py`, the incident
+   report, then stop and resize each VM.
 ## Next steps / open items
 
 - **Unread notices landed on main (2026-10-27, owner-approved; docs/plan.md "Unread notices (October 27, 2026)").**
