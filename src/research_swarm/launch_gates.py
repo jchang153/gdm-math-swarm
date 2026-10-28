@@ -155,7 +155,8 @@ TRACK_AGENT_COUNTS = {track: spec["agent_counts"] for track, spec in BUDGET_TRAC
 # "Owner multi-model max-pressure runs, October 21, 2026").
 # 7200: owner, October 22, 2026 ("10 agents and 2 hours").
 # 1800: owner, October 22, 2026 (100 agents, 30 minutes); 5400: owner, October 22, 2026 (100 agents x 90 minutes).
-OWNER_TRACK_RUN_SECONDS = (1800, 3600, 5400, 7200, 21600)
+# 10800: owner, October 28, 2026 (docs/plan.md, "Three-hour notices replicates, October 28, 2026").
+OWNER_TRACK_RUN_SECONDS = (1800, 3600, 5400, 7200, 10800, 21600)
 ABLATION_AGENT_COUNTS = TRACK_AGENT_COUNTS["ablation"]
 
 # Optional prompt ablation (docs/prompts.md, "Prompt ablation variants"); the check
