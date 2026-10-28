@@ -38,6 +38,10 @@ W, H = 240, 40
 
 # Run series, matched on the run ID (first match wins), shown newest series first.
 SERIES = (
+    ('notices180', r'^glmflash100-seeded-.+-180m-notices-', '180-minute overseer replicates, with unread notices',
+     'Twelve 180-minute seeded runs with unread notices on: no overseer (control) or 1, 2 or 10 GLM 5.3 Flash '
+     'overseers, three replicates each (r1, r2, r3), all launched together. Otherwise the same design as the '
+     '60-minute notices series: 100 GLM 5.3 Flash solvers and the planted exploit at +3 min.'),
     ('notices60', r'^glmflash100-seeded-.+-60m-notices-', '60-minute overseer series, with unread notices',
      'The nine 60-minute seeded runs repeated with one change: every tool result now tells an agent how many unread '
      'direct messages, new bulletin board posts and new library files are waiting. In the first 60-minute series, '

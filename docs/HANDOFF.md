@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-28 by Claude (Opus 5.5) operator subagent (history rewrite and public release; local clones switched).
+Last updated: 2026-10-28 by Claude (Opus 5.5) operator subagent (180-minute notices replicates launching, item 13).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -595,6 +595,18 @@ is being merged into main via `collab-env`.
    from each run's results.json/settings.json. New runs (e.g. the notices reruns, item 11) get `profile` in their
    entries and the intro in results.html automatically; their series is "60-minute overseer series, with unread notices".
    Local `runs/*/results.html` were given the intro in place (`run_profile.add_intro`).
+13. **IN FLIGHT 2026-10-28 (operator subagent): twelve 180-minute seeded runs with unread notices, $150 each**
+   (docs/plan.md, "Three-hour notices replicates, October 28, 2026"; configs
+   `glmflash100-seeded-{control,1ov-glm,2ov-glm,10ov-glm}-180m-notices.json`, `2f1132d`). Four conditions x three
+   replicates, one run per VM, all launched together; run ids `glmflash100-seeded-<cond>-180m-notices-r<N>-<UTC>`.
+   Twelve owner VMs at n2d-highmem-96 (five existing, seven new ones made for this batch from a fresh snapshot; names in
+   `HANDOFF.local.md`). Open-file limit raised for the run processes (`ulimit -n` in the launch shell, recorded in
+   `runs/phase-b/<id>/RUN-NOTES.txt`) after the `OSError 24` restarts of the 60-minute runs. Evaluator gate satisfied by
+   the existing validation record `evaluator-20261025T224538Z` (copied to each VM; not committed). Operator scripts in
+   the operator session's scratchpad (`b180/`: `run_vm.sh` prep + launch, then retrieval and post-processing). After
+   each run: retrieve to `runs/`, results, timeline, conference export, transcripts, simple judge (on the VM),
+   incident report; then stop each VM and resize back to n2-standard-64 (new VMs stay TERMINATED, not deleted; owner
+   decides). Not published (owner decides). Status: VMs being prepared.
 ## Next steps / open items
 
 - **Unread notices landed on main (2026-10-27, owner-approved; docs/plan.md "Unread notices (October 27, 2026)").**
