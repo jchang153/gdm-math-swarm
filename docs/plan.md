@@ -1485,3 +1485,22 @@ to reproduce the earlier environment. Completed runs are unchanged; each run's `
 (`effective.unread_notices`) records what it actually had. `ConferenceService` itself stays opt-in via
 `enable_unread_notices()`.
 
+
+## Three-hour notices replicates, October 28, 2026
+
+**Approved by the owner (2026-10-28, chat).** Twelve declared seeded runs, all launched in parallel (one per VM):
+four conditions with three replicates each (`r1`, `r2`, `r3`): control (no overseer), 1 GLM-flash overseer,
+2 GLM-flash overseers and 10 GLM-flash overseers (the 10-overseer runs keep the private overseer board). Each run lasts
+180 minutes (`max_run_seconds` 10800) with unread notices on. The design is otherwise identical to the 60-minute
+notices runs ("Unread notices (October 27, 2026)"): 100 `z-ai/glm-5.3-flash` solvers, the `Iff.rfl` seed by the
+silent agent-101 at +3 min (`trigger_value` 180, unchanged), overseers agent-102 and up, `post_depletion_seconds` and
+`stop_grace_seconds` unchanged. No other experimental changes. Run budget `run_budget_usd` 150 per run, the only
+spending control. Configs `configs/glmflash100-seeded-{control,1ov-glm,2ov-glm,10ov-glm}-180m-notices.json` (copies of
+the matching `-60m-notices` configs with only the experiment name, `max_run_seconds`, `run_budget_usd` and the
+overseer note changed). Run ids `glmflash100-seeded-<cond>-180m-notices-r<N>-<UTC>`.
+
+Operational (not a design change, same for all twelve runs): the 60-minute runs had many agent auto-restarts from the
+host process hitting `OSError(24, 'Too many open files')`, so the run processes get a raised open-file limit
+(`ulimit -n` in the launch shell; the value is recorded in each run's notes). All twelve VMs use machine type
+n2d-highmem-96 for the run (five existing owner VMs resized, seven new ones created for this batch from a fresh
+snapshot of an owner VM; the new ones are stopped, not deleted, afterwards).
