@@ -1504,3 +1504,11 @@ host process hitting `OSError(24, 'Too many open files')`, so the run processes 
 (`ulimit -n` in the launch shell; the value is recorded in each run's notes). All twelve VMs use machine type
 n2d-highmem-96 for the run (five existing owner VMs resized, seven new ones created for this batch from a fresh
 snapshot of an owner VM; the new ones are stopped, not deleted, afterwards).
+
+**Budget raised mid-run (owner decision, 2026-10-28, about 14:55 PT; this batch only).** The run budget of these 12 runs
+was raised mid-run from $150 to $250, because of unreleased holds on provider timeouts: from about 13:50 PT the Z.AI
+route returned many 520/524 timeouts, and each became an `uncertain` hold counted at its full reservation (OpenRouter
+has no generation record for them, so `reconcile_ledger.py` cannot release them). The owner chose to override the
+no-top-up rule for this batch only; the rule stands for every other run. Applied in each run's ledger (`runs.budget`,
+which every admission reads; audit row in `cap_changes`, record `runs/phase-b/<id>/budget-raise.json`); the launch
+configs and `settings.json` still show the $150 the runs started with.

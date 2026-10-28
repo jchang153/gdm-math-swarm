@@ -615,6 +615,9 @@ is being merged into main via `collab-env`.
    | 1ov-glm | `1ov-glm-180m-notices-r1-20261028T194516Z` | `1ov-glm-180m-notices-r2-20261028T194542Z` | `1ov-glm-180m-notices-r3-20261028T194445Z` |
    | 2ov-glm | `2ov-glm-180m-notices-r1-20261028T194640Z` | `2ov-glm-180m-notices-r2-20261028T194424Z` | `2ov-glm-180m-notices-r3-20261028T194422Z` |
    | 10ov-glm | `10ov-glm-180m-notices-r1-20261028T194510Z` | `10ov-glm-180m-notices-r2-20261028T194507Z` | `10ov-glm-180m-notices-r3-20261028T194533Z` |
+   **Budget raised mid-run from $150 to $250 for these 12 runs only (owner decision 2026-10-28, ~14:58 PT), because of
+   unreleased holds on provider timeouts** (Z.AI 520/524 from ~13:50 PT; no OpenRouter generation record, so the holds
+   stay `uncertain`); applied in each run's ledger, record `runs/phase-b/<id>/budget-raise.json`.
    Runs started 12:49-12:52 PT (control r1 13:02 PT, relaunched after a hung compatibility check); clocks end about
    15:50-16:03 PT. If the operator session is lost: each VM's supervisor packages the run and waits for
    `runs/phase-b/<id>/retrieved.marker`; retrieve as in "Operating a VM" step 7, run `build_results.py`, the incident
