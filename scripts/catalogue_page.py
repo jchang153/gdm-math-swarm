@@ -5,8 +5,6 @@ deterministic function of its entries (maintain_hf_run.py reproduces it byte for
 """
 from site_layout import COLUMN  # the site's one centred content column
 
-WIDE = '1360px'  # the run-card grid only
-
 # Behavior judge cohorts (research/analysis/judge/review.py COHORT_ORDER and COHORT_GLOSS).
 COHORTS = ('exploiter', 'convert', 'exploit_promoter', 'whistleblower', 'no_misbehavior', 'insufficient_record')
 COHORT_LABELS = {'exploiter': ('exploiter', 'exploiters'), 'convert': ('convert', 'converts'),
@@ -42,9 +40,7 @@ STYLE = (
     # Redesign (owner, October 29, 2026: "clanky and old looking, text too dense"). Colours are the shared
     # site_style tokens (light/dark and the theme toggle); one accent; hairlines instead of boxes.
     '*{box-sizing:border-box}'
-    # The card grid may use a wider column (WIDE; owner, October 29, 2026: "5 cards per row"); everything else stays in
-    # the site's text column.
-    'body{max-width:'+WIDE+';margin:0 auto 64px;padding:0 32px;font:16px/1.55 system-ui,-apple-system,"Segoe UI",'
+    'body{max-width:'+COLUMN+';margin:0 auto 64px;padding:0 32px;font:16px/1.55 system-ui,-apple-system,"Segoe UI",'
     'Roboto,sans-serif;color:var(--fg);background:var(--bg);-webkit-font-smoothing:antialiased}'
     'h1,h2,h3{letter-spacing:-.015em;color:var(--fg)}h2{margin:0;font-size:22px;line-height:1.25;font-weight:650}'
     'p{max-width:70ch;color:var(--soft)}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}'
@@ -95,41 +91,40 @@ STYLE = (
     '.lg-area{background:color-mix(in srgb,var(--bad) 28%,transparent);border-top:2px solid var(--bad)}'
     '.lg-cum{border-top:2px dashed var(--muted);height:0!important;vertical-align:3px!important}'
     '.lg-seed{border-left:2px dotted var(--accent);width:0!important;height:11px!important;margin-left:4px}'
-    '.topnav,.hero,#live,.runs,.series-head,#table-view,.about,.foot{max-width:'+COLUMN+';margin-left:auto;margin-right:auto}'
-    # 5 cards per row on a 1440px screen, then 4/3/2/1 as the window narrows.
-    '.rc-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px}'
-    '@media (max-width:1300px){.rc-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}'
-    '@media (max-width:1060px){.rc-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}'
-    '@media (max-width:820px){.rc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+    # Owner, October 29, 2026: 5 compact cards per row inside the column on a 1440px screen, then 4/3/2/1.
+    '.rc-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}'
+    '@media (max-width:1100px){.rc-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}'
+    '@media (max-width:900px){.rc-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}'
+    '@media (max-width:700px){.rc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}'
     '.rc{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:12px;'
-    'padding:14px 14px 10px;min-width:0;transition:border-color .15s}.rc:hover{border-color:var(--input-line)}'
+    'padding:10px 11px 8px;min-width:0;transition:border-color .15s}.rc:hover{border-color:var(--input-line)}'
     '.rc.picked{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}'
-    '.rc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}'
-    '.rc-title{font-size:16px;line-height:1.3;margin:0;font-weight:650}'
+    '.rc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:6px}'
+    '.rc-title{font-size:14px;line-height:1.3;margin:0;font-weight:650}'
     '.rc-pick{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:12px;cursor:pointer;flex:none}'
-    '.rc-pick input{width:15px;height:15px;margin:0;accent-color:var(--accent)}'
-    '.rc-meta{margin:3px 0 10px;font-size:12.5px;color:var(--muted)}'
-    '.rc-body{flex:1}.rc-spark{margin:0 0 8px}.spark{display:block;width:100%;height:44px;overflow:visible}'
+    '.rc-pick input{width:14px;height:14px;margin:0;accent-color:var(--accent)}'
+    '.rc-meta{margin:2px 0 6px;font-size:11.5px;color:var(--muted)}'
+    '.rc-body{flex:1}.rc-spark{margin:0 0 6px}.spark{display:block;width:100%;height:32px;overflow:visible}'
     '.sp-area{fill:color-mix(in srgb,var(--bad) 22%,transparent);stroke:var(--bad);stroke-width:1.5;'
     'vector-effect:non-scaling-stroke}.sp-cum{fill:none;stroke:var(--muted);stroke-width:1.2;stroke-dasharray:4 3;'
     'vector-effect:non-scaling-stroke}.sp-base{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}'
     '.sp-seed{stroke:var(--accent);stroke-width:1.5;stroke-dasharray:2 2;vector-effect:non-scaling-stroke}'
-    '.rc-spark figcaption{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:3px}'
-    '.rc-fakes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0}'
+    '.rc-spark figcaption{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:2px}'
+    '.rc-fakes{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr);gap:6px;margin:0}'
     '.rc-fakes div,.rc-stats div{min-width:0;display:flex;flex-direction:column}'
-    '.rc-fakes dt{order:2;font-size:11px;color:var(--muted);line-height:1.3}'
-    '.rc-fakes dd{order:1;margin:0;font-weight:650;font-size:20px;line-height:1.2;font-variant-numeric:tabular-nums}'
-    '.rc-fakes dd.bad{color:var(--bad)}.rc-fakes dd.sub{order:3;font-size:11.5px;font-weight:400;color:var(--muted)}'
-    '.rc-empty{font-size:13px;line-height:1.45;color:var(--muted);margin:4px 0 0!important}'
-    '.rc-links{display:flex;flex-wrap:wrap;gap:2px 14px;margin:12px 0 0;padding-top:10px;border-top:1px solid var(--line);'
-    'font-size:13px;max-width:none}.rc-links a{white-space:nowrap}'
-    '.rc-more{margin-top:6px;font-size:12.5px;color:var(--soft)}.rc-more summary{cursor:pointer;color:var(--muted);'
+    '.rc-fakes dt{order:2;font-size:11px;color:var(--muted);line-height:1.25;white-space:nowrap}'
+    '.rc-fakes dd{order:1;margin:0;font-weight:650;font-size:17px;line-height:1.2;font-variant-numeric:tabular-nums}'
+    '.rc-fakes dd.bad{color:var(--bad)}.rc-fakes dd.sub{order:3;white-space:nowrap;font-size:11px;font-weight:400;color:var(--muted)}'
+    '.rc-empty{font-size:12px;line-height:1.45;color:var(--muted);margin:4px 0 0!important}'
+    '.rc-links{display:flex;flex-wrap:wrap;gap:1px 10px;margin:8px 0 0;padding-top:7px;border-top:1px solid var(--line);'
+    'font-size:12px;line-height:1.5;max-width:none}.rc-links a{white-space:nowrap}'
+    '.rc-more{margin-top:4px;font-size:12px;color:var(--soft)}.rc-more summary{cursor:pointer;color:var(--muted);'
     'list-style:none;padding:2px 0;width:max-content}.rc-more summary::-webkit-details-marker{display:none}'
     '.rc-more summary::after{content:" +"}.rc-more[open] summary::after{content:" −"}'
-    '.rc-more p{margin:6px 0;font-size:12.5px;line-height:1.45}.rc-cond{color:var(--fg)!important}'
+    '.rc-more p{margin:5px 0;font-size:12px;line-height:1.45}.rc-cond{color:var(--fg)!important}'
     '.rc-note{color:var(--muted)!important}'
     '.rc-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px;margin:8px 0}'
-    '.rc-stats dt{font-size:11px;color:var(--muted)}.rc-stats dd{margin:0;font-weight:600;font-size:13.5px;'
+    '.rc-stats dt{font-size:11px;color:var(--muted)}.rc-stats dd{margin:0;font-weight:600;font-size:13px;'
     'font-variant-numeric:tabular-nums;color:var(--fg)}.rc-stats dd small{font-weight:400}'
     '.rc-when{color:var(--muted)!important;overflow-wrap:anywhere}.rc-when code{font-size:11px}'
     # Table view and compare

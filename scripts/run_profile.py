@@ -246,10 +246,12 @@ def card_inner(p, scale):
            f'<span>{"no fakes accepted" if not f["accepted"] else "peak " + str(f["peak"]) + " standing"}</span>'
            f'<span>{esc(_duration(scale.get("minutes") or p["minutes"]))}</span></figcaption></figure>']
     reverted = (f'<dd class="sub">{f["reverted"]} reverted</dd>' if p.get('overseers') or f['reverted'] else '')
-    stats = [('Fakes accepted', f['accepted'], ' class="bad"', reverted),
-             ('Standing at end', f['standing_end'], ' class="bad"', ''),
-             ('Fake-minutes', math.floor(f['fake_minutes'] + 0.5), '', '')]
-    out.append('<dl class="rc-fakes">' + ''.join(f'<div><dt>{k}</dt><dd{c}>{v}</dd>{x}</div>' for k, v, c, x in stats)
+    # Short labels (compact 5-per-row cards; the full term is the tooltip and in the glossary).
+    stats = [('Fakes', 'Fakes accepted', f['accepted'], ' class="bad"', reverted),
+             ('Standing', 'Fakes standing at the end', f['standing_end'], ' class="bad"', ''),
+             ('Fake-min', 'Fake-minutes', math.floor(f['fake_minutes'] + 0.5), '', '')]
+    out.append('<dl class="rc-fakes">' + ''.join(f'<div title="{t}"><dt>{k}</dt><dd{c}>{v}</dd>{x}</div>'
+                                                 for k, t, v, c, x in stats)
                + '</dl>')
     return ''.join(out)
 
@@ -340,8 +342,8 @@ function inner(p,scale){const f=p.fakes;
  const out=['<figure class="rc-spark">'+spark(p,scale)+'<figcaption><span>0</span><span>'+(!f.accepted?'no fakes accepted':'peak '+f.peak+' standing')+
   '</span><span>'+esc(duration(scale.minutes||p.minutes))+'</span></figcaption></figure>'];
  const rv=p.overseers||f.reverted?'<dd class="sub">'+f.reverted+' reverted</dd>':'';
- const stats=[['Fakes accepted',f.accepted,' class="bad"',rv],['Standing at end',f.standing_end,' class="bad"',''],['Fake-minutes',Math.floor(f.fake_minutes+0.5),'','']];
- out.push('<dl class="rc-fakes">'+stats.map(([k,v,c,x])=>'<div><dt>'+k+'</dt><dd'+c+'>'+v+'</dd>'+x+'</div>').join('')+'</dl>');
+ const stats=[['Fakes','Fakes accepted',f.accepted,' class="bad"',rv],['Standing','Fakes standing at the end',f.standing_end,' class="bad"',''],['Fake-min','Fake-minutes',Math.floor(f.fake_minutes+0.5),'','']];
+ out.push('<dl class="rc-fakes">'+stats.map(([k,t,v,c,x])=>'<div title="'+t+'"><dt>'+k+'</dt><dd'+c+'>'+v+'</dd>'+x+'</div>').join('')+'</dl>');
  return out.join('');}
 function more(p){const out=['<p class="rc-cond">'+esc(condition(p))+'</p>'],f=p.fakes;if(!p.checked)return out.join('');
  const notes=[];

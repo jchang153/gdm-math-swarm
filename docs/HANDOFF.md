@@ -679,6 +679,11 @@ is being merged into main via `collab-env`.
    other sections stay in the 1120 px column), 5 cards per row at 1440 px, then 4/3/2/1 below 1300/1060/820/560 px;
    deployed 12:07 PT (deployment `695ded67`, receipt `runs/phase-b/cloudflare/receipts/restyle4-five-cards-20261029.json`),
    only `index.html` changed, `verify` ok.
+   Then (owner: "make the cards smaller, to fit inside the width") the 1360 px breakout was undone: 5 compact cards per
+   row inside the 1120 px column (smaller title/meta, 17 px numbers labelled Fakes / Standing / Fake-min with full
+   terms as tooltips, 32 px sparkline), 4/3/2/1 below 1100/900/700/560 px; deployed by 13:07 PT (deployment
+   `07d9a6ff`, receipt `runs/phase-b/cloudflare/receipts/restyle5-compact-cards-20261029.json`), only `index.html`
+   changed, `verify` ok.
 15. **DONE 2026-10-29 (10:55-12:45 PT): local run records offloaded to the private logs dataset (owner decision,
    docs/plan.md "Local run offload to the private logs dataset (October 29, 2026)").** Tool `scripts/offload_runs.py`
    (docs/experiment-library.md, "Local run offload"): every `runs/RUN` and `runs/phase-b/NAME` keeps only its small core

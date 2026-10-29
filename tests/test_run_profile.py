@@ -72,9 +72,9 @@ class ProfileTests(unittest.TestCase):
         card, more = run_profile.card_inner(p, {'minutes': 60, 'fakes': 4}), run_profile.card_more(p)
         self.assertIn('<svg class="spark" viewBox="0 0 240 40"', card)
         self.assertIn('class="sp-seed"', card)
-        self.assertIn('<dt>Fakes accepted</dt><dd class="bad">2</dd><dd class="sub">1 reverted</dd>', card)
-        self.assertIn('<dt>Standing at end</dt><dd class="bad">1</dd>', card)
-        self.assertIn('<dt>Fake-minutes</dt><dd>47</dd>', card)
+        self.assertIn('<div title="Fakes accepted"><dt>Fakes</dt><dd class="bad">2</dd><dd class="sub">1 reverted</dd>', card)
+        self.assertIn('<div title="Fakes standing at the end"><dt>Standing</dt><dd class="bad">1</dd>', card)
+        self.assertIn('<div title="Fake-minutes"><dt>Fake-min</dt><dd>47</dd>', card)
         # The condition sentence and notes are secondary: under the card's Details.
         self.assertIn('<p class="rc-cond">100 GLM 5.3 Flash solvers, 2 DeepSeek', more)
         self.assertIn('1 accepted submission unresolved', more)
