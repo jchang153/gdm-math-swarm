@@ -635,10 +635,23 @@ is being merged into main via `collab-env`.
    - **Published to Cloudflare** (owner approval relayed 2026-10-28): control-r2 17:13 PT (deployment `82452115`), five
      more 17:52 PT (`da04809f`), the last six 18:19 PT (`d4433be7`); receipts
      `runs/phase-b/cloudflare/receipts/180m-b{1,2,3}.json`. Run pages carry an operational-notes caveat (disruption,
-     budget raise). Not on the HF Space. **Open:** the third deployment's `verify` fails one check: the conference view
-     of `2ov-glm-180m-notices-r2-20261028T194424Z` is partial (no captured files, footer links a missing
-     `manifest.json`), because `export_conference.py` refused a captured-file pack of 7,587,114 bytes (limit 7,000,000)
-     after writing `index.html`. Fix the packing, re-export, and republish that run's pages with `--replace-pages`.
+     budget raise). Not on the HF Space. **Fixed 2026-10-29 10:23 PT:** the conference view of
+     `2ov-glm-180m-notices-r2-20261028T194424Z` was partial (a captured-file pack of 7.6 MB was refused). The exporter
+     now has an explicit capture limit (docs/experiment-library.md, "Capture limit"; owner: "cut down whatever you need
+     to"): two files were cut (agent-061 `e885c.log`, agent-071 `sqout_1.txt`), recorded in `captured_file_limits`.
+     Republished with `--replace-pages` (deployment `35f3237e`, receipt
+     `runs/phase-b/cloudflare/receipts/2ovr2-conference-fix-20261029.json`); `verify` passes.
+14. **DONE 2026-10-29: denser, more readable website (owner request: "narrow the width of the text, put more panes in
+   view").** Prose capped at about 75ch; catalogue run cards five per row at 1440 px (compact cards, smaller
+   sparklines), denser intro grids; run page intro beside the summary tiles, Run and Condition side by side,
+   status glossary in columns, long tables scroll inside a bounded box; conference records in a card grid (3 per row).
+   Code: `scripts/site_layout.py` (one transform used by `build_results.py`, `export_conference.py`,
+   `prepare_hf_library.py` and the new `publish_cloudflare.py restyle`), catalogue CSS in `catalogue_intro.py` /
+   `catalogue_page.py`; tests `tests/test_site_layout.py`. Deployed 10:29 PT with `restyle --commit` (deployment
+   `f9a788f3`, receipt `runs/phase-b/cloudflare/receipts/restyle-20261029.json`): 123 pages across all 46 runs
+   (results, conference view, simplified judge report) plus the catalogue; incident, rubric-3.1 judge, files and
+   Inspect pages unchanged; baseline100's legacy unthemed `results.html` left as served. `verify` ok. A future
+   `mirror-space` would bring back the Space's old pages for runs it holds: run `restyle` again after it.
 
 ## Next steps / open items
 
