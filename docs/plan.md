@@ -1512,3 +1512,27 @@ has no generation record for them, so `reconcile_ledger.py` cannot release them)
 no-top-up rule for this batch only; the rule stands for every other run. Applied in each run's ledger (`runs.budget`,
 which every admission reads; audit row in `cap_changes`, record `runs/phase-b/<id>/budget-raise.json`); the launch
 configs and `settings.json` still show the $150 the runs started with.
+
+## Local run offload to the private logs dataset (October 29, 2026)
+
+**Approved by the owner (2026-10-29, chat), to free disk space on the owner's Mac.** The local experiment records in
+`runs/` are offloaded to the existing private logs dataset (`GDM_LOGS_DATASET`, host-only name in `HANDOFF.local.md`).
+The owner explicitly approved adding run archives to this dataset; it had been left unchanged only to protect it
+during the Cloudflare migration. Rules of the approval:
+
+- **Only add files** to the dataset; never delete or overwrite an existing dataset file. The dataset stays private
+  (`scripts/hf_visibility.py` check before every commit); no credentials, auth caches or host `.env` are uploaded.
+- **Scope: every run directory under `runs/`**, including the `runs/phase-b/<run-id>` operator copies, at the
+  repository's `RUN/<path>` layout (`phase-b/NAME/<path>` for operator folders). Each run keeps locally only its small
+  core used for quick queries: `conference/`, `evaluations/`, `oversight/`, `results.json`, `results.html`, settings
+  and budget files and other top-level files up to 1 MiB (not `runtime.jsonl`). Everything else (`snapshots/`,
+  `analysis/`, `transcripts/`, `inspect/`, `resume/`, `runtime.jsonl`, `instructions/`, `prompts/`,
+  `conference-view/`, ...) is deleted locally only after the uploaded copy is verified by SHA-256 against the
+  dataset. Each run gets `runs/<run-id>/OFFLOADED.json` (every uploaded path, its SHA-256, size, dataset object and
+  commit); `scripts/offload_runs.py restore` fetches files back.
+- **Website/publishing build bundles in `runs/phase-b/`** (`cf-bundle-*`, `hf-bundle-*`, the packed bundle in
+  `conference-pack-*`, the old `cache100` `hf-bundle/`, and the Cloudflare content cache `cloudflare/cache/`) are
+  rebuildable and are deleted without upload, after `publish_cloudflare.py verify` of the live site passed. Small
+  operator records (receipts, `budget-raise.json`, ledgers, verify outputs, logs) stay local; budget ledgers are
+  never uploaded. Anything not confidently classified is uploaded rather than deleted-only.
+- Not touched: `.venv*`, `.git`, `private/`, `data/`, other repositories, the HF Space, existing dataset files.

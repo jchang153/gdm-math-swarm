@@ -1351,6 +1351,34 @@ No server, no secret and no cold start, on the free plan.
   organization plan; with a token instead of OAuth, the owner would create the read-only token and set it as a
   secret.
 
+## Local run offload (October 29, 2026)
+
+Owner decision (docs/plan.md, "Local run offload to the private logs dataset (October 29, 2026)"): to free the
+owner's disk, `scripts/offload_runs.py` uploads local run records to the private logs dataset (`GDM_LOGS_DATASET`)
+and deletes the local copies only after each dataset copy is verified by SHA-256 (LFS SHA-256, or download and hash).
+
+- A unit is `runs/RUN` or `runs/phase-b/NAME`; its files go to the dataset at `RUN/<path>` (`phase-b/NAME/<path>`).
+  Files of 8 MB or more go at their own path (or `UNIT/offload-20261029/files/<path>` if that path already holds
+  other bytes); smaller files are packed deterministically into `UNIT/offload-20261029/<top-level entry>.tar.gz`
+  (runs/ held over a million files). Files already in the dataset with identical bytes are not uploaded again.
+- Only adds files: dataset visibility is checked (private) before each commit, commits are pinned to the head and
+  retried, and nothing in the dataset is overwritten or deleted.
+- Kept locally (and also backed up): `conference/`, `evaluations/`, `oversight/` and top-level files up to 1 MiB
+  (results, settings, budget files) except `runtime.jsonl`; in `phase-b/NAME`, small logs/JSON/scripts at depth
+  two or less and receipts/verify outputs. Never uploaded, kept locally: dot-files, symlinks, budget ledgers
+  (`*budget*.sqlite`, `*ledger*.sqlite`), credential or host-only file names, and any file failing the credential
+  screen. A tar archive whose only problem is credential-named members (the agents' `~/.agent/sessions/*.key` in
+  resume `state.tar.gz`) stays local as is; a copy without those members is uploaded at
+  `UNIT/offload-20261029/repacked/<path>`.
+- `runs/UNIT/OFFLOADED.json` lists every uploaded file (sha256, size, dataset object or archive member, kept or
+  not), the dataset commit, local-only files and screen exclusions.
+- Restore (export `GDM_LOGS_DATASET` first):
+  `PYTHONPATH=scripts:src:. .venv/bin/python scripts/offload_runs.py restore --unit RUN [--prefix inspect/]`
+  downloads the recorded objects at the recorded commit and writes back each file whose SHA-256 matches.
+  Tools that read offloaded files (transcript export, conference captured files, rebuilding a bundle) need a
+  restore first.
+- Offload: `scripts/offload_runs.py offload --unit UNIT ... | --all [--workers 6] [--dry-run] [--keep-all]`.
+
 ## Near-live mirror
 
 The owner chose a near-live view of runs on the website while they are going ("option 1 (near-live)",

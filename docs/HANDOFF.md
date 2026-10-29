@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-28 by Claude (Opus 5.5) operator subagent (180-minute notices replicates done, item 13).
+Last updated: 2026-10-29 by Claude (Opus 5.5) subagent (local run offload to the logs dataset, item 15).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -131,7 +131,8 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
   - Anything on the Space is world-readable (judge reports and packages included).
 - **Local experiment library:** `runs/index.html`, rebuilt with
   `scripts/build_experiment_index.py`.
-- **Raw runs:** `runs/<run-id>/`. Git-ignored; back them up separately.
+- **Raw runs:** `runs/<run-id>/`. Git-ignored. Since 2026-10-29 only each run's core stays local; the rest is in the
+  private logs dataset (`runs/<run-id>/OFFLOADED.json`, restore with `scripts/offload_runs.py restore`, item 15).
 - **VMs:** see "Hosts and access" and "Operating a VM" below. Always stop VMs after work and verify they're stopped. Do not
   touch collaborator Amelie's VM, files or branches.
 - **Credentials:** host-only `.env`, Git-ignored. It holds the owner's OpenRouter
@@ -671,6 +672,26 @@ is being merged into main via `collab-env`.
    other sections stay in the 1120 px column), 5 cards per row at 1440 px, then 4/3/2/1 below 1300/1060/820/560 px;
    deployed 12:07 PT (deployment `695ded67`, receipt `runs/phase-b/cloudflare/receipts/restyle4-five-cards-20261029.json`),
    only `index.html` changed, `verify` ok.
+15. **DONE 2026-10-29 (10:55-12:45 PT): local run records offloaded to the private logs dataset (owner decision,
+   docs/plan.md "Local run offload to the private logs dataset (October 29, 2026)").** Tool `scripts/offload_runs.py`
+   (docs/experiment-library.md, "Local run offload"): every `runs/RUN` and `runs/phase-b/NAME` keeps only its small core
+   locally (`conference/`, `evaluations/`, `oversight/`, results, settings, budget files); everything else is uploaded
+   to the dataset (`GDM_LOGS_DATASET`, adds only) and deleted locally after SHA-256 verification. Each unit has
+   `runs/<unit>/OFFLOADED.json`; restore with `scripts/offload_runs.py restore --unit RUN [--prefix PATH]`. Website
+   build bundles in `runs/phase-b/` (`cf-bundle-*`, `hf-bundle-*`, the packed bundle in `conference-pack-20261026`,
+   `cache100.../hf-bundle`, `cloudflare/cache`) were deleted without upload after `publish_cloudflare.py verify`
+   passed (list: `runs/phase-b/offload-20261029/deleted-bundles.tsv`). HF allows 128 commits per hour per repository:
+   use `offload --all --batch` (few large commits). Reports: `runs/phase-b/offload-20261029/report-*.json`.
+   Resume `state.tar.gz` archives contain the agents' `~/.agent/sessions/*.key` files: such archives not already in
+   the dataset stay local and a copy without those members is uploaded under `UNIT/offload-20261029/repacked/`.
+   Result: 200 units (59 runs, 141 `phase-b` folders), 43.2 GB offloaded in 71 verified dataset commits (66 per-unit, then
+   5 batched after HF's commit rate limit), 12.4 GB of bundles deleted without upload; `runs/` went from 58 GB to 3.3 GB
+   and the disk from 15 GB to 68 GB free. Still local by design: run cores (about 1.5 GB with the manifests),
+   `phase-b` budget ledgers (about 1.7 GB), 130 resume archives with `.key` members (0.85 GB, 180-minute runs) and three
+   operator tarballs that fail the credential screen (`phase-b/{baseline100,baseline8g100}*/reviewed-update.tar`,
+   `phase-b/cache100*/launch-source.tgz`; not uploaded). Loose files at the top of `runs/phase-b/` were not touched.
+   Tools that read offloaded files (transcript export, conference captured files, bundle preparation) need a
+   `restore` first.
 
 ## Next steps / open items
 
