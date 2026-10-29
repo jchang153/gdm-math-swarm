@@ -66,9 +66,26 @@ ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
    the unchanged paid post-run judge (a shadow check before the first paid live run); ``false``
    keeps the post-run judge alone. A judge process still running when the supervisor finishes (for
    example after an exception) is stopped the same way before the final ledger backup;
-5. packages the run and phase records with SHA-256 checksums and waits up to --retrieval-wait
-   seconds for a ``retrieved.marker`` in the phase directory;
-6. shuts the VM down only when it is idle (no Docker containers, no other tmux session, no
+5. builds the run's report and site on the VM (no model call, no network; each step recorded in
+   site-steps.json and never failing the run): ``build_results.py`` (with a ledger copy; it runs before the
+   incident report, which needs results.json), ``export_conference.py``, the Inspect View bundle (``python -I -m
+   inspect_ai view bundle`` from a scratch folder outside the checkout, so no .env is loaded) into
+   PHASE/inspect-view/ and ``prepare_hf_library.py`` into PHASE/site-bundle/ (the Cloudflare publication input);
+6. uploads the whole run and its phase records straight to the private logs dataset with
+   ``scripts/upload_run.py`` (docs/plan.md, "Runs go from the VM to the logs dataset, never to the owner's
+   computer (October 29, 2026)"): also after a failed or stopped run, add-only, verified by SHA-256, budget
+   ledgers and credential files never uploaded, nothing deleted on the VM. The HF credential is the VM host's
+   own token file (--hf-token-file, default ~/.config/gdm-math-swarm/hf-upload-token, mode 600) given to that one
+   step as HF_TOKEN_PATH; the dataset name is GDM_LOGS_DATASET or ~/.config/gdm-math-swarm/logs-dataset. Without
+   either, the upload is recorded as ``skipped_no_credential`` in hf-upload.json and the run stays on the VM
+   (rerun scripts/upload_run.py there later). --no-upload skips this step;
+7. packages only what the operator's computer keeps, with SHA-256 checksums: completed-core.tgz (the run's
+   core: conference/, evaluations/, oversight/, top-level files up to 1 MiB except runtime.jsonl, and
+   OFFLOADED.json), completed-phase.tgz (ledger backups, logs, records; ledgers never go to the dataset) and
+   completed-site.tgz (the site bundle without its dataset files, which are in the dataset); the full run is never
+   packaged for retrieval. Then it waits up to --retrieval-wait seconds for a ``retrieved.marker`` in the phase
+   directory (scripts/fetch_run.py fetches, verifies and touches it);
+8. shuts the VM down only when it is idle (no Docker containers, no other tmux session, no
    unexpected process of this user and no process of another login user, e.g. a collaborator's
    tmux or SSH session, checked six times); otherwise it leaves the VM running and records why.
    --no-shutdown skips this step.
@@ -102,6 +119,7 @@ import sqlite3
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 from collections import Counter
 from decimal import Decimal
@@ -133,6 +151,15 @@ LIVE_MEMORY_MAX = "8G"           # systemd scope memory ceiling of one live pass
 LIVE_HAIKU_CONCURRENCY = 8       # live passes share the pilot's provider key: keep their burst small
 EARLY_HISTORY_WORKERS = 2        # the early stages run beside evaluate's Lean comparators
 EARLY_JUDGE_TIMEOUT_SECONDS = 4 * 3600
+SITE_STEPS = ("results", "conference-export", "inspect-bundle", "site-bundle")  # free, on the VM (step 5)
+UPLOAD_STEP = "upload"
+CONFIG_HOME = Path.home() / ".config" / "gdm-math-swarm"
+DEFAULT_TOKEN_FILE = CONFIG_HOME / "hf-upload-token"     # the VM host's own HF token (never in the checkout)
+DEFAULT_DATASET_FILE = CONFIG_HOME / "logs-dataset"      # the private logs dataset's name (infrastructure)
+CORE_DIRS = ("conference", "evaluations", "oversight")   # offload_runs.RUN_KEEP_DIRS
+CORE_MAX_TOP_FILE = 1024 * 1024                           # offload_runs.SMALL
+OWNER_STEP = ("install the VM's HF upload token: docs/validation.md, 'Runs go to the logs dataset from the VM' "
+              "(scripts/vm_hf_setup.py), then rerun scripts/upload_run.py on the VM")
 SHADOW_DIR = "live-judge-shadow"
 
 
@@ -199,6 +226,8 @@ class Supervisor:
         self._scope_ok = None
         self.scope_detail = None
         self.shadow_record = None
+        self.site_steps = {}
+        self.upload_record = None
 
     def config_ledger(self, config):
         """The ledger the launched run reserves against (budget.ledger_path_for in this checkout)."""
@@ -269,11 +298,12 @@ class Supervisor:
         (self.phase / "live-checkpoint.json").write_text(json.dumps(data, indent=2))
 
     # -- steps -----------------------------------------------------------------
-    def step(self, name, arguments, on_wait=None):
+    def step(self, name, arguments, on_wait=None, *, cwd=None, extra_env=None):
         self.status(name)
         with (self.phase / (name + ".log")).open("x") as log:
-            process = subprocess.Popen([str(self.root / ".venv/bin/python"), "-u", *arguments], cwd=self.root,
-                                       env=self.env, stdout=log, stderr=subprocess.STDOUT)
+            process = subprocess.Popen([str(self.root / ".venv/bin/python"), "-u", *arguments],
+                                       cwd=cwd or self.root, env={**self.env, **(extra_env or {})}, stdout=log,
+                                       stderr=subprocess.STDOUT)
             while True:
                 try:
                     process.wait(timeout=self.args.poll_seconds)
@@ -794,6 +824,7 @@ class Supervisor:
                 self.early_judge_stop(f"the run or its follow-ups did not complete (exit {code})")
             self.early_judge_wait()
             self.judge_record = self.behavior_judge(code)
+            self.site_steps["results"] = self.results_step(code)   # the incident report needs results.json
             self.incident_record = self.incident_report(code)
         except Exception as error:
             self.status("worker_error", error_type=type(error).__name__, detail=str(error))
@@ -838,17 +869,155 @@ class Supervisor:
             return False
         return cancelled
 
+    # -- report and site on the VM, upload to the logs dataset (steps 5 and 6) --------------------
+    def results_step(self, worker_code):
+        """build_results.py with a consistent ledger copy (skipped when results.json exists or the run did not
+        complete). Never raises."""
+        record = {"utc": now()}
+        try:
+            if self.args.no_postrun or not (self.run / "settings.json").exists():
+                return {**record, "outcome": "skipped", "reason": "--no-postrun or no settings.json"}
+            if (self.run / "results.json").exists():
+                return {**record, "outcome": "skipped", "reason": "results.json exists"}
+            arguments = ["scripts/build_results.py", "--run-dir", str(self.run)]
+            if self.backup("budget-results.sqlite") is not False:
+                arguments += ["--ledger", str(self.phase / "budget-results.sqlite")]
+            code = self.step("results", arguments)
+            return {**record, "exit": code, "outcome": "complete" if code == 0 else "failed"}
+        except Exception as error:
+            return {**record, "outcome": "supervisor_error", "error_type": type(error).__name__, "detail": str(error)}
+
+    def site(self, code):
+        """Conference view, Inspect View bundle and the prepared site bundle (step 5). Free and offline; a
+        failure is recorded in site-steps.json and never changes the worker exit."""
+        if "results" not in self.site_steps:   # work() did not reach it (e.g. an exception)
+            self.site_steps["results"] = self.results_step(code)
+        run, viewer, bundle = self.run, self.phase / "inspect-view", self.phase / "site-bundle"
+        plan = {
+            "conference-export": (["scripts/export_conference.py", "--run-dir", str(run)], None,
+                                  lambda: (run / "conference" / "state.sqlite").exists()),
+            # Outside the checkout, isolated: Inspect never loads the host .env.
+            "inspect-bundle": (["-I", "-m", "inspect_ai", "view", "bundle", "--log-dir", str(run / "inspect"),
+                                "--output-dir", str(viewer)], "scratch",
+                               lambda: any((run / "inspect").glob("*.eval")) and not viewer.exists()),
+            "site-bundle": (["scripts/prepare_hf_library.py", "--runs-dir", str(run.parent), "--run",
+                             f"{run.name}={viewer}", "--output-dir", str(bundle)], None,
+                            lambda: (run / "results.json").is_file() and (viewer / "index.html").is_file()
+                            and not bundle.exists()),
+        }
+        for name, (arguments, cwd, ready) in plan.items():
+            record = {"utc": now()}
+            try:
+                if self.args.no_postrun:
+                    record.update(outcome="skipped", reason="--no-postrun")
+                elif not ready():
+                    record.update(outcome="skipped", reason="inputs missing or output exists")
+                elif cwd == "scratch":
+                    with tempfile.TemporaryDirectory(prefix="gdm-inspect-bundle-") as scratch:
+                        exit_code = self.step(name, arguments, cwd=scratch)
+                    record.update(exit=exit_code, outcome="complete" if exit_code == 0 else "failed")
+                else:
+                    exit_code = self.step(name, arguments)
+                    record.update(exit=exit_code, outcome="complete" if exit_code == 0 else "failed")
+            except Exception as error:
+                record.update(outcome="supervisor_error", error_type=type(error).__name__, detail=str(error))
+            self.site_steps[name] = record
+        try:
+            (self.phase / "site-steps.json").write_text(json.dumps(self.site_steps, indent=2, default=str))
+        except Exception:
+            pass
+
+    def upload_credentials(self):
+        """(token file, dataset name, None) or (None, None, why not). Presence and permissions only: the
+        token is never read here."""
+        token = Path(self.args.hf_token_file).expanduser()
+        dataset = os.environ.get("GDM_LOGS_DATASET", "").strip()
+        if not dataset and DEFAULT_DATASET_FILE.is_file():
+            dataset = DEFAULT_DATASET_FILE.read_text().strip()
+        if not token.is_file() or token.is_symlink():
+            return None, None, f"no HF upload token file at {token}"
+        mode = token.stat().st_mode & 0o777
+        if mode & 0o077 or token.stat().st_uid != os.getuid():
+            return None, None, f"{token} must belong to this user with mode 600 (it is {oct(mode)})"
+        if not dataset or "/" not in dataset:
+            return None, None, f"no logs dataset name (GDM_LOGS_DATASET or {DEFAULT_DATASET_FILE})"
+        return token, dataset, None
+
+    def upload(self, code):
+        """Step 6: the whole run and phase records to the private logs dataset (scripts/upload_run.py). Never
+        raises and never changes the worker exit; the outcome is in hf-upload.json."""
+        target = self.phase / "hf-upload.json"
+        record = {"utc": now(), "run_dir": str(self.run), "worker_exit": code}
+        try:
+            if self.args.no_upload:
+                record.update(outcome="skipped", reason="--no-upload")
+            elif not self.run.exists():
+                record.update(outcome="skipped", reason="no run directory")
+            else:
+                token, dataset, why = self.upload_credentials()
+                if why:
+                    record.update(outcome="skipped_no_credential", reason=why, owner_step=OWNER_STEP)
+                else:
+                    self.status("uploading", worker_exit=code)
+                    bundle = self.phase / "site-bundle"
+                    arguments = ["scripts/upload_run.py", "--run-dir", str(self.run), "--phase-dir",
+                                 str(self.phase), "--record", str(target)]
+                    if (bundle / "archive-manifest.json").is_file():
+                        arguments += ["--site-bundle", str(bundle)]
+                    exit_code = self.step(UPLOAD_STEP, arguments, extra_env={
+                        "HF_TOKEN_PATH": str(token), "GDM_LOGS_DATASET": dataset,
+                        "PYTHONPATH": "scripts:src:.", "HF_HUB_DISABLE_TELEMETRY": "1"})
+                    try:
+                        record = {**record, **json.loads(target.read_text())}
+                    except (OSError, ValueError):
+                        record.update(outcome="failed")
+                    record["exit"] = exit_code
+        except Exception as error:
+            record.update(outcome="supervisor_error", error_type=type(error).__name__, detail=str(error))
+        record["finished_utc"] = now()
+        self.upload_record = record
+        try:
+            target.write_text(json.dumps(record, indent=2, default=str))
+        except Exception:
+            pass
+        return record
+
+    def core_files(self):
+        """The run files the operator's computer keeps (offload_runs.keep_locally for a run unit)."""
+        found = []
+        for path in sorted(self.run.rglob("*")):
+            relative = path.relative_to(self.run)
+            if path.is_symlink() or not path.is_file() or any(p.startswith(".") for p in relative.parts):
+                continue
+            if relative.parts[0] in CORE_DIRS or (len(relative.parts) == 1 and relative.name != "runtime.jsonl"
+                                                  and path.stat().st_size <= CORE_MAX_TOP_FILE):
+                found.append(path)
+        return found
+
     def package(self, code):
         if not self.run.exists():
             return
         self.status("packaging", worker_exit=code)
-        with tarfile.open(self.phase / "completed-run.tgz", "w:gz") as tar:
-            tar.add(self.run, arcname=str(self.run.relative_to(self.root)) if self.run.is_relative_to(self.root)
-                    else self.run.name)
-        selected = ["budget-final.sqlite", "budget-before-launch.sqlite", "budget-after-pilot.sqlite", "pilot.exit",
-                    "pilot.log", "supervisor-console.log", "worker.exit", "live-checkpoint.json", "launch-budget.json",
-                    self.config_path.name, "behavior-judge.json", "incident-report.json", *LIVE_FILES] + [
-                        a + b for a in FOLLOW_UPS + JUDGE_STEPS for b in (".log", ".exit")]
+        prefix = Path(str(self.run.relative_to(self.root)) if self.run.is_relative_to(self.root) else self.run.name)
+        with tarfile.open(self.phase / "completed-core.tgz", "w:gz") as tar:
+            for path in self.core_files():
+                tar.add(path, arcname=str(prefix / path.relative_to(self.run)), recursive=False)
+        bundle = self.phase / "site-bundle"
+        packaged = ["completed-core.tgz", "completed-phase.tgz"]
+        if (bundle / "archive-manifest.json").is_file():
+            with tarfile.open(self.phase / "completed-site.tgz", "w:gz") as tar:
+                for path in sorted(bundle.rglob("*")):
+                    relative = path.relative_to(bundle)
+                    if path.is_file() and not path.is_symlink() and not (
+                            relative.parts[0] == "dataset-files" and relative.parts[1:] != ("manifest.json",)):
+                        tar.add(path, arcname=str(Path("site-bundle") / relative), recursive=False)
+            packaged.append("completed-site.tgz")
+        selected = ["budget-final.sqlite", "budget-before-launch.sqlite", "budget-after-pilot.sqlite",
+                    "budget-results.sqlite", "pilot.exit", "pilot.log", "supervisor-console.log", "worker.exit",
+                    "live-checkpoint.json", "launch-budget.json", self.config_path.name, "behavior-judge.json",
+                    "incident-report.json", "site-steps.json", "hf-upload.json", "OFFLOADED.json", *LIVE_FILES] + [
+                        a + b for a in FOLLOW_UPS + JUDGE_STEPS + SITE_STEPS + (UPLOAD_STEP,)
+                        for b in (".log", ".exit")]
         with tarfile.open(self.phase / "completed-phase.tgz", "w:gz") as tar:
             for name in selected:
                 path = self.config_path if name == self.config_path.name else self.phase / name
@@ -864,10 +1033,11 @@ class Supervisor:
             route = self.simple_judge_route_record()
             if route is not None:
                 tar.add(route, arcname=SIMPLE_ROUTE_DIR + "/" + route.name)
-        hashes = {name: hashlib.sha256((self.phase / name).read_bytes()).hexdigest()
-                  for name in ("completed-run.tgz", "completed-phase.tgz")}
+        hashes = {name: hashlib.sha256((self.phase / name).read_bytes()).hexdigest() for name in packaged}
         (self.phase / "completed-checksums.json").write_text(json.dumps(hashes, indent=2))
+        upload = self.upload_record or {}
         self.status("ready_for_retrieval", worker_exit=code, hashes=hashes, resume_bundle=self.resume_summary(),
+                    hf_upload={k: upload.get(k) for k in ("outcome", "dataset_commit", "reason")},
                     behavior_judge=None if self.judge_record is None else
                     {k: self.judge_record.get(k) for k in ("outcome", "exit", "reason")},
                     incident_report=None if self.incident_record is None else
@@ -946,6 +1116,8 @@ class Supervisor:
         with (self.phase / "supervisor.started").open("x") as marker:
             marker.write(now())
         code = self.work()
+        self.site(code)
+        self.upload(code)
         self.package(code)
         if self.args.no_shutdown:
             self.status("done_vm_left_running", worker_exit=code)
@@ -967,6 +1139,11 @@ def parse_args(argv=None):
                         help="seconds to wait for runs/phase-b/.../retrieved.marker before the idle check (default 600)")
     parser.add_argument("--no-postrun", action="store_true", help="skip the reconcile/evaluate/timeline steps and the judge")
     parser.add_argument("--no-shutdown", action="store_true", help="leave the VM running at the end")
+    parser.add_argument("--no-upload", action="store_true",
+                        help="do not upload the run to the private logs dataset (it stays on the VM)")
+    parser.add_argument("--hf-token-file", default=str(DEFAULT_TOKEN_FILE),
+                        help="the VM host's own HF token file for the upload (default "
+                             "~/.config/gdm-math-swarm/hf-upload-token, mode 600; never in the checkout)")
     parser.add_argument("--live-memory-max", default=LIVE_MEMORY_MAX,
                         help="memory ceiling of one live behavior-judge pass in its systemd scope (default 8G)")
     parser.add_argument("--poll-seconds", type=float, default=30.0,

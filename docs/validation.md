@@ -780,6 +780,56 @@ by default, the simplified judge (`scripts/run_simple_judge.py`, budget `--run-l
 budget (`--run-limit`, else `behavior_judge_max_usd`, else $50); `behavior_judge: "off"` runs
 neither (configs/README.md).
 
+### 19a. Runs go to the logs dataset from the VM (October 29, 2026)
+
+Owner decision (docs/plan.md, "Runs go from the VM to the logs dataset, never to the owner's computer (October
+29, 2026)"): a finished run is never copied in full to the operator's computer. `scripts/supervise_run.py` does
+this automatically at the end of every supervised run, also after a failed or stopped one, with no prompt:
+
+1. on the VM, free and offline: `build_results.py` (with a ledger copy, before the incident report),
+   `export_conference.py`, the Inspect View bundle and `prepare_hf_library.py` into `PHASE/site-bundle/`
+   (each recorded in `PHASE/site-steps.json`; a failure never fails the run);
+2. `scripts/upload_run.py` uploads the whole `runs/RUN/` and `runs/phase-b/RUN/` (without ledgers, credential
+   files, the packaged tarballs and derived bundles) plus the site bundle's dataset files to the private logs
+   dataset: one data commit and one manifest commit per run, add-only, private visibility checked, every copy
+   verified by SHA-256, resume archives uploaded without the agents' session `.key` files. Nothing is deleted on
+   the VM. The outcome is `PHASE/hf-upload.json`;
+3. it packages only `completed-core.tgz` (the run's core), `completed-phase.tgz` (records and ledger backups)
+   and `completed-site.tgz` (the site bundle without its dataset files) and waits for `retrieved.marker`.
+
+On your own computer, instead of copying `runs/RUN`:
+
+```sh
+export GCLOUD=... GDM_GCP_PROJECT=... GDM_GCP_ZONE=... GDM_LOGS_DATASET=...   # HANDOFF.local.md
+PYTHONPATH=scripts:src:. .venv/bin/python scripts/fetch_run.py --vm VM --run RUN             # core + preview
+PYTHONPATH=scripts:src:. .venv/bin/python scripts/fetch_run.py --vm VM --run RUN --publish   # also Cloudflare
+```
+
+It fetches and SHA-256-checks the three packages, extracts the core into `runs/RUN/` and the records into
+`runs/phase-b/RUN/`, publishes (or previews) the site bundle pinned to the upload's dataset commit from a scratch
+folder that is deleted afterwards, touches `retrieved.marker` (the supervisor then stops an idle VM) and rebuilds
+`runs/index.html`. A step that needs a file left in the dataset fetches it into a scratch folder and deletes it:
+`offload_runs.py restore --unit RUN --prefix inspect/ --dest SCRATCH`.
+
+**VM credential (one-time owner step per VM).** The upload uses the VM host's own fine-grained HF token with
+write access to the logs dataset only, in `~/.config/gdm-math-swarm/hf-upload-token` (mode 600, outside the
+checkout; given only to the upload step as `HF_TOKEN_PATH`; never in `.env`, containers or workspaces), and the
+dataset name in `~/.config/gdm-math-swarm/logs-dataset`. The owner installs both (and the pinned `publication`
+extra) with `scripts/vm_hf_setup.py --vm VM [--vm ...] [--start]` (hidden token prompt; `--check-only` reports
+presence and dataset access). Agents never create, copy or print the token. Without it the supervisor records
+`skipped_no_credential` in `hf-upload.json`, the run stays complete on the VM, and after the token is installed
+the upload is rerun on the VM:
+
+```sh
+PYTHONPATH=scripts:src:. HF_TOKEN_PATH=$HOME/.config/gdm-math-swarm/hf-upload-token \
+  GDM_LOGS_DATASET=$(cat ~/.config/gdm-math-swarm/logs-dataset) .venv/bin/python scripts/upload_run.py \
+  --run-dir runs/RUN --phase-dir runs/phase-b/RUN --site-bundle runs/phase-b/RUN/site-bundle \
+  --record runs/phase-b/RUN/hf-upload.json
+```
+
+then fetch with `fetch_run.py` as usual (it reads the new `hf-upload.json` and manifests). An unsupervised run
+is uploaded the same way.
+
 ## Capacity
 
 Measured on the development Mac (Docker VM: 8 CPUs, 7.75 GiB; arm64):

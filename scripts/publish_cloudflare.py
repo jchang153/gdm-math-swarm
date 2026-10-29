@@ -346,9 +346,34 @@ def plan_mirror(base_files, space, revision, unlisted):
                    'preserved_site_only_runs': preserved, 'changed_files': changed, 'removed_files': removed}
 
 
-def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages=False):
-    """The site after merging a prepared bundle (immutable existing run files unless --replace-pages)."""
-    manifest, incoming = load_bundle(bundle)
+def dataset_checker(commit, api=None):
+    """``remote(name, bytes, sha256)`` for load_bundle: True when the private logs dataset holds exactly those
+    bytes at ``name`` at ``commit`` (LFS SHA-256, or a download hashed and deleted for a small regular file).
+    Used for bundles fetched from a VM without their dataset files (scripts/fetch_run.py)."""
+    import offload_runs
+    trees = {}
+
+    def check(name, size, sha256):
+        from huggingface_hub import HfApi
+        nonlocal api
+        api = api or HfApi()
+        run = name.split('/')[0]
+        if run not in trees:
+            hf_visibility.check_dataset(api, hf_visibility.DATASET_REPO)
+            trees[run] = offload_runs.remote_tree(api, hf_visibility.DATASET_REPO, commit, run)
+        entry = trees[run].get(name)
+        return entry is not None and offload_runs.verified(api, hf_visibility.DATASET_REPO, commit, name, entry,
+                                                           sha256, size)
+    return check
+
+
+def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages=False, remote=None):
+    """The site after merging a prepared bundle (immutable existing run files unless --replace-pages). A bundle
+    whose dataset files are already in the logs dataset (left on the VM) needs ``dataset_commit``; ``remote``
+    defaults to dataset_checker(dataset_commit)."""
+    if remote is None and dataset_commit:
+        remote = dataset_checker(dataset_commit)
+    manifest, incoming = load_bundle(bundle, remote)
     if manifest.get('layout') == 'records-in-space':
         raise ValueError('Legacy records-in-space bundle refused: raw records are private')
     manifest = dict(manifest)

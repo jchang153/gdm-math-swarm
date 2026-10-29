@@ -68,7 +68,8 @@ class SuperviseRunTests(unittest.TestCase):
 
     def args(self, *extra):
         return supervise.parse_args(["--config", str(self.config), "--phase-dir", str(self.phase), "--tmux-session",
-                                     "gdm-run-x", "--root", str(self.tmp), "--retrieval-wait", "0", *extra])
+                                     "gdm-run-x", "--root", str(self.tmp), "--retrieval-wait", "0",
+                                     "--hf-token-file", str(self.tmp / "no-hf-token"), *extra])
 
     def test_full_cycle_without_shutdown(self):
         import contextlib
@@ -86,7 +87,7 @@ class SuperviseRunTests(unittest.TestCase):
         with tarfile.open(self.phase / "completed-phase.tgz") as tar:
             self.assertIn("launch-budget.json", tar.getnames())
         for name in ("budget-before-launch.sqlite", "budget-after-pilot.sqlite", "budget-final.sqlite",
-                     "completed-run.tgz", "completed-phase.tgz", "completed-checksums.json", "live-checkpoint.json"):
+                     "completed-core.tgz", "completed-phase.tgz", "completed-checksums.json", "live-checkpoint.json"):
             self.assertTrue((self.phase / name).exists(), name)
         self.assertEqual([(self.phase / f"{n}.exit").read_text().strip() for n in ("pilot", *supervise.FOLLOW_UPS)],
                          ["0"] * 5)
@@ -104,6 +105,68 @@ class SuperviseRunTests(unittest.TestCase):
                          "done_vm_left_running")
         with self.assertRaises(FileExistsError):  # the surviving marker: a phase never launches twice
             supervise.Supervisor(self.args("--no-shutdown")).main()
+
+    def test_upload_without_a_vm_token_is_recorded_and_the_run_stays_on_the_vm(self):
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        record = json.loads((self.phase / "hf-upload.json").read_text())
+        self.assertEqual(record["outcome"], "skipped_no_credential")
+        self.assertIn("vm_hf_setup.py", record["owner_step"])
+        self.assertFalse((self.phase / "completed-run.tgz").exists())   # the full run is never packaged
+        checksums = json.loads((self.phase / "completed-checksums.json").read_text())
+        self.assertEqual(sorted(checksums), ["completed-core.tgz", "completed-phase.tgz"])
+        status = json.loads((self.phase / "supervisor-status.json").read_text())
+        self.assertEqual(status["stage"], "done_vm_left_running")
+        steps = json.loads((self.phase / "site-steps.json").read_text())
+        self.assertEqual(set(steps), set(supervise.SITE_STEPS))
+
+    def test_upload_runs_with_the_vm_token_file_only(self):
+        token = self.tmp / "hf-token"
+        token.write_text("not-a-real-token")
+        token.chmod(0o600)
+        (self.tmp / "scripts" / "upload_run.py").write_text(
+            "import json, os, sys\n"
+            "assert 'OPENROUTER_API_KEY' not in os.environ\n"
+            "args = sys.argv[1:]\n"
+            "open(args[args.index('--record') + 1], 'w').write(json.dumps({'outcome': 'uploaded', "
+            "'dataset_commit': 'c' * 40, 'env': {k: os.environ.get(k) for k in ('HF_TOKEN_PATH', 'GDM_LOGS_DATASET')},"
+            " 'args': args}))\n")
+        with mock.patch.dict(os.environ, {"GDM_LOGS_DATASET": "org/logs"}):
+            args = self.args("--no-shutdown", "--hf-token-file", str(token))
+            self.assertEqual(supervise.Supervisor(args).main(), 0)
+        record = json.loads((self.phase / "hf-upload.json").read_text())
+        self.assertEqual((record["outcome"], record["exit"]), ("uploaded", 0))
+        self.assertEqual(record["env"], {"HF_TOKEN_PATH": str(token), "GDM_LOGS_DATASET": "org/logs"})
+        self.assertIn("--phase-dir", record["args"])
+        status = json.loads((self.phase / "supervisor-status.json").read_text())
+        self.assertEqual(status["stage"], "done_vm_left_running")
+        import tarfile
+        with tarfile.open(self.phase / "completed-phase.tgz") as tar:
+            self.assertTrue({"hf-upload.json", "upload.log", "upload.exit", "site-steps.json"} <= set(tar.getnames()))
+
+    def test_token_readable_by_others_is_refused(self):
+        token = self.tmp / "hf-token"
+        token.write_text("not-a-real-token")
+        token.chmod(0o644)
+        with mock.patch.dict(os.environ, {"GDM_LOGS_DATASET": "org/logs"}):
+            supervise.Supervisor(self.args("--no-shutdown", "--hf-token-file", str(token))).main()
+        record = json.loads((self.phase / "hf-upload.json").read_text())
+        self.assertEqual(record["outcome"], "skipped_no_credential")
+        self.assertIn("mode 600", record["reason"])
+
+    def test_results_are_built_on_the_vm_with_a_ledger_copy(self):
+        (self.tmp / "scripts" / "build_results.py").write_text(STUB_OK)
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
+        ran = (self.tmp / "scripts" / "build_results.py.ran").read_text()
+        self.assertIn("--ledger " + str(self.phase.resolve() / "budget-results.sqlite"), ran)
+        self.assertEqual(json.loads((self.phase / "site-steps.json").read_text())["results"]["outcome"], "complete")
+
+    def test_failed_run_is_still_uploaded(self):
+        (self.tmp / "scripts" / "run_pilot.py").write_text(
+            "import json, os, sys\nconfig = json.load(open(sys.argv[sys.argv.index('--config') + 1]))\n"
+            "os.makedirs(config['run_dir'], exist_ok=True)\nraise SystemExit(2)\n")
+        self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 2)
+        self.assertEqual(json.loads((self.phase / "hf-upload.json").read_text())["worker_exit"], 2)
+        self.assertTrue((self.phase / "completed-core.tgz").exists())
 
     def test_refuses_config_without_run_dir(self):
         self.config.write_text(json.dumps({"run_budget_usd": "40"}))
@@ -355,8 +418,12 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         import tarfile
         with tarfile.open(self.phase / "completed-phase.tgz") as tar:
             phase = set(tar.getnames())
-        with tarfile.open(self.phase / "completed-run.tgz") as tar:
-            run = set(tar.getnames())
+        with tarfile.open(self.phase / "completed-core.tgz") as tar:
+            self.assertIn("runs/run-x/settings.json", tar.getnames())
+        # The whole run directory goes to the logs dataset from the VM (scripts/upload_run.py); only its core
+        # is packaged for the operator's computer.
+        run_dir = self.tmp / "runs" / "run-x"
+        run = {"runs/run-x/" + p.relative_to(run_dir).as_posix() for p in run_dir.rglob("*") if p.is_file()}
         return phase, run
 
     def test_judge_runs_after_the_follow_ups_and_is_packaged(self):
@@ -427,7 +494,7 @@ class AutoBehaviorJudgeTests(SuperviseRunTests):
         (self.tmp / "judge-mode").write_text("crash")
         self.assertEqual(supervise.Supervisor(self.args("--no-shutdown")).main(), 0)
         self.assertEqual((self.judge_record()["outcome"], self.judge_record()["exit"]), ("failed", 1))
-        self.assertTrue((self.phase / "completed-run.tgz").exists())
+        self.assertTrue((self.phase / "completed-core.tgz").exists())
 
     def test_supervisor_error_in_the_judge_step_is_recorded(self):
         real_step = supervise.Supervisor.step

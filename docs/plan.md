@@ -1536,3 +1536,30 @@ during the Cloudflare migration. Rules of the approval:
   operator records (receipts, `budget-raise.json`, ledgers, verify outputs, logs) stay local; budget ledgers are
   never uploaded. Anything not confidently classified is uploaded rather than deleted-only.
 - Not touched: `.venv*`, `.git`, `private/`, `data/`, other repositories, the HF Space, existing dataset files.
+
+## Runs go from the VM to the logs dataset, never to the owner's computer (October 29, 2026)
+
+**Owner decision (2026-10-29, chat): "make sure new runs never go to my computer, but automatically upload to hf".**
+From now on every run's full directory goes from its VM straight to the private logs dataset (`GDM_LOGS_DATASET`)
+at the end of the run, also after a failure or stop, and is never copied in full to the operator's computer. The
+rules of the October 29 offload apply unchanged: add-only, private visibility checked before every commit, every copy
+verified by SHA-256, budget ledgers and credential or host-only files never uploaded, resume archives uploaded only
+without the agents' session `.key` files, few commits (HF: 128 per hour per repository).
+
+Implementation (by the operator's agent, within this decision; no extra approval steps or spending checks): the
+supervisor builds the report, conference view, Inspect View and site bundle on the VM (free, offline), uploads with
+`scripts/upload_run.py` (reusing `scripts/offload_runs.py`), and packages for the operator only the run's core
+(`conference/`, `evaluations/`, `oversight/`, top-level files up to 1 MiB except `runtime.jsonl`, `OFFLOADED.json`),
+the phase records with ledger backups (never uploaded) and the site bundle without its dataset files.
+`scripts/fetch_run.py` fetches those, verifies them, publishes (`--publish`) or previews the Cloudflare page pinned
+to the upload's dataset commit from a scratch folder it deletes, and touches `retrieved.marker`. Steps that need
+other files fetch them into a scratch folder and delete them afterwards. The near-live mirror deletes its local
+working copy of a run after the run's final pass is committed.
+
+**Credential (owner action required, not done by agents).** The upload needs the VM host's own HF token. The
+decision is to use a fine-grained token with write access to the logs dataset only, installed by the owner on each
+VM host at `~/.config/gdm-math-swarm/hf-upload-token` (mode 600, outside the checkout, never in `.env`, containers or
+workspaces) with `scripts/vm_hf_setup.py`. Agents never create, copy or print it. Until it is installed the
+supervisor records `skipped_no_credential` and the run stays complete on the VM. Streaming VM to Mac memory to HF
+was considered and not chosen: it would keep the Mac and an SSH session up for the whole upload and buffer
+multi-gigabyte logs in memory, so it is less robust.

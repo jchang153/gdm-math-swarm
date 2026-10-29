@@ -174,9 +174,13 @@ def space_commit(api, *, dataset_repo=DATASET_REPO, **commit):
     return api.create_commit(**commit)
 
 
-def load_dataset_files(bundle, runs):
+def load_dataset_files(bundle, runs, remote=None):
     """The bundle's dataset-files/manifest.json files ({dataset path: record}), each checked against its
-    digest, path rules and the credential screen; {} when the bundle has none."""
+    digest, path rules and the credential screen; {} when the bundle has none.
+
+    ``remote(name, bytes, sha256)`` (publish_cloudflare.py with --dataset-commit) accepts a bundle whose dataset
+    files were left on the VM because scripts/upload_run.py already added them to the logs dataset: each file
+    missing locally must then be in the dataset at that commit with exactly the recorded bytes."""
     root = Path(bundle) / DATASET_DIR
     actual = {x.relative_to(root).as_posix() for x in root.rglob('*') if x.is_file()} if root.is_dir() else set()
     if not actual:
@@ -185,7 +189,8 @@ def load_dataset_files(bundle, runs):
     if manifest.get('schema') != DATASET_SCHEMA or not isinstance(manifest.get('files'), dict):
         raise ValueError('Expected a prepare_hf_library.py dataset-files manifest')
     files = manifest['files']
-    if actual != set(files) | {'manifest.json'}:
+    missing = set(files) - actual
+    if actual - set(files) != {'manifest.json'} or (missing and remote is None):
         raise ValueError('Dataset files differ from their manifest')
     for name, info in files.items():
         safe_path(name)
@@ -195,6 +200,10 @@ def load_dataset_files(bundle, runs):
         for source in info.get('sources', []):
             if dataset_logs.dataset_path(parts[0], source) != name:
                 raise ValueError('Dataset file source does not map to its path: ' + name)
+        if name in missing:
+            if not remote(name, info['bytes'], info['sha256']):
+                raise ValueError('Dataset file not in the logs dataset with its recorded bytes: ' + name)
+            continue
         path = root / name
         if digest(path.read_bytes()) != {'bytes': info['bytes'], 'sha256': info['sha256']}:
             raise ValueError('Dataset file checksum mismatch: ' + name)
@@ -202,7 +211,7 @@ def load_dataset_files(bundle, runs):
     return files
 
 
-def load_bundle(bundle):
+def load_bundle(bundle, remote=None):
     bundle = Path(bundle)
     if bundle.is_symlink():
         raise ValueError('Linked bundle refused')
@@ -224,7 +233,7 @@ def load_bundle(bundle):
               if x.is_file() and x.relative_to(bundle).parts[0] != DATASET_DIR}
     if actual != set(manifest['files']) | {'archive-manifest.json'}:
         raise ValueError('Bundle contents differ from the manifest')
-    manifest['dataset'] = load_dataset_files(bundle, runs)
+    manifest['dataset'] = load_dataset_files(bundle, runs, remote)
     recorded = manifest.get('dataset_files', {})
     for name, record in recorded.items():
         run, _, rel = name.partition('/')

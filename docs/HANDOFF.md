@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-29 by Claude (Opus 5.5) subagent (local run offload to the logs dataset, item 15).
+Last updated: 2026-10-29 by Claude (Opus 5.5) subagent (new runs go from the VM to the logs dataset, item 16).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -133,6 +133,8 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
   `scripts/build_experiment_index.py`.
 - **Raw runs:** `runs/<run-id>/`. Git-ignored. Since 2026-10-29 only each run's core stays local; the rest is in the
   private logs dataset (`runs/<run-id>/OFFLOADED.json`, restore with `scripts/offload_runs.py restore`, item 15).
+  **New runs (since 2026-10-29, item 16) never come to this computer in full:** the supervisor uploads them from the
+  VM to the dataset and `scripts/fetch_run.py` fetches only the core and phase records.
 - **VMs:** see "Hosts and access" and "Operating a VM" below. Always stop VMs after work and verify they're stopped. Do not
   touch collaborator Amelie's VM, files or branches.
 - **Credentials:** host-only `.env`, Git-ignored. It holds the owner's OpenRouter
@@ -200,10 +202,14 @@ VM=<owner VM name from HANDOFF.local.md>
    - Confirm it started: `runs/<RUN_ID>/runtime.jsonl` has `common_start` and
      `inference_finished` events.
 7. **Afterwards:** the supervisor runs reconciliation, evaluation, the behavior
-   judge and packaging, then waits for `retrieved.marker`.
-   - Copy `runs/<RUN_ID>` back to the local `runs/` with `$G compute scp --recurse`
-     (or tar it first).
-   - Then touch the marker.
+   judge, the incident report, builds results and the site bundle on the VM, **uploads the whole run to the
+   private logs dataset** (`hf-upload.json`; item 16) and packages only the core, then waits for `retrieved.marker`.
+   - **Never copy `runs/<RUN_ID>` back.** From your computer:
+     `PYTHONPATH=scripts:src:. .venv/bin/python scripts/fetch_run.py --vm $VM --run <RUN_ID> [--publish]`
+     (core into `runs/<RUN_ID>/`, records and ledger backups into `runs/phase-b/<RUN_ID>/`, Cloudflare publish
+     or preview from a scratch bundle, touches the marker). docs/validation.md, step 19a.
+   - If `hf-upload.json` says `skipped_no_credential`, the VM has no HF upload token yet (owner step, item 16);
+     the run stays on the VM: rerun `scripts/upload_run.py` there after the token is installed.
 8. **Stop:**
    - `$G compute instances stop $VM --project $GDM_GCP_PROJECT --zone $GDM_GCP_ZONE`.
    - Verify `TERMINATED`. Closing SSH or tmux does NOT stop the VM.
@@ -274,9 +280,10 @@ The full reference is `private/docs/gcp-vm.md` (host-only) and `docs/validation.
    - If Anthropic refuses a step, that step goes once to openai/gpt-5.6-sol and is
      flagged. Refused, unbilled calls settle at $0 through OpenRouter's generation
      lookup.
-5. **Facts-only results page:** `scripts/build_results.py`. Then
-   `scripts/export_transcripts.py`, `scripts/export_conference.py`, and
-   `scripts/build_experiment_index.py`.
+5. **Facts-only results page:** `scripts/build_results.py` and `scripts/export_conference.py` now run on the VM
+   (supervisor, before the upload; results before the incident report). `scripts/build_experiment_index.py` runs
+   in `fetch_run.py`. `scripts/export_transcripts.py` (local only) needs the Inspect logs restored into a scratch
+   folder (`offload_runs.py restore --unit RUN --prefix inspect/ --dest SCRATCH`).
 6. **Publish to HF:**
    - Preview with `scripts/prepare_hf_library.py`, then
      `scripts/publish_hf_library.py --bundle DIR [--commit]`.
@@ -693,7 +700,30 @@ is being merged into main via `collab-env`.
    Tools that read offloaded files (transcript export, conference captured files, bundle preparation) need a
    `restore` first.
 
+16. **DONE in code 2026-10-29 (by 13:10 PT); waiting for the owner's token: new runs go from the VM to the
+   logs dataset, never to the owner's computer (owner: "make sure new runs never go to my computer, but automatically
+   upload to hf"; docs/plan.md "Runs go from the VM to the logs dataset, never to the owner's computer (October 29,
+   2026)").** `scripts/supervise_run.py` now, after the judges, builds results (before the incident report, which
+   fixes the "Incident report needs results.json" gotcha), the conference view, the Inspect View bundle and the
+   `prepare_hf_library.py` bundle on the VM (`site-steps.json`), then `scripts/upload_run.py` adds the whole run, its
+   phase records and the bundle's dataset files to the dataset (one data + one manifest commit, add-only, SHA-256
+   verified, ledgers and `.key` files never uploaded; reuses `offload_runs.py`), also after a failed run
+   (`hf-upload.json`). It no longer builds `completed-run.tgz`: only `completed-core.tgz`, `completed-phase.tgz`,
+   `completed-site.tgz`. `scripts/fetch_run.py` (operator's computer) fetches those, verifies, publishes or previews on
+   Cloudflare (pinned to the upload commit; `publish_cloudflare.py` accepts a bundle whose dataset files are already in
+   the dataset) and touches the marker. `live_mirror.py` deletes its local copy of a run after the final pass is
+   committed. Tests: `tests/test_upload_run.py`, `tests/test_supervise_run.py`. **Owner step still needed before the
+   next run** (agents must not do it): create a fine-grained HF token with write access to the logs dataset only, then
+   from the owner's computer `gcloud auth login` (the login had expired on 2026-10-29) and
+   `.venv/bin/python scripts/vm_hf_setup.py --vm VM [--vm ...] --start` (hidden prompt for the token; installs the
+   token, the dataset name and the `publication` extra on each VM; `--check-only` to confirm). VM presence could not
+   be checked on 2026-10-29 (gcloud login expired); nothing was started. Not yet exercised against the real dataset
+   from a VM: the first supervised run is the first live test; check its `hf-upload.json` and `site-steps.json`.
+
 ## Next steps / open items
+
+- **Before the next run: owner installs the VM HF upload token (item 16).** Then verify on the first run that
+  `hf-upload.json` is `uploaded`, `fetch_run.py --publish` deploys and `verify` passes.
 
 - **Unread notices landed on main (2026-10-27, owner-approved; docs/plan.md "Unread notices (October 27, 2026)").**
   **Default changed to ON (owner, 2026-10-27):** absent key -> notices on; `"unread_notices": false` reproduces the
@@ -777,11 +807,9 @@ is being merged into main via `collab-env`.
   tmux session (for example `sleep 7200`) alive on the VM until retrieval is done, then kill it and touch the
   marker; the supervisor then shuts down by itself (done for glm10-baseline-2h, 2026-10-22).
 - **Incident report needs `results.json`.** `run_incident_report.py` refuses a run without
-  `results.json` ("not a completed run"), and the supervisor runs the report before
-  `build_results.py` (a Mac step), so the supervisor's incident step currently always fails
-  (exit 2). Workaround used for all 4 GLM runs: run
-  `scripts/build_results.py --run-dir runs/<id> --ledger runs/phase-b/<id>/budget-final.sqlite`
-  first, then the report. Open fix: have the supervisor build results before the report.
+  `results.json` ("not a completed run"). Fixed 2026-10-29 (item 16): the supervisor builds results on the VM before
+  the report. For older runs, run `scripts/build_results.py --run-dir runs/<id> --ledger
+  runs/phase-b/<id>/budget-final.sqlite` first.
 - **Credential screen vs. Inspect SWE placeholder (2026-10-22).** In glm100-baseline-30m every sample's Inspect log holds a
   sandbox event writing `{"apiKeyHelper": "echo <placeholder>"}` with Inspect SWE's fixed public bridge placeholder
   (`inspect_swe/_claude_code/env.py`; the bridge ignores client keys). It matches `publish_hf_library.SECRET`, so both the

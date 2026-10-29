@@ -1078,7 +1078,23 @@ def run_pass(cloud, vms, *, state, work=WORK, api=None, download=None, add=None,
                     report['pruned_space_live_logs'] = len(pruned)
                 except Exception as error:
                     report['pruned_space_live_logs'] = f'failed: {type(error).__name__}: {error}'
+            if report['upload'].get('revision'):   # committed: the final pages are on the Space
+                forget_local_copies(work, state, updates, report)
     return report
+
+
+def forget_local_copies(work, state, updates, report):
+    """Delete the local working copy and bundle of each run whose final pass was just uploaded (owner,
+    October 29, 2026: runs never stay on the operator's computer; the full run goes from its VM to the logs
+    dataset, scripts/upload_run.py). A final run is never pulled again."""
+    forgotten = []
+    for run in sorted(updates):
+        if state['runs'].get(run, {}).get('final') and updates[run].get('bundle') is not None:
+            for folder in (work / 'work' / run, work / 'bundle' / run):
+                shutil.rmtree(folder, ignore_errors=True)
+            forgotten.append(run)
+    if forgotten:
+        report['local_copies_deleted'] = forgotten
 
 
 def parse_vm(text):

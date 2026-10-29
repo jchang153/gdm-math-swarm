@@ -1379,6 +1379,30 @@ and deletes the local copies only after each dataset copy is verified by SHA-256
   restore first.
 - Offload: `scripts/offload_runs.py offload --unit UNIT ... | --all [--workers 6] [--dry-run] [--keep-all]`.
 
+## New runs: from the VM to the logs dataset (October 29, 2026)
+
+Owner decision (docs/plan.md, "Runs go from the VM to the logs dataset, never to the owner's computer"): new runs
+never come to the operator's computer in full. `scripts/supervise_run.py` builds `results.json`/`results.html`, the
+conference view, the Inspect View bundle and the `prepare_hf_library.py` bundle on the VM, then
+`scripts/upload_run.py` adds the whole run, its phase records and the bundle's `dataset-files/` (at their exact
+dataset paths, so pages pinned to that commit link existing files) to the private logs dataset in one data commit
+plus one manifest commit (`RUN/upload-<UTC>/OFFLOADED.json`, `phase-b/RUN/upload-<UTC>/OFFLOADED.json`). Layout,
+packing, credential screen, `.key` repacking, add-only and private-visibility guards are those of
+`scripts/offload_runs.py` above (archives under `RUN/upload-<UTC>/` instead of `RUN/offload-20261029/`).
+
+`scripts/fetch_run.py --vm VM --run RUN [--publish]` (operator's computer) fetches only `completed-core.tgz`,
+`completed-phase.tgz` and `completed-site.tgz`, checks their SHA-256, keeps the core (`runs/RUN/`) and records
+(`runs/phase-b/RUN/`, ledger backups included), and publishes the run on Cloudflare from a scratch copy of the
+bundle with `--dataset-commit` set to the upload commit (preview without `--publish`); the scratch copy is deleted.
+`publish_cloudflare.py publish` accepts such a bundle, whose `dataset-files/` holds only its manifest, only with
+`--dataset-commit`: each listed file must be in the dataset at that commit with exactly the recorded bytes (LFS
+SHA-256, or a small file downloaded, hashed and deleted). Other tools that read a run's large files restore them
+into a scratch folder first: `offload_runs.py restore --unit RUN --prefix PATH --dest SCRATCH`.
+
+The VM's HF token is the owner's to install (`scripts/vm_hf_setup.py`; docs/validation.md, step 19a). Without it the
+supervisor records `skipped_no_credential` in `PHASE/hf-upload.json`, keeps the run on the VM and the site bundle is
+not publishable until the upload is rerun there.
+
 ## Near-live mirror
 
 The owner chose a near-live view of runs on the website while they are going ("option 1 (near-live)",

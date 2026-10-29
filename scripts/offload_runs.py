@@ -244,11 +244,14 @@ def file_sha256(path):
 
 # --- one unit ------------------------------------------------------------------------------------------
 
-def offload_unit(unit, *, repo, work, dry_run=False, keep_all=False, log=print, prepare_only=False):
-    from huggingface_hub import CommitOperationAdd, HfApi
-    from huggingface_hub.utils import HfHubHTTPError
+def offload_unit(unit, *, repo, work, dry_run=False, keep_all=False, log=print, prepare_only=False,
+                 runs_root=None, stamp=STAMP, exclude=None):
+    """Plan (and unless ``prepare_only``/``dry_run`` add, verify and finish) one unit. ``runs_root`` is the
+    folder holding the unit (default: this checkout's runs/), ``stamp`` names the unit's archive folder in the
+    dataset, ``exclude(relative)`` returns a reason to leave a file out (it stays where it is) or None."""
+    from huggingface_hub import HfApi
     api = HfApi()
-    unit_dir = RUNS / unit
+    unit_dir = Path(runs_root or RUNS) / unit
     if not unit_dir.is_dir():
         raise ValueError('No such unit: ' + unit)
     info = hf_visibility.check_dataset(api, repo)
@@ -264,7 +267,7 @@ def offload_unit(unit, *, repo, work, dry_run=False, keep_all=False, log=print, 
         if size is None:
             local.append({'path': relative, 'reason': 'symlink'})
             continue
-        reason = local_only(relative)
+        reason = local_only(relative) or (exclude(relative) if exclude else None)
         if reason:
             local.append({'path': relative, 'reason': reason})
             continue
@@ -288,7 +291,7 @@ def offload_unit(unit, *, repo, work, dry_run=False, keep_all=False, log=print, 
                 with open(repacked, 'rb') as handle:
                     r_sha, r_len, r_secret = scan_stream(handle)
                 if not r_secret and not scan_members(repacked):
-                    row.update({'repacked_dataset_path': f'{unit}/{STAMP}/repacked/{relative}',
+                    row.update({'repacked_dataset_path': f'{unit}/{stamp}/repacked/{relative}',
                                 'repacked_sha256': r_sha, 'repacked_bytes': r_len,
                                 'repacked_without': skipped, '_local': repacked})
             excluded.append(row)
@@ -316,7 +319,7 @@ def offload_unit(unit, *, repo, work, dry_run=False, keep_all=False, log=print, 
             continue
         if row['bytes'] >= DIRECT_MIN:
             if target in present:
-                target = f'{unit}/{STAMP}/files/{row["path"]}'
+                target = f'{unit}/{stamp}/files/{row["path"]}'
                 if target in present and not matches(present[target], row['sha256'], row['bytes']):
                     raise ValueError('Dataset already holds other bytes at ' + target)
             row['dataset_path'] = target
@@ -342,7 +345,7 @@ def offload_unit(unit, *, repo, work, dry_run=False, keep_all=False, log=print, 
         for number, part in enumerate(parts, 1):
             name = re.sub(r'[^A-Za-z0-9._-]', '_', top).lstrip('.') or 'entry'
             name = f'{name}.part{number}.tar.gz' if len(parts) > 1 else f'{name}.tar.gz'
-            target = f'{unit}/{STAMP}/{name}'
+            target = f'{unit}/{stamp}/{name}'
             local_archive = work_dir / name
             if not dry_run:
                 build_archive(unit_dir, [(r['path'], r['sha256'], r['bytes']) for r in part], local_archive)
@@ -353,7 +356,7 @@ def offload_unit(unit, *, repo, work, dry_run=False, keep_all=False, log=print, 
                 version = 1
                 while target in present and not matches(present[target], sha256, length, local_archive):
                     version += 1  # never overwrite: a later archive of the same entry gets a new name
-                    target = f'{unit}/{STAMP}/{name[:-len(".tar.gz")]}.v{version}.tar.gz'
+                    target = f'{unit}/{stamp}/{name[:-len(".tar.gz")]}.v{version}.tar.gz'
                 archives[target] = {'local': local_archive, 'sha256': sha256, 'bytes': length,
                                     'members': len(part), 'already_present': target in present}
             for row in part:
@@ -379,15 +382,15 @@ def offload_unit(unit, *, repo, work, dry_run=False, keep_all=False, log=print, 
                 'local_only': len(local), 'excluded': excluded}
     state = {'unit': unit, 'repo': repo, 'files': files, 'direct': direct, 'archives': archives,
              'excluded': excluded, 'local': local, 'uploads': uploads, 'present': sorted(present),
-             'work_dir': work_dir, 'head': info.sha}
+             'work_dir': work_dir, 'head': info.sha, 'unit_dir': unit_dir, 'stamp': stamp}
     if prepare_only:
         return state
-    revision = commit_uploads(api, repo, uploads, set(present), f'{unit} ({STAMP})') if uploads else \
+    revision = commit_uploads(api, repo, uploads, set(present), f'{unit} ({stamp})') if uploads else \
         hf_visibility.check_dataset(api, repo).sha
     return finish_unit(state, revision, log=log)
 
 
-def commit_uploads(api, repo, uploads, present, label):
+def commit_uploads(api, repo, uploads, present, label, message='Offload local run records'):
     """One guarded commit adding ``uploads`` ({dataset path: local Path}); pinned to the head just read
     (private visibility checked) and retried on a concurrent change or rate limit. Never overwrites: a target
     that appeared since planning stops the commit."""
@@ -411,7 +414,7 @@ def commit_uploads(api, repo, uploads, present, label):
         try:
             return api.create_commit(repo_id=repo, repo_type='dataset', parent_commit=current.sha,
                                      operations=operations,
-                                     commit_message=f'Offload local run records: {label}').oid
+                                     commit_message=f'{message}: {label}').oid
         except HfHubHTTPError as error:
             status = getattr(error.response, 'status_code', None)
             if status in (409, 412, 429, 500, 502, 503, 504) and attempt < 39:
@@ -442,7 +445,8 @@ def finish_unit(state, revision, log=print):
     api = HfApi()
     unit, repo, files, direct, archives = (state[k] for k in ('unit', 'repo', 'files', 'direct', 'archives'))
     excluded, local, uploads, work_dir = (state[k] for k in ('excluded', 'local', 'uploads', 'work_dir'))
-    unit_dir = RUNS / unit
+    unit_dir = state.get('unit_dir') or RUNS / unit
+    stamp = state.get('stamp', STAMP)
     final = remote_tree(api, repo, revision, unit)
     bad = []
     for target, path in direct.items():
@@ -466,7 +470,7 @@ def finish_unit(state, revision, log=print):
         raise ValueError(f'{unit}: dataset copies missing or differing after commit {revision}: {bad[:10]}')
     manifest = {
         'schema': SCHEMA, 'unit': unit, 'created': now(), 'dataset': 'GDM_LOGS_DATASET (private; HANDOFF.local.md)',
-        'dataset_commit': revision, 'stamp': STAMP,
+        'dataset_commit': revision, 'stamp': stamp,
         'note': 'Restore: python scripts/offload_runs.py restore --unit ' + unit + ' [--prefix PATH]',
         'archives': {t: {'sha256': a['sha256'], 'bytes': a['bytes'], 'members': a['members']}
                      for t, a in sorted(archives.items())},
@@ -491,8 +495,8 @@ def finish_unit(state, revision, log=print):
         if path.is_file() and path.stat().st_size == row['bytes']:
             path.unlink()
             freed += row['bytes']
-    for directory in sorted((p for p in unit_dir.rglob('*') if p.is_dir() and not p.is_symlink()),
-                            key=lambda p: len(p.parts), reverse=True):
+    for directory in sorted((p for p in unit_dir.rglob('*') if freed and p.is_dir() and not p.is_symlink()),
+                            key=lambda p: len(p.parts), reverse=True):  # only folders this offload emptied
         try:
             if not any(directory.iterdir()) or all(c.name == '.DS_Store' for c in directory.iterdir()):
                 for c in directory.iterdir():
@@ -603,11 +607,13 @@ def _worker(args):
                 'log': lines}
 
 
-def restore(unit, prefix='', force=False, cache=None):
+def restore(unit, prefix='', force=False, cache=None, dest=None):
+    """Write the unit's offloaded files (under ``prefix``) back from the dataset, each checked by SHA-256, into
+    runs/UNIT, or into ``dest`` (a scratch folder: fetch only what one step needs and delete it afterwards)."""
     from huggingface_hub import hf_hub_download
     repo = hf_visibility.DATASET_REPO
-    unit_dir = RUNS / unit
-    manifest = json.loads((unit_dir / 'OFFLOADED.json').read_text())
+    manifest = json.loads((RUNS / unit / 'OFFLOADED.json').read_text())
+    unit_dir = Path(dest) if dest else RUNS / unit
     wanted = [r for r in manifest['files'] if r['path'].startswith(prefix)
               and (force or not (unit_dir / r['path']).exists())]
     by_object = {}
@@ -662,11 +668,12 @@ def main():
     res.add_argument('--prefix', default='')
     res.add_argument('--force', action='store_true')
     res.add_argument('--cache', default=None)
+    res.add_argument('--dest', default=None, help='write into this folder instead of runs/UNIT')
     args = parser.parse_args()
     if hf_visibility.DATASET_REPO == 'HF-ORG/LOGS-DATASET':
         parser.error('Set GDM_LOGS_DATASET (HANDOFF.local.md)')
     if args.command == 'restore':
-        restore(args.unit, args.prefix, args.force, args.cache)
+        restore(args.unit, args.prefix, args.force, args.cache, args.dest)
         return
     units = all_units() if args.all else args.unit
     work = args.work or tempfile.mkdtemp(prefix='offload-work-')
