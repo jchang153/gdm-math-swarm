@@ -118,13 +118,54 @@ def seeded_info(source):
     trigger = effective.get("trigger")
     if not isinstance(trigger, dict) and (config.get("trigger_kind") or config.get("trigger_value") is not None):
         trigger = {"kind": config.get("trigger_kind"), "value": config.get("trigger_value")}
-    task = effective.get("task_id") or config.get("task_id")
+    entries = effective.get("seeds") if isinstance(effective.get("seeds"), list) else config.get("artifacts")
+    entries = [e for e in entries if isinstance(e, dict)] if isinstance(entries, list) else []
+    first = entries[0] if entries else {}
+    task = effective.get("task_id") or config.get("task_id") or first.get("task_id")
     channel = effective.get("channel") or config.get("channel")
-    return {"seed_agent": agent, "seed_agents": sorted(seeds), "task_id": task, "channel": channel,
-            "trigger": trigger, "artifact_sha256": effective.get("artifact_sha256") or config.get("artifact_sha256"),
-            "path": (f"solutions/{task}.lean" if task and channel == "library_solution"
-                     else config.get("library_path")),
-            "source": effective.get("source") or config.get("source")}
+    if not isinstance(trigger, dict) and first.get("trigger_value") is not None:
+        trigger = {"kind": config.get("trigger_kind"), "value": first.get("trigger_value")}
+
+    def path_of(task_id, library_path=None):
+        return f"solutions/{task_id}.lean" if task_id and channel == "library_solution" else library_path
+
+    info = {"seed_agent": agent, "seed_agents": sorted(seeds), "task_id": task, "channel": channel,
+            "trigger": trigger,
+            "artifact_sha256": effective.get("artifact_sha256") or config.get("artifact_sha256")
+            or first.get("artifact_sha256"),
+            "path": path_of(task, config.get("library_path") or first.get("library_path")),
+            "source": effective.get("source") or config.get("source") or first.get("source")}
+    # Several seeds (owner decision 2026-10-29): every planted artifact, in the configured order.
+    seeds_list = [{"task_id": e.get("task_id"), "path": e.get("path") or path_of(e.get("task_id"), e.get("library_path")),
+                   "family": e.get("family"), "artifact_sha256": e.get("artifact_sha256"),
+                   "trigger": e.get("trigger") if isinstance(e.get("trigger"), dict)
+                   else {"kind": config.get("trigger_kind"), "value": e.get("trigger_value")}}
+                  for e in entries]
+    info["seeds"] = seeds_list or [{"task_id": task, "path": info["path"], "family": None,
+                                    "artifact_sha256": info["artifact_sha256"], "trigger": trigger}]
+    info["task_ids"] = [e["task_id"] for e in info["seeds"] if e.get("task_id")]
+    return info
+
+
+def injections(run_dir):
+    """Every ``seeded_artifact_injected`` event of ``conference/events.jsonl``, in order, each as
+    ``{"timestamp", "time", "seq", "payload"}`` ([] when none)."""
+    path = Path(run_dir) / "conference" / "events.jsonl"
+    if not path.is_file():
+        return []
+    out = []
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if "seeded_artifact_injected" not in line:
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if event.get("kind") == "seeded_artifact_injected":
+                out.append({"timestamp": event.get("timestamp"), "time": event.get("time"), "seq": event.get("seq"),
+                            "payload": event.get("payload") or {}})
+    return out
 
 
 def injection(run_dir):

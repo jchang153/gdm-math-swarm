@@ -58,8 +58,15 @@ SEMANTIC_FIELDS = ("trigger_kind", "trigger_value", "artifact_path", "artifact_s
 CHANNEL_FIELDS = {"library_solution": ("task_id",), "library_notebook": ("library_path",),
                   "bulletin_board": ("intent_type",)}
 # Keys a ``seeded`` block may carry for readers only; never passed to the service.
-# ``source``: provenance of the artifact (researcher-only; e.g. the run and agent it was taken from).
-DOCUMENTATION_KEYS = ("note", "source")
+# ``source``: provenance of the artifact (researcher-only; e.g. the run and agent it was taken from);
+# ``family``: the exploit family a seed belongs to (researcher-only label, e.g. ``answer_wrapper``).
+DOCUMENTATION_KEYS = ("note", "source", "family")
+# Several seeds (owner decision 2026-10-29, docs/plan.md "Three exploit families seeded, October 29, 2026"):
+# a ``seeded`` block may list its artifacts under ``artifacts``; each entry carries these per-seed fields
+# (plus documentation keys), and every other semantic field is shared by all entries. A block without
+# ``artifacts`` is the single-seed form, unchanged.
+ARTIFACTS_KEY = "artifacts"
+PER_SEED_FIELDS = ("task_id", "artifact_path", "artifact_sha256", "trigger_value", "library_path")
 # Declared seeded runs (owner, 2026-10-25): researcher-only artifacts live here, never in agent workspaces.
 SEED_ARTIFACT_DIRECTORY = "private/research/seeds"
 SEED_ROLE = "seed"
@@ -121,12 +128,59 @@ class SeededArtifact:
     sha256: str
 
 
+def expand_block(block) -> list[dict]:
+    """The single-seed blocks of a ``seeded`` block: ``[block]`` in the single-seed form; in the list form
+    (``artifacts``), one block per entry (the shared fields plus the entry's own). Raises
+    ``SeededConfigError`` for a malformed list: empty, an entry that is not a mapping or carries a key
+    other than ``PER_SEED_FIELDS`` and ``DOCUMENTATION_KEYS``, a per-seed field also set at the top level,
+    or two entries for the same task or library path."""
+    if not isinstance(block, dict):
+        raise SeededConfigError("The 'seeded' block must be a mapping")
+    if ARTIFACTS_KEY not in block:
+        return [block]
+    entries = block[ARTIFACTS_KEY]
+    if not isinstance(entries, list) or not entries:
+        raise SeededConfigError("seeded.artifacts must be a non-empty list")
+    shared = {k: v for k, v in block.items() if k != ARTIFACTS_KEY}
+    clash = sorted(k for k in PER_SEED_FIELDS if shared.get(k) is not None)
+    if clash:
+        raise SeededConfigError("With seeded.artifacts, set these per seed only: " + ", ".join(clash))
+    out, targets = [], set()
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise SeededConfigError(f"seeded.artifacts[{index}] must be a mapping")
+        unknown = sorted(set(entry) - set(PER_SEED_FIELDS) - set(DOCUMENTATION_KEYS))
+        if unknown:
+            raise SeededConfigError(f"seeded.artifacts[{index}] has unknown key(s): " + ", ".join(map(str, unknown)))
+        target = entry.get("task_id") or entry.get("library_path")
+        if target is not None and target in targets:
+            raise SeededConfigError(f"seeded.artifacts lists {target!r} twice")
+        targets.add(target)
+        merged = dict(shared)
+        merged.update(entry)
+        out.append(merged)
+    return out
+
+
 def missing_semantic_fields(block) -> list[str]:
-    """Semantic fields a run configuration's ``seeded`` block leaves unset (absent or null)."""
+    """Semantic fields a run configuration's ``seeded`` block leaves unset (absent or null); in the list
+    form, a per-seed field is named ``artifacts[i].<field>``."""
     if not isinstance(block, dict):
         return list(SEMANTIC_FIELDS)
-    required = SEMANTIC_FIELDS + CHANNEL_FIELDS.get(block.get("channel"), ())
-    return [name for name in required if block.get(name) is None]
+    try:
+        blocks = expand_block(block)
+    except SeededConfigError:
+        return [ARTIFACTS_KEY]
+    multi = ARTIFACTS_KEY in block
+    missing = []
+    for index, one in enumerate(blocks):
+        required = SEMANTIC_FIELDS + CHANNEL_FIELDS.get(one.get("channel"), ())
+        for name in required:
+            if one.get(name) is None:
+                label = f"{ARTIFACTS_KEY}[{index}].{name}" if multi and name in PER_SEED_FIELDS else name
+                if label not in missing:
+                    missing.append(label)
+    return missing
 
 
 def seed_agent(run_config):
@@ -179,6 +233,11 @@ def declared_run_problems(run_config, repo_root=None) -> list[str]:
     missing = missing_semantic_fields(block)
     if missing:
         problems.append("seeded semantics not set: " + ", ".join(missing))
+    try:
+        blocks = expand_block(block)
+    except SeededConfigError as exc:
+        return problems + [str(exc)]
+    multi = ARTIFACTS_KEY in block
     if block.get("channel") != "library_solution" or block.get("credit_effect") != "close_task":
         problems.append("declared seeded runs plant an accepted solution (channel library_solution, "
                         "credit_effect close_task)")
@@ -188,18 +247,21 @@ def declared_run_problems(run_config, repo_root=None) -> list[str]:
     expected = f"agent-{count + 1:03d}" if isinstance(count, int) and not isinstance(count, bool) else None
     if block.get("author") != expected:
         problems.append(f"seeded.author must be {expected!r} (the identifier right after the solvers)")
-    path = block.get("artifact_path")
-    if not isinstance(path, str) or Path(path).is_absolute() or posixpath.normpath(path) != path \
-            or not path.startswith(SEED_ARTIFACT_DIRECTORY + "/"):
-        problems.append(f"seeded.artifact_path must be a repository-relative file under {SEED_ARTIFACT_DIRECTORY}/")
-    elif repo_root is not None:
-        try:
-            digest = hashlib.sha256((Path(repo_root) / path).read_bytes()).hexdigest()
-        except OSError as exc:
-            problems.append(f"seeded artifact unreadable: {type(exc).__name__}")
-        else:
-            if digest != block.get("artifact_sha256"):
-                problems.append("seeded artifact does not match artifact_sha256")
+    for index, one in enumerate(blocks):
+        where = f"seeded.{ARTIFACTS_KEY}[{index}]" if multi else "seeded"
+        path = one.get("artifact_path")
+        if not isinstance(path, str) or Path(path).is_absolute() or posixpath.normpath(path) != path \
+                or not path.startswith(SEED_ARTIFACT_DIRECTORY + "/"):
+            problems.append(f"{where}.artifact_path must be a repository-relative file under "
+                            f"{SEED_ARTIFACT_DIRECTORY}/")
+        elif repo_root is not None:
+            try:
+                digest = hashlib.sha256((Path(repo_root) / path).read_bytes()).hexdigest()
+            except OSError as exc:
+                problems.append(f"{where}: seeded artifact unreadable: {type(exc).__name__}")
+            else:
+                if digest != one.get("artifact_sha256"):
+                    problems.append(f"{where}: seeded artifact does not match artifact_sha256")
     return problems
 
 
@@ -214,6 +276,8 @@ def conference_arguments(run_config, repo_root=None) -> dict:
     ``enabled: true`` and every semantic field set, and ``seeded_contagion_enabled``
     is not false; anything else raises ``SeededConfigError`` and never falls back to
     the baseline. The service then validates the values and the artifact itself.
+    A block in the list form (``artifacts``) returns a tuple of ``SeededTrackConfig``,
+    one per seed, in the listed order.
     """
     if not isinstance(run_config, dict):
         raise SeededConfigError("Run configuration must be a mapping")
@@ -235,9 +299,14 @@ def conference_arguments(run_config, repo_root=None) -> dict:
     missing = missing_semantic_fields(block)
     if missing:
         raise SeededConfigError("Seeded semantics are not set (awaiting user decisions): " + ", ".join(missing))
-    config = {key: value for key, value in block.items() if key not in DOCUMENTATION_KEYS}
-    config["artifact_path"] = resolve_artifact_path(config.get("artifact_path"), repo_root)
-    return {"track": SEEDED, "seeded_track": SeededTrackConfig.from_value(config)}
+    configs = []
+    for one in expand_block(block):
+        config = {key: value for key, value in one.items() if key not in DOCUMENTATION_KEYS}
+        config["artifact_path"] = resolve_artifact_path(config.get("artifact_path"), repo_root)
+        configs.append(SeededTrackConfig.from_value(config))
+    if ARTIFACTS_KEY not in block:
+        return {"track": SEEDED, "seeded_track": configs[0]}
+    return {"track": SEEDED, "seeded_track": tuple(configs)}
 
 
 def resolve_track(track, config, *, task_ids, max_bytes, max_text_chars, max_post_chars, intent_types,
@@ -268,6 +337,33 @@ def resolve_track(track, config, *, task_ids, max_bytes, max_text_chars, max_pos
                                                 or len(json.dumps(artifact.content)) > max_post_chars):
         raise SeededConfigError("Artifact does not fit a single bulletin-board post")
     return artifact
+
+
+def resolve_tracks(track, config, **limits):
+    """``resolve_track`` for one seed or several: [] for the baseline, else one loaded artifact per seed
+    (``config`` a ``SeededTrackConfig``/mapping, or a list/tuple of them; several seeds must target
+    distinct tasks or library paths)."""
+    if track == SEEDED and isinstance(config, (list, tuple)):
+        if not config:
+            raise SeededConfigError("The seeded track requires at least one seed")
+        artifacts = [resolve_track(track, one, **limits) for one in config]
+        targets = [a.config.task_id or a.config.library_path for a in artifacts]
+        if len(set(targets)) != len(targets):
+            raise SeededConfigError("Several seeds target the same task or library path")
+        return artifacts
+    artifact = resolve_track(track, config, **limits)
+    return [] if artifact is None else [artifact]
+
+
+def configs_digest(configs) -> str:
+    """The run-state fingerprint of the seeds: a single seed's own ``digest`` (unchanged from the
+    single-seed design, so its resume check is the same), else the digest of the ordered digests."""
+    configs = list(configs)
+    if not configs:
+        return ""
+    if len(configs) == 1:
+        return configs[0].digest()
+    return hashlib.sha256(json.dumps([c.digest() for c in configs]).encode("utf-8")).hexdigest()
 
 
 def _validate(config, task_ids, intent_types, max_tags, max_tag_chars):

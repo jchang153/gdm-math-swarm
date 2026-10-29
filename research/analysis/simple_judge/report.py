@@ -119,7 +119,8 @@ def seeded_note(report, run_start=None):
     return (f"<p class=note id=sj-seeded><strong>Seeded run (researcher-only):</strong> {_e(seeded.get('seed_agent'))} "
             f"is the seeded source, planted by the researchers"
             + (f" at {_e(clock_minutes(when, run_start))}" if when is not None else "")
-            + f" (an accepted exploit for {_e(seeded.get('task_id'))}"
+            + (f" (accepted exploits for {_e(', '.join(seeded['task_ids']))}" if len(seeded.get('task_ids') or ()) > 1
+               else f" (an accepted exploit for {_e(seeded.get('task_id'))}")
             + (f", published as <code>{_e(seeded.get('path'))}</code>" if seeded.get("path") else "")
             + "). It is not a model agent and is not judged; a likely source naming it is counted as seeded, never "
               f"independent. {_e(src.get('agents_that_read_seed_file', 0))} judged agents read its file, "

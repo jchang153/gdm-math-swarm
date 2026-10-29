@@ -1115,16 +1115,26 @@ def unread_notices_enabled(config):
     return config.get("unread_notices", True) is not False
 
 
-def seeded_settings(config):
-    """Researcher-only record of a declared seeded run (settings.json ``effective.seeded``)."""
-    block = config.get("seeded") or {}
-    return {"declared_seeded_run": True, "seed_agent": block.get("author"), "role": "seed",
-            "task_id": block.get("task_id"), "channel": block.get("channel"),
+def _one_seed_settings(block):
+    return {"task_id": block.get("task_id"), "channel": block.get("channel"),
             "path": f"solutions/{block.get('task_id')}.lean" if block.get("channel") == "library_solution" else None,
             "trigger": {"kind": block.get("trigger_kind"), "value": block.get("trigger_value")},
             "artifact_path": block.get("artifact_path"), "artifact_sha256": block.get("artifact_sha256"),
-            "source": block.get("source"),
-            "note": "Planted by the researchers (owner decision 2026-10-25); never shown to agents as seeded."}
+            "source": block.get("source")}
+
+
+def seeded_settings(config):
+    """Researcher-only record of a declared seeded run (settings.json ``effective.seeded``). With several
+    seeds (``seeded.artifacts``) the top-level fields describe the first and ``seeds`` lists them all."""
+    from .seeded import ARTIFACTS_KEY, expand_block
+    block = config.get("seeded") or {}
+    blocks = expand_block(block) if block else [block]
+    record = {"declared_seeded_run": True, "seed_agent": block.get("author"), "role": "seed",
+              **_one_seed_settings(blocks[0]),
+              "note": "Planted by the researchers (owner decision 2026-10-25); never shown to agents as seeded."}
+    if ARTIFACTS_KEY in block:
+        record["seeds"] = [dict(_one_seed_settings(one), family=one.get("family")) for one in blocks]
+    return record
 
 
 def preflight(config, repo_root):

@@ -651,11 +651,14 @@ class _Gates:
                  max_connections=self.config.get(MAX_CONNECTIONS_KEY), agent_count=self.config.get("agent_count"))
 
     def seeded_track(self):
-        from .seeded import is_declared_run
+        from .seeded import ARTIFACTS_KEY, is_declared_run
         problems = seeded_config_problems(self.config, self.repo)
         declared = is_declared_run(self.config)
+        count = len((self.config.get("seeded") or {}).get(ARTIFACTS_KEY) or [None]) if declared else 0
+        planted = "one planted exploit, pinned artifact" if count == 1 else \
+            f"{count} planted exploits, pinned artifacts (docs/plan.md, \"Three exploit families seeded, October 29, 2026\")"
         self.add("seeded_track", not problems, "; ".join(problems) or
-                 ("declared seeded run: one planted exploit, pinned artifact (docs/plan.md, \"Seeded overseer "
+                 (f"declared seeded run: {planted} (docs/plan.md, \"Seeded overseer "
                   "experiment, October 25, 2026\")" if declared else
                   "spontaneous track; no seeded-contagion configuration present"), declared_seeded_run=declared)
 

@@ -459,6 +459,9 @@ def seeded(run, settings, runtime, every, first_accept):
             'injected_utc': utc(when).isoformat() if isinstance(when, (int, float)) else None,
             'injected_minute': round((when - runtime['start']) / 60, 2) if isinstance(when, (int, float)) else None,
             'injection': (injected or {}).get('payload'),
+            **({'seeds': [dict(seed, injection=next((i['payload'] for i in participant_roles.injections(run)
+                                                    if i['payload'].get('task_id') == seed.get('task_id')), None))
+                          for seed in info['seeds']]} if len(info.get('seeds') or ()) > 1 else {}),
             'submissions': [{'submission': r['submission'], 'task': r['task'], 'operational_outcome':
                              r['operational_outcome'], 'submitted_utc': r['submitted_utc']}
                             for r in every if r['agent'] in seeds],
@@ -823,7 +826,10 @@ def who(agent, results):
 def seeded_section(sd):
     """Seeded runs: the planted seed (researcher-only)."""
     return ['<h2 id="seeded">Seeded source (researcher-only)</h2>', f'<p>{esc(sd["note"])}</p>', facts([
-        ('Track', sd['track']), ('Seed agent', f'{sd["seed_agent"]} ({sd["label"]})'), ('Task', sd['task']),
+        ('Track', sd['track']), ('Seed agent', f'{sd["seed_agent"]} ({sd["label"]})'),
+        ('Task', sd['task']) if not sd.get('seeds') else
+        ('Tasks (one seed each)', '; '.join(f'{x["task_id"]} ({x.get("family") or "family not recorded"})'
+                                          for x in sd['seeds'])),
         ('Channel', sd['channel']), ('Library path', sd['path']), ('Trigger', sd['trigger']),
         ('Injected (UTC)', sd['injected_utc'] or ('not injected' if not sd['injection_recorded'] else None)),
         ('Injected (run minute)', sd['injected_minute']), ('Artifact SHA-256', sd['artifact_sha256']),

@@ -444,16 +444,21 @@ def _seeded_context(run_dir, records):
     payload = (injected or {}).get("payload") or {}
     agent, task = payload.get("author") or info["seed_agent"], payload.get("task_id") or info["task_id"]
     subs = records["submissions"]
-    if injected and records["source"] is not None and task and not any(
-            s["agent"] == agent and s["task"] == task and s["outcome"] == ACCEPTED for s in subs):
-        subs.append({"id": f"seeded-{payload.get('artifact_id') or task}", "agent": agent, "task": task,
-                     "outcome": ACCEPTED, "source": None, "ts": _ts(injected.get("timestamp")), "seeded": True})
-        subs.sort(key=lambda s: (s["ts"] if s["ts"] is not None else 0, str(s["id"])))
+    # Every seeded acceptance (several seeds since 2026-10-29), not only the first.
+    for one in participant_roles.injections(run_dir) or ([injected] if injected else []):
+        load = one.get("payload") or {}
+        who, what = load.get("author") or info["seed_agent"], load.get("task_id")
+        if records["source"] is not None and what and not any(
+                s["agent"] == who and s["task"] == what and s["outcome"] == ACCEPTED for s in subs):
+            subs.append({"id": f"seeded-{load.get('artifact_id') or what}", "agent": who, "task": what,
+                         "outcome": ACCEPTED, "source": None, "ts": _ts(one.get("timestamp")), "seeded": True})
+    subs.sort(key=lambda s: (s["ts"] if s["ts"] is not None else 0, str(s["id"])))
     when = _ts((injected or {}).get("timestamp"))
     if when is None:   # no injection event: the seed's first accepted submission
         when = min((s["ts"] for s in subs if s["agent"] == agent and s["outcome"] == ACCEPTED
                     and s["ts"] is not None), default=None)
     return seeds, roles, {"seed_agent": agent, "label": participant_roles.SEED_LABEL, "task_id": task,
+                          **({"task_ids": info["task_ids"]} if len(info.get("task_ids") or ()) > 1 else {}),
                           "path": payload.get("path") or info["path"], "channel": info["channel"],
                           "trigger": payload.get("trigger") or info["trigger"],
                           "injected_ts": when, "injected": injected is not None}
@@ -823,7 +828,7 @@ def seeded_sentence(record):
     return (f"Seeded run: {seeded['seed_agent']} is the seeded source, planted by the researchers (not a model "
             f"agent and not an independent discoverer): "
             + (f"at {_at(when, _start(record))} " if when is not None else "")
-            + f"the conference credited it with an accepted exploit for {seeded.get('task_id')}"
+            + f"the conference credited it with an accepted exploit for {', '.join(seeded.get('task_ids') or [seeded.get('task_id')])}"
             + (f" and published {seeded['path']}" if seeded.get("path") else "")
             + (". " if seeded.get("injected") or when is not None else " (no injection was recorded). ")
             + f"It is left out of the agent and credit counts; {_traces(attributed)}.")

@@ -418,15 +418,19 @@ class ConferenceService:
                 raise ValueError("Agent identifiers must be unique and well-formed")
         # Refuses any seeded configuration in the spontaneous track, and a seeded
         # track that is not explicitly enabled (docs/plan.md, Track definitions).
-        self._seeded = seeded_track_module.resolve_track(
+        # ``seeded_track`` may list several seeds (owner decision 2026-10-29): each is resolved, triggered
+        # and injected on its own; ``_seeded`` is the first (or None) for the single-seed readers.
+        self._seeds = seeded_track_module.resolve_tracks(
             track, seeded_track, task_ids=frozenset(ids), max_bytes=MAX_NOTEBOOK_BYTES,
             max_text_chars=MAX_TEXT_CHARS, max_post_chars=MAX_LISTED_TEXT_JSON_CHARS, intent_types=INTENT_TYPES,
             max_tags=MAX_TAGS, max_tag_chars=MAX_TAG_CHARS)
+        self._seeded = self._seeds[0] if self._seeds else None
+        self._seeds_resolved = set()    # indexes of seeds whose trigger has resolved (persisted in meta)
         self.track = track
         self._seeded_done = False
         self._seeded_failures = 0       # consecutive failed seeded polls (researcher-side)
         self._run_started_at = None     # cached meta run_started_at (seeded pre-check only)
-        self._seeded_observer = None    # (task, source, metadata) of an injected seeded acceptance
+        self._seeded_observer = None    # [(task, source, metadata)] of injected seeded acceptances
         self.directory = Path(run_dir) / "conference"
         self.directory.mkdir(parents=True, exist_ok=True)
         self.events_path = self.directory / "events.jsonl"
@@ -506,14 +510,15 @@ class ConferenceService:
             if resumed and existing != expected:
                 raise ValueError("Existing conference state belongs to a different task set")
             meta = dict(db.execute("SELECT key, value FROM meta"))
-            seeded_digest = self._seeded.config.digest() if self._seeded else ""
+            seeded_digest = seeded_track_module.configs_digest(a.config for a in self._seeds)
             if resumed and meta.get("track", seeded_track_module.SPONTANEOUS) != self.track:
                 raise ValueError("Existing conference state belongs to a different track")
             if resumed and meta.get("seeded_config_sha256", "") != seeded_digest:
                 raise ValueError("Existing conference state has a different seeded configuration")
             db.execute("INSERT OR IGNORE INTO meta VALUES ('track', ?)", (self.track,))
             db.execute("INSERT OR IGNORE INTO meta VALUES ('seeded_config_sha256', ?)", (seeded_digest,))
-            self._seeded_done = "seeded_resolved" in meta
+            self._seeds_resolved = {i for i in range(len(self._seeds)) if self._resolved_key(i) in meta}
+            self._seeded_done = len(self._seeds_resolved) == len(self._seeds)
             if meta.get("run_started_at") is not None:
                 self._run_started_at = float(meta["run_started_at"])
             now = self._clock()
@@ -532,6 +537,9 @@ class ConferenceService:
             if self._seeded is not None:
                 payload.update(track=self.track, seeded_config_sha256=seeded_digest,
                                seeded_artifact_sha256=self._seeded.sha256)
+                if len(self._seeds) > 1:
+                    payload.update(seeded_artifact_sha256s=[a.sha256 for a in self._seeds],
+                                   seeded_task_ids=[a.config.task_id for a in self._seeds])
             if missing or dropped:
                 payload.update(event_log_backfilled=missing, event_log_partial_bytes_dropped=dropped)
             if backfilled:
@@ -1671,22 +1679,41 @@ class ConferenceService:
                 self._record_quietly(kind, None, payload)
 
     # ---------------------------------------------------------- seeded track
+    @staticmethod
+    def _resolved_key(index):
+        """The meta key recording that seed ``index`` resolved: ``seeded_resolved`` for the first seed
+        (as in the single-seed design), ``seeded_resolved:<index>`` for the others."""
+        return "seeded_resolved" if index == 0 else f"seeded_resolved:{index}"
+
+    def _pending_seeds(self):
+        return [(i, a) for i, a in enumerate(self._seeds) if i not in self._seeds_resolved]
+
     def _seeded_maybe_due(self):
         """Cheap pre-check without a write transaction; ``_seeded_tick`` decides."""
-        config = self._seeded.config
-        if config.trigger_kind == "elapsed_seconds":
-            started = self._run_started_at
-            return started is not None and seeded_track_module.trigger_due(
-                config, now=self._clock(), run_started_at=started, acceptances=0)
-        with self._lock:
-            if self._closed:
-                return False
-            acceptances = self._db.execute("SELECT COUNT(*) FROM tasks WHERE status = 'closed' "
-                                           "AND accepted_submission IS NOT NULL").fetchone()[0]
-        return seeded_track_module.trigger_due(config, now=self._clock(), run_started_at=self._run_started_at,
-                                               acceptances=acceptances)
+        pending = self._pending_seeds()
+        if not pending:
+            return False
+        acceptances = None
+        for _, artifact in pending:
+            config = artifact.config
+            if config.trigger_kind == "elapsed_seconds":
+                started = self._run_started_at
+                if started is not None and seeded_track_module.trigger_due(
+                        config, now=self._clock(), run_started_at=started, acceptances=0):
+                    return True
+                continue
+            if acceptances is None:
+                with self._lock:
+                    if self._closed:
+                        return False
+                    acceptances = self._db.execute("SELECT COUNT(*) FROM tasks WHERE status = 'closed' "
+                                                   "AND accepted_submission IS NOT NULL").fetchone()[0]
+            if seeded_track_module.trigger_due(config, now=self._clock(), run_started_at=self._run_started_at,
+                                               acceptances=acceptances):
+                return True
+        return False
 
-    def _inject_seeded_acceptance(self, db, config, now, common):
+    def _inject_seeded_acceptance(self, db, config, now, common, artifact=None):
         """The seeded solution goes through the state changes of a real acceptance
         (``_submit_solution``): a submissions row by ``author`` (outcome accepted), the task
         closed and credited with ``accepted_submission`` set, revision N of
@@ -1697,7 +1724,8 @@ class ConferenceService:
         accepted for the same template in glm100-baseline-30m-20261022T050055Z (pinned by
         SHA-256), so the trigger time is exact. check_proof and revert_submission work on it
         like on any accepted submission, and the evaluator observer checks it after commit."""
-        artifact, task_id = self._seeded, config.task_id
+        artifact = artifact if artifact is not None else self._seeded
+        task_id = config.task_id
         source, digest = artifact.content, artifact.sha256
         path = f"solutions/{task_id}.lean"
         public_id = self._new_public_id(db, "submissions", "sub")
@@ -1740,39 +1768,46 @@ class ConferenceService:
         if db.execute("SELECT COUNT(*) FROM tasks WHERE status = 'open'").fetchone()[0] == 0:
             self._emit("task_pool_depleted", None, {"last_problem_id": task_id, "seeded": True})
         # The evaluator observer, as after a real acceptance; dispatched after the commit.
-        self._seeded_observer = (self._tasks[task_id], source, {
+        self._seeded_observer.append((self._tasks[task_id], source, {
             "submission_id": submission_id, "agent_id": config.author, "problem_id": task_id, "outcome": "accepted",
             "source_sha256": digest, "file_path": None, "submitted_at": now, "judged_at": now, "track": self.track,
-            "seeded": True})
+            "seeded": True}))
         return "injected"
 
     def _seeded_tick(self):
-        """Inject the seeded artifact once its trigger is due (seeded track only)."""
+        """Inject every seeded artifact whose trigger is due, once each (seeded track only), in the
+        configured order; the evaluator observer runs for each injected acceptance after the commit."""
         with self._transaction() as db:
             if self._seeded_done:
                 return
             meta = dict(db.execute("SELECT key, value FROM meta"))
-            if "seeded_resolved" in meta:
+            self._seeds_resolved |= {i for i in range(len(self._seeds)) if self._resolved_key(i) in meta}
+            if len(self._seeds_resolved) == len(self._seeds):
                 self._seeded_done = True
                 return
             started = meta.get("run_started_at")
-            acceptances = db.execute("SELECT COUNT(*) FROM tasks WHERE status = 'closed' "
-                                     "AND accepted_submission IS NOT NULL").fetchone()[0]
             now = self._clock()
-            config = self._seeded.config
-            if not seeded_track_module.trigger_due(config, now=now, acceptances=acceptances,
-                                                   run_started_at=None if started is None else float(started)):
-                return
-            self._seeded_observer = None
-            outcome = self._inject_seeded(db, config, now)
-            db.execute("INSERT INTO meta VALUES ('seeded_resolved', ?)", (outcome,))
-            self._seeded_done = True
-        pending, self._seeded_observer = self._seeded_observer, None
-        if pending is not None:
-            self._dispatch_observer(*pending)
+            self._seeded_observer = []
+            resolved = set()
+            for index, artifact in self._pending_seeds():
+                acceptances = db.execute("SELECT COUNT(*) FROM tasks WHERE status = 'closed' "
+                                         "AND accepted_submission IS NOT NULL").fetchone()[0]
+                config = artifact.config
+                if not seeded_track_module.trigger_due(config, now=now, acceptances=acceptances,
+                                                       run_started_at=None if started is None else float(started)):
+                    continue
+                outcome = self._inject_seeded(db, config, now, artifact=artifact)
+                db.execute("INSERT INTO meta VALUES (?, ?)", (self._resolved_key(index), outcome))
+                resolved.add(index)
+        # Only after the commit: a failed transaction rolls every injection of this tick back.
+        self._seeds_resolved |= resolved
+        self._seeded_done = len(self._seeds_resolved) == len(self._seeds)
+        pending, self._seeded_observer = self._seeded_observer or [], None
+        for observed in pending:
+            self._dispatch_observer(*observed)
 
-    def _inject_seeded(self, db, config, now):
-        artifact = self._seeded
+    def _inject_seeded(self, db, config, now, artifact=None):
+        artifact = artifact if artifact is not None else self._seeded
         trigger = {"kind": config.trigger_kind, "value": config.trigger_value}
         common = {"channel": config.channel, "author": config.author, "credit_effect": config.credit_effect,
                   "artifact_sha256": artifact.sha256, "trigger": trigger, "seeded": True}
@@ -1792,7 +1827,7 @@ class ConferenceService:
                 self._emit("seeded_injection_skipped", None, {**common, "task_id": config.task_id,
                                                               "reason": "task_closed"})
                 return "skipped"
-            return self._inject_seeded_acceptance(db, config, now, common)
+            return self._inject_seeded_acceptance(db, config, now, common, artifact)
         else:
             path = config.library_path
             previous = db.execute("SELECT MAX(revision) FROM library WHERE path = ?", (path,)).fetchone()[0]
