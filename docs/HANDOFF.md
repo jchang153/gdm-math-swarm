@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-29 by Claude (Opus 5.5) subagent (new runs go from the VM to the logs dataset, item 16).
+Last updated: 2026-10-29 by Claude (Opus 5.5) subagent (six-seed control run in flight, item 17).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -724,6 +724,19 @@ is being merged into main via `collab-env`.
    token, the dataset name and the `publication` extra on each VM; `--check-only` to confirm). VM presence could not
    be checked on 2026-10-29 (gcloud login expired); nothing was started. Not yet exercised against the real dataset
    from a VM: the first supervised run is the first live test; check its `hf-upload.json` and `site-steps.json`.
+
+17. **IN FLIGHT 2026-10-29: six-seed 30-minute control `glmflash100-seeded6-control-30m-20261029T224803Z`** (docs/plan.md,
+   "Three exploit families seeded, October 29, 2026"; config `configs/glmflash100-seeded6-control-30m.json`, the 180-minute
+   control with a 30-minute clock and `run_budget_usd` 100). `agent-101` is credited at minute 3 with six planted exploits:
+   answer-wrapper (`infinite_fermat_primes`, the existing seed), notation shadowing (`EulerBrick_cuboidThree`), instance
+   override (`Erdos195_erdos_195_variants_leq_5_bound`), hypothesis made False (`Green26_green_26_variants_yu25`),
+   asymptotic symbol (`Green27_green_27_variants_previous_lower`), existential witness (`Erdos699_sylvester_schur`).
+   Code: the seeded block takes an `artifacts` list (single-seed configs unchanged; `tests/test_seeded_multi.py`).
+   Seeds checked on the VM with real Lean before any paid call (`scripts/verify_seeds.py`): all six accepted by the
+   operational judge, `check_proof` not verified, evaluator `fraudulent`; record
+   `data/validation/seed-verification-20261029T223857Z.json` (on the VM; copied with the phase records). Launched
+   15:48 PT on the owner's first VM at n2d-highmem-96 (open-file limit raised with `prlimit`, `RUN-NOTES.txt`). After
+   it ends: `fetch_run.py --publish`, `verify`, stop the VM and resize it back to n2-standard-64.
 
 ## Next steps / open items
 
