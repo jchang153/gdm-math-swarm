@@ -14,7 +14,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_profile  # noqa: E402
-from build_experiment_index import write_index  # noqa: E402
+from build_experiment_index import short_title, write_index  # noqa: E402
 import catalogue_intro  # noqa: E402
 
 
@@ -68,13 +68,17 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(run_profile.condition_text(run_profile.profile(r)), '5 GLM 5.3 agents, no planted exploit, 60 min.')
 
     def test_card_has_sparkline_counts_and_notes(self):
-        card = run_profile.card_inner(run_profile.profile(results(), SETTINGS), {'minutes': 60, 'fakes': 4})
+        p = run_profile.profile(results(), SETTINGS)
+        card, more = run_profile.card_inner(p, {'minutes': 60, 'fakes': 4}), run_profile.card_more(p)
         self.assertIn('<svg class="spark" viewBox="0 0 240 40"', card)
         self.assertIn('class="sp-seed"', card)
-        self.assertIn('<dt>Fakes accepted</dt><dd class="bad">2</dd>', card)
+        self.assertIn('<dt>Fakes accepted</dt><dd class="bad">2</dd><dd class="sub">1 reverted</dd>', card)
+        self.assertIn('<dt>Standing at end</dt><dd class="bad">1</dd>', card)
         self.assertIn('<dt>Fake-minutes</dt><dd>47</dd>', card)
-        self.assertIn('1 accepted submission unresolved', card)
-        self.assertIn('planted seed reverted at +10 min', card)
+        # The condition sentence and notes are secondary: under the card's Details.
+        self.assertIn('<p class="rc-cond">100 GLM 5.3 Flash solvers, 2 DeepSeek', more)
+        self.assertIn('1 accepted submission unresolved', more)
+        self.assertIn('planted seed reverted at +10 min', more)
 
     def test_series_of_run_ids(self):
         self.assertEqual(run_profile.series_of('glmflash100-seeded-5ov-ds-60m-notices-20261027T220000Z')[0], 'notices60')
@@ -97,14 +101,15 @@ class ProfileTests(unittest.TestCase):
         for r, s in cases:
             scale = {'minutes': 90, 'fakes': 3}
             script = (run_profile.CARD_JS + ';const [r,s,sc]=JSON.parse(require("fs").readFileSync(0,"utf8"));'
-                      'const p=RP.profile(r,s);process.stdout.write(JSON.stringify([p,RP.inner(p,sc),RP.condition(p)]));')
+                      'const p=RP.profile(r,s);process.stdout.write(JSON.stringify([p,RP.inner(p,sc),RP.condition(p),RP.more(p)]));')
             out = subprocess.run(['node', '-e', script], input=json.dumps([r, s, scale]), capture_output=True, text=True,
                                  check=True).stdout
-            p, card, condition = json.loads(out)
+            p, card, condition, more = json.loads(out)
             expected = run_profile.profile(r, s)
             self.assertEqual(p, expected)
             self.assertEqual(card, run_profile.card_inner(expected, scale))
             self.assertEqual(condition, run_profile.condition_text(expected))
+            self.assertEqual(more, run_profile.card_more(expected))
 
 
 def entry(run, hour, **extra):
@@ -126,7 +131,7 @@ class CataloguePageTests(unittest.TestCase):
         self.assertIn(f'href="{catalogue_intro.PAPER_URL}" target="_blank" rel="noopener noreferrer">'
                       f'<cite>{catalogue_intro.PAPER_TITLE}</cite></a>', page)
         self.assertIn('Paglieri et al.', page)
-        for anchor in ('id="how"', 'id="read"', 'id="glossary"', 'id="cards-view"', 'id="table-view"',
+        for anchor in ('id="about"', 'id="experiment"', 'id="how"', 'id="read"', 'id="glossary"', 'id="cards-view"', 'id="table-view"',
                        'id="view-cards"', 'id="view-table"', 'href="#series-small"'):
             self.assertIn(anchor, page)
         for term in ('Fake-minutes', 'Seed readers', 'Standing fake', 'Overseer', 'Revert', 'Genuine'):
@@ -147,13 +152,33 @@ class CataloguePageTests(unittest.TestCase):
         self.assertLess(cards.index('id="series-oversight60"'), cards.index('id="series-models"'))  # newest series first
         # Within a series by overseer count: 2 overseers before 10 (the bare entry's count from its run ID).
         self.assertLess(cards.index('data-run="glmflash100-seeded-2ov-ds'), cards.index('data-run="glmflash100-seeded-10ov'))
-        self.assertIn('<div class="rc-body" data-profile="1"><h3 class="rc-cond">100 GLM 5.3 Flash solvers, 2 DeepSeek',
-                      cards)
-        self.assertIn('<div class="rc-body" data-profile="0"><h3 class="rc-cond">102 GLM 5.3 Flash agents, 1h 00m.</h3>',
-                      cards)
+        # Short titles from the run ID; the full condition sentence sits in the card's details.
+        self.assertIn('<h3 class="rc-title">2 DeepSeek overseers</h3>', cards)
+        self.assertIn('<h3 class="rc-title">10 DeepSeek overseers</h3>', cards)
+        self.assertIn('<h3 class="rc-title">GLM 5.3 Flash</h3>', cards)  # model comparison: the model's name
+        self.assertIn('<div class="rc-prof"><p class="rc-cond">100 GLM 5.3 Flash solvers, 2 DeepSeek', cards)
+        self.assertIn('<div class="rc-body" data-profile="1"><figure class="rc-spark">', cards)
+        self.assertIn('<div class="rc-body" data-profile="0"><p class="rc-empty">', cards)
+        self.assertIn('<p class="rc-meta">GLM 5.3 Flash · 102 agents · 60 min</p>', cards)
         self.assertIn('class="card-pick" value="owner-opus55-20261021T183459Z"', cards)
         self.assertIn('const RP=(()=>{', page)
         self.assertIn('"deepseek/deepseek-v4.1-flash-1017": "DeepSeek V4.1 Flash"', page)
+
+    def test_short_titles_and_replicate_order(self):
+        for run, title in [('glmflash100-seeded-control-180m-notices-r1-20261028T195741Z', 'Control · r1'),
+                           ('glmflash100-seeded-2ov-glm-180m-notices-r2-20261028T194424Z', '2 GLM overseers · r2'),
+                           ('glmflash100-seeded-1ov-ds-60m-20261027T055433Z', '1 DeepSeek overseer'),
+                           ('glm100-repeat2-20261022T055342Z', 'Repeat 2'),
+                           ('glm100-baseline-90m-20261022T183812Z', 'Baseline, 90 min'),
+                           ('glm-rule6-20261021T224441Z', 'With rule 6')]:
+            self.assertEqual(short_title({'run': run, 'model': 'z-ai/glm-5.3'}), title)
+        self.assertEqual(short_title({'run': 'gemini10-20261020T054602Z', 'model': 'google/gemini-3.1-pro-preview'}),
+                         'Gemini 3.1 Pro')
+        # Replicates in order within an overseer count, whatever their start times.
+        r1 = entry('glmflash100-seeded-control-180m-notices-r1-20261028T195741Z', 9)
+        r2 = entry('glmflash100-seeded-control-180m-notices-r2-20261028T194617Z', 8)
+        page, _ = self.write([r1, r2])
+        self.assertLess(page.index('data-run="' + r1['run']), page.index('data-run="' + r2['run']))
 
     def test_rendering_is_deterministic(self):
         es = [entry('glmflash100-seeded-2ov-ds-60m-20261027T055654Z', 5,

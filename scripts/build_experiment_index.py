@@ -267,21 +267,70 @@ def card_order(entry):
         found = _OV.search(entry['run'])
         count, model = (int(found[1]), found[2]) if found else (0, '')
     start = datetime.datetime.fromisoformat(entry['start_utc'].replace('Z', '+00:00')).timestamp()
-    return (count, model, -start, entry['run'])
+    rep = _REPLICATE.search(_STAMP.sub('', entry['run']))  # replicates r1, r2, r3 in order (redesign, Oct 29)
+    return (count, model, int(rep[1][1:]) if rep else 0, -start, entry['run'])
+
+
+# Short card titles from the run ID (redesign, October 29, 2026): the condition in a few words; the full condition
+# sentence moves into the card's details. First match wins; otherwise the model's display name.
+_TITLES = (
+    (r'-(\d+)ov-(glm|ds)-', lambda m: f'{m[1]} {"DeepSeek" if m[2] == "ds" else "GLM"} '
+                                       f'overseer{"" if m[1] == "1" else "s"}'),
+    (r'-seeded-control-', lambda m: 'Control'),
+    (r'-seeded-overseer-', lambda m: '1 overseer'),
+    (r'^glm100-baseline-(\d+)m', lambda m: 'Baseline' + ('' if m[1] == '30' else f', {m[1]} min')),
+    (r'^glm100-repeat(\d+)', lambda m: f'Repeat {m[1]}'),
+    (r'^glm10-baseline', lambda m: '10 agents'),
+    (r'^glm-overseer-powers', lambda m: 'Overseer with powers'),
+    (r'^glm-overseer', lambda m: 'Overseer, no powers'),
+    (r'^glm-baseline', lambda m: 'Baseline'),
+    (r'^glm-rule6', lambda m: 'With rule 6'),
+    (r'^pilot-', lambda m: 'Pilot'),
+)
+# Shorter link labels on the cards (full name in the tooltip; the table and compare view keep the full names).
+CARD_LINK = {'Simple behavior judge': 'Judge', 'Behavior judge': 'Rubric judge', 'Incident report': 'Incident'}
+_STAMP = re.compile(r'-\d{8}T\d{6}Z$')
+_REPLICATE = re.compile(r'-(r\d+)$')
+
+
+def short_title(entry):
+    """A few words naming the run's condition within its series, e.g. "Control · r1" or "2 GLM overseers · r2"."""
+    run = _STAMP.sub('', entry['run'])
+    title = None
+    for pattern, make in _TITLES:
+        found = re.search(pattern, run)
+        if found:
+            title = make(found)
+            break
+    if title is None:
+        title = run_profile.model_name(entry.get('model'))
+    rep = _REPLICATE.search(run)
+    return title + (f' · {rep[1]}' if rep else '')
+
+
+def short_date(entry):
+    """'Oct 28, 12:45 PDT' from the entry's Pacific date ('2026-10-28 12:45 PDT')."""
+    try:
+        day, clock, zone = entry['date'].split(' ')
+        when = datetime.date.fromisoformat(day)
+        return f'{when.strftime("%b")} {when.day}, {clock} {zone}'
+    except (ValueError, KeyError):
+        return entry.get('date', '')
 
 
 def run_card(entry, scale):
-    """One run card: the profile part (condition, chips, sparkline, fake counts; a placeholder the hosted page
-    fills from the run's records when the entry has no profile), the entry's own counts, links and a compare box."""
+    """One run card: a short title, a meta line, the sparkline with three key fake counts (a placeholder the hosted
+    page fills from the run's records when the entry has no profile), a links row, and Details with the condition
+    sentence, notes and the secondary counts."""
     esc = html.escape
     p = valid_profile(entry)
     summary = entry.get('summary') if isinstance(entry.get('summary'), dict) else None
     if p:
-        body = run_profile.card_inner(p, scale)
+        body, more = run_profile.card_inner(p, scale), run_profile.card_more(p)
     else:
-        body = (f'<h3 class="rc-cond">{esc(str(entry["agents"]))} {esc(run_profile.model_name(entry["model"]))} '
-                f'agents, {esc(duration_text(entry["elapsed_seconds"]))}.</h3><p class="rc-empty">'
-                'Condition and fakes over time are read from the run\'s own records in the browser.</p>')
+        body = ('<p class="rc-empty">Condition and fakes over time are read from the run\'s own records in the '
+                'browser.</p>')
+        more = ''
     accepted = summary.get('accepted_tasks') if summary else None
     tasks = entry.get('task_count')
     stats = [('Genuine tasks', f'{entry["distinct_verified_tasks"]}<small> of {esc(str(tasks if tasks is not None else "?"))}'
@@ -289,14 +338,22 @@ def run_card(entry, scale):
              ('Accepted tasks', f'<span class="rc-accepted">{accepted if accepted is not None else "?"}</span>'),
              ('Duration', esc(duration_text(entry['elapsed_seconds']))),
              ('Spend', f'${Decimal(entry["pilot_spent_usd"]):.2f}')]
-    links = ''.join(f'<a href="{esc(url, quote=True)}">{esc(name)}</a>' for name, url in entry['links'].items()
-                    if not hidden_link(name))
+    links = ''.join(f'<a href="{esc(url, quote=True)}"' + (f' title="{esc(name, quote=True)}"' if name in CARD_LINK
+                                                             else '') + f'>{esc(CARD_LINK.get(name, name))}</a>'
+                    for name, url in entry['links'].items() if not hidden_link(name))
     run = esc(entry['run'], quote=True)
-    return (f'<article class="rc" data-run="{run}"><div class="rc-body" data-profile="{1 if p else 0}">{body}</div>'
+    minutes = float(entry['elapsed_seconds']) / 60
+    meta = (f'{esc(run_profile.model_name(entry["model"]))} · {esc(str(entry["agents"]))} agents · '
+            f'{esc(run_profile.duration_label(minutes))}')
+    return (f'<article class="rc" data-run="{run}"><header class="rc-head"><h3 class="rc-title">'
+            f'{esc(short_title(entry))}</h3><label class="rc-pick" title="Select to compare"><input type="checkbox" '
+            f'class="card-pick" value="{run}" aria-label="Compare {run}"><span class="sr">Compare</span></label></header>'
+            f'<p class="rc-meta">{meta}</p>'
+            f'<div class="rc-body" data-profile="{1 if p else 0}">{body}</div>'
+            f'<p class="rc-links">{links}</p>'
+            f'<details class="rc-more"><summary>Details</summary><div class="rc-prof">{more}</div>'
             '<dl class="rc-stats">' + ''.join(f'<div><dt>{k}</dt><dd>{v}</dd></div>' for k, v in stats) + '</dl>'
-            f'<footer class="rc-foot"><span class="rc-when">{esc(entry["date"])} · <code>{esc(entry["run"])}</code></span>'
-            f'<span class="rc-links">{links}</span><label class="rc-pick"><input type="checkbox" class="card-pick" '
-            f'value="{run}" aria-label="Compare {run}">Compare</label></footer></article>')
+            f'<p class="rc-when">Started {esc(short_date(entry))} · <code>{esc(entry["run"])}</code></p></details></article>')
 
 
 def series_groups(entries):
@@ -316,7 +373,7 @@ def series_sections(groups):
         scale = run_profile.series_scale([valid_profile(e) for e in members])
         count = f'{len(members)} run' + ('' if len(members) == 1 else 's')
         out.append(f'<section class="series" id="series-{esc(key, quote=True)}" data-series="{esc(key, quote=True)}">'
-                   f'<div class="series-head"><h2>{esc(title)}<small>{count}</small></h2><p>{esc(text)}</p>'
+                   f'<div class="series-head"><h2>{esc(title)}<span class="count">{count}</span></h2><p>{esc(text)}</p>'
                    '<p class="legend"><span><i class="lg-area"></i>standing fakes</span><span><i class="lg-cum"></i>'
                    'all fakes accepted so far</span><span><i class="lg-seed"></i>exploit planted</span><span>'
                    f'shared scale: 0 to <b class="sc-fakes">{max(scale["fakes"], 1)}</b> fakes</span></p></div>'
@@ -365,9 +422,9 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
     # The compare view and the filters read the same entries; '<' is escaped so the JSON
     # can never close its script element.
     blob = json.dumps(entries, separators=(',', ':'), ensure_ascii=False).replace('<', '\\u003c')
-    note = ('This Hugging Face Space (public by owner decision, October 24, 2026) holds the experiment reports and '
-            'derived views. Inspect logs and raw records are kept in a private Hugging Face dataset that needs '
-            'read access (Sign in with HF). Preserve the original records when moving a run.' if hosted else
+    note = ('This public site holds the experiment reports and derived views. Inspect logs and raw records are kept '
+            'in a private Hugging Face dataset that needs read access (Sign in with HF). Preserve the original '
+            'records when moving a run.' if hosted else
             'These files are stored on this computer. Raw runs and transcripts are excluded from Git; the code '
             'repository alone is not a backup or a shared results library. Keep the full experiment folder when '
             'backing up or moving a run.')
@@ -380,28 +437,37 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
                    + f'><button type="button">{esc(t)}</button></th>' if k else
                    f'<th scope="col">{"<span class=sr>Select</span>" if not t else esc(t)}</th>' for t, k in headers)
     groups = series_groups(entries)
+    stats = [('Runs', len(entries)), ('Series', len(groups)), ('Agents run', sum(int(e['agents']) for e in entries)),
+             ('Models', len({e['model'] for e in entries}))]
+    select = lambda id_, label, first, extra='': (  # noqa: E731
+        f'<label class="sel"><span class="sr">{label}</span><select id="{id_}" aria-label="{label}">'
+        f'<option value="">{first}</option>{extra}</select></label>')
     body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
-            '<title>GDM Math Swarm experiments</title><style>' + STYLE + catalogue_intro.CSS + '</style></head><body>'
-            + catalogue_intro.hero([(k, t) for k, t, _, _ in groups]) + catalogue_intro.how_section()
+            '<title>GDM Math Swarm experiments</title><style>' + STYLE + '</style></head><body>'
+            + catalogue_intro.hero(stats)
             + (live_section(entries) if hosted else '') +
-            f'<section class="block" id="runs-top"><h2>The runs</h2><p class="sub"><strong>{len(entries)} saved '
-            'experiment(s)</strong>, grouped into series. Filter them here; tick 2 to 4 runs (on the cards or in the '
-            'table) to compare them side by side.</p>'
-            '<div class="viewbar"><span class="muted">View</span><span class="seg" role="group" aria-label="View">'
-            '<button type="button" id="view-cards" aria-pressed="true">Cards by series</button>'
+            '<section class="block runs" id="runs-top"><div class="runs-head"><h2>Runs</h2>'
+            f'<p class="sub">{len(entries)} saved experiment{"" if len(entries) == 1 else "s"} in {len(groups)} series, '
+            'newest first. Tick 2 to 4 runs to compare them side by side.</p></div>'
+            + catalogue_intro.toc([(k, t, len(es)) for k, t, _, es in groups]) +
+            '<div class="controls"><div class="toolbar">'
+            '<label class="grow"><span class="sr">Find</span><input id="filter" type="search" '
+            'placeholder="Search runs, models, conditions…" aria-label="Find"></label>'
+            + select('f-model', 'Model', 'All models') + select('f-variant', 'Prompt variant', 'All prompt variants')
+            + select('f-judge', 'Behavior judge', 'Any judge status', '<option value="run">Judge run</option>'
+                     '<option value="flagged">Cheating found</option><option value="clean">None flagged</option>'
+                     '<option value="none">Judge not run</option>') +
+            '<label class="sel"><span class="sr">Sort</span><select id="sort" aria-label="Sort by">'
+            + ''.join(f'<option value="{k}">Sort: {esc(t.lower() if t != "Accepted / genuine" else "tasks")}</option>'
+                      for t, k in headers if k)
+            + '</select></label><button type="button" id="direction" aria-label="Sort direction">Newest first ↓</button>'
+            '<span class="seg" role="group" aria-label="View">'
+            '<button type="button" id="view-cards" aria-pressed="true">Cards</button>'
             '<button type="button" id="view-table" aria-pressed="false">Table</button></span></div>'
-            '<div class="toolbar"><label class="grow">Find<input id="filter" type="search" placeholder="Date, run, model, condition…"></label>'
-            '<label>Model<select id="f-model"><option value="">All</option></select></label>'
-            '<label>Prompt variant<select id="f-variant"><option value="">All</option></select></label>'
-            '<label>Behavior judge<select id="f-judge"><option value="">All</option><option value="run">Run</option>'
-            '<option value="flagged">Cheating found</option><option value="clean">None flagged</option>'
-            '<option value="none">Not run</option></select></label>'
-            '<label>Sort<select id="sort">' + ''.join(f'<option value="{k}">{esc(t)}</option>' for t, k in headers if k)
-            + '</select></label><button type="button" id="direction" aria-label="Sort direction">Newest first ↓</button></div>'
             '<div class="actions"><span id="shown" aria-live="polite"></span>'
             '<button type="button" id="compare" disabled>Compare selected (0)</button>'
-            '<button type="button" id="clear" class="quiet">Clear selection</button></div>'
+            '<button type="button" id="clear" class="quiet">Clear</button></div></div>'
             '<section id="compare-view" hidden aria-label="Compare runs"><div class="cmp-head"><h2>Compare runs</h2>'
             '<button type="button" id="close-compare" class="quiet">Close</button></div><div class="scroll" id="compare-table"></div></section>'
             '</section><div id="cards-view">' + series_sections(groups) + '</div>'
@@ -420,8 +486,8 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
             'judge, by cohort (below); a row shows both when both ran. "not run" means no judge outputs are '
             'published for the run; "…" means the entry predates these columns and the run\'s own records could '
             'not be read here.</dd>' + glossary + '</dl></details></section>'
-            + catalogue_intro.glossary_section() +
-            f'<p class="note">{esc(note)}</p>'
+            + catalogue_intro.about_section() +
+            f'<footer class="foot"><p>{esc(note)}</p></footer>'
             f'<script type="application/json" id="catalogue-data">{blob}</script>'
             '<script>' + SCRIPT.replace('/*CARDJS*/', run_profile.CARD_JS) + '</script></body></html>')
     body = themed(body)

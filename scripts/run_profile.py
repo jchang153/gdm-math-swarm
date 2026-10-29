@@ -169,8 +169,9 @@ def model_name(model_id):
     return MODEL_NAMES.get(model_id, model_id) if model_id else 'unknown model'
 
 
-def _plural(n, word):
-    return f'{n} {word}' + ('' if n == 1 else 's')
+def duration_label(minutes):
+    """'3 h' or '60 min' (card meta lines and sparkline captions)."""
+    return _duration(minutes)
 
 
 def _duration(minutes):
@@ -234,26 +235,32 @@ def sparkline(p, scale):
 
 
 def card_inner(p, scale):
-    """The profile-dependent part of a run card (condition sentence, chips, sparkline, fake counts)."""
+    """The profile-dependent headline of a run card: sparkline and the three key fake counts (accepted, standing at
+    the end, fake-minutes). Reverts are shown under the accepted count for overseer runs (or whenever there are any).
+    The condition sentence and notes are in ``card_more`` (the card's details)."""
     esc = html.escape
-    chips = ['<span class="chip ' + ('chip-seed">seeded' if p.get('seed') else 'chip-spont">spontaneous') + '</span>']
-    if p.get('overseers'):
-        chips.append(f'<span class="chip chip-ov">{_plural(p["overseers"]["count"], "overseer")}</span>')
-    if p.get('notices') is True:
-        chips.append('<span class="chip">unread notices</span>')
-    out = [f'<h3 class="rc-cond">{esc(condition_text(p))}</h3><p class="chips">{"".join(chips)}</p>']
     f = p['fakes']
     if not p.get('checked'):
-        out.append('<p class="rc-empty">Proof checker not run: fakes unknown.</p>')
-        return ''.join(out)
-    out.append(f'<figure class="rc-spark">{sparkline(p, scale)}<figcaption><span>0</span>'
-               f'<span>{"no fakes accepted" if not f["accepted"] else "peak " + str(f["peak"]) + " standing"}</span>'
-               f'<span>{esc(_duration(scale.get("minutes") or p["minutes"]))}</span></figcaption></figure>')
-    stats = [('Fakes accepted', f['accepted'], ' class="bad"'), ('Reverted', f['reverted'], ''),
-             ('Standing at end', f['standing_end'], ' class="bad"'),
-             ('Fake-minutes', math.floor(f['fake_minutes'] + 0.5), '')]
-    out.append('<dl class="rc-fakes">' + ''.join(f'<div><dt>{k}</dt><dd{c}>{v}</dd></div>' for k, v, c in stats)
+        return '<p class="rc-empty">Proof checker not run: fakes unknown.</p>'
+    out = [f'<figure class="rc-spark">{sparkline(p, scale)}<figcaption><span>0</span>'
+           f'<span>{"no fakes accepted" if not f["accepted"] else "peak " + str(f["peak"]) + " standing"}</span>'
+           f'<span>{esc(_duration(scale.get("minutes") or p["minutes"]))}</span></figcaption></figure>']
+    reverted = (f'<dd class="sub">{f["reverted"]} reverted</dd>' if p.get('overseers') or f['reverted'] else '')
+    stats = [('Fakes accepted', f['accepted'], ' class="bad"', reverted),
+             ('Standing at end', f['standing_end'], ' class="bad"', ''),
+             ('Fake-minutes', math.floor(f['fake_minutes'] + 0.5), '', '')]
+    out.append('<dl class="rc-fakes">' + ''.join(f'<div><dt>{k}</dt><dd{c}>{v}</dd>{x}</div>' for k, v, c, x in stats)
                + '</dl>')
+    return ''.join(out)
+
+
+def card_more(p):
+    """The secondary profile part of a run card (shown under Details): the condition sentence and notes."""
+    esc = html.escape
+    out = [f'<p class="rc-cond">{esc(condition_text(p))}</p>']
+    f = p['fakes']
+    if not p.get('checked'):
+        return ''.join(out)
     notes = []
     if f['unresolved']:
         notes.append(f'{f["unresolved"]} accepted submission{"" if f["unresolved"] == 1 else "s"} unresolved '
@@ -275,7 +282,7 @@ def series_scale(profiles):
             'fakes': max([p['fakes']['accepted'] for p in profiles], default=0)}
 
 
-# The JavaScript twin of profile(), condition_text(), sparkline() and card_inner(), for entries published
+# The JavaScript twin of profile(), condition_text(), sparkline(), card_inner() and card_more(), for entries published
 # before profiles existed. MODEL_NAMES and SERIES-independent; kept byte-compatible with the Python output.
 CARD_JS = r'''const RP=(()=>{
 const SCHEMA='gdm-run-profile/1',W=240,H=40,NAMES=MODELNAMES;
@@ -310,7 +317,6 @@ function profile(results,settings){const c=obj(results.condition)||{},start=ms(r
   fakes:{accepted:cumulative,reverted,standing_end:standingEnd,peak,fake_minutes:tenths(total/60000),
    unresolved:rows.filter(r=>r.independent_validity==='unresolved').length},curve};}
 const name=id=>id?(NAMES[id]||id):'unknown model';
-const plural=(n,w)=>n+' '+w+(n===1?'':'s');
 const duration=m=>{m=Math.floor(m+0.5);return m>=120&&m%60===0?m/60+' h':m+' min';};
 function condition(p){const sd=p.seed,ov=p.overseers,n=p.solvers;
  const parts=[(n!=null?n:'?')+' '+name(p.model)+' '+(ov||sd?'solvers':'agents')];
@@ -329,22 +335,22 @@ function spark(p,scale){const xmax=scale.minutes||p.minutes||1,ymax=Math.max(sca
  return '<svg class="spark" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" role="img" aria-label="'+esc(label)+'">'+
   '<line class="sp-base" x1="0" x2="'+W+'" y1="'+base+'" y2="'+base+'"/>'+tick+
   '<path class="sp-area" d="M0,'+base+stand+'V'+base+'Z"/><path class="sp-cum" d="M0,'+base+cum+'"/></svg>';}
-function inner(p,scale){const chips=['<span class="chip '+(p.seed?'chip-seed">seeded':'chip-spont">spontaneous')+'</span>'];
- if(p.overseers)chips.push('<span class="chip chip-ov">'+plural(p.overseers.count,'overseer')+'</span>');
- if(p.notices===true)chips.push('<span class="chip">unread notices</span>');
- const out=['<h3 class="rc-cond">'+esc(condition(p))+'</h3><p class="chips">'+chips.join('')+'</p>'],f=p.fakes;
- if(!p.checked){out.push('<p class="rc-empty">Proof checker not run: fakes unknown.</p>');return out.join('');}
- out.push('<figure class="rc-spark">'+spark(p,scale)+'<figcaption><span>0</span><span>'+(!f.accepted?'no fakes accepted':'peak '+f.peak+' standing')+
-  '</span><span>'+esc(duration(scale.minutes||p.minutes))+'</span></figcaption></figure>');
- const stats=[['Fakes accepted',f.accepted,' class="bad"'],['Reverted',f.reverted,''],['Standing at end',f.standing_end,' class="bad"'],['Fake-minutes',Math.floor(f.fake_minutes+0.5),'']];
- out.push('<dl class="rc-fakes">'+stats.map(([k,v,c])=>'<div><dt>'+k+'</dt><dd'+c+'>'+v+'</dd></div>').join('')+'</dl>');
+function inner(p,scale){const f=p.fakes;
+ if(!p.checked)return '<p class="rc-empty">Proof checker not run: fakes unknown.</p>';
+ const out=['<figure class="rc-spark">'+spark(p,scale)+'<figcaption><span>0</span><span>'+(!f.accepted?'no fakes accepted':'peak '+f.peak+' standing')+
+  '</span><span>'+esc(duration(scale.minutes||p.minutes))+'</span></figcaption></figure>'];
+ const rv=p.overseers||f.reverted?'<dd class="sub">'+f.reverted+' reverted</dd>':'';
+ const stats=[['Fakes accepted',f.accepted,' class="bad"',rv],['Standing at end',f.standing_end,' class="bad"',''],['Fake-minutes',Math.floor(f.fake_minutes+0.5),'','']];
+ out.push('<dl class="rc-fakes">'+stats.map(([k,v,c,x])=>'<div><dt>'+k+'</dt><dd'+c+'>'+v+'</dd>'+x+'</div>').join('')+'</dl>');
+ return out.join('');}
+function more(p){const out=['<p class="rc-cond">'+esc(condition(p))+'</p>'],f=p.fakes;if(!p.checked)return out.join('');
  const notes=[];
  if(f.unresolved)notes.push(f.unresolved+' accepted submission'+(f.unresolved===1?'':'s')+' unresolved (the proof checker could not decide; not counted as fakes)');
  const sd=p.seed;if(sd)notes.push(sd.reverted_minute!=null?'planted seed reverted at +'+num(sd.reverted_minute)+' min':'planted seed never reverted');
  if(notes.length){const t=notes.join('; ');out.push('<p class="rc-note">'+esc(t.charAt(0).toUpperCase()+t.slice(1))+'.</p>');}
  return out.join('');}
 function scaleOf(ps){ps=ps.filter(Boolean);return {minutes:Math.max(0,...ps.map(p=>p.minutes)),fakes:Math.max(0,...ps.map(p=>p.fakes.accepted))};}
-return {profile,condition,spark,inner,scaleOf,SCHEMA};})();
+return {profile,condition,spark,inner,more,scaleOf,SCHEMA};})();
 '''.replace('MODELNAMES', json.dumps(MODEL_NAMES, sort_keys=True))
 
 
