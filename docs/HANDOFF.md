@@ -655,6 +655,18 @@ is being merged into main via `collab-env`.
    (results, conference view, simplified judge report) plus the catalogue; incident, rubric-3.1 judge, files and
    Inspect pages unchanged; baseline100's legacy unthemed `results.html` left as served. `verify` ok. A future
    `mirror-space` would bring back the Space's old pages for runs it holds: run `restyle` again after it.
+   **Catalogue redesign (2026-10-29, owner: main page "clanky and old looking, text too dense and unorganized").**
+   The index page only: top nav (Runs, Table, About, Paper), a short hero (title, two-sentence summary, headline
+   numbers: runs, series, agents run, models), compact paper credit and disclaimer, a series table of contents with run
+   counts, a one-row filter/sort/view toolbar, 3-per-row run cards with a short title from the run ID ("Control · r1",
+   "2 GLM overseers · r2"), one meta line, sparkline, three key numbers (fakes accepted with reverts, standing at end,
+   fake-minutes), a links row, and Details (condition sentence, notes, genuine/accepted tasks, duration, spend, run
+   ID). The former intro text, How a run works, How to read this site and Glossary moved into a collapsible About
+   section (#experiment, #how, #read, #glossary; a hash link opens its section). Replicates sort r1, r2, r3. Code:
+   `catalogue_page.STYLE` (all catalogue CSS), `catalogue_intro.py` (hero, toc, about), `run_profile.card_inner` /
+   `card_more` and their JS twins, `build_experiment_index.short_title`. Screenshots in the session scratchpad
+   `site-redesign/after3/`. Deployed 11:50 PT with `restyle --commit` (deployment `9f158535`, receipt
+   `runs/phase-b/cloudflare/receipts/restyle3-catalogue-redesign-20261029.json`): only `index.html` changed; `verify` ok.
 
 ## Next steps / open items
 
