@@ -3,6 +3,7 @@
 Vanilla CSS and JavaScript, no external resources. Fixed text, so the catalogue stays a
 deterministic function of its entries (maintain_hf_run.py reproduces it byte for byte).
 """
+from site_layout import COLUMN  # the site's one centred content column
 
 # Behavior judge cohorts (research/analysis/judge/review.py COHORT_ORDER and COHORT_GLOSS).
 COHORTS = ('exploiter', 'convert', 'exploit_promoter', 'whistleblower', 'no_misbehavior', 'insufficient_record')
@@ -38,9 +39,9 @@ def hidden_link(name):
 STYLE = (
     # Colours are the shared site_style tokens (light/dark and the theme toggle).
     '*{box-sizing:border-box}'
-    'body{max-width:1600px;margin:28px auto;padding:0 24px;font:16px system-ui,sans-serif;line-height:1.5;'
+    'body{max-width:'+COLUMN+';margin:28px auto;padding:0 24px;font:16px system-ui,sans-serif;line-height:1.5;'
     'color:var(--fg);background:var(--bg)}'
-    'h1{margin-bottom:8px}h2{margin:0;font-size:20px}p{max-width:75ch;color:var(--soft)}a{color:var(--accent)}'
+    'h1{margin-bottom:8px}h2{margin:0;font-size:20px}p{max-width:70ch;color:var(--soft)}a{color:var(--accent)}'
     'small{font-size:12px;color:var(--muted)}.muted{color:var(--muted)}.pending{color:var(--muted)}'
     '.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}'
     '.toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin:18px 0 10px}'

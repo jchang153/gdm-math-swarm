@@ -14,13 +14,15 @@ Pure CSS in the ``site_style`` colour tokens (light/dark); no scripts, fonts or 
 import re
 
 MARKER = 'id="site-layout"'
-MEASURE = '75ch'
+MEASURE = '70ch'
+# Owner, October 29, 2026 ("doesn't look any narrower"): every page's content sits in one centred column.
+COLUMN = '1120px'
 
 # Phone width keeps every grid to one column (16px gutters come from site_style).
 _PHONE = '@media (max-width:640px){'
 
 RESULTS_CSS = (
-    'body{max-width:1440px;padding-left:24px;padding-right:24px}'
+    f'body{{max-width:{COLUMN};margin-left:auto;margin-right:auto;padding-left:24px;padding-right:24px}}'
     f'p,li,dd{{max-width:{MEASURE}}}td p,td li,.card p{{max-width:none}}'
     'h2{margin:1.5em 0 .5em;font-size:1.3rem}h3{margin:1.1em 0 .4em;font-size:1.05rem}'
     # Lead: the run's intro beside its summary tiles.
@@ -28,7 +30,7 @@ RESULTS_CSS = (
     'margin:14px 0}.lay-lead>.run-intro,.lay-lead>.card{margin:0}'
     '.lay-lead>.card{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}'
     '.tile{padding:9px 12px}.tile .v{font-size:17px}.tile .s{font-size:12.5px;line-height:1.4}'
-    '.tabhelp{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(520px,100%),1fr));gap:0 28px;'
+    '.tabhelp{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(480px,100%),1fr));gap:0 28px;'
     'font-size:13px}.tabhelp li{margin:2px 0}'
     # Short fact tables and glossary groups side by side.
     '.lay-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(440px,100%),1fr));gap:0 28px;'
@@ -42,10 +44,10 @@ RESULTS_CSS = (
 )
 
 CONFERENCE_CSS = (
-    'body{max-width:1440px}'
+    f'body{{max-width:{COLUMN};margin-left:auto;margin-right:auto}}'
     f'body>p,.banner,footer,#intro{{max-width:{MEASURE}}}.banner{{max-width:calc({MEASURE} + 40px)}}'
     # Records as a grid of compact cards instead of one full-width card per row.
-    '#records{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(380px,100%),1fr));gap:12px;'
+    '#records{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(330px,100%),1fr));gap:12px;'
     'align-items:start;margin-top:6px}#records>article{margin:0;padding:12px 14px;min-width:0}'
     '#records>article>h2{font-size:1.02rem;line-height:1.3;margin:0 0 2px}#records>article p{margin:4px 0}'
     '#records>article .text{font-size:14.5px;line-height:1.5;max-height:26em;overflow:auto}'
@@ -53,7 +55,7 @@ CONFERENCE_CSS = (
     '#records>article article{padding:10px 12px;margin:8px 0}#records>.empty{grid-column:1/-1}'
 )
 
-SIMPLE_JUDGE_CSS = f'main>p,main>section>p,main>div>p,main li{{max-width:{MEASURE}}}td p,td li{{max-width:none}}'
+SIMPLE_JUDGE_CSS = f'main{{max-width:{COLUMN};margin-left:auto;margin-right:auto;overflow-x:auto}}main>p,main>section>p,main>div>p,main li{{max-width:{MEASURE}}}td p,td li{{max-width:none}}'
 
 KINDS = (
     (re.compile(r'(?:^|/)results\.html$'), 'results', RESULTS_CSS),

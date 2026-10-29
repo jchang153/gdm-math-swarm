@@ -61,10 +61,11 @@ class LayoutTest(unittest.TestCase):
     def test_css_is_tokens_only_and_phone_safe(self):
         for css in (site_layout.RESULTS_CSS, site_layout.CONFERENCE_CSS, site_layout.SIMPLE_JUDGE_CSS):
             self.assertNotRegex(css, r'url\(|@import|https?:')  # no external resources
-            self.assertIn('75ch', css)
+            self.assertIn('70ch', css)
+            self.assertIn('max-width:1120px', css)  # one centred column
         # Grids never force a column wider than the phone viewport.
         self.assertIn('minmax(min(440px,100%)', site_layout.RESULTS_CSS)
-        self.assertIn('minmax(min(380px,100%)', site_layout.CONFERENCE_CSS)
+        self.assertIn('minmax(min(330px,100%)', site_layout.CONFERENCE_CSS)
 
 
 class RestyleTest(unittest.TestCase):

@@ -642,8 +642,11 @@ is being merged into main via `collab-env`.
      Republished with `--replace-pages` (deployment `35f3237e`, receipt
      `runs/phase-b/cloudflare/receipts/2ovr2-conference-fix-20261029.json`); `verify` passes.
 14. **DONE 2026-10-29: denser, more readable website (owner request: "narrow the width of the text, put more panes in
-   view").** Prose capped at about 75ch; catalogue run cards five per row at 1440 px (compact cards, smaller
-   sparklines), denser intro grids; run page intro beside the summary tiles, Run and Condition side by side,
+   view").** Owner follow-up ("doesn't look any narrower"): since 10:51 PT every restyled page (catalogue, results,
+   conference view, simplified judge) sits in one centred 1120 px column (`site_layout.COLUMN`), prose at 70ch,
+   run cards four per row; deployment `c81ef0fb`, receipt `runs/phase-b/cloudflare/receipts/restyle2-column-20261029.json`,
+   `verify` ok. First pass (10:29 PT): compact catalogue cards,
+   denser intro grids; run page intro beside the summary tiles, Run and Condition side by side,
    status glossary in columns, long tables scroll inside a bounded box; conference records in a card grid (3 per row).
    Code: `scripts/site_layout.py` (one transform used by `build_results.py`, `export_conference.py`,
    `prepare_hf_library.py` and the new `publish_cloudflare.py restyle`), catalogue CSS in `catalogue_intro.py` /
