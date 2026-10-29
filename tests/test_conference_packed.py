@@ -105,6 +105,53 @@ class PackingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'digest'):
             export_conference.read_pack(json.dumps(document))
 
+    def test_capture_limit_cuts_explicitly_and_records_it(self):
+        import random
+        rng = random.Random(7)
+        def noise(n):
+            return ''.join(rng.choice('abcdefghijklmnopqrstuvwxyz0123456789') for _ in range(n))
+        rows = [{'timestamp': 10.0 + i, 'sha256': str(i), 'blob_sha256': str(i), 'bytes': 4000, 'mode': 'full',
+                 'runtime_line': i, 'content': noise(4000)} for i in range(6)]
+        entry = {'agent': 'agent-001', 'path': '/workspace/big.log', 'versions': rows}
+        same, record = export_conference.limit_capture(entry, budget=10 ** 9)
+        self.assertIs(same, entry)
+        self.assertIsNone(record)
+        # Truncation alone fits: every version keeps head and tail around a visible marker.
+        cut, record = export_conference.limit_capture(entry, budget=20_000, cap=1000)
+        self.assertEqual(record['truncated_versions'], [1, 2, 3, 4, 5, 6])
+        self.assertEqual(record['omitted_versions'], [])
+        for raw, kept in zip(rows, cut['versions']):
+            self.assertTrue(kept['content'].startswith(raw['content'][:500]))
+            self.assertTrue(kept['content'].endswith(raw['content'][-500:]))
+            self.assertIn('[truncated: 3000 characters omitted', kept['content'])
+            self.assertEqual(kept['capture_limit'], 'truncated: 3000 characters omitted')
+            self.assertEqual(kept['bytes'], 4000)  # the recorded size stays the raw one
+        # Still over budget: first and last keep content, middle versions keep metadata and a notice.
+        cut, record = export_conference.limit_capture(entry, budget=3_000, cap=1000)
+        self.assertEqual(record['omitted_versions'], [2, 3, 4, 5])
+        self.assertEqual(len(cut['versions']), 6)
+        self.assertIn('[truncated:', cut['versions'][0]['content'])
+        self.assertIn('[truncated:', cut['versions'][-1]['content'])
+        for kept in cut['versions'][1:-1]:
+            self.assertTrue(kept['content'].startswith('[content omitted by the export capture limit'))
+            self.assertEqual(kept['blob_sha256'], rows[cut['versions'].index(kept)]['blob_sha256'])
+        self.assertEqual(rows[1]['content'][:10], entry['versions'][1]['content'][:10])  # input untouched
+        # pack_captures lists the cut file in the index; files within the budget are unchanged.
+        versions = export_conference.captured_versions(self.run)
+        packs, index = export_conference.pack_captures(RUN, versions)
+        self.assertNotIn('capture_limits', index)
+        versions[('agent-001', '/workspace/big.log')] = rows
+        packs, index = export_conference.pack_captures(RUN, versions, budget=3_000)
+        identity = export_conference.file_identity('agent-001', '/workspace/big.log')
+        self.assertIn(identity, index['capture_limits'])
+        entries = {}
+        for data in packs.values():
+            entries.update(export_conference.read_pack(data))
+        self.assertIn('capture_limit', entries[identity]['versions'][1])
+        viewer = export_conference.render_files_page(index)
+        for needed in ('capture_limits', 'Capture limit: ', 'cut by the capture limit', 'v.capture_limit'):
+            self.assertIn(needed, viewer)
+
     def test_export_writes_the_viewer_and_removes_per_file_pages(self):
         stale = self.run / 'conference-view' / ('file-' + '0' * 20 + '.html')
         stale.parent.mkdir(parents=True)

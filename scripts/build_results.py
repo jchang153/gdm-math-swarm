@@ -77,6 +77,7 @@ from simple_judge_site import add_simple_judge_tab, has_simple_judge, simple_rep
 import run_clock  # noqa: E402
 import run_profile  # noqa: E402
 from site_theme import BASE as STYLE, badge_class  # noqa: E402
+import site_layout  # noqa: E402
 if str(Path(__file__).resolve().parents[1]) not in sys.path:  # research/analysis/roles.py (participant roles)
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from research.analysis import roles as participant_roles  # noqa: E402
@@ -939,11 +940,11 @@ def render(results, title, inspect_logs=(), settings=None):
     if judge['status'] != 'not_run':
         records.insert(1, ('Behavior judge', judge['report']))
     body.append('<h2>Records</h2><p>' + ' · '.join(link(label, href) for label, href in records) + '</p></main>')
-    return run_profile.add_intro(restamp_page(themed(
+    return site_layout.apply('results.html', run_profile.add_intro(restamp_page(themed(
         '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
         f'content="width=device-width,initial-scale=1"><title>{esc(title or results["run"] + " results")}</title>'
         f'<style>{STYLE}</style></head><body>' + ''.join(body) + '</body></html>\n'),
-        run_clock.epoch(results['start_utc'])), results, settings)
+        run_clock.epoch(results['start_utc'])), results, settings))
 
 
 # Times on the run page (owner, October 25, 2026): every time shows the offset from the run start and the

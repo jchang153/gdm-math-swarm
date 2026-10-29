@@ -50,6 +50,13 @@ read-only unless `--commit` is given; there are no approval prompts or extra spe
   checkout; no credential). Runs present only on Cloudflare (another collaborator's) are preserved and kept in the
   catalogue; changes to runs present in both come from the Space's guarded HF maintenance and are listed in the
   receipt (`changed_files`). This is how runs published to HF during the transition reach Cloudflare.
+- `restyle [--run RUN ...] [--commit] [--receipt FILE]` (October 29, 2026): re-render the layout of pages already on
+  the site with `scripts/site_layout.py` (`results.html`, `conference-view/index.html`,
+  `analysis/simple_judge/report.html`; all runs by default) and the catalogue page from its entries. Only existing
+  `.html` pages change, by the layout transform only (one `<style id="site-layout">` block plus grid wrappers;
+  text, links and scripts kept); no file is added or removed and every replacement is recorded. Pages without the
+  shared theme (baseline100's legacy `results.html`) are left as served. `mirror-space` copies Space pages over
+  Cloudflare ones, so after a mirror run `restyle` again.
 - `verify [--url URL] [--run RUN ...] [--full]`: read-only; the served site against its `site-manifest.json`:
   manifest served; each checked file (all pages, `results.json` and `listing.json`, root files; every file with
   `--full`) with HTTP 200 and its exact recorded bytes, pages as `text/html`; no private file recorded; a probe of
@@ -700,6 +707,17 @@ and reports `space_files_run` (`--space-file-count` adds `space_files_total`).
 
 The next largest per-run file groups are `instructions/` and `prompts/` (about 300 files per 100-agent run) and
 the rubric-3.1 judge pages; pack those next if the count grows again.
+
+### Capture limit (October 29, 2026)
+
+One captured file can outgrow a pack (2ov-r2: agent-071's `sqout_1.txt`, 17 versions of ~2 MB; agent-061's
+`e885c.log`, 60 versions, 14 MB). Owner: "cut down whatever you need to". `export_conference.limit_capture` applies
+an explicit rule to a captured file whose packed size exceeds `FILE_BUDGET_BYTES` (2,000,000): every version longer
+than `VERSION_CAP_CHARS` (262,144) keeps its first and last halves of that cap around a visible
+`[truncated: N characters omitted ...]` line; if still over budget, only the first and last versions keep content
+and the middle ones keep their metadata with a visible omission notice. Each cut is recorded in the files index
+(`capture_limits`) and the export manifest (`captured_file_limits`), and the viewer shows a banner, a list marker and
+a per-version note. Raw snapshots and the runtime log are unchanged. Files within the budget are packed as before.
 
 ### Conference scope (no embedded timeline)
 

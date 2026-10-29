@@ -26,6 +26,7 @@ from simple_judge_site import (DATASET_FILES as SJ_DATASET_FILES, SJ_DIR, SPACE_
 from publish_hf_library import SECRET
 from space_navigation import private_space_navigation
 from site_style import themed
+import site_layout
 
 ROOT = Path(__file__).resolve().parents[1]
 # Behavior judge outputs under RUN/analysis/judge/ (docs/experiment-library.md, "Behavior
@@ -564,6 +565,7 @@ private Hugging Face dataset (Sign in with HF for read access). Do not upload cr
             continue  # dataset-bound transcript pages stay as recorded
         modules = ['./assets/' + p.name for p in sorted((page.parent / 'assets').glob('*.js'))] if page.parent.name == 'inspect-view' else []
         text = page.read_text() if 'inspect-view' in page.relative_to(output).parts else themed(page.read_text())
+        text = site_layout.apply(page.relative_to(output).as_posix(), text)  # dense layout (no-op for other pages)
         text = private_space_navigation(text, modules)
         if page.relative_to(output).parts[1:] == ('inspect-view', 'index.html') \
                 and any(category(rel) == 'eval' for rel in moved.get(page.relative_to(output).parts[0], ())):

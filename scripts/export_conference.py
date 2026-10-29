@@ -29,6 +29,7 @@ if str(ROOT) not in sys.path:  # research/analysis/roles.py (participant roles)
     sys.path.insert(0, str(ROOT))
 from research.analysis import roles as participant_roles  # noqa: E402
 from research.analysis import agent_badges  # noqa: E402
+import site_layout  # noqa: E402
 STYLE = '''
 :root{font-family:system-ui,sans-serif;color:var(--fg);background:var(--bg);line-height:1.55}
 body{max-width:1280px;margin:32px auto;padding:0 24px}a{color:var(--accent)}h1{margin-bottom:8px}
@@ -59,8 +60,17 @@ CAPTURE_PAGE = re.compile(r'file-[0-9a-f]{20}\.html')
 PACK_TARGET_BYTES = 1_500_000  # per pack; raised when a run would need more than MAX_PACKS packs
 PACK_LIMIT_BYTES = 7_000_000  # below the site's 8 MB page limit and HF's ~10 MB LFS threshold
 MAX_PACKS = 10
+# Capture limit (owner, October 29, 2026: one 2ov-r2 agent rewrote a 2 MB search log 17 times, so one captured file
+# alone outgrew a pack). A captured file whose packed size would exceed FILE_BUDGET_BYTES is cut, explicitly:
+# (1) every version longer than VERSION_CAP_CHARS keeps its first and last VERSION_CAP_CHARS // 2 characters with a
+# visible "[truncated: N characters omitted ...]" line between them; (2) if still over budget, only the first and
+# last versions keep content and the middle versions keep their metadata with a visible omission notice. Every
+# cut is recorded per file (index "capture_limits", export manifest "captured_file_limits") and shown in the
+# viewer. Raw records (snapshots, runtime log) are never changed.
+FILE_BUDGET_BYTES = 2_000_000
+VERSION_CAP_CHARS = 262_144
 # Optional manifest fields of a packed export (absent from manifests written before October 26, 2026).
-MANIFEST_OPTIONAL_KEYS = ('captured_file_layout', 'captured_file_packs')
+MANIFEST_OPTIONAL_KEYS = ('captured_file_layout', 'captured_file_packs', 'captured_file_limits')
 TIMELINE = 'analysis/timeline.jsonl'
 SCHEMA = 'gdm-conference-view/1'
 DATA_KEYS = ('run', 'records', 'counts', 'warnings', 'conference_events', 'timeline_entries', 'captured_files')
@@ -315,6 +325,7 @@ def export(run, out=None):
                 'conference_events': len(events), 'timeline_entries': 0, 'timeline_location': 'dataset',
                 'warnings': warnings, 'captured_file_layout': PACKED_LAYOUT,
                 'captured_file_packs': {name: digest(data) for name, data in sorted(packs.items())},
+                **({'captured_file_limits': index['capture_limits']} if index.get('capture_limits') else {}),
                 'sources': {str(p.relative_to(run)): hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else 'absent'
                             for p in [run/'conference/state.sqlite', run/'conference/events.jsonl',run/'runtime.jsonl',run/'evaluations/evaluations.jsonl']}}
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=2))
@@ -397,21 +408,66 @@ def _encode_pack(run_name, number, entries):
     return (json.dumps(document, indent=0) + '\n').encode('ascii')
 
 
-def pack_captures(run_name, versions, target=PACK_TARGET_BYTES, limit=PACK_LIMIT_BYTES, max_packs=MAX_PACKS):
+def _packed_size(entry):
+    return len(base64.b64encode(gzip.compress(json.dumps(entry, ensure_ascii=False).encode(), 6, mtime=0)))
+
+
+def limit_capture(entry, budget=FILE_BUDGET_BYTES, cap=VERSION_CAP_CHARS):
+    """(entry, record or None): one captured file cut to the capture limit (see FILE_BUDGET_BYTES), never
+    silently. A file within the budget is returned unchanged with no record."""
+    if _packed_size(entry) <= budget:
+        return entry, None
+    versions, truncated, omitted, omitted_chars = [], [], [], 0
+    for number, version in enumerate(entry['versions'], 1):
+        content = version['content']
+        if isinstance(content, str) and len(content) > cap:
+            cut = len(content) - cap
+            content = (content[:cap // 2] + f'\n[truncated: {cut} characters omitted by the export capture limit; '
+                       'the raw snapshot is unchanged]\n' + content[-(cap // 2):])
+            truncated.append(number)
+            omitted_chars += cut
+            version = {**version, 'content': content, 'capture_limit': f'truncated: {cut} characters omitted'}
+        versions.append(version)
+    original = entry['versions']
+    entry = {**entry, 'versions': versions}
+    if _packed_size(entry) > budget and len(versions) > 2:
+        kept = []
+        for number, version in enumerate(versions, 1):
+            if 1 < number < len(versions):
+                raw = original[number - 1]['content']
+                size = len(raw) if isinstance(raw, str) else 0
+                omitted_chars += size - (len(raw) - cap if number in truncated else 0)  # not counted twice
+                omitted.append(number)
+                version = {**version, 'content': f'[content omitted by the export capture limit: {size} characters; '
+                                                  'the first and last captures keep their content; the raw '
+                                                  'snapshot is unchanged]',
+                           'capture_limit': f'omitted: {size} characters'}
+            kept.append(version)
+        entry = {**entry, 'versions': kept}
+    return entry, {'agent': entry['agent'], 'path': entry['path'], 'versions': len(versions),
+                   'truncated_versions': truncated, 'omitted_versions': omitted,
+                   'omitted_characters': omitted_chars, 'budget_bytes': budget, 'version_cap_characters': cap}
+
+
+def pack_captures(run_name, versions, target=PACK_TARGET_BYTES, limit=PACK_LIMIT_BYTES, max_packs=MAX_PACKS,
+                  budget=FILE_BUDGET_BYTES):
     """({pack name: bytes}, files index) of a run's captured versions. Every captured file goes whole into one
     pack, in identity order; packs are filled up to ``target`` bytes (raised until at most ``max_packs`` are
-    needed). Deterministic: the same records give the same bytes. The index maps every identity to
+    needed). A file over the capture limit (``limit_capture``) is cut and listed in the index's
+    ``capture_limits``. Deterministic: the same records give the same bytes. The index maps every identity to
     [pack name, agent, path, captures]."""
-    entries = {}
+    entries, limits = {}, {}
     for (agent, path), rows in versions.items():
-        entries[file_identity(agent, path)] = {'agent': agent, 'path': path, 'versions': [
+        identity = file_identity(agent, path)
+        entries[identity], record = limit_capture({'agent': agent, 'path': path, 'versions': [
             {k: row[k] for k in ('timestamp', 'sha256', 'blob_sha256', 'bytes', 'mode', 'runtime_line', 'content')}
-            for row in rows]}
+            for row in rows]}, budget)
+        if record:
+            limits[identity] = record
     if len(entries) != len(versions):
         raise ValueError('Captured-file identity collision')
     ordered = sorted(entries)
-    sizes = {i: len(base64.b64encode(gzip.compress(json.dumps(entries[i], ensure_ascii=False).encode(), 6, mtime=0)))
-             for i in ordered}
+    sizes = {i: _packed_size(entries[i]) for i in ordered}
     if ordered:
         target = max(target, -(-sum(sizes.values()) * 11 // (10 * max_packs)))
     while True:
@@ -440,7 +496,7 @@ def pack_captures(run_name, versions, target=PACK_TARGET_BYTES, limit=PACK_LIMIT
     return packs, {'schema': FILES_INDEX_SCHEMA, 'run': run_name,
                    'packs': {name: {**digest(data), 'files': sum(1 for v in index.values() if v[0] == name)}
                              for name, data in packs.items()},
-                   'files': index}
+                   'files': index, **({'capture_limits': dict(sorted(limits.items()))} if limits else {})}
 
 
 def read_pack(data):
@@ -486,6 +542,7 @@ def render_files_page(index, run_start=None):
     body = '''<p><a href="index.html#files">← Captured files</a> · <a href="index.html">Conference view</a></p>
 <h1 id="title">Captured private files</h1><p id="run" class="muted"></p>
 <p class="banner">Private researcher record. Captures are observations, not a complete edit history. A partial capture may omit content. Recorded times are capture times, not necessarily edit times.</p>
+<p class="banner" id="limits" hidden></p>
 <div id="list" hidden><div class="filters"><input id="search" aria-label="Search captured files" placeholder="Search agents and paths…"></div><ul id="files-list"></ul></div>
 <div class="vnav" id="vnav" hidden><button id="prev-version">Previous capture</button><select id="jump" aria-label="Jump to capture"></select><button id="next-version">Next capture</button></div>
 <p id="status" aria-live="polite"></p><main id="captures"></main>
@@ -497,6 +554,7 @@ const el=id=>document.getElementById(id);const node=(tag,text,cls)=>{const n=doc
 ''' + run_clock.CLOCK_JS + r'''
 const cache={};let shown=null,versionCount=0;
 el('run').textContent=meta.run+' · '+Object.keys(meta.files).length+' captured files'+(meta.run_start!=null?' · times are run clock (from the run start) and UTC':'');
+const limits=meta.capture_limits||{};if(Object.keys(limits).length){el('limits').hidden=false;el('limits').textContent='Capture limit: '+Object.keys(limits).length+' captured file(s) exceeded the export\'s per-file budget and were cut (long versions keep their head and tail; if still too large, middle versions keep only their metadata). Each cut is marked in the file\'s content and listed in manifest.json (captured_file_limits); the raw snapshots are unchanged.';}
 function pack(name){if(!cache[name])cache[name]=(async()=>{
  if(typeof DecompressionStream==='undefined')throw new Error('This viewer needs a browser with gzip decompression support. Please use a current Chrome, Firefox, Edge or Safari.');
  const r=await fetch('files/'+name);if(!r.ok)throw new Error('HTTP '+r.status+' for files/'+name);
@@ -508,7 +566,7 @@ function params(){return new URLSearchParams(location.hash.slice(1));}
 function listing(){el('list').hidden=false;el('vnav').hidden=true;el('captures').replaceChildren();el('title').textContent='Captured private files';document.title='Captured files · '+meta.run;
  const q=el('search').value.toLowerCase(),ul=el('files-list');ul.replaceChildren();let n=0;
  const rows=Object.entries(meta.files).sort((a,b)=>(a[1][1]+a[1][2]).localeCompare(b[1][1]+b[1][2]));
- for(const [id,[,agent,path,count]] of rows){if(q&&!(agent+' '+path).toLowerCase().includes(q))continue;n++;const li=node('li');const a=node('a',agent+' · '+path);a.href='#file='+id;li.append(a,node('span',' · '+count+' captured version(s)','muted'));ul.append(li);}
+ for(const [id,[,agent,path,count]] of rows){if(q&&!(agent+' '+path).toLowerCase().includes(q))continue;n++;const li=node('li');const a=node('a',agent+' · '+path);a.href='#file='+id;li.append(a,node('span',' · '+count+' captured version(s)'+(limits[id]?' · cut by the capture limit':''),'muted'));ul.append(li);}
  el('status').textContent=n+' captured files';}
 function go(i){if(!shown)return;i=Math.max(1,Math.min(versionCount,i));el('jump').value=String(i);history.replaceState(null,'','#file='+shown+'&version='+i);const t=el('version-'+i);if(t)t.scrollIntoView();el('prev-version').disabled=i<=1;el('next-version').disabled=i>=versionCount;}
 async function route(){const p=params(),id=p.get('file');
@@ -522,7 +580,7 @@ async function route(){const p=params(),id=p.get('file');
   shown=id;versionCount=data.versions.length;const main=el('captures'),jump=el('jump');jump.replaceChildren();
   data.versions.forEach((v,k)=>{const i=k+1,card=node('article');card.id='version-'+i;const h=node('h2');const a=node('a','Capture '+i);a.href='#file='+id+'&version='+i;h.append(a);
    const code=node('code',v.blob_sha256),line=node('p','Runtime line '+v.runtime_line+' · blob SHA-256 ');line.append(code);
-   card.append(h,node('p',runClock(v.timestamp,meta.run_start)+' · '+v.mode+' capture · '+v.bytes+' recorded bytes'),line,node('pre',v.content));main.append(card);
+   card.append(h,node('p',runClock(v.timestamp,meta.run_start)+' · '+v.mode+' capture · '+v.bytes+' recorded bytes'),line);if(v.capture_limit)card.append(node('p','Capture limit: '+v.capture_limit+' (the raw snapshot is unchanged)','badge'));card.append(node('pre',v.content));main.append(card);
    jump.append(new Option('Capture '+i+' of '+versionCount+' · '+runClock(v.timestamp,meta.run_start),String(i)));});
   el('status').textContent=versionCount+' captured version(s)';el('vnav').hidden=versionCount<2;}
  const v=parseInt(p.get('version')||'',10);if(v)go(v);else{el('prev-version').disabled=true;el('next-version').disabled=versionCount<2;el('jump').value='1';}}
@@ -616,7 +674,7 @@ for(const id of ['search','agent','task'])el(id).addEventListener(id==='search'?
         script = script.replace("'Credits the overseer reverted (with its stated reason) and the proof checks it ran. "
                                 "A reverted credit removed the credit and the library entry and reopened the problem; "
                                 "the original submission stays in the records.'", MULTI_OVERSIGHT_INTRO, 1)
-    return compact_browser_page(page('Conference · ' + data['run'], body + '<script id="data" type="application/json">' + encoded + '</script><script>' + script + '</script>'))
+    return site_layout.apply('conference-view/index.html', compact_browser_page(page('Conference · ' + data['run'], body + '<script id="data" type="application/json">' + encoded + '</script><script>' + script + '</script>')))
 
 
 def published_data(document):

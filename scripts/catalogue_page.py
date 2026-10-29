@@ -38,9 +38,9 @@ def hidden_link(name):
 STYLE = (
     # Colours are the shared site_style tokens (light/dark and the theme toggle).
     '*{box-sizing:border-box}'
-    'body{max-width:1500px;margin:32px auto;padding:0 24px;font:16px system-ui,sans-serif;line-height:1.5;'
+    'body{max-width:1600px;margin:28px auto;padding:0 24px;font:16px system-ui,sans-serif;line-height:1.5;'
     'color:var(--fg);background:var(--bg)}'
-    'h1{margin-bottom:8px}h2{margin:0;font-size:20px}p{max-width:950px;color:var(--soft)}a{color:var(--accent)}'
+    'h1{margin-bottom:8px}h2{margin:0;font-size:20px}p{max-width:75ch;color:var(--soft)}a{color:var(--accent)}'
     'small{font-size:12px;color:var(--muted)}.muted{color:var(--muted)}.pending{color:var(--muted)}'
     '.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}'
     '.toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin:18px 0 10px}'
@@ -59,7 +59,7 @@ STYLE = (
     '.cmp-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}'
     '#compare-table th{white-space:normal;min-width:170px;color:var(--fg)}#compare-table th:first-child{min-width:150px;color:var(--soft)}'
     '.bar{height:6px;border-radius:3px;background:var(--bar);margin-top:4px}.warn{color:var(--warn);font-weight:600}'
-    '.help{margin:22px 0;max-width:950px}.help summary{cursor:pointer;font-weight:600}.help dt{font-weight:600;margin-top:10px}'
+    '.help{margin:22px 0;max-width:80ch}.help summary{cursor:pointer;font-weight:600}.help dt{font-weight:600;margin-top:10px}'
     '.help dd{margin:2px 0 0 0;color:var(--soft)}.note{font-size:14px}'
     '@media (max-width:760px){body{margin:20px auto;padding:0 16px}#runs thead{display:none}'
     '#runs,#runs tbody,#runs tr,#runs td{display:block;width:100%}'

@@ -21,6 +21,11 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
         catalogue is merged newest first. Files of the bundle's dataset-files/ (private) are never deployed;
         with --dataset-commit (the HF logs-dataset commit that holds them) pages link there, otherwise links to
         them point to the site's private-records notice.
+    publish_cloudflare.py restyle [--run RUN ...] [--commit] [--receipt FILE]
+        Re-render the layout of pages already on the site (``site_layout.apply``: results.html, the conference
+        view and the simplified judge report of every run, or only the given runs) and the catalogue page from
+        its entries. Only existing .html pages change; text, links, records and every other file stay as
+        served, and each replacement is recorded with old and new digests.
     publish_cloudflare.py verify [--url URL] [--full] [--run RUN ...]
         Read-only check of the served site against its site-manifest.json (see ``verify``).
 
@@ -54,6 +59,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_experiment_index import unlisted_runs, write_index  # noqa: E402
 import dataset_logs  # noqa: E402
 import hf_visibility  # noqa: E402
+import site_layout  # noqa: E402
+import site_style  # noqa: E402
 from publish_hf_library import (SECRET, load_bundle, merge_entries, packed_text,  # noqa: E402
                                 safe_path)
 
@@ -387,6 +394,34 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
                                                   'bytes': sum(x['bytes'] for x in private.values())}}
 
 
+def plan_restyle(base_files, unlisted, runs=None):
+    """The site with its run pages in the current layout (``site_layout.apply``) and the catalogue re-rendered.
+
+    Pages only: no file is added or removed, non-HTML files never change, and a page changes only by the layout
+    transform (which keeps text, links and scripts). ``runs`` limits the run pages touched (default: all)."""
+    known = {run_of(n) for n in base_files if run_of(n)}
+    missing = sorted(set(runs or ()) - known)
+    if missing:
+        raise ValueError('Run(s) not on the site: ' + ', '.join(missing))
+    files, replaced, legacy = dict(base_files), [], []
+    for name in sorted(base_files):
+        run = run_of(name)
+        if not run or run == 'live' or (runs and run not in runs) or site_layout.kind(name) is None:
+            continue
+        old = base_files[name]
+        if site_style.MARKER.encode() not in old:  # a page from before the shared theme: left as served
+            legacy.append(name)
+            continue
+        new = site_layout.apply(name, old.decode('utf-8')).encode('utf-8')
+        if new == old:
+            continue
+        replaced.append({'path': name, 'old': digest(old), 'new': digest(new)})
+        files[name] = new
+    files.update(render_catalogue(catalogue(base_files), unlisted))
+    return files, {'source': {'kind': 'restyle', 'runs': sorted(runs) if runs else 'all'},
+                   'replaced_pages': replaced, 'unthemed_pages_left_as_served': legacy}
+
+
 def finish(files, base_manifest, plan, project=PROJECT):
     """Add the generated pages and the site manifest; gate every file and the deployment limits."""
     files = {n: d for n, d in files.items() if n not in GENERATED}
@@ -590,7 +625,9 @@ def main(argv=None):
     bundle.add_argument('--bundle', required=True, type=Path)
     bundle.add_argument('--dataset-commit', help='HF logs-dataset commit holding the bundle\'s private files')
     bundle.add_argument('--replace-pages', action='store_true', help='allow the bundle runs\' .html pages to change')
-    for command in (mirror, bundle):
+    restyle = sub.add_parser('restyle', help='re-render the layout of published run pages and the catalogue')
+    restyle.add_argument('--run', action='append', help='only this run\'s pages (repeatable; default all runs)')
+    for command in (mirror, bundle, restyle):
         command.add_argument('--commit', action='store_true', help='deploy; otherwise only plan')
         command.add_argument('--receipt', type=Path, help='receipt JSON (outside the bundle)')
         command.add_argument('--workdir', type=Path, help='scratch directory for staging (default: a temporary one)')
@@ -629,6 +666,9 @@ def main(argv=None):
             files, plan = plan_mirror(base_files, space, revision, unlisted)
             plan['private_files_not_deployed'] = private
             message = f'Mirror HF Space {revision[:12]}'
+        elif args.command == 'restyle':
+            files, plan = plan_restyle(base_files, unlisted, args.run)
+            message = f'Restyle {len(plan["replaced_pages"])} page(s) and the catalogue'
         else:
             files, plan = plan_bundle(base_files, args.bundle, unlisted, args.dataset_commit, args.replace_pages)
             message = 'Publish ' + ', '.join(plan['source']['runs'])
