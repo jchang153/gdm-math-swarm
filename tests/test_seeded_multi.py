@@ -18,7 +18,7 @@ from tests.test_seeded import SeededTestCase
 from research.analysis.private_material import skip_decorator as needs_private  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = "glmflash100-seeded3fam-control-30m"
+CONFIG = "glmflash100-seeded6-control-30m"
 
 
 class ExpandBlockTests(unittest.TestCase):
@@ -135,26 +135,29 @@ class ThreeFamilyConfigTests(unittest.TestCase):
         self.assertEqual(diff, {"experiment", "seeded", "max_run_seconds", "run_budget_usd"})
         self.assertEqual((self.config["max_run_seconds"], self.config["run_budget_usd"]), (1800, "100"))
         entries = self.config["seeded"]["artifacts"]
-        self.assertEqual([e["family"] for e in entries], ["answer_wrapper", "notation_shadowing", "instance_override"])
+        self.assertEqual([e["family"] for e in entries], ["answer_wrapper", "notation_shadowing", "instance_override",
+                                                     "hypothesis_false", "asymptotic_symbol", "existential_witness"])
         self.assertEqual({e["trigger_value"] for e in entries}, {180})
         first = entries[0]
         self.assertEqual((first["task_id"], first["artifact_path"], first["artifact_sha256"]),
                          (base["seeded"]["task_id"], base["seeded"]["artifact_path"], base["seeded"]["artifact_sha256"]))
         tasks = {t["task_id"]: t for t in json.loads((ROOT / "data" / "manifest.json").read_text())["tasks"]}
-        self.assertEqual([tasks[e["task_id"]]["answer_based"] for e in entries], [True, False, False])
+        self.assertEqual([tasks[e["task_id"]]["answer_based"] for e in entries], [True] + [False] * 5)
 
     def test_settings_record_every_seed(self):
         record = runtime.seeded_settings(self.config)
         self.assertEqual(record["task_id"], "infinite_fermat_primes")
         self.assertEqual([s["task_id"] for s in record["seeds"]],
-                         ["infinite_fermat_primes", "EulerBrick_cuboidThree", "Erdos195_erdos_195_variants_leq_5_bound"])
+                         ["infinite_fermat_primes", "EulerBrick_cuboidThree", "Erdos195_erdos_195_variants_leq_5_bound",
+                          "Green26_green_26_variants_yu25", "Green27_green_27_variants_previous_lower",
+                          "Erdos699_sylvester_schur"])
 
     @needs_private("research/seeds/EulerBrick_cuboidThree.notation.lean")
     def test_declared_run_gates_pass(self):
         self.assertEqual(seeded.declared_run_problems(self.config, ROOT), [])
         self.assertEqual(launch_gates.seeded_config_problems(self.config, ROOT), [])
         arguments = runtime.conference_track_arguments(self.config, ROOT)
-        self.assertEqual(len(arguments["seeded_track"]), 3)
+        self.assertEqual(len(arguments["seeded_track"]), 6)
         broken = json.loads(json.dumps(self.config))
         broken["seeded"]["artifacts"][2]["artifact_sha256"] = "0" * 64
         self.assertTrue(any("artifacts[2]" in p for p in seeded.declared_run_problems(broken, ROOT)))
