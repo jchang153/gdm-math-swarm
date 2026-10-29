@@ -5,6 +5,8 @@ deterministic function of its entries (maintain_hf_run.py reproduces it byte for
 """
 from site_layout import COLUMN  # the site's one centred content column
 
+WIDE = '1360px'  # the run-card grid only
+
 # Behavior judge cohorts (research/analysis/judge/review.py COHORT_ORDER and COHORT_GLOSS).
 COHORTS = ('exploiter', 'convert', 'exploit_promoter', 'whistleblower', 'no_misbehavior', 'insufficient_record')
 COHORT_LABELS = {'exploiter': ('exploiter', 'exploiters'), 'convert': ('convert', 'converts'),
@@ -40,7 +42,9 @@ STYLE = (
     # Redesign (owner, October 29, 2026: "clanky and old looking, text too dense"). Colours are the shared
     # site_style tokens (light/dark and the theme toggle); one accent; hairlines instead of boxes.
     '*{box-sizing:border-box}'
-    'body{max-width:'+COLUMN+';margin:0 auto 64px;padding:0 32px;font:16px/1.55 system-ui,-apple-system,"Segoe UI",'
+    # The card grid may use a wider column (WIDE; owner, October 29, 2026: "5 cards per row"); everything else stays in
+    # the site's text column.
+    'body{max-width:'+WIDE+';margin:0 auto 64px;padding:0 32px;font:16px/1.55 system-ui,-apple-system,"Segoe UI",'
     'Roboto,sans-serif;color:var(--fg);background:var(--bg);-webkit-font-smoothing:antialiased}'
     'h1,h2,h3{letter-spacing:-.015em;color:var(--fg)}h2{margin:0;font-size:22px;line-height:1.25;font-weight:650}'
     'p{max-width:70ch;color:var(--soft)}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}'
@@ -91,9 +95,14 @@ STYLE = (
     '.lg-area{background:color-mix(in srgb,var(--bad) 28%,transparent);border-top:2px solid var(--bad)}'
     '.lg-cum{border-top:2px dashed var(--muted);height:0!important;vertical-align:3px!important}'
     '.lg-seed{border-left:2px dotted var(--accent);width:0!important;height:11px!important;margin-left:4px}'
-    '.rc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:16px}'
+    '.topnav,.hero,#live,.runs,.series-head,#table-view,.about,.foot{max-width:'+COLUMN+';margin-left:auto;margin-right:auto}'
+    # 5 cards per row on a 1440px screen, then 4/3/2/1 as the window narrows.
+    '.rc-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px}'
+    '@media (max-width:1300px){.rc-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}'
+    '@media (max-width:1060px){.rc-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}'
+    '@media (max-width:820px){.rc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}'
     '.rc{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:12px;'
-    'padding:14px 16px 10px;min-width:0;transition:border-color .15s}.rc:hover{border-color:var(--input-line)}'
+    'padding:14px 14px 10px;min-width:0;transition:border-color .15s}.rc:hover{border-color:var(--input-line)}'
     '.rc.picked{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}'
     '.rc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}'
     '.rc-title{font-size:16px;line-height:1.3;margin:0;font-weight:650}'
@@ -106,10 +115,10 @@ STYLE = (
     'vector-effect:non-scaling-stroke}.sp-base{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}'
     '.sp-seed{stroke:var(--accent);stroke-width:1.5;stroke-dasharray:2 2;vector-effect:non-scaling-stroke}'
     '.rc-spark figcaption{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:3px}'
-    '.rc-fakes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0}'
+    '.rc-fakes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0}'
     '.rc-fakes div,.rc-stats div{min-width:0;display:flex;flex-direction:column}'
-    '.rc-fakes dt{order:2;font-size:11.5px;color:var(--muted);line-height:1.3}'
-    '.rc-fakes dd{order:1;margin:0;font-weight:650;font-size:22px;line-height:1.2;font-variant-numeric:tabular-nums}'
+    '.rc-fakes dt{order:2;font-size:11px;color:var(--muted);line-height:1.3}'
+    '.rc-fakes dd{order:1;margin:0;font-weight:650;font-size:20px;line-height:1.2;font-variant-numeric:tabular-nums}'
     '.rc-fakes dd.bad{color:var(--bad)}.rc-fakes dd.sub{order:3;font-size:11.5px;font-weight:400;color:var(--muted)}'
     '.rc-empty{font-size:13px;line-height:1.45;color:var(--muted);margin:4px 0 0!important}'
     '.rc-links{display:flex;flex-wrap:wrap;gap:2px 14px;margin:12px 0 0;padding-top:10px;border-top:1px solid var(--line);'
@@ -164,7 +173,7 @@ STYLE = (
     '#runs td{border:0;padding:5px 10px;display:grid;grid-template-columns:118px minmax(0,1fr);gap:8px}'
     '#runs td::before{content:attr(data-label);font-size:12px;color:var(--muted)}'
     '#runs td.pick{display:block}#runs td.pick::before{content:none}#runs td.open .v{overflow-wrap:anywhere}'
-    '.rc-grid{grid-template-columns:minmax(0,1fr)}}'
+    '}@media (max-width:560px){.rc-grid{grid-template-columns:minmax(0,1fr)}}'
     '@media (max-width:420px){.topnav .brand{font-size:13px}.tn-links{gap:12px;font-size:13px}}'
 )
 

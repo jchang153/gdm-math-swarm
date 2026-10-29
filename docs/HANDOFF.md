@@ -667,6 +667,10 @@ is being merged into main via `collab-env`.
    `card_more` and their JS twins, `build_experiment_index.short_title`. Screenshots in the session scratchpad
    `site-redesign/after3/`. Deployed 11:50 PT with `restyle --commit` (deployment `9f158535`, receipt
    `runs/phase-b/cloudflare/receipts/restyle3-catalogue-redesign-20261029.json`): only `index.html` changed; `verify` ok.
+   Owner follow-up ("5 cards per row"): the card grid alone widens to 1360 px (`catalogue_page.WIDE`; prose and
+   other sections stay in the 1120 px column), 5 cards per row at 1440 px, then 4/3/2/1 below 1300/1060/820/560 px;
+   deployed 12:07 PT (deployment `695ded67`, receipt `runs/phase-b/cloudflare/receipts/restyle4-five-cards-20261029.json`),
+   only `index.html` changed, `verify` ok.
 
 ## Next steps / open items
 
