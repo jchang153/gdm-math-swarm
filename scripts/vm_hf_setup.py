@@ -55,7 +55,7 @@ def remote_script(dataset, remote_root, pins, *, check_only):
     root = shlex.quote(remote_root)
     lines = ['set -eu', 'umask 077', f'mkdir -p {CONFIG}', f'chmod 700 {CONFIG}']
     if not check_only:
-        lines += [f'cd {root} && .venv/bin/python -m pip install --quiet ' + ' '.join(shlex.quote(p) for p in pins),
+        lines += [f'(cd {root} && .venv/bin/python -m pip install --quiet ' + ' '.join(shlex.quote(p) for p in pins) + ')',
                   f'printf "%s\\n" {shlex.quote(dataset)} > {CONFIG}/logs-dataset',
                   f'cat > {CONFIG}/hf-upload-token.new',   # the token arrives on standard input
                   f'test -s {CONFIG}/hf-upload-token.new',
