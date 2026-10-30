@@ -785,12 +785,13 @@ is being merged into main via `collab-env`.
    - r1 post-processing (all six TERMINATED, back at n2-standard-64 by 04:50 PT): judges and incident reports got
      HTTP 402 (spent $0). The VM upload first failed on all six (site bundle carried resume archives with session
      `.key` files; fixed `0bb98e9`), then two uploads raced (HF "Revision Not Found"; retry fixed `e545f0f`). All six
-     are now in the logs dataset and published on Cloudflare. **Known issue:** the
+     are now in the logs dataset and published on Cloudflare. **Fixed 05:20 PT:** the
      `2ov-glm-180m-notices-enforceonly-r1-20261030T060434Z` supervisor was killed mid-evaluate by an operator recovery
-     step; follow-ups were rerun by hand (RUN-NOTES.txt), but its published pages were built before the timeline
-     existed, so `publish_cloudflare.py verify` reports two broken links (`results.html -> analysis/timeline.md`,
-     `conference-view/index.html -> ../analysis/timeline.jsonl`); republishing needs `--replace-pages` with a bundle
-     whose dataset files (an earlier partial `evaluations/evaluations.jsonl` is at the canonical path) are reconciled.
+     step; follow-ups were rerun by hand (RUN-NOTES.txt) and its pages republished with `--replace-pages` (timeline
+     links now point to the dataset, commit `78504720`; receipt
+     `runs/phase-b/cloudflare/receipts/2ovenf-r1-timeline-fix-20261030.json`); `verify` is clean. Its raw
+     `evaluations/evaluations.jsonl` link shows the earlier partial copy (96 of 107 rows; the dataset is add-only); the
+     final file is in that run's offload archive and the local core.
      r1 results (proof checker done; solver fakes exclude the seed; ~77 min of activity before credits ran out):
      | run (`glmflash100-seeded-` omitted) | accepted / genuine / fake / unres | fakers | fakes reverted | reverts | settled $ |
      |---|---|---|---|---|---|
