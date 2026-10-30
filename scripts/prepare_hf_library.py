@@ -411,6 +411,29 @@ def screen_bytes(name, data):
                     raise ValueError(f'Credential-like content in Inspect archive {name}; not published')
 
 
+def without_credential_members(rel, data):
+    """A resume-bundle agent archive (``resume/agents/*/state.tar.gz``) without its credential-named members
+    (the agents' Claude Code session ``.key`` files, offload_runs.credential_name), repacked deterministically
+    as offload_runs.repack does; other files unchanged. Returns (data, skipped member names). Resume archives
+    go to the dataset only without those files (docs/plan.md, "Runs go from the VM to the logs dataset")."""
+    if not (rel.startswith('resume/') and rel.endswith('.tar.gz')):
+        return data, []
+    from offload_runs import credential_name
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as old:
+        if not any(credential_name(info.name) for info in old):
+            return data, []
+    skipped, raw = [], io.BytesIO()
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as old, \
+            gzip.GzipFile(filename='', fileobj=raw, mode='wb', compresslevel=6, mtime=0) as gz, \
+            tarfile.open(fileobj=gz, mode='w', format=tarfile.PAX_FORMAT) as new:
+        for info in old:
+            if credential_name(info.name):
+                skipped.append(info.name)
+                continue
+            new.addfile(info, old.extractfile(info) if info.isreg() else None)
+    return raw.getvalue(), skipped
+
+
 def relocate_dataset_files(output, runs):
     """Move every dataset-bound run file (dataset_logs.category) out of the Space bundle into
     OUTPUT/dataset-files/<dataset path>, deduplicating the two copies of each Inspect log. Returns
@@ -426,7 +449,7 @@ def relocate_dataset_files(output, runs):
             kind = category(rel)
             if kind is None:
                 continue
-            data = path.read_bytes()
+            data, skipped = without_credential_members(rel, path.read_bytes())
             name = dataset_path(run, rel)
             screen_bytes(f'{run}/{rel}', data)
             record = {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
@@ -438,7 +461,8 @@ def relocate_dataset_files(output, runs):
                 target = target_root / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(data)
-                files[name] = {**record, 'category': kind, 'run': run, 'sources': [rel]}
+                files[name] = {**record, 'category': kind, 'run': run, 'sources': [rel],
+                               **({'without_credential_members': len(skipped)} if skipped else {})}
             by_space[f'{run}/{rel}'] = {'repo': DATASET_REPO, 'path': name, **record}
             moved[run].add(rel)
             path.unlink()

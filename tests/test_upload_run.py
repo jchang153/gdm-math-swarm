@@ -259,3 +259,38 @@ class FetchRunTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SiteBundleResumeArchiveTests(unittest.TestCase):
+    """The site bundle's dataset copy of a resume archive leaves out the agents' session keys, so the VM upload's
+    credential screen passes (first 180-minute run under the VM upload, 2026-10-30)."""
+
+    def archive(self, members):
+        raw = io.BytesIO()
+        with tarfile.open(fileobj=raw, mode='w:gz') as tar:
+            for name, data in members:
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        return raw.getvalue()
+
+    def test_relocated_resume_archive_has_no_credential_members(self):
+        import prepare_hf_library
+        data = self.archive([('home/.agent/sessions/1.abc.key', b'k'), ('home/notes.md', b'n')])
+        with tempfile.TemporaryDirectory() as folder:
+            out = Path(folder)
+            target = out / 'run-1' / 'resume' / 'agents' / 'agent-001' / 'state.tar.gz'
+            target.parent.mkdir(parents=True)
+            target.write_bytes(data)
+            files, _, moved = prepare_hf_library.relocate_dataset_files(out, ['run-1'])
+            (name, record), = files.items()
+            self.assertEqual(record['without_credential_members'], 1)
+            stored = out / prepare_hf_library.DATASET_DIR / name
+            self.assertEqual(offload_runs.scan_members(stored), [])
+            self.assertEqual(hashlib.sha256(stored.read_bytes()).hexdigest(), record['sha256'])
+            with tarfile.open(stored) as tar:
+                self.assertEqual(tar.getnames(), ['home/notes.md'])
+            upload_run.screen_extra({name: stored})  # no longer refused
+        clean = self.archive([('home/notes.md', b'n')])
+        self.assertEqual(prepare_hf_library.without_credential_members('resume/agents/a/state.tar.gz', clean),
+                         (clean, []))
