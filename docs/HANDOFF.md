@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-29 by Claude (Opus 5.5) subagent (communication-only / enforcement-only overseer experiment built, item 18).
+Last updated: 2026-10-30 04:50 PT by Claude (Opus 5.5) subagent (item 18: r1 failed on OpenRouter credits, post-processed and published; waiting for credits).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -780,7 +780,26 @@ is being merged into main via `collab-env`.
      "Insufficient credits" (account credits, not a key limit); Claude Code surfaces it as
      `[claude-code:unrecognized_model]` and every agent restarts in a loop (~900 restarts per run, backoff 600 s).
      About 77 min of real activity per run (settled ~$20-24 each). Runs left to their scheduled stop (no spend
-     possible); r1 counts as failed and must be rerun. **Owner action: add OpenRouter credits.** Round 2 waits.
+     possible); r1 counts as failed and must be rerun (coordinator-relayed owner approval: rerun r1, then r2, r3 once a
+     compat check passes). **Owner action: add OpenRouter credits.**
+   - r1 post-processing (all six TERMINATED, back at n2-standard-64 by 04:50 PT): judges and incident reports got
+     HTTP 402 (spent $0). The VM upload first failed on all six (site bundle carried resume archives with session
+     `.key` files; fixed `0bb98e9`), then two uploads raced (HF "Revision Not Found"; retry fixed `e545f0f`). All six
+     are now in the logs dataset and published on Cloudflare. **Known issue:** the
+     `2ov-glm-180m-notices-enforceonly-r1-20261030T060434Z` supervisor was killed mid-evaluate by an operator recovery
+     step; follow-ups were rerun by hand (RUN-NOTES.txt), but its published pages were built before the timeline
+     existed, so `publish_cloudflare.py verify` reports two broken links (`results.html -> analysis/timeline.md`,
+     `conference-view/index.html -> ../analysis/timeline.jsonl`); republishing needs `--replace-pages` with a bundle
+     whose dataset files (an earlier partial `evaluations/evaluations.jsonl` is at the canonical path) are reconciled.
+     r1 results (proof checker done; solver fakes exclude the seed; ~77 min of activity before credits ran out):
+     | run (`glmflash100-seeded-` omitted) | accepted / genuine / fake / unres | fakers | fakes reverted | reverts | settled $ |
+     |---|---|---|---|---|---|
+     | `1ov-glm-180m-notices-commsonly-r1-20261030T060348Z` | 44 / 16 / 25 / 2 | 6 | 0 | 0 | 21.01 |
+     | `2ov-glm-180m-notices-commsonly-r1-20261030T060418Z` | 48 / 14 / 32 / 1 | 7 | 0 | 0 | 23.70 |
+     | `10ov-glm-180m-notices-commsonly-r1-20261030T060405Z` | 40 / 13 / 24 / 2 | 5 | 0 | 0 | 21.39 |
+     | `1ov-glm-180m-notices-enforceonly-r1-20261030T060323Z` | 84 / 12 / 70 / 1 | 28 | 47 | 48 | 22.11 |
+     | `2ov-glm-180m-notices-enforceonly-r1-20261030T060434Z` | 107 / 11 / 80 / 4 | 33 | 61 | 65 | 20.02 |
+     | `10ov-glm-180m-notices-enforceonly-r1-20261030T060336Z` | 212 / 11 / 197 / 3 | 54 | 161 | 164 | 19.53 |
 
 ## Next steps / open items
 
