@@ -995,5 +995,39 @@ class JudgeModeTests(unittest.TestCase):
         self.assertFalse(aj.incident_enabled({}))
 
 
+class SiteBundleDatasetNameTests(unittest.TestCase):
+    """The site bundle is built with the logs dataset's name (first live run, 2026-10-29: without it the bundle
+    recorded the public placeholder and the Cloudflare publication refused it)."""
+
+    def test_logs_dataset_from_environment_then_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            name_file = Path(folder) / "logs-dataset"
+            with mock.patch.object(supervise, "DEFAULT_DATASET_FILE", name_file), \
+                    mock.patch.dict(os.environ, {"GDM_LOGS_DATASET": ""}):
+                self.assertEqual(supervise.Supervisor.logs_dataset(), "")
+                name_file.write_text("org/logs\n")
+                self.assertEqual(supervise.Supervisor.logs_dataset(), "org/logs")
+                with mock.patch.dict(os.environ, {"GDM_LOGS_DATASET": "other/logs"}):
+                    self.assertEqual(supervise.Supervisor.logs_dataset(), "other/logs")
+
+    def test_site_bundle_step_gets_the_dataset_name(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run, phase = root / "runs" / "RUN", root / "runs" / "phase-b" / "RUN"
+            (run / "inspect").mkdir(parents=True)
+            phase.mkdir(parents=True)
+            (run / "results.json").write_text("{}")
+            (phase / "inspect-view").mkdir()
+            (phase / "inspect-view" / "index.html").write_text("x")
+            sup = object.__new__(supervise.Supervisor)
+            sup.run, sup.phase, sup.site_steps = run, phase, {"results": {"outcome": "complete"}}
+            sup.args = types.SimpleNamespace(no_postrun=False)
+            calls = []
+            sup.step = lambda name, arguments, cwd=None, extra_env=None: calls.append((name, extra_env)) or 0
+            with mock.patch.dict(os.environ, {"GDM_LOGS_DATASET": "org/logs"}):
+                sup.site(0)
+            self.assertIn(("site-bundle", {"GDM_LOGS_DATASET": "org/logs"}), calls)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -917,8 +917,15 @@ class Supervisor:
                         exit_code = self.step(name, arguments, cwd=scratch)
                     record.update(exit=exit_code, outcome="complete" if exit_code == 0 else "failed")
                 else:
-                    exit_code = self.step(name, arguments)
+                    # The bundle records (and its pages link) the logs dataset by name: without it,
+                    # prepare_hf_library.py writes the public placeholder and publication refuses the
+                    # bundle (first live run, 2026-10-29).
+                    dataset = self.logs_dataset()
+                    exit_code = self.step(name, arguments,
+                                          extra_env={"GDM_LOGS_DATASET": dataset} if dataset else None)
                     record.update(exit=exit_code, outcome="complete" if exit_code == 0 else "failed")
+                    if not dataset:
+                        record["dataset_name"] = "missing (placeholder recorded; publication will refuse)"
             except Exception as error:
                 record.update(outcome="supervisor_error", error_type=type(error).__name__, detail=str(error))
             self.site_steps[name] = record
@@ -927,13 +934,19 @@ class Supervisor:
         except Exception:
             pass
 
+    @staticmethod
+    def logs_dataset():
+        """The private logs dataset's name: GDM_LOGS_DATASET, else DEFAULT_DATASET_FILE, else ""."""
+        dataset = os.environ.get("GDM_LOGS_DATASET", "").strip()
+        if not dataset and DEFAULT_DATASET_FILE.is_file():
+            dataset = DEFAULT_DATASET_FILE.read_text().strip()
+        return dataset if "/" in dataset else ""
+
     def upload_credentials(self):
         """(token file, dataset name, None) or (None, None, why not). Presence and permissions only: the
         token is never read here."""
         token = Path(self.args.hf_token_file).expanduser()
-        dataset = os.environ.get("GDM_LOGS_DATASET", "").strip()
-        if not dataset and DEFAULT_DATASET_FILE.is_file():
-            dataset = DEFAULT_DATASET_FILE.read_text().strip()
+        dataset = self.logs_dataset()
         if not token.is_file() or token.is_symlink():
             return None, None, f"no HF upload token file at {token}"
         mode = token.stat().st_mode & 0o777
