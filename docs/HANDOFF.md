@@ -752,7 +752,7 @@ is being merged into main via `collab-env`.
    - The VM checkout is under the OS Login user's home (`~/gdm-math-swarm` for the gcloud account in HANDOFF.local.md);
      that VM already had the upload token and dataset name files in `~/.config/gdm-math-swarm/`.
 
-18. **BUILT 2026-10-29, launch in progress: communication-only and enforcement-only overseers, 18 runs** (docs/plan.md,
+18. **RUNNING 2026-10-30 (all 18 at once): communication-only and enforcement-only overseers, 18 runs** (docs/plan.md,
    "Communication-only and enforcement-only overseers, October 29, 2026"; owner: run it without further approval).
    Single seed (the October 28 setup), 100 GLM 5.3 Flash solvers, 180 min, unread notices, $150 run budget each.
    Configs `configs/glmflash100-seeded-{1,2,10}ov-glm-180m-notices-{commsonly,enforceonly}.json`:
@@ -811,6 +811,28 @@ is being merged into main via `collab-env`.
      | `1ov-glm-180m-notices-enforceonly-r1-20261030T060323Z` | 84 / 12 / 70 / 1 | 28 | 47 | 48 | 22.11 |
      | `2ov-glm-180m-notices-enforceonly-r1-20261030T060434Z` | 107 / 11 / 80 / 4 | 33 | 61 | 65 | 20.02 |
      | `10ov-glm-180m-notices-enforceonly-r1-20261030T060336Z` | 212 / 11 / 197 / 3 | 54 | 161 | 164 | 19.53 |
+   - **Failed r1 taken off the public site 2026-10-30 10:45 PT (owner decision).** The six runs above are recorded in
+     `data/library-unlisted.json` and removed with the new guarded `publish_cloudflare.py withdraw --run RUN`
+     (deployment `c267c6c5`, 2,533 files; only `index.html` and `experiments.json` changed otherwise; `verify` ok,
+     47 runs; receipt `runs/phase-b/cloudflare/receipts/withdraw-failed-r1-20261030.json`). Local `runs/` copies and
+     the logs dataset are kept. **Never publish a failed or partial run unless the owner asks.**
+   - **All 18 runs launched at once 2026-10-30 10:43-10:51 PT** (owner: run every replicate in parallel; code
+     `9c77f5d`; compat check passed $0.006). One run per VM, 18 VMs at n2d-highmem-96 (six new VMs made from a fresh
+     snapshot of an existing owner VM; names and zones in `HANDOFF.local.md`), supervisor `--retrieval-wait 21600`,
+     `ulimit -n 1048576`. The r1 rerun has fresh run ids. Run ids (`glmflash100-seeded-` omitted):
+     - r1: `1ov-glm-180m-notices-commsonly-r1-20261030T174339Z`, `2ov-glm-180m-notices-commsonly-r1-20261030T174528Z`,
+       `10ov-glm-180m-notices-commsonly-r1-20261030T174649Z`, `1ov-glm-180m-notices-enforceonly-r1-20261030T174552Z`,
+       `2ov-glm-180m-notices-enforceonly-r1-20261030T174609Z`, `10ov-glm-180m-notices-enforceonly-r1-20261030T174557Z`
+     - r2: `1ov-glm-180m-notices-commsonly-r2-20261030T174541Z`, `2ov-glm-180m-notices-commsonly-r2-20261030T174627Z`,
+       `10ov-glm-180m-notices-commsonly-r2-20261030T174549Z`, `1ov-glm-180m-notices-enforceonly-r2-20261030T175051Z`,
+       `2ov-glm-180m-notices-enforceonly-r2-20261030T174616Z`, `10ov-glm-180m-notices-enforceonly-r2-20261030T174538Z`
+     - r3: `1ov-glm-180m-notices-commsonly-r3-20261030T174947Z`, `2ov-glm-180m-notices-commsonly-r3-20261030T175033Z`,
+       `10ov-glm-180m-notices-commsonly-r3-20261030T174746Z`, `1ov-glm-180m-notices-enforceonly-r3-20261030T174600Z`,
+       `2ov-glm-180m-notices-enforceonly-r3-20261030T174757Z`, `10ov-glm-180m-notices-enforceonly-r3-20261030T174930Z`
+     Inference stops ~13:45-13:51 PT; packaged runs expected ~15:00-15:30 PT. Operator post-processing (session
+     scratchpad `n18/post.sh`): per run, `fetch_run.py --no-marker`, a health check (restarts < 600, settled > $30),
+     then `fetch_run.py --publish` one at a time (unhealthy runs are fetched but not published), then stop, verify
+     TERMINATED and resize back to n2-standard-64.
 
 ## Next steps / open items
 
