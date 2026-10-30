@@ -776,6 +776,11 @@ is being merged into main via `collab-env`.
      `10ov-glm-180m-notices-enforceonly-r1-20261030T060336Z`. Expected stop ~02:05 PT. To resume operations: VM
      assignment in `HANDOFF.local.md`; after each run is packaged run `fetch_run.py --vm VM --run RUN --publish`,
      verify TERMINATED, resize back to n2-standard-64, then launch the next round with the same configs.
+   - **r1 stalled: OpenRouter credits exhausted at ~00:20 PT 2026-10-30.** Every request since returns HTTP 402
+     "Insufficient credits" (account credits, not a key limit); Claude Code surfaces it as
+     `[claude-code:unrecognized_model]` and every agent restarts in a loop (~900 restarts per run, backoff 600 s).
+     About 77 min of real activity per run (settled ~$20-24 each). Runs left to their scheduled stop (no spend
+     possible); r1 counts as failed and must be rerun. **Owner action: add OpenRouter credits.** Round 2 waits.
 
 ## Next steps / open items
 
