@@ -167,6 +167,21 @@ class BundleTests(unittest.TestCase):
                 cf.plan_bundle(site(RUN), root, unlisted=(), replace_pages=True)
 
 
+    @patch.object(cf, 'render_catalogue', side_effect=fake_catalogue)
+    def test_withdraw_removes_only_recorded_runs(self, _):
+        base = site(OTHER, RUN)
+        with self.assertRaises(ValueError):
+            cf.plan_withdraw(base, unlisted=(), runs=[RUN])  # not recorded as unlisted
+        with self.assertRaises(ValueError):
+            cf.plan_withdraw(base, unlisted=('absent-run',), runs=['absent-run'])
+        files, plan = cf.plan_withdraw(base, unlisted=(RUN,), runs=[RUN])
+        self.assertFalse([n for n in files if n.startswith(RUN + '/')])
+        self.assertEqual(plan['removed_files'], 2)
+        for name in (f'{OTHER}/results.html', f'{OTHER}/results.json'):
+            self.assertEqual(files[name], base[name])
+        self.assertEqual([e['run'] for e in json.loads(files['experiments.json'])['experiments']], [OTHER])
+
+
 class FinishTests(unittest.TestCase):
     def test_manifest_generated_pages_and_limits(self):
         files, manifest = cf.finish(site(RUN), {'history': [{'utc': 'old'}]}, {'source': {'kind': 'test'}})

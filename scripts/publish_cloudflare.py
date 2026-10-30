@@ -26,6 +26,9 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
         view and the simplified judge report of every run, or only the given runs) and the catalogue page from
         its entries. Only existing .html pages change; text, links, records and every other file stay as
         served, and each replacement is recorded with old and new digests.
+    publish_cloudflare.py withdraw --run RUN [--run RUN ...] [--commit] [--receipt FILE]
+        Remove runs already recorded in data/library-unlisted.json from the site (every file of each run; the
+        catalogue is re-rendered without them). Other runs never change; private copies are untouched.
     publish_cloudflare.py verify [--url URL] [--full] [--run RUN ...]
         Read-only check of the served site against its site-manifest.json (see ``verify``).
 
@@ -447,6 +450,30 @@ def plan_restyle(base_files, unlisted, runs=None):
                    'replaced_pages': replaced, 'unthemed_pages_left_as_served': legacy}
 
 
+def plan_withdraw(base_files, unlisted, runs):
+    """The site without the given runs: every file of each run is removed and the catalogue re-rendered.
+
+    Owner-requested take-down (for example a failed run). Each run must already be recorded in the tracked
+    data/library-unlisted.json (run, date, reason), so its catalogue entry stays out and later publishes refuse
+    it; other runs' files never change. Nothing private is touched: local runs/ and the logs dataset stay."""
+    runs = sorted(set(runs or ()))
+    if not runs:
+        raise ValueError('withdraw needs at least one --run')
+    known = {run_of(n) for n in base_files if run_of(n)}
+    missing = sorted(set(runs) - known)
+    if missing:
+        raise ValueError('Run(s) not on the site: ' + ', '.join(missing))
+    unrecorded = sorted(set(runs) - set(unlisted))
+    if unrecorded:
+        raise ValueError('Record the run(s) in data/library-unlisted.json first: ' + ', '.join(unrecorded))
+    removed = sorted(n for n in base_files if run_of(n) in runs)
+    files = {n: d for n, d in base_files.items() if run_of(n) not in runs}
+    files.update(render_catalogue(catalogue(base_files), unlisted))
+    return files, {'source': {'kind': 'withdraw', 'runs': runs},
+                   'removed_files': len(removed),
+                   'removed_by_run': {r: sum(1 for n in removed if run_of(n) == r) for r in runs}}
+
+
 def finish(files, base_manifest, plan, project=PROJECT):
     """Add the generated pages and the site manifest; gate every file and the deployment limits."""
     files = {n: d for n, d in files.items() if n not in GENERATED}
@@ -652,7 +679,9 @@ def main(argv=None):
     bundle.add_argument('--replace-pages', action='store_true', help='allow the bundle runs\' .html pages to change')
     restyle = sub.add_parser('restyle', help='re-render the layout of published run pages and the catalogue')
     restyle.add_argument('--run', action='append', help='only this run\'s pages (repeatable; default all runs)')
-    for command in (mirror, bundle, restyle):
+    withdraw = sub.add_parser('withdraw', help='remove recorded unlisted runs (all their files) from the site')
+    withdraw.add_argument('--run', action='append', required=True, help='run to remove (repeatable)')
+    for command in (mirror, bundle, restyle, withdraw):
         command.add_argument('--commit', action='store_true', help='deploy; otherwise only plan')
         command.add_argument('--receipt', type=Path, help='receipt JSON (outside the bundle)')
         command.add_argument('--workdir', type=Path, help='scratch directory for staging (default: a temporary one)')
@@ -694,6 +723,9 @@ def main(argv=None):
         elif args.command == 'restyle':
             files, plan = plan_restyle(base_files, unlisted, args.run)
             message = f'Restyle {len(plan["replaced_pages"])} page(s) and the catalogue'
+        elif args.command == 'withdraw':
+            files, plan = plan_withdraw(base_files, unlisted, args.run)
+            message = 'Withdraw ' + ', '.join(plan['source']['runs'])
         else:
             files, plan = plan_bundle(base_files, args.bundle, unlisted, args.dataset_commit, args.replace_pages)
             message = 'Publish ' + ', '.join(plan['source']['runs'])

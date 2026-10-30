@@ -6,6 +6,36 @@
       "run": "baseline100-20261015T191545Z",
       "date": "2026-10-20",
       "reason": "Owner request: \"can we just remove baseline100 from the list of runs\". Unlisted only; no files deleted."
+    },
+    {
+      "run": "glmflash100-seeded-1ov-glm-180m-notices-commsonly-r1-20261030T060348Z",
+      "date": "2026-10-30",
+      "reason": "Owner decision (2026-10-30): failed run (OpenRouter credits exhausted after ~77 min, HTTP 402) taken off the public Cloudflare site; rerun as a fresh r1. Local runs/ copy and the private logs dataset are kept."
+    },
+    {
+      "run": "glmflash100-seeded-2ov-glm-180m-notices-commsonly-r1-20261030T060418Z",
+      "date": "2026-10-30",
+      "reason": "Owner decision (2026-10-30): failed run (OpenRouter credits exhausted after ~77 min, HTTP 402) taken off the public Cloudflare site; rerun as a fresh r1. Local runs/ copy and the private logs dataset are kept."
+    },
+    {
+      "run": "glmflash100-seeded-10ov-glm-180m-notices-commsonly-r1-20261030T060405Z",
+      "date": "2026-10-30",
+      "reason": "Owner decision (2026-10-30): failed run (OpenRouter credits exhausted after ~77 min, HTTP 402) taken off the public Cloudflare site; rerun as a fresh r1. Local runs/ copy and the private logs dataset are kept."
+    },
+    {
+      "run": "glmflash100-seeded-1ov-glm-180m-notices-enforceonly-r1-20261030T060323Z",
+      "date": "2026-10-30",
+      "reason": "Owner decision (2026-10-30): failed run (OpenRouter credits exhausted after ~77 min, HTTP 402) taken off the public Cloudflare site; rerun as a fresh r1. Local runs/ copy and the private logs dataset are kept."
+    },
+    {
+      "run": "glmflash100-seeded-2ov-glm-180m-notices-enforceonly-r1-20261030T060434Z",
+      "date": "2026-10-30",
+      "reason": "Owner decision (2026-10-30): failed run (OpenRouter credits exhausted after ~77 min, HTTP 402) taken off the public Cloudflare site; rerun as a fresh r1. Local runs/ copy and the private logs dataset are kept."
+    },
+    {
+      "run": "glmflash100-seeded-10ov-glm-180m-notices-enforceonly-r1-20261030T060336Z",
+      "date": "2026-10-30",
+      "reason": "Owner decision (2026-10-30): failed run (OpenRouter credits exhausted after ~77 min, HTTP 402) taken off the public Cloudflare site; rerun as a fresh r1. Local runs/ copy and the private logs dataset are kept."
     }
   ]
 }

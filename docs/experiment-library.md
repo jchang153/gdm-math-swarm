@@ -57,6 +57,12 @@ read-only unless `--commit` is given; there are no approval prompts or extra spe
   text, links and scripts kept); no file is added or removed and every replacement is recorded. Pages without the
   shared theme (baseline100's legacy `results.html`) are left as served. `mirror-space` copies Space pages over
   Cloudflare ones, so after a mirror run `restyle` again.
+- `withdraw --run RUN [--run RUN ...] [--commit] [--receipt FILE]` (October 30, 2026): take runs off the site
+  (owner decision, for example failed runs). Each run must first be recorded in the tracked
+  `data/library-unlisted.json` (run, date, reason); every file of each run is removed and the catalogue is
+  re-rendered without them. Other runs' files never change (the plan's `new_or_changed` is only `index.html` and
+  `experiments.json`). Local `runs/` copies and the private logs dataset are untouched. Failed or partial runs are
+  not published unless the owner asks.
 - `verify [--url URL] [--run RUN ...] [--full]`: read-only; the served site against its `site-manifest.json`:
   manifest served; each checked file (all pages, `results.json` and `listing.json`, root files; every file with
   `--full`) with HTTP 200 and its exact recorded bytes, pages as `text/html`; no private file recorded; a probe of
