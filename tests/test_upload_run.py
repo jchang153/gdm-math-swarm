@@ -294,3 +294,47 @@ class SiteBundleResumeArchiveTests(unittest.TestCase):
         clean = self.archive([('home/notes.md', b'n')])
         self.assertEqual(prepare_hf_library.without_credential_members('resume/agents/a/state.tar.gz', clean),
                          (clean, []))
+
+
+class ConcurrentUploadTests(unittest.TestCase):
+    """Six VMs upload at once: a head another VM just committed can be briefly unknown (HF 404 "Revision Not
+    Found"); it is retried, never read as an empty folder (2026-10-30)."""
+
+    def test_remote_tree_retries_an_unknown_revision(self):
+        calls = []
+
+        class Api:
+            def list_repo_tree(self, *args, **kwargs):
+                calls.append(1)
+                if len(calls) < 3:
+                    raise RuntimeError('404 Client Error. Revision Not Found for url: x. Invalid rev id: abc')
+                return iter([types.SimpleNamespace(path='run/a', size=1, blob_id='b', lfs=None)])
+        with mock.patch.object(offload_runs.time, 'sleep'):
+            self.assertEqual(offload_runs.remote_tree(Api(), REPO, 'abc', 'run'), {'run/a': (1, None, 'b')})
+        self.assertEqual(len(calls), 3)
+
+        class Gone:
+            def list_repo_tree(self, *args, **kwargs):
+                raise RuntimeError('404 Client Error: Entry Not Found')
+        self.assertEqual(offload_runs.remote_tree(Gone(), REPO, 'abc', 'run'), {})
+
+        class Never:
+            def list_repo_tree(self, *args, **kwargs):
+                raise RuntimeError('Revision Not Found')
+        with mock.patch.object(offload_runs.time, 'sleep'), self.assertRaises(RuntimeError):
+            offload_runs.remote_tree(Never(), REPO, 'abc', 'run', attempts=2)
+
+    def test_main_retries_the_whole_upload(self):
+        attempts = []
+
+        def flaky(*args, **kwargs):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise RuntimeError('Invalid rev id: abc')
+            return {'outcome': 'uploaded', 'dataset_commit': 'c' * 40}
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(upload_run, 'upload', flaky), \
+                mock.patch.object(upload_run.time, 'sleep'):
+            record = Path(folder) / 'r.json'
+            self.assertEqual(upload_run.main(['--run-dir', folder, '--record', str(record)]), 0)
+            self.assertEqual(json.loads(record.read_text())['outcome'], 'uploaded')
+        self.assertEqual(len(attempts), 2)

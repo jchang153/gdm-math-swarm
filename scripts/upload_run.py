@@ -40,6 +40,7 @@ from pathlib import Path, PurePosixPath
 import shutil
 import sys
 import tempfile
+import time
 import traceback
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -56,6 +57,9 @@ PHASE_SKIP_FILES = {'upload.log', 'upload.exit', 'hf-upload.json', 'supervisor-s
 
 def now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
+
+
+UPLOAD_ATTEMPTS, RETRY_SECONDS = 5, 30
 
 
 def stamp_for(moment=None):
@@ -198,8 +202,18 @@ def main(argv=None):
             raise ValueError('No run directory: ' + str(args.run_dir))
         bundle = args.site_bundle if args.site_bundle and (args.site_bundle / 'archive-manifest.json').is_file() \
             else None
-        record.update(upload(args.run_dir, args.phase_dir, bundle, work=args.work,
-                             log=lambda m: print(m, flush=True)))
+        for attempt in range(UPLOAD_ATTEMPTS):
+            try:
+                record.update(upload(args.run_dir, args.phase_dir, bundle, work=args.work,
+                                     log=lambda m: print(m, flush=True)))
+                break
+            except Exception as error:
+                # Several VMs upload at once: a head another one just committed can be briefly unknown to
+                # this replica ("Revision Not Found"). The upload is add-only, so a fresh attempt is safe.
+                if not offload_runs.revision_not_found(error) or attempt == UPLOAD_ATTEMPTS - 1:
+                    raise
+                print(f'upload attempt {attempt + 1}: {str(error)[:200]}; retrying', flush=True)
+                time.sleep(RETRY_SECONDS * (attempt + 1))
     except Exception as error:
         record.update(outcome='failed', error_type=type(error).__name__, detail=str(error)[:2000])
         traceback.print_exc()

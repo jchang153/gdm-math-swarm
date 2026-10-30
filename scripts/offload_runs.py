@@ -172,18 +172,29 @@ def unit_files(unit_dir):
     return rows
 
 
-def remote_tree(api, repo, revision, prefix):
-    rows = {}
-    try:
-        for item in api.list_repo_tree(repo, repo_type='dataset', revision=revision, path_in_repo=prefix,
-                                       recursive=True):
-            if hasattr(item, 'blob_id'):
-                lfs = getattr(item, 'lfs', None)
-                rows[item.path] = (item.size, lfs.sha256 if lfs else None, item.blob_id)
-    except Exception as error:
-        if 'not found' not in str(error).lower() and '404' not in str(error):
-            raise
-    return rows
+def revision_not_found(error):
+    """HF's answer for a commit another uploader just made that this replica does not know yet (several VMs
+    uploading at once, 2026-10-30): retry, never read it as an empty folder."""
+    text = str(error)
+    return 'Revision Not Found' in text or 'Invalid rev id' in text
+
+
+def remote_tree(api, repo, revision, prefix, attempts=12):
+    for attempt in range(attempts):
+        rows = {}
+        try:
+            for item in api.list_repo_tree(repo, repo_type='dataset', revision=revision, path_in_repo=prefix,
+                                           recursive=True):
+                if hasattr(item, 'blob_id'):
+                    lfs = getattr(item, 'lfs', None)
+                    rows[item.path] = (item.size, lfs.sha256 if lfs else None, item.blob_id)
+        except Exception as error:
+            if revision_not_found(error) and attempt < attempts - 1:
+                time.sleep(5 + 5 * attempt)
+                continue
+            if revision_not_found(error) or ('not found' not in str(error).lower() and '404' not in str(error)):
+                raise
+        return rows
 
 
 def git_sha1_file(path):
@@ -417,6 +428,8 @@ def commit_uploads(api, repo, uploads, present, label, message='Offload local ru
                                      commit_message=f'{message}: {label}').oid
         except HfHubHTTPError as error:
             status = getattr(error.response, 'status_code', None)
+            if status == 404 and revision_not_found(error):
+                status = 409  # a head another uploader just committed, not yet visible here: retry
             if status in (409, 412, 429, 500, 502, 503, 504) and attempt < 39:
                 wait = 5 + attempt
                 if status == 429:
