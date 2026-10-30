@@ -768,6 +768,14 @@ is being merged into main via `collab-env`.
    - Plan: three rounds; round k = replicate `rk` of all six cells at once, one run per VM (six VMs, n2d-highmem-96 as
      on October 28), run ids `glmflash100-seeded-<n>ov-glm-180m-notices-<cond>-r<k>-<UTC>`. After each round:
      results, offload, site, HANDOFF, VMs TERMINATED. Round status is kept below as it happens.
+   - **Round r1 launched 2026-10-29 23:03-23:04 PT** (code `ae72f27`), six VMs, supervisor `--retrieval-wait 21600`
+     (the run stays packaged until `fetch_run.py` touches the marker; the supervisor then stops the idle VM).
+     Run ids (`glmflash100-seeded-` omitted): `1ov-glm-180m-notices-commsonly-r1-20261030T060348Z`,
+     `2ov-glm-180m-notices-commsonly-r1-20261030T060418Z`, `10ov-glm-180m-notices-commsonly-r1-20261030T060405Z`,
+     `1ov-glm-180m-notices-enforceonly-r1-20261030T060323Z`, `2ov-glm-180m-notices-enforceonly-r1-20261030T060434Z`,
+     `10ov-glm-180m-notices-enforceonly-r1-20261030T060336Z`. Expected stop ~02:05 PT. To resume operations: VM
+     assignment in `HANDOFF.local.md`; after each run is packaged run `fetch_run.py --vm VM --run RUN --publish`,
+     verify TERMINATED, resize back to n2-standard-64, then launch the next round with the same configs.
 
 ## Next steps / open items
 
