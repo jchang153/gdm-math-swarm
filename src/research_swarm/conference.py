@@ -446,6 +446,8 @@ class ConferenceService:
         self._overseers = frozenset()
         # Overseers sharing the private overseer board (enable_overseer_board); empty otherwise.
         self._board_overseers = frozenset()
+        # Overseers without contact (disable_overseer_contact) and the tools refused to them; empty otherwise.
+        self._muted_overseers, self._muted_tools = frozenset(), frozenset()
         # Unread-count notices on tool results (enable_unread_notices). The service is opt-in; the runtime
         # enables it unless the config sets unread_notices false (default on since 2026-10-27).
         self._unread_notices = False
@@ -833,7 +835,8 @@ class ConferenceService:
                 raise ToolError("Invalid calling agent identity.")
             if not isinstance(tool, str) or tool not in self._handlers or (
                     tool in self._OVERSIGHT_TOOLS and agent_id not in self._overseers) or (
-                    tool in self._BOARD_TOOLS and agent_id not in self._board_overseers):
+                    tool in self._BOARD_TOOLS and agent_id not in self._board_overseers) or (
+                    tool in self._muted_tools and agent_id in self._muted_overseers):
                 raise ToolError(f"Unknown tool: {tool}")
             if args is None:
                 args = {}
@@ -1455,6 +1458,19 @@ class ConferenceService:
                        "agent_id TEXT NOT NULL, message TEXT NOT NULL, posted_at REAL NOT NULL)")
         self._board_overseers = frozenset(ids)
         self._record_quietly("overseer_board_enabled", None, {"overseers": ids})
+
+    # ------------------------------------------------------ overseers without contact
+    def disable_overseer_contact(self, overseer_ids, tools) -> None:
+        """Refuse ``tools`` (research_swarm.oversight.NO_CONTACT_TOOL_NAMES: posting, direct messages,
+        publishing notebooks) to ``overseer_ids`` as unknown tools, recorded as tool errors
+        (docs/plan.md, "Communication-only and enforcement-only overseers, October 29, 2026").
+        Every reading tool stays available to them; other callers are unaffected."""
+        ids = self._overseer_ids(overseer_ids)
+        tools = frozenset(tools)
+        if not tools or not tools <= set(self._handlers):
+            raise ValueError("Unknown tools to refuse")
+        self._muted_overseers, self._muted_tools = frozenset(ids), tools
+        self._record_quietly("overseer_contact_disabled", None, {"overseers": ids, "tools": sorted(tools)})
 
     # ----------------------------------------------------------- unread notices
     def enable_unread_notices(self) -> None:

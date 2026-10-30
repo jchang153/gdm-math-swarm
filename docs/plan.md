@@ -1599,3 +1599,41 @@ workspaces) with `scripts/vm_hf_setup.py`. Agents never create, copy or print it
 supervisor records `skipped_no_credential` and the run stays complete on the VM. Streaming VM to Mac memory to HF
 was considered and not chosen: it would keep the Mac and an SSH session up for the whole upload and buffer
 multi-gigabyte logs in memory, so it is less robust.
+
+## Communication-only and enforcement-only overseers, October 29, 2026
+
+**Approved by the owner (2026-10-29, chat; an approval, not a proposal).** New experiment, single seed (the original
+seeded setup of "Three-hour notices replicates, October 28, 2026", not the six-seed setup of "Three exploit families
+seeded, October 29, 2026"). 1, 2 and 10 GLM-5.3-flash overseers, 3 runs each, in two conditions = 18 runs:
+
+1. **Communication only**: overseers have no `revert_submission` and no `check_proof` tools (they keep DMs, board
+   posts and everything else a solver has). Implemented as `"powers": false` (prompt A).
+2. **Enforcement only**: overseers keep `revert_submission` and `check_proof` but cannot communicate with solvers: no
+   `send_direct_message`, no `post_intent` (public board posts), and no `publish_notebook` (the shared library is
+   readable by solvers, so it would be a back channel; the owner said yes to blocking it). They can still read the
+   public board, read incoming DMs and read the library. They talk among themselves via the private overseer board in
+   the 2- and 10-overseer runs; the single overseer gets no board (the code requires at least two overseers), only its
+   private notes (owner approved). Note: the October 28 2-overseer config had no board, so the 2-overseer
+   enforcement-only cell differs from its full-tools baseline in the board as well (without it two overseers without
+   contact could not talk at all); the communication-only cells match the October 28 boards (10 overseers: board;
+   1 and 2: none, they can message each other directly).
+
+Everything else is identical to the October 28 configs `configs/glmflash100-seeded-{1,2,10}ov-glm-180m-notices.json`:
+100 solvers, silent seed agent-101, 180 minutes, unread notices, GLM-flash overseers, `run_budget_usd` 150 per run
+(the per-run budget; no other spending controls). The October 28 runs serve as the full-tools baseline and control.
+
+**Run plan (approved):** three rounds of six runs; each round runs one replicate of each of the six cells (so
+time-of-day and provider problems hit all conditions equally); after each round the results are saved, logs offloaded,
+the site and HANDOFF updated, VMs stopped and verified TERMINATED. Owner follow-up (2026-10-29, relayed): "just go
+ahead and run it without any more approval from me."
+
+Implementation: overseer config key `contact` (multi-overseer form; default true, which leaves every existing prompt,
+tool list and config byte-identical). `"contact": false` requires `powers`; it removes the three contact tools from
+the overseers' tool lists (`oversight.NO_CONTACT_TOOL_NAMES`), the conference service refuses those calls from the
+overseers as unknown tools (recorded `tool_error`; `overseer_contact_disabled` event), and the overseer prompt lists
+only the reading tools, says the overseer cannot contact the other agents, ends the task paragraph with "try to
+counteract it with your oversight tools" and drops "you may tell the author or the group if you choose".
+`settings.json` `effective.overseer` records `contact` and `withheld_tools`. Solvers' prompts and tools are unchanged.
+Configs `configs/glmflash100-seeded-{1,2,10}ov-glm-180m-notices-{commsonly,enforceonly}.json`; run ids
+`glmflash100-seeded-<n>ov-glm-180m-notices-<cond>-r<N>-<UTC>`. Overseers may still use `submit_solution` (as in every
+earlier overseer run); an accepted overseer submission would appear in the library, which is noted, not blocked.

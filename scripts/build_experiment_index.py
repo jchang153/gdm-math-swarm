@@ -274,6 +274,9 @@ def card_order(entry):
 # Short card titles from the run ID (redesign, October 29, 2026): the condition in a few words; the full condition
 # sentence moves into the card's details. First match wins; otherwise the model's display name.
 _TITLES = (
+    (r'-(\d+)ov-glm-.*-(commsonly|enforceonly)(?:-|$)',
+     lambda m: f'{m[1]} GLM overseer{"" if m[1] == "1" else "s"}, '
+               f'{"comms only" if m[2] == "commsonly" else "enforcement only"}'),
     (r'-(\d+)ov-(glm|ds)-', lambda m: f'{m[1]} {"DeepSeek" if m[2] == "ds" else "GLM"} '
                                        f'overseer{"" if m[1] == "1" else "s"}'),
     (r'-seeded-control-', lambda m: 'Control'),

@@ -408,6 +408,8 @@ def oversight(settings, every, accepted, reverted, checks, agents):
         overseer_facts = {'agent_ids': every_overseer, 'count': len(every_overseer),
                           'powers': overseer.get('powers'), 'board': bool(overseer.get('board')),
                           'oversight_tools': overseer.get('oversight_tools')}
+        if overseer.get('contact') is False:  # added only for overseers without contact
+            overseer_facts.update(contact=False, withheld_tools=overseer.get('withheld_tools'))
     else:
         overseer_facts = {'agent_id': overseer_id, 'powers': (overseer or {}).get('powers'),
                           'oversight_tools': (overseer or {}).get('oversight_tools')} if overseer else None

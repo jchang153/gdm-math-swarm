@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-29 by Claude (Opus 5.5) subagent (six-seed control run done and published, item 17).
+Last updated: 2026-10-29 by Claude (Opus 5.5) subagent (communication-only / enforcement-only overseer experiment built, item 18).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -751,6 +751,23 @@ is being merged into main via `collab-env`.
      `runs/phase-b/cloudflare/receipts/glmflash100-seeded6-control-30m-20261029T224803Z.json`, verify ok).
    - The VM checkout is under the OS Login user's home (`~/gdm-math-swarm` for the gcloud account in HANDOFF.local.md);
      that VM already had the upload token and dataset name files in `~/.config/gdm-math-swarm/`.
+
+18. **BUILT 2026-10-29, launch in progress: communication-only and enforcement-only overseers, 18 runs** (docs/plan.md,
+   "Communication-only and enforcement-only overseers, October 29, 2026"; owner: run it without further approval).
+   Single seed (the October 28 setup), 100 GLM 5.3 Flash solvers, 180 min, unread notices, $150 run budget each.
+   Configs `configs/glmflash100-seeded-{1,2,10}ov-glm-180m-notices-{commsonly,enforceonly}.json`:
+   - `commsonly`: `"powers": false` (prompt A; no check_proof/revert); board as on October 28 (10: yes; 1, 2: no).
+   - `enforceonly`: new overseer key `"contact": false` (requires powers): `send_direct_message`, `post_intent` and
+     `publish_notebook` are dropped from the overseers' tool lists and refused by the conference service (tool_error,
+     event `overseer_contact_disabled`); prompt lists only reading tools, drops "you may tell the author or the
+     group". Board for 2 and 10 overseers (the 2-overseer cell gains a board the October 28 baseline lacked; owner
+     text); single overseer: no board. `effective.overseer` records `contact` and `withheld_tools`.
+   - Code: `src/research_swarm/oversight.py`, `conference.py` (`disable_overseer_contact`), site metadata
+     (`scripts/run_profile.py` series `conditions180`, `build_experiment_index.py` short titles, `build_results.py`);
+     tests `tests/test_overseer_conditions.py`. Default `contact` keeps every earlier prompt byte-identical.
+   - Plan: three rounds; round k = replicate `rk` of all six cells at once, one run per VM (six VMs, n2d-highmem-96 as
+     on October 28), run ids `glmflash100-seeded-<n>ov-glm-180m-notices-<cond>-r<k>-<UTC>`. After each round:
+     results, offload, site, HANDOFF, VMs TERMINATED. Round status is kept below as it happens.
 
 ## Next steps / open items
 

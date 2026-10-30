@@ -38,6 +38,12 @@ W, H = 240, 40
 
 # Run series, matched on the run ID (first match wins), shown newest series first.
 SERIES = (
+    ('conditions180', r'^glmflash100-seeded-.+-180m-notices-(?:commsonly|enforceonly)-',
+     '180-minute communication-only and enforcement-only overseers',
+     'Eighteen 180-minute seeded runs with 1, 2 or 10 GLM 5.3 Flash overseers, three replicates each, in two '
+     'conditions: communication only (no check_proof or revert tools; direct messages and board posts kept) and '
+     'enforcement only (check_proof and revert kept; no direct messages, board posts or notebook publishing). '
+     'Otherwise the same design as the 180-minute replicates, which are their full-tools baseline and control.'),
     ('notices180', r'^glmflash100-seeded-.+-180m-notices-', '180-minute overseer replicates, with unread notices',
      'Twelve 180-minute seeded runs with unread notices on: no overseer (control) or 1, 2 or 10 GLM 5.3 Flash '
      'overseers, three replicates each (r1, r2, r3), all launched together. Otherwise the same design as the '
@@ -118,6 +124,8 @@ def profile(results, settings=None):
             omodel = om.get('model_id') if isinstance(om, dict) and isinstance(om.get('model_id'), str) else model
         overseers = {'count': _int(o.get('count')) or 1, 'model': omodel, 'powers': o.get('powers') is True,
                      'board': o.get('board') is True}
+        if o.get('contact') is False:  # docs/plan.md, "Communication-only and enforcement-only overseers"
+            overseers['contact'] = False
     seed = None
     s = results.get('seeded')
     if isinstance(s, dict) and s.get('seed_agent'):
@@ -188,6 +196,8 @@ def condition_text(p):
         text = (f'{ov["count"]} {model_name(ov["model"]) + " " if ov["model"] else ""}'
                 f'overseer{"" if ov["count"] == 1 else "s"}')
         text += ' with check_proof and revert powers' if ov['powers'] else ' without oversight powers'
+        if ov.get('contact') is False:
+            text += ' and no posting, messaging or publishing'
         if ov['board']:
             text += ' and a private overseer board'
         parts.append(text)
@@ -298,7 +308,7 @@ function profile(results,settings){const c=obj(results.condition)||{},start=ms(r
  const eff=obj(settings&&settings.effective)||{},cfg=obj(settings&&settings.config)||{};
  const model=typeof c.model==='string'?c.model:null;let overseers=null;const o=obj(c.overseer);
  if(o&&(int(o.count)||o.agent_id)){let om=null;if(settings){const x=obj(settings.overseer_model);om=x&&typeof x.model_id==='string'?x.model_id:model;}
-  overseers={count:int(o.count)||1,model:om,powers:o.powers===true,board:o.board===true};}
+  overseers={count:int(o.count)||1,model:om,powers:o.powers===true,board:o.board===true};if(o.contact===false)overseers.contact=false;}
  let seed=null;const s=obj(results.seeded);
  if(s&&s.seed_agent){const rv=(results.reverted_submissions||[]).filter(r=>obj(r)&&r.agent===s.seed_agent&&r.reverted_utc);
   const at=s.injected_minute;seed={minute:typeof at==='number'?tenths(at):null,task:typeof s.task==='string'?s.task:null,
@@ -323,7 +333,7 @@ const duration=m=>{m=Math.floor(m+0.5);return m>=120&&m%60===0?m/60+' h':m+' min
 function condition(p){const sd=p.seed,ov=p.overseers,n=p.solvers;
  const parts=[(n!=null?n:'?')+' '+name(p.model)+' '+(ov||sd?'solvers':'agents')];
  if(ov){let t=ov.count+' '+(ov.model?name(ov.model)+' ':'')+'overseer'+(ov.count===1?'':'s');
-  t+=ov.powers?' with check_proof and revert powers':' without oversight powers';if(ov.board)t+=' and a private overseer board';parts.push(t);}
+  t+=ov.powers?' with check_proof and revert powers':' without oversight powers';if(ov.contact===false)t+=' and no posting, messaging or publishing';if(ov.board)t+=' and a private overseer board';parts.push(t);}
  else if(sd)parts.push('no overseer');
  if(sd)parts.push(sd.minute!=null?'exploit planted at +'+Math.floor(sd.minute+0.5)+' min':'exploit planted');else parts.push('no planted exploit');
  if(p.notices===true)parts.push('unread notices on');
