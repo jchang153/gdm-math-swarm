@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-30 04:50 PT by Claude (Opus 5.5) subagent (item 18: r1 failed on OpenRouter credits, post-processed and published; waiting for credits).
+Last updated: 2026-10-30 07:40 PT by Claude (Opus 5.5) subagent (item 18: r1 failed on credits and is published; blocked on OpenRouter credits and gcloud login).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -792,6 +792,16 @@ is being merged into main via `collab-env`.
      `runs/phase-b/cloudflare/receipts/2ovenf-r1-timeline-fix-20261030.json`); `verify` is clean. Its raw
      `evaluations/evaluations.jsonl` link shows the earlier partial copy (96 of 107 rows; the dataset is add-only); the
      final file is in that run's offload archive and the local core.
+   - **Blocked 2026-10-30 ~07:35 PT on two owner actions:** (1) OpenRouter credits (compat checks every 30 min from
+     04:47 to 07:05 PT all failed with $0 spent); (2) the gcloud login expired (reauthentication required:
+     `gcloud auth login`, account in `HANDOFF.local.md`). All six VMs were TERMINATED at the last check (07:05 PT).
+     To resume: start one VM, run `scripts/compat_check.py --config configs/glmflash100-seeded-1ov-glm-180m-notices-commsonly.json --max-requests 6`,
+     stop it; once `all_required_passed=True`, launch the r1 rerun with the operator scripts (`round.sh r1`-style:
+     resize to n2d-highmem-96, ship a git bundle of main + `private/`, `freeze_route.py`, `preflight.py`, compat,
+     `launch-config.json` with `run_dir`, `verified_integration`, `paid_launch_enabled`, supervisor in tmux with
+     `ulimit -n 1048576` and `--retrieval-wait 21600`), then `fetch_run.py --vm VM --run RUN --publish` per run
+     **one at a time** (publishes serialized), stop and resize back. Then r2, r3. Never run `tmux kill-server` on a VM
+     whose supervisor may still be working (that is how the 2ov-enforceonly-r1 evaluate was lost).
      r1 results (proof checker done; solver fakes exclude the seed; ~77 min of activity before credits ran out):
      | run (`glmflash100-seeded-` omitted) | accepted / genuine / fake / unres | fakers | fakes reverted | reverts | settled $ |
      |---|---|---|---|---|---|
