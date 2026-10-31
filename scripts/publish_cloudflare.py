@@ -26,6 +26,11 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
         view and the simplified judge report of every run, or only the given runs) and the catalogue page from
         its entries. Only existing .html pages change; text, links, records and every other file stay as
         served, and each replacement is recorded with old and new digests.
+    publish_cloudflare.py repack [--commit] [--receipt FILE]
+        Pack every run's per-agent instructions (instructions/, instructions/received/) and prompts (prompts/)
+        into RUN/packed/ (pack files with each file's exact bytes and SHA-256, an index and a viewer page); the
+        old URLs keep working (RUN/instructions/404.html, RUN/prompts/404.html: the viewer). Every deployment packs new runs the same way; unpacking is
+        checked to reproduce every original byte for byte.
     publish_cloudflare.py withdraw --run RUN [--run RUN ...] [--commit] [--receipt FILE]
         Remove runs already recorded in data/library-unlisted.json from the site (every file of each run; the
         catalogue is re-rendered without them). Other runs never change; private copies are untouched.
@@ -42,6 +47,7 @@ Wrangler runs with the operator's own login, from a clean working directory (nev
 .env it must not see). Nothing here reads or prints a credential, changes visibility or adds a spending step.
 """
 import argparse
+import base64
 import datetime
 import hashlib
 import html
@@ -108,6 +114,183 @@ def private_category(name):
     return dataset_logs.category('/'.join(parts[1:])) if len(parts) > 1 else None
 
 
+# --- per-agent file packs (owner, October 30, 2026: Pages' 20,000-file limit) ------------------------------
+# Each run's per-agent instructions (instructions/, instructions/received/) and prompts (prompts/) are about 300
+# small files per 100-agent run. They are deployed as a few pack files per run, RUN/packed/<folder>-NN.json, with
+# every file's exact bytes (UTF-8 text, else base64) and SHA-256, an index RUN/packed/index.json and a viewer page
+# RUN/packed/index.html. Old URLs keep working: RUN/instructions/404.html and RUN/prompts/404.html are copies of
+# the viewer, which Pages serves (HTTP 404, the URL unchanged) for any missing file below those folders; the viewer
+# reads the path and shows that file. (Pages' _redirects cannot substitute a placeholder into a query or a 200
+# rewrite, tested October 30, 2026, so no _redirects is used.)
+# Nothing is dropped: unpack(pack) reproduces every original file byte for byte (checked on every deployment).
+PACKED_DIRS = ('instructions', 'prompts')
+PACK_FOLDER = 'packed'
+PACK_SCHEMA = 'gdm-site-pack/1'
+PACK_PART_BYTES = 20 * 1024 * 1024
+PACK_NAME = re.compile(r'[^/]+/packed/(?:instructions|prompts)-\d{2}\.json')
+VIEWER_404 = '404.html'
+
+
+def packable(name):
+    parts = name.split('/')
+    return (len(parts) >= 3 and parts[0] != 'live' and parts[1] in PACKED_DIRS
+            and not (len(parts) == 3 and parts[2] == VIEWER_404))
+
+
+def viewer_names(run):
+    return [f'{run}/{PACK_FOLDER}/index.html'] + [f'{run}/{folder}/{VIEWER_404}' for folder in PACKED_DIRS]
+
+
+def is_pack_file(name):
+    return bool(PACK_NAME.fullmatch(name))
+
+
+def _entry(data):
+    try:
+        return {'encoding': 'utf-8', 'content': data.decode('utf-8')}
+    except UnicodeDecodeError:
+        return {'encoding': 'base64', 'content': base64.b64encode(data).decode('ascii')}
+
+
+def _entry_bytes(entry):
+    return entry['content'].encode('utf-8') if entry['encoding'] == 'utf-8' else base64.b64decode(entry['content'])
+
+
+def pack_run(run, originals):
+    """{name: bytes} of a run's pack files, index and viewer for ``originals`` ({RUN/folder/...: bytes})."""
+    out, index = {}, {}
+    for folder in PACKED_DIRS:
+        names = sorted(n for n in originals if n.split('/')[1] == folder)
+        parts, current, size = [], {}, 0
+        for name in names:
+            relative = name[len(run) + 1:]
+            entry = {**digest(originals[name]), **_entry(originals[name])}
+            weight = len(entry['content']) + 200
+            if current and size + weight > PACK_PART_BYTES:
+                parts.append(current)
+                current, size = {}, 0
+            current[relative] = entry
+            size += weight
+        if current:
+            parts.append(current)
+        for number, files in enumerate(parts, 1):
+            pack = f'{folder}-{number:02d}.json'
+            out[f'{run}/{PACK_FOLDER}/{pack}'] = json.dumps(
+                {'schema': PACK_SCHEMA, 'run': run, 'folder': folder, 'part': number, 'files': files},
+                ensure_ascii=False, indent=0, sort_keys=True).encode('utf-8')
+            for relative, entry in files.items():
+                index[relative] = {'pack': pack, 'bytes': entry['bytes'], 'sha256': entry['sha256']}
+    out[f'{run}/{PACK_FOLDER}/index.json'] = json.dumps(
+        {'schema': PACK_SCHEMA, 'run': run, 'files': dict(sorted(index.items()))}, indent=1).encode()
+    for name in viewer_names(run):
+        out[name] = pack_viewer(run)
+    return out
+
+
+def unpack_run(run, files):
+    """{RUN/folder/...: bytes} restored from a run's pack files (checks every SHA-256)."""
+    restored = {}
+    for name, data in files.items():
+        if name.startswith(run + '/') and is_pack_file(name):
+            pack = json.loads(data)
+            for relative, entry in pack['files'].items():
+                raw = _entry_bytes(entry)
+                if digest(raw) != {'bytes': entry['bytes'], 'sha256': entry['sha256']}:
+                    raise ValueError(f'Pack entry differs from its digest: {name}: {relative}')
+                restored[f'{run}/{relative}'] = raw
+    return restored
+
+
+def packed_run_text(name, data):
+    """Decoded base64 entries of a per-agent pack (UTF-8 entries are screened in the JSON itself)."""
+    if not is_pack_file(name):
+        return b''
+    pack = json.loads(data)
+    return b'\n'.join(_entry_bytes(e) for e in pack['files'].values() if e['encoding'] != 'utf-8')
+
+
+def pack_site(files):
+    """Pack every run's per-agent files. Returns (files, record); refuses any loss of content."""
+    files = dict(files)
+    runs = sorted({run_of(n) for n in files if packable(n)})
+    record = {}
+    for run in runs:
+        originals = {n: files.pop(n) for n in sorted(files) if n.startswith(run + '/') and packable(n)}
+        packed = pack_run(run, originals)
+        existing = {n: files.pop(n) for n in sorted(files)
+                    if n.startswith(f'{run}/{PACK_FOLDER}/') or n in viewer_names(run)}
+        if existing and {n: d for n, d in existing.items() if not n.endswith('.html')} != \
+                {n: d for n, d in packed.items() if not n.endswith('.html')}:
+            raise ValueError(f'{run}: per-agent files differ from the packed ones already on the site')
+        if unpack_run(run, packed) != originals:
+            raise ValueError('Packing would lose content: ' + run)
+        files.update(packed)
+        record[run] = {'packed_files': len(originals), 'pack_files': len(packed)}
+    return files, record
+
+
+def pack_viewer(run):
+    from site_style import themed
+    script = r"""
+const run = document.body.dataset.run, base = '/' + run + '/';
+const list = document.getElementById('list'), view = document.getElementById('view');
+let wanted = '';
+if (location.pathname.startsWith(base)) {
+  const rest = decodeURIComponent(location.pathname.slice(base.length));
+  if (/^(instructions|prompts)\//.test(rest)) wanted = rest;
+}
+const packs = {};
+function pack(name) {
+  if (!packs[name]) packs[name] = fetch(base + 'packed/' + name).then(r => r.json());
+  return packs[name];
+}
+function bytes(e) {
+  if (e.encoding === 'utf-8') return new TextEncoder().encode(e.content);
+  return Uint8Array.from(atob(e.content), c => c.charCodeAt(0));
+}
+async function show(path, index) {
+  const meta = index.files[path];
+  if (!meta) { view.textContent = 'No such file in this run: ' + path; return; }
+  const e = (await pack(meta.pack)).files[path];
+  document.getElementById('name').textContent = path + ' (' + e.bytes + ' bytes, SHA-256 ' + e.sha256 + ')';
+  const pre = document.createElement('pre');
+  let text = e.encoding === 'utf-8' ? e.content : '[binary file: use the download link]';
+  if (path.endsWith('.json')) { try { text = JSON.stringify(JSON.parse(e.content), null, 2); } catch (_) {} }
+  pre.textContent = text;
+  const a = document.createElement('a');
+  a.textContent = 'Download the original file (exact bytes)';
+  a.download = path.split('/').pop();
+  a.href = URL.createObjectURL(new Blob([bytes(e)]));
+  view.replaceChildren(a, pre);
+  document.title = path + ' - ' + run;
+}
+fetch(base + 'packed/index.json').then(r => r.json()).then(index => {
+  for (const path of Object.keys(index.files)) {
+    const li = document.createElement('li'), a = document.createElement('a');
+    a.textContent = path;
+    a.setAttribute('href', base + path.split('/').map(encodeURIComponent).join('/'));
+    li.append(a); list.append(li);
+  }
+  if (wanted) show(wanted, index); else document.getElementById('all').open = true;
+});
+"""
+    safe = html.escape(run, quote=True)
+    body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>Agent instructions and prompts</title>'
+            '<style>body{font:15px/1.5 system-ui,sans-serif;max-width:1100px;margin:24px auto;padding:0 16px;'
+            'background:var(--bg);color:var(--fg)}a{color:var(--link)}pre{white-space:pre-wrap;overflow-wrap:anywhere;'
+            'border:1px solid var(--line, #8884);padding:12px;border-radius:6px}'
+            'details{margin:12px 0}ul{columns:2;font-size:13px}</style></head>'
+            f'<body data-run="{safe}"><p><a href="/{safe}/results.html">Back to the run</a></p>'
+            '<h1>Agent instructions and prompts</h1>'
+            f'<p>{safe}: every agent\'s instruction files and prompt, kept in a few pack files (exact bytes and '
+            'SHA-256 of each original file). The old file links show the file here.</p>'
+            '<h2 id="name"></h2><div id="view"></div><details id="all"><summary>All files</summary>'
+            f'<ul id="list"></ul></details><script>{script}</script></body></html>')
+    return themed(body).encode('utf-8')
+
+
 def site_gate(name, data):
     """The last screen of every deployed file: path rules, host-only and credential file names, Pages special
     files, the credential screen (packed captured files included), no private category, Cloudflare's per-file
@@ -115,7 +298,7 @@ def site_gate(name, data):
     path = safe_path(name)  # no dot-folders, no traversal, no credential file names
     if path.name.lower() in {'.env', 'host.env'} or path.parts[0] == 'functions' or path.name in PAGES_SPECIAL:
         raise ValueError('Pages special or host-only file refused: ' + name)
-    if SECRET.search(data) or SECRET.search(packed_text(name, data)):
+    if SECRET.search(data) or SECRET.search(packed_text(name, data)) or SECRET.search(packed_run_text(name, data)):
         raise ValueError('Credential-like content; deploy refused: ' + name)
     if private_category(name) is not None:
         raise ValueError(f'{name} is private ({private_category(name)}) and is never deployed to the public site')
@@ -408,9 +591,19 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
         elif name not in base_files:
             added.append(name)
         files[name] = data
-    unstaged = sorted(n for n in base_files if run_of(n) in selected and n not in manifest['files'])
+    unstaged = sorted(n for n in base_files if run_of(n) in selected and n not in manifest['files']
+                      and not ((n.startswith(f'{run_of(n)}/{PACK_FOLDER}/') or n in viewer_names(run_of(n)))
+                               and any(packable(m) and run_of(m) == run_of(n) for m in manifest['files'])))
     if unstaged:
         raise ValueError('Site run contains an unstaged file: ' + unstaged[0])
+    for run in sorted(selected):  # a run already packed on the site: its per-agent files are immutable too
+        old = {n: d for n, d in base_files.items() if is_pack_file(n) or n == f'{run}/{PACK_FOLDER}/index.json'
+               if n.startswith(f'{run}/{PACK_FOLDER}/')}
+        originals = {n: d for n, d in files.items() if n.startswith(run + '/') and packable(n)}
+        if old and originals:
+            new = {n: d for n, d in pack_run(run, originals).items() if not n.endswith('.html')}
+            if new != old:
+                raise ValueError('Immutable site run file differs: ' + run + '/' + PACK_FOLDER)
     entries = merge_entries(catalogue(base_files), incoming)
     files.update(render_catalogue(entries, unlisted))
     if 'archive-manifest.json' in base_files:  # the HF-origin run record; new runs are recorded in site-manifest
@@ -474,9 +667,20 @@ def plan_withdraw(base_files, unlisted, runs):
                    'removed_by_run': {r: sum(1 for n in removed if run_of(n) == r) for r in runs}}
 
 
+def plan_repack(base_files):
+    """The site with every run's per-agent files packed (``pack_site``, applied by ``finish``). Nothing else
+    changes: no file of any run other than its instructions/ and prompts/ files (replaced by RUN/packed/), and
+    unpacking reproduces each of them byte for byte."""
+    pending = sorted({run_of(n) for n in base_files if packable(n)})
+    return dict(base_files), {'source': {'kind': 'repack', 'runs': pending}}
+
+
 def finish(files, base_manifest, plan, project=PROJECT):
     """Add the generated pages and the site manifest; gate every file and the deployment limits."""
     files = {n: d for n, d in files.items() if n not in GENERATED}
+    files, packed = pack_site(files)
+    if packed:
+        plan['packed_runs'] = packed
     files[NOT_FOUND] = not_found_page()
     files[PRIVATE_PAGE] = private_page()
     for name, data in files.items():
@@ -487,10 +691,11 @@ def finish(files, base_manifest, plan, project=PROJECT):
     history = list(base_manifest.get('history', []))[-49:]
     history.append({'utc': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
                     **{k: plan[k] for k in ('source',)}})
+    served = files
     manifest = {'schema': SITE_SCHEMA, 'project': project, 'runs': runs,
                 'public': True, 'private_store': None,
-                'files': {n: digest(d) for n, d in sorted(files.items())},
-                'total_bytes': sum(len(d) for d in files.values()), 'history': history}
+                'files': {n: digest(d) for n, d in sorted(served.items())},
+                'total_bytes': sum(len(d) for d in served.values()), 'history': history}
     data = json.dumps(manifest, indent=1).encode()
     files[SITE_MANIFEST] = site_gate(SITE_MANIFEST, data)
     if len(files) > MAX_FILES:
@@ -615,6 +820,16 @@ def verify(base, runs=None, full=False, getter=fetch, head_getter=None):
     check('no_private_logs_served', not probes, ', '.join(probes[:5]))
     status, _, _ = getter(file_url(base, 'no-such-page-' + sha256(base.encode())[:8] + '.html'))
     check('not_found_404', status == 404, f'HTTP {status}')
+    packed = sorted({n.split('/')[0] for n in recorded if is_pack_file(n)})
+    if packed:  # an old per-agent file URL shows the run's pack viewer (its folder's 404.html, URL unchanged)
+        run = packed[0]
+        status, _, data = getter(file_url(base, f'{run}/{PACK_FOLDER}/index.json'))
+        first = next(iter(json.loads(data)['files']), None) if status == 200 else None
+        viewer = recorded.get(f'{run}/{first.split("/")[0]}/{VIEWER_404}') if first else None
+        code, _, body = getter(file_url(base, f'{run}/{first}')) if first else (status, {}, b'')
+        check('packed_old_urls', bool(viewer) and code == 404 and digest(body) == {'bytes': viewer['bytes'],
+                                                                                  'sha256': viewer['sha256']},
+              f'HTTP {code}')
     return {'url': base, 'ok': all(c['ok'] for c in checks), 'checked_files': len(names),
             'site_files': len(recorded) + 1, 'runs': len(runs), 'checks': checks}
 
@@ -679,9 +894,10 @@ def main(argv=None):
     bundle.add_argument('--replace-pages', action='store_true', help='allow the bundle runs\' .html pages to change')
     restyle = sub.add_parser('restyle', help='re-render the layout of published run pages and the catalogue')
     restyle.add_argument('--run', action='append', help='only this run\'s pages (repeatable; default all runs)')
+    repack = sub.add_parser('repack', help='pack every run\'s per-agent instructions and prompts (lossless)')
     withdraw = sub.add_parser('withdraw', help='remove recorded unlisted runs (all their files) from the site')
     withdraw.add_argument('--run', action='append', required=True, help='run to remove (repeatable)')
-    for command in (mirror, bundle, restyle, withdraw):
+    for command in (mirror, bundle, restyle, withdraw, repack):
         command.add_argument('--commit', action='store_true', help='deploy; otherwise only plan')
         command.add_argument('--receipt', type=Path, help='receipt JSON (outside the bundle)')
         command.add_argument('--workdir', type=Path, help='scratch directory for staging (default: a temporary one)')
@@ -723,6 +939,9 @@ def main(argv=None):
         elif args.command == 'restyle':
             files, plan = plan_restyle(base_files, unlisted, args.run)
             message = f'Restyle {len(plan["replaced_pages"])} page(s) and the catalogue'
+        elif args.command == 'repack':
+            files, plan = plan_repack(base_files)
+            message = f'Repack per-agent files of {len(plan["source"]["runs"])} run(s)'
         elif args.command == 'withdraw':
             files, plan = plan_withdraw(base_files, unlisted, args.run)
             message = 'Withdraw ' + ', '.join(plan['source']['runs'])

@@ -31,9 +31,9 @@ kept as they are and work only while that dataset exists.
 
 **Limits.** Cloudflare Pages allows 20,000 files per deployment and 25 MiB per file. The first deployment
 (mirror of Space revision `227e31e9`) has 10,131 files, 860.4 MB, largest 5.5 MB (each run's Inspect View
-`assets/index.js`; Pages stores identical files once). A 100-agent run adds about 400 files, so roughly 24 more
-such runs fit; past that, pack more per run (as for snapshots and captured files) or move to Workers static assets
-on a paid plan (100,000 files). `publish_cloudflare.py` refuses a deployment over either limit.
+`assets/index.js`; Pages stores identical files once). A 100-agent run adds about 100 files once its per-agent files are packed (`repack`, October 30, 2026; before
+that about 400), so roughly 130 more such runs fit; past that, share the Inspect View assets or move to Workers
+static assets on a paid plan (100,000 files). `publish_cloudflare.py` refuses a deployment over either limit.
 
 **Tool: `scripts/publish_cloudflare.py`** (tests: `tests/test_publish_cloudflare.py`). Every subcommand plans
 read-only unless `--commit` is given; there are no approval prompts or extra spending checks (no paid calls).
@@ -57,6 +57,19 @@ read-only unless `--commit` is given; there are no approval prompts or extra spe
   text, links and scripts kept); no file is added or removed and every replacement is recorded. Pages without the
   shared theme (baseline100's legacy `results.html`) are left as served. `mirror-space` copies Space pages over
   Cloudflare ones, so after a mirror run `restyle` again.
+- `repack [--commit] [--receipt FILE]` (October 30, 2026; owner decision after the site reached Pages' 20,000-file
+  limit): every deployment (`finish`) packs each run's per-agent files, `RUN/instructions/` (with `received/`) and
+  `RUN/prompts/` (about 300 files per 100-agent run), into `RUN/packed/<folder>-NN.json` (each file's exact bytes,
+  UTF-8 text or base64, with its SHA-256; parts up to 20 MiB), `RUN/packed/index.json` and a viewer
+  `RUN/packed/index.html`. Unpacking is checked to reproduce every original byte for byte, and the credential screen
+  sees every entry. Old URLs keep working: `RUN/instructions/404.html` and `RUN/prompts/404.html` are the viewer,
+  which Pages serves for any missing file below those folders (HTTP 404, URL unchanged); the viewer shows that file
+  and offers its exact bytes. (Pages' `_redirects` cannot substitute a placeholder into a query string or a 200
+  rewrite, tested on a preview branch, so no `_redirects` is used.) `repack` alone applies this to the runs already
+  on the site and changes nothing else. A bundle for a run already packed must carry the same per-agent files.
+  `verify` checks that an old per-agent URL serves the viewer (`packed_old_urls`). The Inspect View assets
+  (26 files per run) stay per run: sharing them would mean rewriting each run's Inspect View page and its relative
+  asset paths, and packing alone brings the site from 19,736 to about 6,600 files.
 - `withdraw --run RUN [--run RUN ...] [--commit] [--receipt FILE]` (October 30, 2026): take runs off the site
   (owner decision, for example failed runs). Each run must first be recorded in the tracked
   `data/library-unlisted.json` (run, date, reason); every file of each run is removed and the catalogue is

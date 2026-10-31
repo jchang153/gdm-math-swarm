@@ -197,6 +197,90 @@ class FinishTests(unittest.TestCase):
             cf.finish({**site(RUN), f'{RUN}/x.jsonl': b'{}'}, {}, {'source': {}})
 
 
+def agent_files(run, variant=b''):
+    return {f'{run}/instructions/agent-001-aa.json': b'{"text": "caf\xc3\xa9"}' + variant,
+            f'{run}/instructions/received/agent-001-bb.json': b'{"n": 1}',
+            f'{run}/prompts/agent-001.txt': b'You are agent-001.\n',
+            f'{run}/prompts/agent-002.txt': b'\xff\xfe binary \x00'}
+
+
+class PackTests(unittest.TestCase):
+    def test_pack_is_lossless_and_keeps_old_urls(self):
+        files = {**site(RUN, OTHER), **agent_files(RUN), **agent_files(OTHER)}
+        out, manifest = cf.finish(files, {}, {'source': {'kind': 'test'}})
+        self.assertFalse([n for n in out if cf.packable(n)])
+        for run in (RUN, OTHER):
+            self.assertEqual(cf.unpack_run(run, out), agent_files(run))
+            for name in (f'{run}/packed/index.html', f'{run}/instructions/404.html', f'{run}/prompts/404.html'):
+                self.assertIn(f'data-run="{run}"'.encode(), out[name])
+            index = json.loads(out[f'{run}/packed/index.json'])['files']
+            self.assertEqual(set(index), {n[len(run) + 1:] for n in agent_files(run)})
+        self.assertNotIn('_redirects', out)
+        self.assertEqual(set(manifest['files']), set(out) - {cf.SITE_MANIFEST})
+        for name in site(RUN, OTHER):  # nothing else changes
+            if name not in ('index.html', 'experiments.json'):
+                self.assertEqual(out[name], files[name])
+        again, _ = cf.finish({n: d for n, d in out.items() if n != cf.SITE_MANIFEST}, {}, {'source': {}})
+        self.assertEqual({n: d for n, d in again.items() if n != cf.SITE_MANIFEST},
+                         {n: d for n, d in out.items() if n != cf.SITE_MANIFEST})  # repack is idempotent
+        with patch.object(cf, 'PACK_PART_BYTES', 10):
+            parts, _ = cf.finish(files, {}, {'source': {}})
+            self.assertGreater(sum(cf.is_pack_file(n) for n in parts), 4)
+            self.assertEqual(cf.unpack_run(RUN, parts), agent_files(RUN))
+
+    def test_gate_and_tampering(self):
+        with self.assertRaises(ValueError):
+            cf.site_gate('_redirects', b'/* https://evil.example 302\n')
+        out, _ = cf.finish({**site(RUN), **agent_files(RUN)}, {}, {'source': {}})
+        name = next(n for n in out if cf.is_pack_file(n))
+        pack = json.loads(out[name])
+        first = next(iter(pack['files']))
+        pack['files'][first]['content'] += 'x'
+        with self.assertRaises(ValueError):
+            cf.unpack_run(RUN, {name: json.dumps(pack).encode()})
+        secret = {f'{RUN}/prompts/agent-009.txt': b'\xff' + b'hf_' + b'A' * 34}
+        with patch.object(cf, 'SECRET', __import__('re').compile(rb'hf_[A-Za-z]{30,}')), \
+                self.assertRaises(ValueError):
+            cf.finish({**site(RUN), **secret}, {}, {'source': {}})
+
+    @patch.object(cf, 'render_catalogue', side_effect=fake_catalogue)
+    def test_bundle_against_packed_site(self, _):
+        base, _ = cf.finish({**site(RUN), **agent_files(RUN)}, {}, {'source': {}})
+        base = {n: d for n, d in base.items() if n not in cf.GENERATED}
+        with tempfile.TemporaryDirectory() as tmp:
+            root, loaded = BundleTests.bundle(None, tmp, {**{n: d for n, d in site(RUN).items() if '/' in n},
+                                                          **agent_files(RUN)})
+            loaded = (loaded[0], json.loads(site(RUN)['experiments.json'])['experiments'])
+            with patch.object(cf, 'load_bundle', return_value=loaded):
+                files, _ = cf.plan_bundle(base, root, unlisted=(), replace_pages=True)
+            out, _ = cf.finish(files, {}, {'source': {}})
+            self.assertEqual(cf.unpack_run(RUN, out), agent_files(RUN))
+        with tempfile.TemporaryDirectory() as tmp:
+            root, loaded = BundleTests.bundle(None, tmp, {**{n: d for n, d in site(RUN).items() if '/' in n},
+                                                          **agent_files(RUN, b' ')})
+            loaded = (loaded[0], json.loads(site(RUN)['experiments.json'])['experiments'])
+            with patch.object(cf, 'load_bundle', return_value=loaded), self.assertRaises(ValueError):
+                cf.plan_bundle(base, root, unlisted=(), replace_pages=True)
+
+    def test_verify_checks_old_urls(self):
+        files, _ = cf.finish({**LoadAndVerifyTests.site(None), **agent_files(RUN)}, {}, {'source': {}})
+        viewer = files[f'{RUN}/instructions/404.html']
+
+        def pages(missing_body):
+            served = Served(files)
+
+            def get(url):
+                status, headers, body = served(url)
+                if status == 404 and f'{RUN}/instructions/' in url:
+                    return 404, {'Content-Type': 'text/html'}, missing_body
+                return status, headers, body
+            return get
+        result = cf.verify('https://d.p.pages.dev', getter=pages(viewer))
+        self.assertTrue(result['ok'], result)
+        result = cf.verify('https://d.p.pages.dev', getter=pages(b'not found'))
+        self.assertEqual({c['check'] for c in result['checks'] if not c['ok']}, {'packed_old_urls'})
+
+
 class FakeWrangler:
     def __init__(self, before, after):
         self.lists = [before, after]

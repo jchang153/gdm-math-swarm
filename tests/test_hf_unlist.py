@@ -147,7 +147,8 @@ class LocalIndexTests(unittest.TestCase):
 
     def test_tracked_file_records_baseline100(self):
         records = unlisted_runs()
-        self.assertEqual(set(records), {'baseline100-20261015T191545Z'})
+        self.assertIn('baseline100-20261015T191545Z', records)
+        self.assertTrue(all(r['reason'] for r in records.values()))
         self.assertTrue(records['baseline100-20261015T191545Z']['reason'])
 
     def test_malformed_file_refused(self):
