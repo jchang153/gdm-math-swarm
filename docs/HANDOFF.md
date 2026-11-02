@@ -887,7 +887,7 @@ is being merged into main via `collab-env`.
    viewer, W5 validation against the November 2 hand labels of first-fake sources (4 runs, 218 fakers; kept in
    the session scratchpad, to be copied into private/ by the integrator). Approved pilot: the 1-overseer run r2
    (`glmflash100-seeded-1ov-glm-180m-notices-r2-20261028T194542Z`), $50 run budget, Haiku 5.5 / Sonnet 5.5 /
-   GPT-5.6 Terra cross-check. Not yet run; no paid calls so far.
+   GPT-5.6 Terra cross-check. Then the other three heatmap runs (control r3, 2ov r3, 10ov r3), $50 run budget each (owner, Nov 2). Not yet run; no paid calls so far.
 
 ## Next steps / open items
 

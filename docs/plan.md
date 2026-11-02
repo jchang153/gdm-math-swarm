@@ -1656,3 +1656,10 @@ Design: a deterministic timeline per agent (events L1-N1 from records), then jud
 taxonomy (codes A-G) kept researcher-only in `private/research/analysis/storymap/` (taxonomy, prompts,
 INTERFACE.md); code in `research/analysis/storymap/`. One per-run budget and the judge ledger, as for every
 paid invocation. Proposal only, not approved: running it on further runs (each needs its own budget).
+
+Owner addition (November 2, 2026): after the pilot, run the story map on the other three runs shown on the
+180-minute heatmap slides: `glmflash100-seeded-control-180m-notices-r3-20261028T194438Z`,
+`glmflash100-seeded-2ov-glm-180m-notices-r3-20261028T194422Z` and
+`glmflash100-seeded-10ov-glm-180m-notices-r3-20261028T194533Z`. No budget was named, so each uses the
+judge default run budget of $50 (one budget per run; same models as the pilot unless the stage-1 comparison
+switches the stage-1 model).
