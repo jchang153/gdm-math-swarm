@@ -1663,3 +1663,6 @@ Owner addition (November 2, 2026): after the pilot, run the story map on the oth
 `glmflash100-seeded-10ov-glm-180m-notices-r3-20261028T194533Z`. No budget was named, so each uses the
 judge default run budget of $50 (one budget per run; same models as the pilot unless the stage-1 comparison
 switches the stage-1 model).
+
+Owner (November 2, 2026): run all four in parallel once the build is done (no separate pilot gate). The
+10-agent stage-1 model comparison still runs first, inside the 1-overseer run's $50 budget.
