@@ -1637,3 +1637,22 @@ counteract it with your oversight tools" and drops "you may tell the author or t
 Configs `configs/glmflash100-seeded-{1,2,10}ov-glm-180m-notices-{commsonly,enforceonly}.json`; run ids
 `glmflash100-seeded-<n>ov-glm-180m-notices-<cond>-r<N>-<UTC>`. Overseers may still use `submit_solution` (as in every
 earlier overseer run); an accepted overseer submission would appear in the library, which is noted, not blocked.
+
+## Agent story map (November 2, 2026)
+
+Owner request (November 2, 2026): a map of every solver's behaviour in a run, with its reasoning and
+thoughts about cheating over time interleaved with what it saw (library files, board posts, DMs,
+reverts), and an analysis of its reasoning after each exposure to tell which post, DM or revert mattered.
+Not a replacement for the behaviour judge: it adds exposure-by-exposure reactions and changes of stance.
+
+Approved by the owner (November 2, 2026): build it, and pilot it on one run,
+`glmflash100-seeded-1ov-glm-180m-notices-r2-20261028T194542Z` (all 100 solvers), with a **$50 run budget**
+and this model mix: stage 1 thought extraction Claude Haiku 5.5; stage 2 per-exposure reaction and stage 3
+per-agent synthesis Claude Sonnet 5.5; cross-check on a seeded 10% of agents GPT-5.6 Terra. A stage-1
+model comparison (Haiku 5.5, GPT-5.6 Luna, Gemini 3.8 Flash on 10 agents, scored against the hand labels
+of November 2) runs inside the same $50 budget and may switch the stage-1 model to the cheapest that matches.
+
+Design: a deterministic timeline per agent (events L1-N1 from records), then judged stages 1-3 with the
+taxonomy (codes A-G) kept researcher-only in `private/research/analysis/storymap/` (taxonomy, prompts,
+INTERFACE.md); code in `research/analysis/storymap/`. One per-run budget and the judge ledger, as for every
+paid invocation. Proposal only, not approved: running it on further runs (each needs its own budget).

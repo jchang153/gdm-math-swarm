@@ -879,6 +879,16 @@ is being merged into main via `collab-env`.
      | 10ov-enforceonly | 53.66 | 677.0/15.7 | 82.7 | 646.7 | 570.0 | 581.3 | 0.0 | 0.0 (+35.3) | 89.7 | 48 | |
      Total settled $1062.64
 
+19. **IN PROGRESS 2026-11-02 (build started ~15:45 PT): agent story map** (docs/plan.md, "Agent story map
+   (November 2, 2026)"). Per-solver map of reasoning about cheating interleaved with library reads, board posts,
+   DMs and reverts, and the reaction to each. Five parallel workstreams against
+   `private/research/analysis/storymap/INTERFACE.md`: W1 timeline extractor, W2 taxonomy/prompts/schemas
+   (private) + `schema.py`, W3 judge pipeline (reuses `research/analysis/judge/` client, routes, ledger), W4 HTML
+   viewer, W5 validation against the November 2 hand labels of first-fake sources (4 runs, 218 fakers; kept in
+   the session scratchpad, to be copied into private/ by the integrator). Approved pilot: the 1-overseer run r2
+   (`glmflash100-seeded-1ov-glm-180m-notices-r2-20261028T194542Z`), $50 run budget, Haiku 5.5 / Sonnet 5.5 /
+   GPT-5.6 Terra cross-check. Not yet run; no paid calls so far.
+
 ## Next steps / open items
 
 - **VM HF upload token (item 16):** confirmed working on the owner's first VM (item 17). `vm_hf_setup.py` failed on
