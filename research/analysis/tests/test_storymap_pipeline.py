@@ -129,7 +129,7 @@ class PipelineTests(unittest.TestCase):
         record = json.loads((self.out / "pipeline.json").read_text())
         self.assertEqual(record["models"]["stage1"]["model_id"], "anthropic/claude-haiku-5.5")
         self.assertEqual(record["models"]["stage2"]["model_id"], "openai/gpt-6.1-terra")
-        self.assertEqual(record["models"]["stage3"]["model_id"], "openai/gpt-6.1-terra")
+        self.assertEqual(record["models"]["stage3"]["model_id"], "openai/gpt-6.1-sol")
         self.assertEqual(record["crosscheck"]["model"], "google/gemini-3.8-flash")
         self.assertEqual(len(record["crosscheck"]["agents"]), 1)
         for stage in ("stage1", "stage2", "stage3"):
@@ -152,7 +152,8 @@ class PipelineTests(unittest.TestCase):
                 expected = "google-ai-studio" if body["model"].startswith("google/") else "openai"
                 self.assertEqual(body["provider"]["only"], [expected])
         models = {r["body"]["model"] for r in transport.requests}
-        self.assertEqual(models, {"anthropic/claude-haiku-5.5", "openai/gpt-6.1-terra", "google/gemini-3.8-flash"})
+        self.assertEqual(models, {"anthropic/claude-haiku-5.5", "openai/gpt-6.1-terra", "openai/gpt-6.1-sol",
+                                  "google/gemini-3.8-flash"})
         # Stage-1 system prompts are identical across requests (cacheable prefix).
         stage1 = {json.dumps(r["body"]["messages"][0]) for r in transport.requests
                   if unit_header(r["body"]["messages"][1]["content"]).get("stage") == 1
@@ -208,7 +209,8 @@ class PipelineTests(unittest.TestCase):
             user = request["body"]["messages"][1]["content"]
             if unit_header(user).get("stage") == 1:
                 obj = reply(user)
-                obj["state"]["summary"] = "s" * 900   # over the cap: soft (truncated), not a failed unit
+                for thought in obj["thoughts"]:
+                    thought["quote"] = "a paraphrase that is nowhere in the item"   # soft: one repair is asked
                 return fake_completion(json.dumps(obj), model=request["body"]["model"], provider="Anthropic")
             return MockStorymapModel()(request)
         code, _, err = self.run_cli("--agents", "agent-001", "--crosscheck-model", "none",
@@ -216,8 +218,62 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         row = self.rows("stage1/agent-001.jsonl")[0]
         self.assertEqual(row["status"], "ok")
-        self.assertEqual(row["reason"], "repaired")   # one repair asked; its output is valid, checks kept
-        self.assertTrue(any("state.summary" in p for p in row["check_problems"]))
+        self.assertIn(row["reason"], ("repaired", "first_kept_repair_invalid"))
+        self.assertTrue(any("verbatim" in p for p in row["check_problems"]))
+
+    def test_over_length_summary_is_truncated_not_repaired(self):
+        sent = []
+
+        def responder(request):
+            user = request["body"]["messages"][1]["content"]
+            if unit_header(user).get("stage") == 1:
+                sent.append(user)
+                obj = reply(user)
+                obj["state"]["summary"] = "s" * 900   # over the 600-character cap
+                return fake_completion(json.dumps(obj), model=request["body"]["model"], provider="Anthropic")
+            return MockStorymapModel()(request)
+        code, _, err = self.run_cli("--agents", "agent-001", "--crosscheck-model", "none",
+                                    transport=FakeTransport(responder=responder))
+        self.assertEqual(code, 0, err)
+        rows = self.rows("stage1/agent-001.jsonl")
+        self.assertFalse(any("PREVIOUS REPLY" in u for u in sent))      # no paid repair
+        self.assertEqual(len(sent), len(rows))                           # one request per chunk
+        for row in rows:
+            self.assertEqual((row["status"], row["reason"], row["check_problems"]), ("ok", None, []))
+            self.assertTrue(row["summary_truncated"])
+            self.assertEqual(row["state"]["summary"], "s" * 600)
+        unit = json.loads((self.out / rows[0]["unit"]).read_text())
+        self.assertEqual(unit["truncations"], [{"field": "state.summary", "from_chars": 900, "to_chars": 600}])
+        self.assertEqual([s["kind"] for s in unit["steps"]], ["initial"])
+
+    def test_pending_unit_with_over_length_summary_resumes_without_a_request(self):
+        """A unit left after its first reply (old rule: the summary would have needed a repair) finishes from the
+        saved reply on resume: same content-addressed key, nothing sent."""
+        def long_summary(request):
+            user = request["body"]["messages"][1]["content"]
+            if unit_header(user).get("stage") == 1:
+                obj = reply(user)
+                obj["state"]["summary"] = "s" * 700
+                return fake_completion(json.dumps(obj), model=request["body"]["model"], provider="Anthropic")
+            return MockStorymapModel()(request)
+        code, _, err = self.run_cli("--agents", "agent-001", "--crosscheck-model", "none",
+                                    transport=FakeTransport(responder=long_summary))
+        self.assertEqual(code, 0, err)
+        units = sorted((self.out / "units" / "stage1" / "agent-001").glob("c*.json"))
+        self.assertTrue(units)
+        for path in units:    # rewind each stage-1 unit to "first reply saved, outcome pending"
+            unit = json.loads(path.read_text())
+            for key in ("result", "reason", "problems", "check_problems", "completed_at", "truncations"):
+                unit.pop(key, None)
+            unit["status"] = "pending"
+            path.write_text(json.dumps(unit))
+        again = FakeTransport(responder=MockStorymapModel())
+        code, _, err = self.run_cli("--agents", "agent-001", "--crosscheck-model", "none", transport=again)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(again.requests, [])
+        self.assertEqual(sorted((self.out / "units" / "stage1" / "agent-001").glob("c*.json")), units)
+        self.assertTrue(all(r["summary_truncated"] and r["status"] == "ok"
+                            for r in self.rows("stage1/agent-001.jsonl")))
 
     def test_refusal_is_unresolved_never_empty(self):
         def responder(request):

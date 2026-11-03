@@ -107,11 +107,14 @@ class Stage1Tests(unittest.TestCase):
         obj = stage1_ok()
         obj["thoughts"][0]["quote"] = "we get P <-> P by Iff.rfl"      # paraphrase
         obj["state"]["summary"] = "s" * 700
-        soft = []
-        out = schema.validate_stage1(obj, codes=CODES, items=ITEMS, soft=soft)
+        soft, truncated = [], []
+        out = schema.validate_stage1(obj, codes=CODES, items=ITEMS, soft=soft, truncated=truncated)
         self.assertTrue(any("verbatim" in p for p in soft))
-        self.assertTrue(any("state.summary" in p and "at most" in p for p in soft))
-        self.assertEqual(len(out["state"]["summary"]), schema.SUMMARY_MAX_CHARS)   # truncated
+        # Over-length summary: truncated and recorded, not a problem (no paid repair).
+        self.assertFalse(any("state.summary" in p for p in soft))
+        self.assertEqual(out["state"]["summary"], "s" * schema.SUMMARY_MAX_CHARS)
+        self.assertEqual(truncated, [{"field": "state.summary", "from_chars": 700,
+                                      "to_chars": schema.SUMMARY_MAX_CHARS}])
         obj["state"]["stance"] = "bogus"                                  # shape problems stay hard
         with self.assertRaises(schema.SchemaError):
             schema.validate_stage1(obj, codes=CODES, items=ITEMS, soft=[])
@@ -139,8 +142,25 @@ class Stage1Tests(unittest.TestCase):
         obj = stage1_ok()
         obj["state"].update(stance="thinking", believes_judge="maybe", summary="s" * 601, has_trick="yes")
         found = problems(schema.validate_stage1, obj, codes=CODES)
-        for key in ("state.stance", "state.believes_judge", "state.summary", "state.has_trick"):
+        for key in ("state.stance", "state.believes_judge", "state.has_trick"):
             self.assertTrue(any(p.startswith(key) for p in found), key)
+        self.assertFalse(any(p.startswith("state.summary") for p in found))   # over-length is truncated, never a problem
+
+    def test_summary_truncation_strict_mode_and_empty(self):
+        obj = stage1_ok()
+        obj["state"]["summary"] = "x" * 601
+        warnings, truncated = [], []
+        out = schema.validate_stage1(obj, codes=CODES, items=ITEMS, warnings=warnings, truncated=truncated)
+        self.assertEqual(out["state"]["summary"], "x" * 600)
+        self.assertEqual(truncated[0]["from_chars"], 601)
+        self.assertTrue(any("state.summary" in w and "truncated" in w for w in warnings))
+        obj["state"]["summary"] = "x" * 600                                   # at the cap: untouched
+        truncated = []
+        schema.validate_stage1(obj, codes=CODES, items=ITEMS, truncated=truncated)
+        self.assertEqual(truncated, [])
+        obj["state"]["summary"] = ""                                          # empty: still a problem
+        self.assertTrue(any(p.startswith("state.summary") for p in problems(schema.validate_stage1, obj,
+                                                                            codes=CODES)))
 
     def test_missing_keys_and_types(self):
         obj = stage1_ok()

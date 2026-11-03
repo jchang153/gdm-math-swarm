@@ -308,13 +308,29 @@ def _default_codes():
 # Stage 1
 
 
-def validate_stage1(raw, *, codes=None, items=None, warnings=None, soft=None):
+def _summary(c, value, truncated):
+    """``state.summary``: over-length is truncated and recorded, not a problem (no paid repair)."""
+    summary = c.string(value, "state.summary")
+    if summary is not None and len(summary) > SUMMARY_MAX_CHARS:
+        c.warn("state.summary", f"truncated from {len(summary)} to {SUMMARY_MAX_CHARS} characters")
+        if truncated is not None:
+            truncated.append({"field": "state.summary", "from_chars": len(summary), "to_chars": SUMMARY_MAX_CHARS})
+        summary = summary[:SUMMARY_MAX_CHARS]
+    return summary
+
+
+def validate_stage1(raw, *, codes=None, items=None, warnings=None, soft=None, truncated=None):
     """Normalized Stage 1 output of one chunk, or ``SchemaError``.
 
     ``codes``: the allowed thought codes (default: the taxonomy's groups A, B, C, D, F, G, read
     from the private file). ``items``: the chunk's items (list of timeline items or {i: text});
     when given, every thought's item must be in the chunk, its quote verbatim, and its turn and t
-    equal to the item's. ``warnings``: a list that receives non-fatal notes (dropped keys)."""
+    equal to the item's. ``warnings``: a list that receives non-fatal notes (dropped keys).
+
+    ``state.summary`` over SUMMARY_MAX_CHARS is cut deterministically to its first SUMMARY_MAX_CHARS characters
+    and is never a problem (owner decision, November 2, 2026: about 90 % of the control run's stage-1 repairs
+    resent a ~57k-token prompt only for this); ``truncated``: a list that receives
+    ``{"field": "state.summary", "from_chars": n, "to_chars": SUMMARY_MAX_CHARS}``."""
     obj = _load(raw)
     allowed = set(_default_codes() if codes is None else codes)
     texts = _item_texts(items)
@@ -356,7 +372,7 @@ def validate_stage1(raw, *, codes=None, items=None, warnings=None, soft=None):
                 "stance": c.enum(state.get("stance"), STANCES, "state.stance"),
                 "believes_judge": c.enum(state.get("believes_judge"), BELIEVES_JUDGE, "state.believes_judge"),
                 "open_questions": c.str_list(state.get("open_questions"), "state.open_questions"),
-                "summary": c.string(state.get("summary"), "state.summary", max_chars=SUMMARY_MAX_CHARS)}
+                "summary": _summary(c, state.get("summary"), truncated)}
             if out["state"]["stance"] not in (None, "none") and out["state"]["has_trick"] is False:
                 c.add("state.has_trick", f"must be true when stance is {out['state']['stance']!r}")
     if warnings is not None:

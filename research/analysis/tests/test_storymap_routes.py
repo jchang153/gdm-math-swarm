@@ -28,6 +28,9 @@ PRICES = {
     "openai/gpt-6.1-terra": ("openai/gpt-6.1-terra-20261026",
                              ("0.000001", "0.000005", "0.00000005", "0.00000125"),
                              ("0.000002", "0.0000075", "0.0000001", "0.0000025")),
+    "openai/gpt-6.1-sol": ("openai/gpt-6.1-sol-20260929",
+                           ("0.000002", "0.00001", "0.0000001", "0.0000025"),
+                           ("0.000004", "0.000015", "0.0000002", "0.000005")),
     "openai/gpt-5.6-terra": ("openai/gpt-5.6-terra-20260709",
                              ("0.000002", "0.000012", "0.0000002", "0.0000025"),
                              ("0.000004", "0.000018", "0.0000004", "0.000005")),
@@ -81,14 +84,14 @@ class DefaultModelTests(unittest.TestCase):
     def test_stage_defaults(self):
         self.assertEqual(pipeline.DEFAULT_MODELS, {"stage1": "anthropic/claude-haiku-5.5",
                                                    "stage2": "openai/gpt-6.1-terra",
-                                                   "stage3": "openai/gpt-6.1-terra"})
+                                                   "stage3": "openai/gpt-6.1-sol"})
         self.assertEqual(pipeline.DEFAULT_CROSSCHECK_MODEL, "google/gemini-3.8-flash")
         for model in (*pipeline.DEFAULT_MODELS.values(), pipeline.DEFAULT_CROSSCHECK_MODEL):
             self.assertEqual(pm.check_model(model), model)
 
     def test_both_terra_routes_are_known(self):
-        # 6.1 is the default; 5.6 stays so the four earlier maps' pipeline.json records still price and resume.
-        for model_id in ("openai/gpt-6.1-terra", "openai/gpt-5.6-terra"):
+        # 6.1 Terra (stage 2) and 6.1 Sol (stage 3) are the defaults; 5.6 Terra stays so the four earlier maps' pipeline.json records still price and resume.
+        for model_id in ("openai/gpt-6.1-terra", "openai/gpt-6.1-sol", "openai/gpt-5.6-terra"):
             self.assertIn(model_id, pm.KNOWN_MODELS)
             spec = pm.EXTRA_SPECS[model_id]
             self.assertEqual((spec.model_id, spec.provider_tag, spec.provider_name, spec.effort),
@@ -106,7 +109,7 @@ class TerraRouteTests(unittest.TestCase):
 
     def freeze(self):
         fetcher, calls = public_catalog(list(PRICES))
-        path, record = pm.freeze_extra_routes(self.dir, ["openai/gpt-6.1-terra", "openai/gpt-5.6-terra"],
+        path, record = pm.freeze_extra_routes(self.dir, list(PRICES),
                                               fetcher=fetcher, now=NOW)
         return path, record, calls
 
@@ -131,6 +134,19 @@ class TerraRouteTests(unittest.TestCase):
         self.assertFalse(prefs["allow_fallbacks"])
         self.assertTrue(settings.pricing_verified)
         self.assertFalse(settings.prompt_cache)
+
+    def test_sol_route_resolves_with_frozen_prices(self):
+        path, record, _ = self.freeze()
+        self.assertTrue(record["models"]["openai/gpt-6.1-sol"]["valid"])
+        settings = pm.StorymapRouteSettings.from_record(path, ["openai/gpt-6.1-sol"], now=NOW)
+        route = settings.route("gpt-6.1-sol")
+        self.assertEqual((route.model_id, route.canonical_slug, route.effort, route.context_length),
+                         ("openai/gpt-6.1-sol", "openai/gpt-6.1-sol-20260929", "medium", 1050000))
+        self.assertEqual([(t.min_prompt_tokens, t.prompt, t.completion, t.cache_read, t.cache_write)
+                          for t in route.tiers],
+                         [(0, "0.000002", "0.00001", "0.0000001", None),
+                          (272000, "0.000004", "0.000015", "0.0000002", None)])
+        self.assertEqual(settings.provider_preferences("gpt-6.1-sol")["only"], ["openai"])
 
     def test_record_prices_stay_frozen(self):
         path, _, _ = self.freeze()

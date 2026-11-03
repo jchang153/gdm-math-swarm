@@ -32,7 +32,10 @@ Every reply is parsed as JSON and validated by ``storymap/schema.py`` (W2; impor
 (unparseable, failing the schema, or truncated at ``max_tokens``) gets exactly one repair request naming the
 problems; if the repair is malformed too the unit is recorded as failed (``status`` ``invalid``) and nothing is
 filled in. Code checks (quotes verbatim from the items shown, item numbers in range, event and agent ids) are
-soft: named in the repair, and kept as ``check_problems`` on an otherwise valid output. Refusals and API
+soft: named in the repair, and kept as ``check_problems`` on an otherwise valid output. A stage-1 ``state.summary``
+over its 600-character cap is not a problem: it is cut to its first 600 characters (``schema.validate_stage1``),
+recorded on the unit (``truncations``) and the stage-1 row (``summary_truncated``), and never asks for a repair
+(November 2, 2026; it caused most stage-1 repairs, each resending the whole prompt). Refusals and API
 failures are recorded as failed units with their reason (never a negative).
 
 Spending (AGENTS.md; docs/plan.md, "One per-run budget, no manual approvals (October 20, 2026)"): every request
@@ -80,10 +83,11 @@ ROOT = Path(__file__).resolve().parents[3]
 SCHEMA = "gdm-storymap-pipeline/1"
 UNIT_SCHEMA = "gdm-storymap-unit/1"
 PREFIX_NORMALIZATION = "storymap-prefix-v1"
-# November 2, 2026 (owner decision): stages 2-3 on GPT-6.1 Terra (Sonnet 5.5 was refused by Anthropic's filter;
-# the four existing maps ran on GPT-5.6 Terra and are kept), cross-check on Gemini 3.8 Flash.
+# November 2, 2026 (owner decision, "best value" from the model survey): stage 1 Haiku 5.5, stage 2 GPT-6.1 Terra
+# (medium), stage 3 GPT-6.1 Sol, cross-check Gemini 3.8 Flash. Sonnet 5.5 was refused by Anthropic's filter; the
+# four existing maps ran stages 2-3 on GPT-5.6 Terra and are kept.
 DEFAULT_MODELS = {"stage1": "anthropic/claude-haiku-5.5", "stage2": "openai/gpt-6.1-terra",
-                  "stage3": "openai/gpt-6.1-terra"}
+                  "stage3": "openai/gpt-6.1-sol"}
 DEFAULT_CROSSCHECK_MODEL = "google/gemini-3.8-flash"
 DEFAULT_CROSSCHECK_FRACTION = 0.1
 DEFAULT_CROSSCHECK_SEED = 20261102
@@ -181,13 +185,20 @@ class SchemaAdapter:
         """(normalized output or None, hard problems, soft problems). Soft problems are the schema's record
         checks (quotes verbatim, item turn/t, cited event ids, length caps): named in the one repair, and kept
         as ``check_problems`` on an otherwise valid output."""
+        return self.validate_noted(stage, raw, **context)[:3]
+
+    def validate_noted(self, stage, raw, **context):
+        """``validate`` plus the deterministic truncations made instead of a repair (stage 1 ``state.summary``):
+        (output or None, hard, soft, truncated)."""
         fn = getattr(self.module, f"validate_stage{stage}")
-        soft = []
+        soft, truncated = [], []
+        if stage == 1:
+            context = {**context, "truncated": truncated}
         try:
-            return fn(raw, soft=soft, **context), [], soft
+            return fn(raw, soft=soft, **context), [], soft, truncated
         except Exception as error:   # SchemaError carries repair-ready problems
             problems = getattr(error, "problems", None)
-            return None, [str(p) for p in problems] if problems else [f"{type(error).__name__}: {error}"], []
+            return None, [str(p) for p in problems] if problems else [f"{type(error).__name__}: {error}"], [], []
 
 
 def load_schema_module():
@@ -463,37 +474,39 @@ class StoryMap:
             return unit
 
         def evaluate(done):
-            """(result, hard problems, soft problems, checks)."""
+            """(result, hard problems, soft problems, checks, truncations). Truncations (stage 1 ``state.summary``
+            over its cap) are applied deterministically and recorded; they never ask for a repair."""
             if _truncated(done):
-                return None, [output_limit_problem(max_tokens)], [], None
+                return None, [output_limit_problem(max_tokens)], [], None, []
             if not str(done.get("text") or "").strip():
-                return None, ["empty reply: return the JSON object"], [], None
-            obj, hard, soft = self.schema.validate(stage, done.get("text"), **(context or {}))
+                return None, ["empty reply: return the JSON object"], [], None, []
+            obj, hard, soft, cut = self.schema.validate_noted(stage, done.get("text"), **(context or {}))
             if hard:
-                return None, hard, [], None
+                return None, hard, [], None, []
             extra, checks = parse(obj) if parse is not None else ([], None)
-            return obj, [], soft + list(extra), checks
+            return obj, [], soft + list(extra), checks, cut
 
         first = await step("initial", user)
         if first.get("status") != "ok" and not _truncated(first):
             return finish(first.get("status") or "grading_failed", (first.get("error") or {}).get("reason"))
-        result, hard, soft, checks = evaluate(first)
+        result, hard, soft, checks, cut = evaluate(first)
         if not hard and not soft:
-            return finish("ok", None, result, checks=checks)
+            return finish("ok", None, result, checks=checks, truncations=cut)
         first_valid = not hard
         second = await step("repair", repair_user(user, first.get("text"), hard + soft))
         if second.get("status") != "ok" and not _truncated(second):
             reason = (second.get("error") or {}).get("reason")
             if first_valid:
                 return finish("ok", "first_kept_repair_failed", result, check_problems=soft, checks=checks,
-                              first_problems=hard + soft, repair_reason=reason)
+                              first_problems=hard + soft, repair_reason=reason, truncations=cut)
             return finish("invalid", f"repair_{second.get('status')}:{reason}", None, hard, first_problems=hard)
-        result2, hard2, soft2, checks2 = evaluate(second)
+        result2, hard2, soft2, checks2, cut2 = evaluate(second)
         if not hard2:
-            return finish("ok", "repaired", result2, check_problems=soft2, checks=checks2, first_problems=hard + soft)
+            return finish("ok", "repaired", result2, check_problems=soft2, checks=checks2, first_problems=hard + soft,
+                          truncations=cut2)
         if first_valid:
             return finish("ok", "first_kept_repair_invalid", result, check_problems=soft, checks=checks,
-                          first_problems=hard + soft, repair_problems=hard2)
+                          first_problems=hard + soft, repair_problems=hard2, truncations=cut)
         return finish("invalid", "malformed_after_repair", None, hard2, first_problems=hard)
 
     # -- stage rows -------------------------------------------------------------
@@ -538,7 +551,9 @@ class StoryMap:
                 root / "units" / "stage1" / agent, f"c{chunk['chunk']:03d}", model_id, system, user)[0])}
             if unit["status"] == "ok":
                 result = unit["result"]
-                row.update(thoughts=result.get("thoughts"), state=result.get("state"))
+                row.update(thoughts=result.get("thoughts"), state=result.get("state"),
+                           summary_truncated=any(t.get("field") == "state.summary"
+                                                 for t in unit.get("truncations") or ()))
                 state, gap = result.get("state"), False
             else:
                 row.update(thoughts=None, state=None)

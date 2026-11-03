@@ -911,6 +911,10 @@ is being merged into main via `collab-env`.
      3.8 Flash unchanged. The validation page drops the comparison with the Nov 2 model-made source labels (not
      ground truth); it keeps the record-consistency checks and reports the Gemini cross-check as model agreement
      only.
+   - **Best value (owner, Nov 2, docs/plan.md), code defaults now:** stage 1 Haiku 5.5, stage 2 GPT-6.1 Terra
+     medium, stage 3 GPT-6.1 Sol (`openai/gpt-6.1-sol`, $2/$10 per M), cross-check Gemini 3.8 Flash; a stage-1
+     `state.summary` over 600 characters is truncated and flagged (`summary_truncated`) instead of a paid repair
+     (926 of 1,037 control-r3 stage-1 units were repaired, mostly for this); existing units still resume as is.
    - **Published 2026-11-02 (owner "please publish"; docs/plan.md "Story maps on the public site"):** v3 interface,
      rendered with `--taxonomy ''` into the session scratchpad (never over `runs/`). 104 files per run (index, events,
      validation.html/.md, 100 agent pages; 9-13 MB per run) plus a "Story map" tab on each results.html; nothing

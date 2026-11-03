@@ -9,8 +9,9 @@ OpenRouter's reported cost, refusal classification and the provider pin with no 
   (scripts/freeze_judge_route.py, refreshed automatically and unpaid by ``run_transcript_judge.refresh_pricing``),
   with prompt caching on for every model (``JudgeRouteSettings.with_prompt_cache(True)``): the system prompt, the
   fixed story-map prefix, is one text block with a 5-minute ``cache_control`` breakpoint.
-* Other models (``EXTRA_SPECS``: GPT-6.1 Terra for stages 2-3, the cross-check and the stage-1 bake-off
-  models) use the simplified judge's ``SimpleClient`` pattern (research/analysis/simple_judge/route.py) with this module's own route record
+* Other models (``EXTRA_SPECS``: GPT-6.1 Terra for stage 2, GPT-6.1 Sol for stage 3, the cross-check and the
+  stage-1 bake-off models) use the simplified judge's ``SimpleClient`` pattern
+  (research/analysis/simple_judge/route.py) with this module's own route record
   ``data/validation/storymap-route-<UTC>.json``, frozen from OpenRouter's PUBLIC catalog (no credential, unpaid)
   and refreshed when older than 72 h. They cache implicitly (OpenAI/Google), so no request is marked.
 """
@@ -31,9 +32,11 @@ from research.analysis.simple_judge.route import (MAX_TOKENS_CEILING as EXTRA_MA
 
 ANTHROPIC_KEYS = {model_id: key for key, model_id in MODEL_IDS.items()}   # model id -> judge route key
 EXTRA_SPECS = {
-    # GPT-6.1 Terra: stages 2-3 default from November 2, 2026 (owner decision). The 5.6 route stays so earlier
+    # GPT-6.1 Terra: stage-2 default from November 2, 2026 (owner decision). The 5.6 route stays so earlier
     # pipeline.json records still price and resume.
     "openai/gpt-6.1-terra": RouteSpec("openai/gpt-6.1-terra", "openai", "OpenAI", "medium"),
+    # GPT-6.1 Sol: stage-3 default from November 2, 2026 ("best value" owner decision).
+    "openai/gpt-6.1-sol": RouteSpec("openai/gpt-6.1-sol", "openai", "OpenAI", "medium"),
     "openai/gpt-5.6-terra": RouteSpec("openai/gpt-5.6-terra", "openai", "OpenAI", "medium"),
     "openai/gpt-5.6-luna": RouteSpec("openai/gpt-5.6-luna", "openai", "OpenAI", "medium"),
     "openai/gpt-5.6-sol": RouteSpec("openai/gpt-5.6-sol", "openai", "OpenAI", "medium"),

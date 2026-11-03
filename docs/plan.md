@@ -1680,6 +1680,10 @@ stays Claude Haiku 5.5 and the cross-check Gemini 3.8 Flash. The validation page
 November 2 model-made source labels (not ground truth); it keeps the record-consistency checks and reports the
 Gemini cross-check as model agreement only.
 
+Owner (November 2, 2026): future story-map runs use the best-value configuration from the model survey: stage 1
+Claude Haiku 5.5 (summary over-length truncated instead of repaired), stage 2 GPT-6.1 Terra medium, stage 3
+GPT-6.1 Sol, cross-check Gemini 3.8 Flash; existing maps are not re-run.
+
 ## Story maps on the public site (November 2, 2026)
 
 Owner decision (November 2, 2026, "can you publish them to the website"): the story maps of the four runs
