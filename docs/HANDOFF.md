@@ -940,6 +940,9 @@ is being merged into main via `collab-env`.
      Then (owner): agent pages open on the timeline with the detail column beside it (story, legend and list
      below); selecting or stepping never scrolls the window (verified: 0 moves in 25 actions and on #sel= load).
      Receipt `storymap-20261102d.json` (deployment 087dbe85); livecheck 420/420.
+     Then (owner): a compact legend strip open above the timeline (full legend below), larger lanes and glyphs
+     (lane 36, glyphs about 14-16 px, 27 px hit areas, nearest-glyph clicks, hover highlight), code-group key in the
+     empty detail column. Receipt `storymap-20261102e.json` (deployment 6368a302); livecheck 420/420.
    - Open: the library vs self_then_library split is the weak point (the stage-3 prompt or the reference
      normalization may need a look); the first pass's Sonnet stage-2/3 rows were superseded by Terra (units kept).
 

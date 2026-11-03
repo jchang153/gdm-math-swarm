@@ -243,6 +243,14 @@ svg text{fill:var(--muted);font:11px system-ui,sans-serif}
 .g .m{fill:var(--card);stroke:var(--muted);stroke-width:1.4}.g.ring .m{stroke:var(--ev-ov)}
 .g.g-fill .m{fill:var(--ev-fake);stroke:var(--ev-fake)}.g .ring{fill:none;stroke:var(--ev-ov);stroke-width:1.4}.g .mk{fill:none;stroke:var(--fg);stroke-width:1.6;stroke-linecap:round}
 .g .halo{fill:none;stroke:var(--card);stroke-width:4;stroke-linecap:round}.g .hit{fill:transparent;stroke:none}
+.lanes .g:hover .hit,.lanes .g:focus .hit{fill:var(--fg);fill-opacity:.13}.lanes .g.sel .hit{fill:var(--fg);fill-opacity:.2}
+.lanes .g:focus{outline:none}.lanes svg text{font-size:13px}body.agent{max-width:1720px}
+details.legend.strip{position:static;padding:2px 0 4px;margin:4px 0 6px}details.legend.strip>summary{font-size:12.5px}
+.lstrip{display:flex;flex-wrap:wrap;gap:3px 16px;font-size:12.5px;line-height:1.3}.lstrip ul{list-style:none;margin:0;
+padding:0;display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center}.lstrip li{display:inline-flex;gap:4px;
+align-items:center}.lstrip svg{width:18px;height:16px;flex:none;overflow:visible}.lstrip svg.swatch{width:20px}
+.lstrip .k{font-weight:600}.pkey{font-size:12.5px;margin-top:10px}.pkey h4{margin:2px 0}
+.pkey .codes{max-height:none}.pkey ul{list-style:none;padding:0}.lstrip .row{display:flex;flex-wrap:wrap;gap:2px 14px;width:100%}
 .g .x{fill:none;stroke:var(--fg);stroke-width:2.4;stroke-linecap:round}.g.g-other .m{fill:var(--muted);stroke:none}
 .g.g-th .m{fill:var(--fg);stroke:var(--fg);stroke-width:.8}.g.g-th-low .m{fill:var(--card);stroke:var(--fg);stroke-width:1}
 .g:hover .m,.g:hover .x{stroke-width:2.2}.g.sel .m,.g.sel .ring{stroke-width:2.6}.g.sel .x{stroke-width:3.4}
@@ -329,16 +337,21 @@ try{history.replaceState(null,'','#sel='+key);}catch(e){}}
 // Selecting or stepping never moves the window: only the detail column resets to its top (owner, Nov 2, 2026).
 function close(){cur=null;const cu=document.getElementById('cursor');if(cu)cu.setAttribute('visibility','hidden');document.querySelectorAll('.sel').forEach(e=>e.classList.remove('sel'));
 all.forEach(a=>a.classList.remove('hl'));panel.classList.remove('open');
+const tpl=document.getElementById('pempty');
 body.innerHTML='<p class="muted">Nothing selected. Click a shape on the timeline, or press \u2192 (or Next) to read '
-+'the items one by one in time order.</p>';
++'the items one by one in time order.</p>'+(tpl?tpl.innerHTML:'');
 status();try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}}
 function step(d){const src=cur&&document.getElementById(cur),ix=src?all.indexOf(src):(d>0?-1:all.length);
 let j=ix+d;while(j>=0&&j<all.length&&!ok(all[j]))j+=d;if(j>=0&&j<all.length)show(all[j].id,'step');}
 prev.addEventListener('click',()=>step(-1));next.addEventListener('click',()=>step(1));
 document.getElementById('pclose').addEventListener('click',close);
 kind.addEventListener('change',()=>{status();kind.blur();});
-document.addEventListener('click',ev=>{const g=ev.target.closest('[data-k]');if(!g)return;
-ev.preventDefault();show(g.getAttribute('data-k'),'click');});
+document.addEventListener('click',ev=>{const sv=ev.target.closest&&ev.target.closest('.lanes svg');
+if(sv){let best=null,bd=1e9;sv.querySelectorAll('[data-k]').forEach(g=>{const r=g.getBoundingClientRect(),
+cx=r.left+r.width/2,cy=r.top+r.height/2;const d=g.tagName==='line'?Math.abs(ev.clientX-cx)+8:
+Math.hypot(ev.clientX-cx,ev.clientY-cy);if(d<bd){bd=d;best=g;}});
+if(best&&bd<=22){ev.preventDefault();show(best.getAttribute('data-k'),'click');}return;}
+const g=ev.target.closest('[data-k]');if(!g)return;ev.preventDefault();show(g.getAttribute('data-k'),'click');});
 document.addEventListener('keydown',ev=>{if(ev.altKey||ev.ctrlKey||ev.metaKey)return;
 const tag=(ev.target.tagName||'').toLowerCase();if(tag==='input'||tag==='select'||tag==='textarea')return;
 const k=ev.key;if(k==='ArrowRight'||k==='j'){ev.preventDefault();step(1);}
@@ -726,8 +739,12 @@ def _mark(typ, x, y, r, cls="m"):
     if typ in OTHER_TYPES:
         return f'<circle class="{cls}" cx="{x:.1f}" cy="{y:.1f}" r="{max(r * 0.4, 1.6):.1f}"/>'
     if typ == "TH":
-        return f'<rect class="{cls}" x="{x - 1.6:.1f}" y="{y - r:.1f}" width="3.2" height="{2 * r:.1f}" rx="1"/>'
+        w = max(3.2, r * 0.7)
+        return f'<rect class="{cls}" x="{x - w / 2:.1f}" y="{y - r:.1f}" width="{w:.1f}" height="{2 * r:.1f}" rx="1"/>'
     return f'<circle class="{cls}" cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}"/>'
+
+
+HIT_R = 14  # viewBox units (about 1 px each at desktop width): a hit area of about 27 px across
 
 
 def shape(typ, x, y, r, cls, key, title):
@@ -741,6 +758,8 @@ def shape(typ, x, y, r, cls, key, title):
         body = f'<circle class="hit" cx="{x:.1f}" cy="{y:.1f}" r="{r + 1:.1f}"/><path class="x" d="{d}"/>'
     else:
         body = _mark(typ, x, y, r)
+    if key is not None:  # an invisible hit area of at least 24 px, drawn first so the mark stays on top
+        body = f'<circle class="hit" cx="{x:.1f}" cy="{y:.1f}" r="{HIT_R}"/>' + (body if typ != "P2" else body[body.index("/>") + 2:])
     ring = _mark(typ, x, y, r + 2.8, "ring") if "ring" in flags and typ != "P2" else ""
     extra = ""
     if "ok" in flags:  # a check mark above right: accepted or credited
@@ -822,11 +841,12 @@ def phases_of(a, tmax):
     return out, ("stage-1 reading (no stage-3 reading)" if out else "none")
 
 
-def page(title, body, scripts=""):
+def page(title, body, scripts="", body_class=""):
     doc = (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
            f'<meta name="viewport" content="width=device-width,initial-scale=1">'
            f'<meta name="robots" content="noindex"><title>{esc(title)}</title><style>{CSS}</style></head>'
-           f'<body>{body}{"<script>" + scripts + "</script>" if scripts else ""}</body></html>')
+           f'<body{f" class={chr(34)}{body_class}{chr(34)}" if body_class else ""}>{body}'
+           f'{"<script>" + scripts + "</script>" if scripts else ""}</body></html>')
     return themed(doc)
 
 
@@ -936,6 +956,21 @@ def groups_html(names, href, defs=None):
     return (f'<p class="note">Codes the stage-1 reader gave to quoted thoughts (and, for E and F, the stage-2 reader to '
             f'reactions). Hover or click a code for its definition; full reference with examples: '
             f'<a href="{esc(href)}">codes page</a>.</p><div class="codes">{"".join(groups)}</div>')
+
+
+def legend_strip():
+    """The agent pages' compact legend, open above the timeline: position colours, event shapes and marks in two
+    rows (each with its meaning on hover); the full legend with explanations is further down the page."""
+    pos = "".join(f'<li title="{esc(m)}">{_legend_glyph("BAR", s)}{esc(STANCE_LABEL.get(s, s))}</li>'
+                  for s, m in STANCE_MEANING)
+    shapes = "".join(f'<li>{_legend_glyph(t, c)}{esc(m)}</li>' for t, c, m in SHAPE_MEANING)
+    shapes += (f'<li>{_legend_glyph("TH", "g-th")}{_legend_glyph("TH", "g-th-low")}thought (hollow = low certainty)</li>'
+               f'<li>{_legend_glyph("TP", "")}turning point</li>')
+    marks = "".join(f'<li>{_legend_glyph(t, c)}{esc(m)}</li>' for t, c, m in MARK_MEANING)
+    return ('<details class="legend strip" open><summary>Legend (full legend and terms below the timeline)</summary>'
+            f'<div class="lstrip"><div class="row"><span class="k">Bar colour = position on cheating:</span><ul>{pos}'
+            f'</ul></div><div class="row"><span class="k">Shape = event:</span><ul>{shapes}</ul>'
+            f'<span class="k">Mark:</span><ul>{marks}</ul></div></div></details>')
 
 
 def legend(mode="agent", names=None, href="taxonomy.html", defs=None):
@@ -1194,9 +1229,9 @@ PANEL = ('<aside id="panel"><div class="stepper"><button type="button" id="pprev
 def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
     name = a["name"]
     s3 = a["stage3"] or {}
-    W, LX, x0, x1 = 1000, 0, 212, 990
+    W, LX, x0, x1 = 1000, 0, 236, 990
     X = lambda t: x0 + (x1 - x0) * min(max(_num(t), 0.0), tmax) / tmax  # noqa: E731
-    LH = 22
+    LH = 36  # lane height; glyphs about 16 px, hit areas about 27 px at desktop width
     lanes = ([("stance", POSITION, POSITION_HINT)]
              + [(f"th-{L}", f"Thought {L}: {names[L]}" if names.get(L) else f"What it thought: {L}",
                  f"Thoughts in code group {L}" + (f" ({names[L]})" if names.get(L) else "")
@@ -1212,7 +1247,7 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
         y = ypos[k]
         if k != "stance":  # the stance bars sit on the card surface their colours were validated against
             svg.append(f'<rect class="lane-bg{" alt" if n % 2 else ""}" x="{x0}" y="{y}" width="{x1 - x0}" height="{LH}"/>')
-        svg.append(f'<text class="lanetext" x="{LX + 4}" y="{y + 15}"><title>{esc(label)}: {esc(hint)}</title>'
+        svg.append(f'<text class="lanetext" x="{LX + 4}" y="{y + LH / 2 + 4:.0f}"><title>{esc(label)}: {esc(hint)}</title>'
                    f'{esc(label if len(label) <= 36 else label[:35] + "…")}</text>')
     svg.append(axis_svg(tmax, x0, x1, 6, len(lanes) * LH))
     svg.append(f'<line id="cursor" class="cursor" x1="0" x2="0" y1="6" y2="{6 + len(lanes) * LH}" visibility="hidden"/>')
@@ -1253,7 +1288,7 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
         e = ev["event"]
         key = f"ev-{ev.get('i')}"
         lane = lane_of.get(e.get("type"), "own")
-        svg.append(shape(e.get("type"), X(ev.get("t")), ypos[lane] + LH / 2, 5, glyph_class(ev), key, event_title(ev)))
+        svg.append(shape(e.get("type"), X(ev.get("t")), ypos[lane] + LH / 2, 7.5, glyph_class(ev), key, event_title(ev)))
         articles.append((_num(ev.get("t")), 1, event_article(name, ev, a["by_event"].get(str(e.get("id")), []), key,
                                                              names, href)))
     seen_ids = set(key_of_event)
@@ -1266,7 +1301,7 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
         L = str(th.get("code") or "?")[:1].upper()
         lane = f"th-{L}" if L in LETTERS else "th-G"
         cls = "g-th-low" if th.get("certainty") == "low" else "g-th"
-        svg.append(shape("TH", X(th.get("t")), ypos[lane] + LH / 2, 4.5, cls, key,
+        svg.append(shape("TH", X(th.get("t")), ypos[lane] + LH / 2, 8, cls, key,
                          f"Thought {code_name(str(th.get('code')), names, str(th.get('code')))} \u00b7 "
                          f"{fmt_t(th.get('t'))} \u00b7 \u201c{str(th.get('quote') or '')[:120]}\u201d"
                          + (f"\n\n{code_tip(str(th.get('code')), DEFS, names)}" if DEFS.get(str(th.get('code'))) else "")))
@@ -1296,6 +1331,8 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
     # Timeline and detail column first, above the fold; the story, counts, legend and code key follow below.
     body = (nav.replace("</nav>", f"{prev_link}{next_link}</nav>")
             + f'<header class="ah"><h1>{esc(name)}</h1> {final_labels(a["stage3"])}</header>{banner_line(models)}'
+            f'{legend_strip()}<template id="pempty"><div class="lgbox pkey"><h4>What it thought: code groups</h4>'
+            f'{groups_html(names, href, DEFS)}</div></template>'
             f'<div class="layout"><div class="lanes"><svg viewBox="0 0 {W} {H}">{"".join(svg)}</svg></div>'
             f'{PANEL}<div class="list"><h2>Summary (stage 3)</h2><p class="story">{esc(s3.get("story")) or "<span class=muted>No model-written summary for this agent.</span>"}</p>'
             + (f'<p class="muted">Not available for this agent: {", ".join(missing)}.</p>' if missing else "")
@@ -1315,7 +1352,7 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
                f'of each chunk of the timeline.</p><table><tr><th>Chunk</th><th>Span</th><th>Position on cheating</th>'
                f"<th>Knows the trick</th><th>Thinks the judge</th><th>Reader's summary</th></tr>{states}</table>"
                if states else ""))
-    return page(f"Story map {name}", body, LEGEND_JS + PANEL_JS)
+    return page(f"Story map {name}", body, LEGEND_JS + PANEL_JS, "agent")
 
 
 # ------------------------------------------------------------------ events.html

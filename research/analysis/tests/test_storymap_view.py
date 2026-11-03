@@ -139,7 +139,7 @@ class ViewFixtureTest(unittest.TestCase):
             self.assertNotIn("Researcher-only", text)
             self.assertNotIn("off the public site", text)
         # Legend swatches and glyphs come from the map's own classes and code, so they cannot drift.
-        legend = re.search(r'<details class="legend[^"]*".*?</details>', self.pages["agent-003"], re.S).group(0)
+        legend = re.search(r'<details class="legend inline".*?</details>', self.pages["agent-003"], re.S).group(0)
         for stance in view.STANCES:
             self.assertIn(f'<rect class="ph-{stance}"', legend)
         self.assertNotIn("style=", legend)  # no inline colours
@@ -265,6 +265,26 @@ class ViewFixtureTest(unittest.TestCase):
         self.assertLess(page.index('<div class="lanes">'), page.index('<p class="story">'))
         self.assertLess(page.index('<aside id="panel">'), page.index('<details class="legend inline"'))
         self.assertIn('<p class="banner one"', page)
+        # The compact legend sits open directly above the timeline (owner, Nov 2, 2026), with both keys.
+        strip = page.index('<details class="legend strip" open>')
+        self.assertLess(strip, page.index('<div class="layout">'))
+        block = page[strip:page.index('<div class="layout">')]
+        for s in view.STANCES:
+            self.assertIn(f'<rect class="ph-{s}"', block)
+        self.assertIn("Shape = event:", block)
+        self.assertIn(view.shape("D1", 8, 8.5, 4.6, "g-hollow ring", None, ""), block)
+
+    def test_large_glyphs_with_hit_areas(self):
+        page = self.pages["agent-003"]
+        lanes = page.split('<div class="lanes">', 1)[1].split("</svg>", 1)[0]
+        glyphs = re.findall(r'<g class="g [^"]*" data-k="[^"]+"[^>]*>(?:<title>[^<]*</title>)?(.*?)</g>', lanes, re.S)
+        self.assertTrue(glyphs)
+        for body in glyphs:  # every selectable glyph has an invisible hit area of radius HIT_R (about 27 px across)
+            self.assertIn(f'class="hit"', body)
+            self.assertIn(f'r="{view.HIT_R}"', body)
+        self.assertGreaterEqual(view.HIT_R, 12)
+        self.assertIn("Math.hypot", view.PANEL_JS)  # clicks pick the nearest glyph
+        self.assertIn(".lanes .g:hover .hit", view.CSS)
 
     def test_selecting_never_scrolls_the_window(self):
         # Selecting or stepping must not move the page: no window or element scrolling and no focus() in the agent
