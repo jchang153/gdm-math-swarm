@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-10-30 07:40 PT by Claude (Opus 5.5) subagent (item 18: r1 failed on credits and is published; blocked on OpenRouter credits and gcloud login).
+Last updated: 2026-11-03 12:25 PT by Claude (Opus 5.5) subagent (item 20: three integrity-reminder runs launched).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -945,6 +945,20 @@ is being merged into main via `collab-env`.
      empty detail column. Receipt `storymap-20261102e.json` (deployment 6368a302); livecheck 420/420.
    - Open: the library vs self_then_library split is the weak point (the stage-3 prompt or the reference
      normalization may need a look); the first pass's Sonnet stage-2/3 rows were superseded by Terra (units kept).
+
+20. **IN FLIGHT 2026-11-03: baseline with periodic integrity reminder, 3 replicates** (docs/plan.md, "Baseline with
+   periodic integrity reminder (November 3, 2026)"). Config `configs/glmflash100-seeded-reminder5m-60m-notices.json`
+   (the 60-minute seeded control with notices plus `integrity_reminder` every 300 s, minutes 5-55; $150 run budget;
+   simple judge). Code c7bb1b7 (`ConferenceService.enable_integrity_reminder`, field `system_notice`, events
+   `integrity_reminder_delivered`; story-map event R1, star glyph). One run per VM (n2d-highmem-96, VM names in
+   HANDOFF.local.md), launched in parallel 12:19-12:22 PT, expected end ~13:25 PT plus post-run (judge, upload):
+   `glmflash100-seeded-reminder5m-60m-notices-r1-20261103T201956Z`,
+   `glmflash100-seeded-reminder5m-60m-notices-r2-20261103T201955Z`,
+   `glmflash100-seeded-reminder5m-60m-notices-r3-20261103T202243Z`.
+   To resume: `scripts/fetch_run.py --vm VM --run RUN` (no `--publish`: the owner has not asked to publish), then the
+   story map: `python -m research.analysis.storymap.extract --run-dir runs/RUN --out runs/RUN/analysis/storymap/timeline`
+   and `python -m research.analysis.storymap.pipeline --run-dir runs/RUN --timeline runs/RUN/analysis/storymap/timeline
+   --out runs/RUN/analysis/storymap --run-limit 100`; stop the VMs and resize back to n2-standard-64.
 
 ## Next steps / open items
 
