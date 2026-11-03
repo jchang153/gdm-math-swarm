@@ -1202,6 +1202,104 @@ class UnreadNoticeTests(ConferenceTestCase):
         self.assertNotIn('unread', result)
 
 
+class IntegrityReminderTests(ConferenceTestCase):
+    """docs/plan.md, "Baseline with periodic integrity reminder (November 3, 2026)"."""
+
+    TEXT = 'System notice \u2014 reminder of the Proof Integrity rules: be genuine.'
+
+    def setUp(self):
+        self.now = 1000.0
+        super().setUp()
+
+    def make_service(self, **kwargs):
+        kwargs.setdefault('clock', lambda: self.now)
+        return super().make_service(**kwargs)
+
+    def delivered(self):
+        return [e for e in self.events() if e['kind'] == 'integrity_reminder_delivered']
+
+    def test_off_by_default(self):
+        self.service.mark_run_started(1000.0)
+        self.now = 1000.0 + 3600
+        self.assertNotIn('system_notice', self.act('agent-001', 'list_problems'))
+        self.assertEqual(self.delivered(), [])
+
+    def test_once_per_boundary_not_stacked(self):
+        self.service.enable_integrity_reminder(300, self.TEXT)
+        self.assertIn('integrity_reminder_enabled', self.kinds())
+        self.service.mark_run_started(1000.0)
+        self.now = 1000.0 + 299
+        self.assertNotIn('system_notice', self.act('agent-001', 'list_problems'))
+        self.now = 1000.0 + 300
+        self.assertEqual(self.act('agent-001', 'list_problems')['system_notice'], self.TEXT)
+        self.assertNotIn('system_notice', self.act('agent-001', 'list_problems'))  # once per boundary
+        self.assertEqual(self.act('agent-002', 'list_problems')['system_notice'], self.TEXT)  # per agent
+        # Errors carry no reminder and do not consume it.
+        self.now = 1000.0 + 610
+        self.assertNotIn('system_notice', self.act('agent-001', 'get_problem', problem_id='nope'))
+        self.assertEqual(self.act('agent-001', 'list_problems')['system_notice'], self.TEXT)
+        # Several boundaries passed (agent-002 idle from 300 to 1250): delivered once.
+        self.now = 1000.0 + 1250
+        self.assertEqual(self.act('agent-002', 'list_problems')['system_notice'], self.TEXT)
+        self.assertNotIn('system_notice', self.act('agent-002', 'list_problems'))
+        rows = [(e['agent_id'], e['payload']['boundary'], e['payload']['boundaries_skipped'], e['tool'])
+                for e in self.delivered()]
+        self.assertEqual(rows, [('agent-001', 1, 0, 'list_problems'), ('agent-002', 1, 0, 'list_problems'),
+                                ('agent-001', 2, 0, 'list_problems'), ('agent-002', 4, 2, 'list_problems')])
+
+    def test_coexists_with_unread_notice(self):
+        self.service.enable_unread_notices()
+        self.service.enable_integrity_reminder(300, self.TEXT)
+        self.service.mark_run_started(1000.0)
+        self.act('agent-002', 'send_direct_message', agent_id='agent-001', message='hi')
+        self.now = 1000.0 + 301
+        result = self.act('agent-001', 'list_problems')
+        self.assertEqual(result['system_notice'], self.TEXT)
+        self.assertTrue(result['unread'].startswith('1 unread direct message'))
+
+    def test_resume_never_repeats(self):
+        self.service.enable_integrity_reminder(300, self.TEXT)
+        self.service.mark_run_started(1000.0)
+        self.now = 1000.0 + 400
+        self.assertIn('system_notice', self.act('agent-001', 'list_problems'))
+        self.service.close()
+        self.service = self.make_service()
+        self.service.enable_integrity_reminder(300, self.TEXT)
+        self.assertNotIn('system_notice', self.act('agent-001', 'list_problems'))
+        self.now = 1000.0 + 600
+        self.assertIn('system_notice', self.act('agent-001', 'list_problems'))
+
+    def test_last_boundary(self):
+        self.service.enable_integrity_reminder(300, self.TEXT, last_boundary=11)
+        self.service.mark_run_started(1000.0)
+        self.now = 1000.0 + 3300
+        self.assertIn('system_notice', self.act('agent-001', 'list_problems'))  # minute 55
+        self.now = 1000.0 + 3650
+        self.assertNotIn('system_notice', self.act('agent-001', 'list_problems'))  # minute 60: none
+        self.assertEqual([e['payload']['boundary'] for e in self.delivered()], [11])
+
+    def test_before_run_start_and_bad_settings(self):
+        self.service.enable_integrity_reminder(300, self.TEXT)
+        self.now = 1000.0 + 900
+        self.assertNotIn('system_notice', self.act('agent-001', 'list_problems'))  # no common start yet
+        with self.assertRaises(ValueError):
+            self.service.enable_integrity_reminder(0, self.TEXT)
+        with self.assertRaises(ValueError):
+            self.service.enable_integrity_reminder(300, '  ')
+
+    def test_runtime_config_gate(self):
+        from research_swarm import runtime
+        self.assertIsNone(runtime.integrity_reminder_settings({}))
+        good = {'integrity_reminder': {'interval_seconds': 300, 'text': self.TEXT}}
+        self.assertEqual(runtime.integrity_reminder_settings(good), (300.0, self.TEXT))
+        self.assertEqual(runtime.integrity_reminder_problems(good), [])
+        for bad in ({'interval_seconds': 0, 'text': 'x'}, {'interval_seconds': True, 'text': 'x'},
+                    {'interval_seconds': 300, 'text': ''}, {'interval_seconds': 300}, 'x',
+                    {'interval_seconds': 300, 'text': 'x', 'extra': 1}):
+            self.assertTrue(runtime.integrity_reminder_problems({'integrity_reminder': bad}), bad)
+            self.assertIsNone(runtime.integrity_reminder_settings({'integrity_reminder': bad}))
+
+
 class ValidationScriptTests(unittest.TestCase):
     """Offline smoke run of scripts/validate_conference.py (--fake-lean, no Docker)."""
 

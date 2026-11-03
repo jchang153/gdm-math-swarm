@@ -451,6 +451,10 @@ class ConferenceService:
         # Unread-count notices on tool results (enable_unread_notices). The service is opt-in; the runtime
         # enables it unless the config sets unread_notices false (default on since 2026-10-27).
         self._unread_notices = False
+        # Periodic integrity reminder (enable_integrity_reminder): (interval_seconds, text) or None, and the
+        # last boundary delivered per agent (persisted in reminder_marks, so a resume never repeats one).
+        self._integrity_reminder = None
+        self._reminder_marks: dict[str, int] = {}
         self._proof_checker = None
         self._lock = threading.RLock()
         self._activity = threading.Condition(threading.Lock())
@@ -860,6 +864,10 @@ class ConferenceService:
             notice = self._unread_notice(agent_id)
             if notice:
                 result["unread"] = notice
+        if self._integrity_reminder is not None and isinstance(result, dict) and result.get("ok"):
+            reminder = self._due_integrity_reminder(agent_id, tool, call_id)
+            if reminder:
+                result["system_notice"] = reminder
         return result
 
     def _admit(self, agent_id):
@@ -1482,6 +1490,55 @@ class ConferenceService:
                        "seq INTEGER NOT NULL, PRIMARY KEY (agent_id, channel))")
         self._unread_notices = True
         self._record_quietly("unread_notices_enabled", None, {})
+
+    # ------------------------------------------------------ integrity reminder
+    def enable_integrity_reminder(self, interval_seconds: float, text: str, last_boundary: int | None = None) -> None:
+        """Every ``interval_seconds`` after the common start, the next successful tool result of each
+        agent gains a field ``system_notice`` holding ``text`` (docs/plan.md, "Baseline with periodic
+        integrity reminder (November 3, 2026)"). Boundaries that pass while an agent makes no call are
+        delivered once, not stacked; boundaries after ``last_boundary`` (the runtime passes the last one
+        before ``max_run_seconds``, e.g. minute 55 of 60) are never delivered. Each delivery is an ``integrity_reminder_delivered`` event; the
+        ``reminder_marks`` table (only in runs with the reminder) persists the last boundary per agent."""
+        interval = float(interval_seconds)
+        if not interval > 0 or not isinstance(text, str) or not text.strip():
+            raise ValueError("integrity reminder needs a positive interval and a non-empty text")
+        with self._transaction() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS reminder_marks (agent_id TEXT PRIMARY KEY, "
+                       "boundary INTEGER NOT NULL)")
+            self._reminder_marks = dict(db.execute("SELECT agent_id, boundary FROM reminder_marks"))
+        self._integrity_reminder = (interval, text, last_boundary)
+        self._record_quietly("integrity_reminder_enabled", None, {"interval_seconds": interval, "text": text,
+                                                                  "last_boundary": last_boundary})
+
+    def _due_integrity_reminder(self, agent_id, tool, call_id):
+        """The reminder text when a boundary passed since this agent's last delivery, else None.
+        Best-effort: a failure drops the reminder and never affects the tool result."""
+        try:
+            interval, text, last_boundary = self._integrity_reminder
+            started = self._run_started_at
+            if started is None:
+                return None
+            elapsed = self._clock() - started
+            boundary = int(elapsed // interval)
+            if last_boundary is not None:
+                boundary = min(boundary, last_boundary)
+            if boundary < 1 or boundary <= self._reminder_marks.get(agent_id, 0):
+                return None  # cheap in-memory check; the transaction below re-checks
+            with self._transaction() as db:
+                row = db.execute("SELECT boundary FROM reminder_marks WHERE agent_id = ?", (agent_id,)).fetchone()
+                last = row[0] if row else 0
+                if boundary <= last:
+                    self._reminder_marks[agent_id] = last
+                    return None
+                db.execute("INSERT INTO reminder_marks (agent_id, boundary) VALUES (?, ?) "
+                           "ON CONFLICT (agent_id) DO UPDATE SET boundary = excluded.boundary", (agent_id, boundary))
+                self._emit("integrity_reminder_delivered", agent_id, {
+                    "boundary": boundary, "elapsed_seconds": round(elapsed, 3), "interval_seconds": interval,
+                    "boundaries_skipped": boundary - last - 1}, tool, call_id)
+            self._reminder_marks[agent_id] = boundary
+            return text
+        except Exception:
+            return None
 
     def _mark_read(self, db, agent_id, channel, page):
         """Advance the caller's read mark on ``channel`` to the newest entry it was just shown."""

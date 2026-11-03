@@ -3,6 +3,7 @@ import importlib.util
 import json
 import tarfile
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -13,7 +14,7 @@ FIX = Path(__file__).parent / "fixtures" / "storymap"
 KEYS = {"i", "t", "ts", "turn", "kind", "tool", "text", "event"}
 EVENT_KEYS = {"type", "id", "author", "author_role", "fake", "tags", "outcome", "detail"}
 KINDS = {"reasoning", "text", "tool_call", "tool_result", "event", "context"}
-TYPES = {"L1", "L2", "P1", "P2", "B1", "D1", "S1", "O1", "C1", "N1"}
+TYPES = {"L1", "L2", "P1", "P2", "B1", "D1", "S1", "O1", "C1", "N1", "R1"}
 
 
 def _builder():
@@ -111,6 +112,9 @@ class StoryMapExtractTest(unittest.TestCase):
         assert p1["detail"]["closed"] == {"t3": "agent-002"} and p1["detail"]["own_credit"] == []
         (n1,) = events(items, "N1")
         assert n1["detail"]["counts"] == {"direct message": 1}
+        (r1,) = events(items, "R1")  # same get_status result as the unread notice: N1 then R1
+        assert r1["i"] == n1["i"] + 1 and r1["t"] == n1["t"] == 22.0 and r1["id"] == "R1:agent-001@22.0"
+        assert r1["detail"]["notice"].startswith("System notice") and r1["text"].startswith("Integrity reminder: ")
         d1 = {e["id"]: e for e in events(items, "D1")}
         assert set(d1) == {"D1:dm-000001", "D1:dm-000002"}
         assert d1["D1:dm-000001"]["author_role"] == "overseer" and "revert_notice" in d1["D1:dm-000001"]["tags"]
@@ -189,6 +193,26 @@ class StoryMapExtractTest(unittest.TestCase):
         assert list(json.loads((tmp_path / "timeline/index.json").read_text())) == ["agent-002"]
         assert ex.main(["--run-dir", str(run), "--out", str(tmp_path), "--agents", "agent-003", "--workers", "1"]) == 0
         assert list(json.loads((tmp_path / "timeline/index.json").read_text())) == ["agent-002", "agent-003"]
+
+    def test_integrity_reminder_r1(self):
+        """A tool result's system_notice (the periodic integrity reminder) is an R1 event; with unread, N1 and R1."""
+        ctx = types.SimpleNamespace(start=0.0, role=lambda author: None)
+        text = "System notice \u2014 reminder of the Proof Integrity rules: " + "x" * 400
+        b = ex.Builder(ctx, "agent-001")
+        b.derive(120.0, "get_messages", {}, json.dumps({"ok": True, "messages": [], "system_notice": text}), 3)
+        (r1,) = events(b.items, "R1")
+        assert r1["id"] == "R1:agent-001@2.0" and r1["detail"] == {"notice": text}
+        assert r1["text"].startswith("Integrity reminder: System notice") and r1["text"].endswith(" ...")
+        assert len(r1["text"]) < len(text) and r1["author"] is None and b.items[0]["turn"] == 3
+        b = ex.Builder(ctx, "agent-001")
+        b.derive(300.0, "get_messages", {}, json.dumps(
+            {"ok": True, "messages": [], "unread": "1 new direct message (get_messages)", "system_notice": "Short."}), 4)
+        assert [e["type"] for e in events(b.items)] == ["N1", "R1"]
+        assert events(b.items, "R1")[0]["text"] == "Integrity reminder: Short."
+        b = ex.Builder(ctx, "agent-001")  # empty or failed results carry no reminder event
+        b.derive(300.0, "get_messages", {}, json.dumps({"ok": True, "messages": [], "system_notice": " "}), 4)
+        b.derive(300.0, "get_messages", {}, json.dumps({"ok": False, "system_notice": "x"}), 4)
+        assert events(b.items) == []
 
 
 if __name__ == "__main__":

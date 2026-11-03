@@ -154,13 +154,13 @@ class ViewFixtureTest(unittest.TestCase):
             stance = {v.lower() for k, v in tokens.items() if k.startswith("st-")}
             event = {v.lower() for k, v in tokens.items() if k.startswith("ev-")}
             self.assertEqual(len(stance), 6)
-            self.assertEqual(len(event), 2)
+            self.assertEqual(len(event), 3)  # fake, overseer, integrity reminder
             self.assertFalse(stance & event)
         css = view.CSS
         for stance in view.STANCES:
             uses = re.findall(r"([^{}]+)\{[^}]*var\(--st-" + stance + r"\)", css)
             self.assertEqual([u.strip() for u in uses], [f".ph-{stance}"], stance)
-        for ev in ("ev-fake", "ev-ov"):
+        for ev in ("ev-fake", "ev-ov", "ev-rem"):
             for sel in re.findall(r"([^{}]+)\{[^}]*var\(--" + ev + r"\)", css):
                 self.assertTrue(sel.strip().startswith(".g"), (ev, sel))
         page = self.pages["agent-003"]
@@ -169,7 +169,7 @@ class ViewFixtureTest(unittest.TestCase):
         flags = set()
         for cls in re.findall(r'<g class="g ([^"]*)"', lanes):
             flags |= set(cls.split())
-        self.assertLessEqual(flags, {"g-fill", "g-hollow", "g-other", "ring", "ok", "no", "g-th", "g-th-low"})
+        self.assertLessEqual(flags, {"g-fill", "g-hollow", "g-other", "g-rem", "ring", "ok", "no", "g-th", "g-th-low"})
         self.assertIn("ring", flags)  # the overseer DM in the fixture
 
     def test_glyph_flags(self):
@@ -180,6 +180,40 @@ class ViewFixtureTest(unittest.TestCase):
         self.assertEqual(view.glyph_class(ev(type="S1", outcome="rejected")), "g-hollow no")
         self.assertEqual(view.glyph_class(ev(type="S1", detail={"credited": True})), "g-hollow ok")
         self.assertEqual(view.glyph_class(ev(type="P1")), "g-other")
+        self.assertEqual(view.glyph_class(ev(type="R1")), "g-rem")
+
+    def test_integrity_reminder_glyph_and_legends(self):
+        # An R1 (the host's integrity reminder) has its own shape (a star) and colour (amber, ev-rem), drawn in the
+        # status lane, and both agent-page legends list it; the index and events legends (not drawn there) do not.
+        star = view._mark("R1", 8, 8.5, 4.6)
+        self.assertTrue(star.startswith('<polygon class="m" points="') and star.count(",") == 10)
+        others = [view._mark(t, 8, 8.5, 4.6) for t in ("L2", "B1", "D1", "S1", "P1", "TH")]
+        self.assertNotIn(star, others)
+        self.assertIn(".g.g-rem .m{fill:var(--ev-rem)", view.CSS)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            shutil.copytree(FIX / "timeline", tmp / "timeline")
+            path = tmp / "timeline" / "timeline" / "agent-003.jsonl"
+            items = [json.loads(x) for x in path.read_text().splitlines()]
+            text = "System notice \u2014 reminder of the Proof Integrity rules: synthetic."
+            items.append({"i": len(items), "t": 160.0, "ts": "2026-10-28T22:25:42Z", "turn": 11, "kind": "event",
+                          "tool": "get_status", "text": "Integrity reminder: " + text,
+                          "event": {"type": "R1", "id": "R1:agent-003@160.0", "author": None, "author_role": None,
+                                    "fake": None, "tags": [], "outcome": None, "detail": {"notice": text}}})
+            path.write_text("".join(json.dumps(it) + "\n" for it in items))
+            view.build(FIX / "map", tmp / "timeline", tmp / "out", taxonomy=None)
+            page = (tmp / "out" / "agents" / "agent-003.html").read_text()
+            lanes = page.split('<div class="lanes">', 1)[1].split("</svg>", 1)[0]
+            self.assertRegex(lanes, r'<g class="g g-rem" data-k="ev-\d+"[^>]*><title>Integrity reminder · 160\.0 min')
+            strip = re.search(r'<details class="legend strip".*?</details>', page, re.S).group(0)
+            full = re.search(r'<details class="legend inline".*?</details>', page, re.S).group(0)
+            glyph = view.shape("R1", 8, 8.5, 4.6, "g-rem", None, "")
+            for lg in (strip, full):
+                self.assertIn(glyph, lg)
+                self.assertIn("integrity reminder (host notice)", lg)
+            self.assertIn("Integrity reminder: System notice", page)
+            for other in ("index.html", "events.html"):
+                self.assertNotIn('class="g g-rem"', (tmp / "out" / other).read_text())
 
     def test_tooltips_name_what_each_mark_is(self):
         page = self.pages["agent-003"]

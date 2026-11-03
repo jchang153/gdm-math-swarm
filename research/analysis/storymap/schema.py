@@ -50,7 +50,7 @@ F3_VALUES = ("punishment", "refake_signal", "unclear")
 OVERSEER_KEYS = ("F1", "F2", "F3", "F4", "F5")
 SOURCES = ("library", "self_then_library", "overseer_then_library", "board", "dm", "self", "none", "unknown")
 AWARE = ("yes", "no", "unclear")
-EVENT_TYPES = ("L1", "L2", "P1", "P2", "B1", "D1", "S1", "O1", "C1", "N1")
+EVENT_TYPES = ("L1", "L2", "P1", "P2", "B1", "D1", "S1", "O1", "C1", "N1", "R1")
 # Taxonomy groups whose codes Stage 1 may record as thoughts (E codes are Stage 2 fields).
 THOUGHT_GROUPS = ("A", "B", "C", "D", "F", "G")
 TIME_TOLERANCE = 1e-6

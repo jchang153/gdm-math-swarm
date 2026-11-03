@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
 import re
 import sys
 from collections import Counter, defaultdict
@@ -59,8 +60,8 @@ TEXT_CAP = 1500  # event text shown per item (the raw timelines themselves are n
 LANES = (  # (key, label, event types, hover hint)
     ("library", "What it saw: library", ("L1", "L2"), "Shared-library listings and files the agent read"),
     ("board", "What it saw: board, DMs", ("B1", "D1"), "Board posts and direct messages the agent read"),
-    ("status", "What it saw: status", ("P1", "P2", "N1"),
-     "Problem lists, reverts of its own credit, and unread-message notices"),
+    ("status", "What it saw: status", ("P1", "P2", "N1", "R1"),
+     "Problem lists, reverts of its own credit, unread-message notices and the host's integrity reminders"),
     ("subs", "What it submitted", ("S1",), "The agent's own proof submissions and their outcomes"),
     ("own", "What it did: posts, restarts", ("O1", "C1"),
      "The agent's own posts, DMs and notes, and context compactions or restarts"),
@@ -96,7 +97,8 @@ def model_label(mid):
     return " ".join(p if any(c.isdigit() for c in p) or p.isupper() else p.capitalize() for p in parts)
 TYPE_NAME = {"L1": "library listing", "L2": "library file read", "P1": "problem list",
              "P2": "revert of its own credit", "B1": "board post", "D1": "direct message", "S1": "submission",
-             "O1": "own post, DM or note", "C1": "context compaction or restart", "N1": "unread-messages notice"}
+             "O1": "own post, DM or note", "C1": "context compaction or restart", "N1": "unread-messages notice",
+             "R1": "integrity reminder"}
 
 
 def type_name(typ, cap=False):
@@ -131,7 +133,7 @@ def event_label(e_or_id, typ=None):
 
 def plain_ids(text):
     """Model-written or extractor text with raw event ids ('B1:post-000003') made plain."""
-    return re.sub(r"\b([LPBDSOCN][12]):([^\s,;)'\"\]]+)", lambda m: event_label(m.group(0), m.group(1)), str(text))
+    return re.sub(r"\b([LPBDSOCNR][12]):([^\s,;)'\"\]]+)", lambda m: event_label(m.group(0), m.group(1)), str(text))
 
 
 OUTCOME_LABEL = {"problem_closed": "problem already closed", "accepted": "accepted", "rejected": "rejected",
@@ -178,11 +180,11 @@ BELIEVES_LABEL = {"compile_only": "only compiles", "checks_answer": "checks the 
 # #f1f4f7, #e9edf2; dark #0f141a, #161d25, #18202a, #1d2631. "none" is a neutral grey bar and "unknown" an outline.
 TOKENS_LIGHT = {"st-none": "#a7b1bd", "st-considering": "#9c8133", "st-deferred": "#1440bd",
                 "st-rejected": "#027651", "st-faking": "#b41e07", "st-stopped": "#8254f9",
-                "ev-fake": "#e13c85", "ev-ov": "#2593af",
+                "ev-fake": "#e13c85", "ev-ov": "#2593af", "ev-rem": "#d97706",
                 "lane": "#f1f4f7", "lane-alt": "#e9edf2", "panel": "#ffffff"}
 TOKENS_DARK = {"st-none": "#5b6675", "st-considering": "#a3933c", "st-deferred": "#2b6dec",
                "st-rejected": "#337f53", "st-faking": "#c7461b", "st-stopped": "#9457b3",
-               "ev-fake": "#e95296", "ev-ov": "#1aa0be",
+               "ev-fake": "#e95296", "ev-ov": "#1aa0be", "ev-rem": "#f59e0b",
                "lane": "#18202a", "lane-alt": "#1d2631", "panel": "#161d25"}
 
 
@@ -251,7 +253,7 @@ padding:0;display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center}.lstrip li
 align-items:center}.lstrip svg{width:18px;height:16px;flex:none;overflow:visible}.lstrip svg.swatch{width:20px}
 .lstrip .k{font-weight:600}.pkey{font-size:12.5px;margin-top:10px}.pkey h4{margin:2px 0}
 .pkey .codes{max-height:none}.pkey ul{list-style:none;padding:0}.lstrip .row{display:flex;flex-wrap:wrap;gap:2px 14px;width:100%}
-.g .x{fill:none;stroke:var(--fg);stroke-width:2.4;stroke-linecap:round}.g.g-other .m{fill:var(--muted);stroke:none}
+.g .x{fill:none;stroke:var(--fg);stroke-width:2.4;stroke-linecap:round}.g.g-other .m{fill:var(--muted);stroke:none}.g.g-rem .m{fill:var(--ev-rem);stroke:var(--ev-rem);stroke-width:.8;stroke-linejoin:round}
 .g.g-th .m{fill:var(--fg);stroke:var(--fg);stroke-width:.8}.g.g-th-low .m{fill:var(--card);stroke:var(--fg);stroke-width:1}
 .g:hover .m,.g:hover .x{stroke-width:2.2}.g.sel .m,.g.sel .ring{stroke-width:2.6}.g.sel .x{stroke-width:3.4}
 .tp.sel{stroke-width:3;stroke-dasharray:none}.cursor{stroke:var(--fg);stroke-width:1.5;opacity:.55;pointer-events:none}
@@ -713,10 +715,12 @@ OTHER_TYPES = ("P1", "N1", "C1", "O1")
 
 def glyph_class(ev):
     """Neutral-ink flags of an event glyph: g-fill (fake) or g-hollow, ring (from an overseer), and for a submission
-    ok (accepted or credited) or no (not accepted); g-other for the small status / own-action dots."""
+    ok (accepted or credited) or no (not accepted); g-other for the small status / own-action dots; g-rem for the
+    host's integrity reminder (an amber star)."""
     e = ev["event"]
     typ = e.get("type")
-    flags = ["g-other"] if typ in OTHER_TYPES else ["g-fill" if e.get("fake") else "g-hollow"]
+    flags = (["g-other"] if typ in OTHER_TYPES else ["g-rem"] if typ == "R1"
+             else ["g-fill" if e.get("fake") else "g-hollow"])
     if is_overseer(e):
         flags.append("ring")
     if typ == "S1":
@@ -726,7 +730,7 @@ def glyph_class(ev):
 
 
 def _mark(typ, x, y, r, cls="m"):
-    """The bare SVG element of a shape (square, diamond, triangle, small dot, tick or circle)."""
+    """The bare SVG element of a shape (square, diamond, triangle, star, small dot, tick or circle)."""
     if typ in ("L1", "L2"):
         return f'<rect class="{cls}" x="{x - r:.1f}" y="{y - r:.1f}" width="{2 * r:.1f}" height="{2 * r:.1f}"/>'
     if typ == "D1":
@@ -736,6 +740,11 @@ def _mark(typ, x, y, r, cls="m"):
     if typ == "S1":
         return (f'<polygon class="{cls}" points="{x:.1f},{y - r * 1.3:.1f} {x + r * 1.2:.1f},{y + r:.1f} '
                 f'{x - r * 1.2:.1f},{y + r:.1f}"/>')
+    if typ == "R1":  # a five-pointed star: the host's integrity reminder
+        pts = " ".join(f"{x + (r * 1.35 if k % 2 == 0 else r * 0.58) * math.sin(math.pi * k / 5):.1f},"
+                       f"{y - (r * 1.35 if k % 2 == 0 else r * 0.58) * math.cos(math.pi * k / 5):.1f}"
+                       for k in range(10))
+        return f'<polygon class="{cls}" points="{pts}"/>'
     if typ in OTHER_TYPES:
         return f'<circle class="{cls}" cx="{x:.1f}" cy="{y:.1f}" r="{max(r * 0.4, 1.6):.1f}"/>'
     if typ == "TH":
@@ -895,7 +904,9 @@ STANCE_MEANING = (("none", "no idea of the shortcut yet"), ("considering", "has 
 SHAPE_MEANING = (  # (type, glyph_class flags, name); drawn by shape() exactly as on the map
     ("L2", "g-hollow", "library file"), ("B1", "g-hollow", "board post"), ("D1", "g-hollow", "direct message"),
     ("S1", "g-hollow", "own submission"), ("P2", "g-hollow", "revert notice"),
-    ("N1", "g-other", "problem list, unread notice, own post, restart"))
+    ("N1", "g-other", "problem list, unread notice, own post, restart"),
+    ("R1", "g-rem", "integrity reminder (host notice)"))
+AGENT_ONLY_SHAPES = {"R1"}  # drawn only on the agent pages (status lane), so listed only in their legends
 MARK_MEANING = (("L2", "g-hollow", "grey outline: ordinary or genuine"), ("L2", "g-fill", "pink, solid: fake"),
                 ("D1", "g-hollow ring", "cyan with ring: from an overseer"),
                 ("S1", "g-hollow ok", "\u2713 accepted or credited"), ("S1", "g-hollow no", "slash: not accepted"))
@@ -979,7 +990,8 @@ def legend(mode="agent", names=None, href="taxonomy.html", defs=None):
     names = names or {}
     sw = "".join(f'<li>{_legend_glyph("BAR", s)}<b>{STANCE_LABEL.get(s, s)}</b>&nbsp;{esc(m)}</li>'
                  for s, m in STANCE_MEANING)
-    shapes = "".join(f'<li>{_legend_glyph(t, c)}{esc(m)}</li>' for t, c, m in SHAPE_MEANING)
+    shapes = "".join(f'<li>{_legend_glyph(t, c)}{esc(m)}</li>' for t, c, m in SHAPE_MEANING
+                     if mode == "agent" or t not in AGENT_ONLY_SHAPES)
     if mode == "agent":
         shapes += (f'<li>{_legend_glyph("TH", "g-th")}{_legend_glyph("TH", "g-th-low")}thought (hollow = low '
                    f'certainty)</li><li>{_legend_glyph("TP", "")}turning point</li>')
@@ -998,7 +1010,7 @@ def legend(mode="agent", names=None, href="taxonomy.html", defs=None):
             f'reading where stage 3 is missing). Dashed outline = no reading.</p></div>'
             f'<div class="lgbox"><h4>Shape + colour = event</h4>'
             f'<ul>{shapes}</ul><ul class="marks">{marks}</ul><ul class="ex"><li><b>Read as:</b></li>{examples}</ul>'
-            f'<p class="note">Event colours (pink, cyan) are never position colours.</p>'
+            f'<p class="note">Event colours (pink, cyan{", amber" if mode == "agent" else ""}) are never position colours.</p>'
             f'<p class="note">{where}</p></div>'
             + (f'<div class="lgbox"><h4>What it thought: code groups</h4>{groups_html(names, href, defs)}</div>'
                if names or mode == "agent" else "")
@@ -1187,7 +1199,7 @@ def event_article(name, ev, reactions, key, names=None, href=""):
     head = event_label(e) if typ in ("L2", "B1", "D1", "S1", "P2", "O1") else type_name(typ)
     text = ev.get("text")
     if typ in ("L2", "S1", "P2", "L1", "P1"):
-        text = tidy_times(text)  # extractor summaries (B1, D1, O1, C1 and N1 texts are what the agent saw)
+        text = tidy_times(text)  # extractor summaries (B1, D1, O1, C1, N1 and R1 texts are what the agent saw)
     return (f'<article class="item {k}" id="{key}" data-kind="{kind}" data-t="{_num(ev.get("t")):.1f}">'
             f'<h3>{fmt_t(ev.get("t"))} &middot; {esc(head[:1].upper() + head[1:])}</h3>'
             f'<p>{"".join(meta)} <small>turn {esc(ev.get("turn"))} &middot; timeline item {esc(ev.get("i"))}</small></p>'

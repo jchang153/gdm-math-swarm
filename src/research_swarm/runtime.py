@@ -1115,6 +1115,32 @@ def unread_notices_enabled(config):
     return config.get("unread_notices", True) is not False
 
 
+def integrity_reminder_settings(config):
+    """Config ``integrity_reminder``: {"interval_seconds": N, "text": "..."}; absent or null means off.
+
+    docs/plan.md, "Baseline with periodic integrity reminder (November 3, 2026)". Returns
+    (interval_seconds, text) or None. Malformed values are preflight blockers (integrity_reminder_problems).
+    """
+    block = config.get("integrity_reminder")
+    if block is None or integrity_reminder_problems(config):
+        return None
+    return float(block["interval_seconds"]), block["text"]
+
+
+def integrity_reminder_problems(config):
+    block = config.get("integrity_reminder")
+    if block is None:
+        return []
+    if not isinstance(block, dict) or set(block) != {"interval_seconds", "text"}:
+        return ["integrity_reminder must be an object with exactly interval_seconds and text"]
+    interval, text = block["interval_seconds"], block["text"]
+    if isinstance(interval, bool) or not isinstance(interval, (int, float)) or not interval > 0:
+        return ["integrity_reminder.interval_seconds must be a positive number"]
+    if not isinstance(text, str) or not text.strip():
+        return ["integrity_reminder.text must be a non-empty string"]
+    return []
+
+
 def _one_seed_settings(block):
     return {"task_id": block.get("task_id"), "channel": block.get("channel"),
             "path": f"solutions/{block.get('task_id')}.lean" if block.get("channel") == "library_solution" else None,
@@ -1201,6 +1227,7 @@ def preflight(config, repo_root):
     blockers.extend(overseer_problems(config))  # docs/prompts.md, "Overseer role"
     if "unread_notices" in config and not isinstance(config["unread_notices"], bool):
         blockers.append("unread_notices must be true or false")  # docs/plan.md, "Unread notices"
+    blockers.extend(integrity_reminder_problems(config))  # docs/plan.md, "periodic integrity reminder"
     allocation = None
     try:
         allocation = persona_counts(assign_personas(int(config.get("agent_count", APPROVED_AGENT_COUNT)),
@@ -1701,6 +1728,12 @@ async def _run_pilot(config, repo_root, conference_factory=None):
         unread_notices = unread_notices_enabled(config)  # default on; explicit false turns it off
         if unread_notices:  # docs/plan.md, "Unread notices (October 27, 2026)"
             conference.enable_unread_notices()
+        integrity_reminder = integrity_reminder_settings(config)  # off unless configured
+        if integrity_reminder is not None:  # docs/plan.md, "Baseline with periodic integrity reminder"
+            max_seconds = config.get("max_run_seconds")
+            last_boundary = (None if not isinstance(max_seconds, (int, float)) or isinstance(max_seconds, bool)
+                             else max(0, int((max_seconds - 1) // integrity_reminder[0])))  # 60 min: minute 55
+            conference.enable_integrity_reminder(*integrity_reminder, last_boundary=last_boundary)
         compose = make_compose(run_dir, config, images["agent"]["id"])
         # Loads the key and records its provider-side limit (unpaid, informational) before any
         # paid request; the run's budget is the spending control.
@@ -1741,6 +1774,9 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "max_connections": connections, "track": getattr(conference, "track", config.get("track")),
             "auto_restart": config.get("auto_restart") is True,
             "unread_notices": unread_notices,
+            "integrity_reminder": None if integrity_reminder is None else {
+                "interval_seconds": integrity_reminder[0], "text": integrity_reminder[1],
+                "last_boundary": last_boundary},
             "roles": roles, "participant_count": len(agent_ids),
             "conference_participants": len(conference_ids),
             "seeded": None if seed is None else seeded_settings(config),

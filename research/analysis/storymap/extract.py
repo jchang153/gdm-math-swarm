@@ -40,6 +40,7 @@ WARNING = re.compile(r"\bwarn|revert|will be (?:audited|reverted|removed)|not al
                      r"not genuine|cheat|fraud|tautolog", re.I)
 RULING = re.compile(r"revert|not genuine|credit (?:withdrawn|removed)|ruling|verdict|reopened|re-verified", re.I)
 REVERT = re.compile(r"revert|reopened|credit (?:withdrawn|removed)|withdrawn", re.I)
+REMINDER_SUMMARY = 300  # characters of an integrity reminder kept in the event text (full text in detail)
 UNREAD = re.compile(r"(\d+) new ([a-z ]+?)(?: since| \(|$)")
 
 
@@ -438,6 +439,13 @@ class Builder:
             counts = {k.strip(): int(n) for n, k in UNREAD.findall(r["unread"])}
             self.event(ts, "N1", f"N1:{self.agent}@{self.t(ts)}", "Unread notice: " + r["unread"], tool=tool,
                        detail={"notice": r["unread"], "counts": counts}, turn=turn)
+        if isinstance(r.get("system_notice"), str) and r["system_notice"].strip():
+            # the run's periodic integrity reminder (config integrity_reminder), delivered in this tool result: a
+            # host notice the agent saw, not its own act; the full text stays in detail
+            notice = r["system_notice"].strip()
+            short = notice if len(notice) <= REMINDER_SUMMARY else notice[:REMINDER_SUMMARY].rstrip() + " ..."
+            self.event(ts, "R1", f"R1:{self.agent}@{self.t(ts)}", "Integrity reminder: " + short, tool=tool,
+                       detail={"notice": notice}, turn=turn)
 
     def on_list_library(self, ts, r, args, turn):
         files = r.get("files") or []
