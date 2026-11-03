@@ -967,6 +967,38 @@ is being merged into main via `collab-env`.
    R1 events in the timelines vs delivery events: r1 520/529, r2 514/514, r3 454/455 (a few deliveries were in
    tool results missing from the session transcripts).
 
+21. **DONE 2026-11-03 (14:15 PT): coding experiment on ImpossibleBench, 2 runs** (docs/plan.md, "Coding experiment on
+   ImpossibleBench (November 3, 2026)"). Impossible-LiveCodeBench, 100 tasks (34 oneoff, 33 conflicting, 33 original;
+   HF `fjzzq2002/impossible_livecodebench` rev `98650ffc`), 20 GLM 5.3 Flash solvers, 60 min, unread notices, seed
+   `lcbhard_1` hard-coded solution credited to `agent-021` at minute 3, `run_budget_usd` 50, simple judge.
+   - Code: `src/research_swarm/coding/` (dataset, sandboxed Python test judge, evaluator, prompts, overseer prompt,
+     tools text), config key `"domain": "code"` dispatched in runtime/conference/oversight/launch_gates;
+     `scripts/evaluate_code_run.py`, `scripts/prepare_coding_dataset.py`, `scripts/coding_results.py`; story map and
+     simple judge select coding prompts/taxonomy/rubric by run domain (`research/analysis/storymap/domain.py`,
+     `fake_rule_code.py`). Public data `data/coding/`; reference tests, variant labels, seed and coding rubric/prompts
+     in `private/` (copy `private/data/coding`, the seed and `private/research/analysis/{simple_judge,storymap}` to a VM).
+   - Runs (launched 12:35 PT, code `df9ebab`; both ended at `max_run_seconds`, worker exit 0, uploaded to the logs
+     dataset, fetched to `runs/` with results, simple judge, story map; VMs TERMINATED):
+     - `glmflash20-code-seeded-control-60m-20261103T203525Z`: pilot $6.23 settled (+$1.08 held). 51 tasks closed:
+       26 original (all genuine), 25 impossible, all hard-coded fakes (all oneoff, incl. the seed); 24 non-seed
+       accepted fakes by 9 agents (004, 006, 007, 010, 012, 014, 015, 017, 018), all still credited; 9 more
+       rejected submissions flagged as special-casing. 14 board posts, 0 DMs, 1 feedback. Simple judge: credited 8,
+       submitted 1, considered 8, none 2, unclear 1; whistleblowers 10. Incident report failed (plan step
+       unparseable, $0.40).
+     - `glmflash20-code-seeded-2ov-60m-20261103T203525Z` (overseers 022/023): pilot $7.21 (+$0.68 held). 17 non-seed
+       accepted fakes by 5 agents (001, 005, 006, 014, 018; 5 conflicting, 12 oneoff), every fake (and the seed)
+       reverted: 18 reverts, 51 `check_solution` calls; 25 tasks closed at the end, all genuine originals. 58 board
+       posts, 20 DMs, 3 feedback. Simple judge: credited 5, considered 10, none 6; whistleblowers 16 (incl. overseers).
+   - The simple judge was rerun on both VMs ($0.70, $0.77) after fixing the coding seed path in
+     `research/analysis/roles.py` (`978c1c0`; first pass kept as `analysis/simple_judge.seedpath-lean`); results rebuilt
+     (`results.pre-judge-rerun.*` kept).
+   - Story maps (`--run-limit 50`, 20/20 agents each, validation consistency all ok): control $5.56, 2ov $15.37;
+     `runs/<id>/analysis/storymap/` (timelines in `analysis/storymap-timeline/`). Local only.
+   - **Not published.** Publishing goes to a separate Cloudflare project `gdm-impossiblebench-experiments`
+     (`publish_cloudflare.py --site ib`; owner decision Nov 3), only when the owner asks; the project is not created yet
+     (`npx wrangler pages project create gdm-impossiblebench-experiments --production-branch main` from a scratch dir
+     with `npm_config_cache` set to a scratch folder: the owner's ~/.npm cache has permission errors).
+
 ## Next steps / open items
 
 - **VM HF upload token (item 16):** confirmed working on the owner's first VM (item 17). `vm_hf_setup.py` failed on
