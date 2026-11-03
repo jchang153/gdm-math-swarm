@@ -68,10 +68,13 @@ class ViewFixtureTest(unittest.TestCase):
 
     def test_agent_page_lanes_and_reaction(self):
         page = self.pages["agent-003"]
-        for lane in ("Stance", "Library: event L1, L2", "Board/DMs: event B1, D1", "Submissions: event S1"):
+        for lane in ("Position on cheating", "What it saw: library", "What it saw: board, DMs", "What it submitted"):
             self.assertIn(f">{lane}</text>", page)
         for letter in view.LETTERS:
-            self.assertIn(f">thought {letter}: codes</text>", page)
+            self.assertIn(f">What it thought: {letter}</text>", page)
+        # Every lane label has a hover hint.
+        self.assertEqual(page.count('<text class="lanetext"'), 1 + len(view.LETTERS) + len(view.LANES))
+        self.assertIn("<title>Position on cheating: What the agent intended about the shortcut", page)
         # Event codes share names with thought codes: events are labelled "event B1", thoughts "thought B4".
         self.assertIn('<span class="badge">event B1</span>', page)
         self.assertIn("&middot; thought C6", page)
@@ -118,11 +121,11 @@ class ViewFixtureTest(unittest.TestCase):
     def test_legend_groups_on_every_page(self):
         for text in [self.index, self.events, *self.pages.values()]:
             self.assertIn('<details class="legend" open>', text)
-            self.assertIn("<h4>Bar colour = stance</h4>", text)
+            self.assertIn("<h4>Bar colour = the agent's position on cheating at that moment</h4>", text)
             self.assertIn("<h4>Shape + colour = event</h4>", text)
             self.assertIn("<b>Read as:</b>", text)
             for stance in view.STANCES:
-                self.assertIn(f"<b>{stance}</b>", text)
+                self.assertIn(f"<b>{view.STANCE_LABEL[stance]}</b>", text)
             self.assertIn("Model readings are interpretations, not ground truth", text)
             self.assertNotIn("Researcher-only", text)
             self.assertNotIn("off the public site", text)
@@ -171,7 +174,7 @@ class ViewFixtureTest(unittest.TestCase):
 
     def test_tooltips_name_what_each_mark_is(self):
         page = self.pages["agent-003"]
-        self.assertRegex(page, r'class="ph-\w+"[^>]*><title>Stance: \w+ · t=')
+        self.assertRegex(page, r'class="ph-\w+"[^>]*><title>Position: [\w ]+ · t=')
         self.assertRegex(page, r'data-k="ev-\d+"[^>]*><title>[A-Z][^<]* · t=')
         self.assertRegex(page, r'data-k="th-\d+"[^>]*><title>Thought ')
         self.assertIn("<title>Turning point · t=", page)
@@ -217,11 +220,34 @@ class ViewFixtureTest(unittest.TestCase):
         self.assertFalse((self.out / "validation.html").exists())
         self.assertNotIn("validation.html", self.index)
 
+    def test_plain_labels_and_axis(self):
+        self.assertIn('<option value="self_then_library">Own idea, then library</option>', self.index)
+        self.assertIn('data-source="self_then_library"', self.index)
+        self.assertIn("Source: Overseer, then library", self.index)
+        self.assertNotIn("flag(s)", self.index)
+        self.assertRegex(self.index, r'<span class="badge b-caution" title="[^"]+">\d+ consistency flags?</span>')
+        self.assertEqual(view.model_label("google/gemini-3.8-flash"), "Gemini 3.8 Flash")
+        self.assertEqual(view.model_label("openai/gpt-6-luna"), "GPT-6 Luna")
+        self.assertEqual(view._shown("submitted_at", 20.259), "20.3")
+        self.assertEqual(view._shown("count", 2.5), 2.5)
+        a = {"items": [{"t": 181.7}], "thoughts": [], "stage3": None}
+        self.assertEqual(view.axis_max({"x": a}), 180.0)  # a few seconds past the run's end: same axis
+        a["items"] = [{"t": 200.0}]
+        self.assertEqual(view.axis_max({"x": a}), 210.0)
+
+    def test_panel_is_a_fixed_column(self):
+        page = self.pages["agent-003"]
+        lay = page.split('<div class="layout">', 1)[1]
+        self.assertLess(lay.index('<div class="lanes">'), lay.index('<aside id="panel">'))
+        self.assertLess(lay.index('<aside id="panel">'), lay.index('<div class="list">'))
+        self.assertIn("Nothing selected.", page)
+        self.assertNotIn("position:fixed", view.CSS)
+
     def test_model_names(self):
         p = {"models": {"stage1": {"model_id": "anthropic/claude-haiku-5.5"},
                         "stage2": {"model_id": "openai/gpt-5.6-terra"}, "stage3": {"model_id": "openai/gpt-5.6-terra"}}}
         self.assertEqual(view.model_names(p),
-                         "stage 1 anthropic/claude-haiku-5.5; stages 2-3 openai/gpt-5.6-terra")
+                         "Claude Haiku 5.5 (stage 1); GPT-5.6 Terra (stages 2\u20133)")
         self.assertEqual(view.model_names({}), "")
 
     def test_relative_links_resolve(self):
@@ -261,10 +287,10 @@ class ViewPartialInputTest(unittest.TestCase):
             shutil.copytree(FIX / "timeline" / "timeline", flat)  # timeline DIR without timeline/ subdir
             view.build(mp, flat, tmp / "out", taxonomy=None)
             page = (tmp / "out" / "agents" / "agent-002.html").read_text()
-            self.assertIn("Missing: stage 2, stage 3.", page)
+            self.assertIn("Not available for this agent: stage-2 reactions, a stage-3 summary.", page)
             self.assertIn("stage-1 states (no stage 3)", page)
-            self.assertIn("Malformed rows skipped", page)
-            self.assertIn("no stage 3", (tmp / "out" / "index.html").read_text())
+            self.assertIn("could not be read and are left out", page)
+            self.assertIn("No reading", (tmp / "out" / "index.html").read_text())
             self.assertTrue((tmp / "out" / "agents" / "agent-005.html").is_file())
 
     def test_cli(self):

@@ -27,8 +27,8 @@ TAB_MARKER = 'data-tab="storymap"'
 TAB = f'<a {TAB_MARKER} href="{STORYMAP_INDEX}">{STORYMAP_LABEL}</a>'
 HELP = f'<li {TAB_MARKER}><strong>{STORYMAP_LABEL}</strong>: {html.escape(STORYMAP_HELP)}</li>'
 # A public story map page carries no researcher-only taxonomy names (rendered with --taxonomy ''): every thought
-# lane is labelled "thought X: codes".
-TAXONOMY_LANE = re.compile(r'>thought [A-G]: (?!codes<)')
+# lane is labelled "What it thought: X" (older pages: "thought X: codes"); a name after the letter is refused.
+TAXONOMY_LANE = re.compile('>thought [A-G]: (?!codes<)|>What it thought: [A-G] \u00b7')
 # Host paths never appear in a published file. The agents' own container home (/home/researcher, quoted from
 # their transcripts) is not a host path and may appear.
 HOST_PATH = re.compile(rb'/(?:Users|private/tmp|private/var|var/folders)/')
