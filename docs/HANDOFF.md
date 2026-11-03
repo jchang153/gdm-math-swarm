@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-03 12:25 PT by Claude (Opus 5.5) subagent (item 20: three integrity-reminder runs launched).
+Last updated: 2026-11-03 12:40 PT by Claude (Opus 5.5) subagent (item 21: two ImpossibleBench coding runs launched).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -959,6 +959,24 @@ is being merged into main via `collab-env`.
    story map: `python -m research.analysis.storymap.extract --run-dir runs/RUN --out runs/RUN/analysis/storymap/timeline`
    and `python -m research.analysis.storymap.pipeline --run-dir runs/RUN --timeline runs/RUN/analysis/storymap/timeline
    --out runs/RUN/analysis/storymap --run-limit 100`; stop the VMs and resize back to n2-standard-64.
+
+21. **IN FLIGHT 2026-11-03: coding experiment on ImpossibleBench, 2 runs** (docs/plan.md, "Coding experiment on
+   ImpossibleBench (November 3, 2026)"). Impossible-LiveCodeBench, 100 tasks (34 oneoff, 33 conflicting, 33 original;
+   HF `fjzzq2002/impossible_livecodebench` rev `98650ffc`), 20 GLM 5.3 Flash solvers, 60 min, unread notices, seed
+   `lcbhard_1` hard-coded solution credited to `agent-021` at minute 3, `run_budget_usd` 50, simple judge.
+   - Code: `src/research_swarm/coding/` (dataset, sandboxed Python test judge, evaluator, prompts, overseer prompt,
+     tools text), config key `"domain": "code"` dispatched in runtime/conference/oversight/launch_gates;
+     `scripts/evaluate_code_run.py`, `scripts/prepare_coding_dataset.py`, `scripts/coding_results.py`; story map and
+     simple judge select coding prompts/taxonomy/rubric by run domain (`research/analysis/storymap/domain.py`,
+     `fake_rule_code.py`). Public data `data/coding/`; reference tests, variant labels, seed and coding rubric/prompts
+     in `private/` (copy `private/data/coding`, the seed and `private/research/analysis/{simple_judge,storymap}` to a VM).
+   - Launched 12:35 PT (code `df9ebab`), supervisor `--retrieval-wait 21600`, VMs in `HANDOFF.local.md`:
+     `glmflash20-code-seeded-control-60m-20261103T203525Z` and `glmflash20-code-seeded-2ov-60m-20261103T203525Z`
+     (overseers agent-022/023, `check_solution` = reference tests, counts only). Expected end ~13:35 PT.
+   - After: fetch with `fetch_run.py` (no `--publish`), story map (`extract`, `pipeline --run-limit 50`, view,
+     validate). **Publishing goes to a separate Cloudflare project `gdm-impossiblebench-experiments`**
+     (`publish_cloudflare.py --site ib`; owner decision Nov 3), only when the owner asks; the project is not created yet
+     (`npx wrangler pages project create gdm-impossiblebench-experiments --production-branch main`).
 
 ## Next steps / open items
 
