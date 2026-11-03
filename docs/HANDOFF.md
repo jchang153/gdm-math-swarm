@@ -879,40 +879,35 @@ is being merged into main via `collab-env`.
      | 10ov-enforceonly | 53.66 | 677.0/15.7 | 82.7 | 646.7 | 570.0 | 581.3 | 0.0 | 0.0 (+35.3) | 89.7 | 48 | |
      Total settled $1062.64
 
-19. **STOPPED AT BUDGET 2026-11-02: agent story map** (docs/plan.md, "Agent story map (November 2, 2026)").
-   Per-solver map of reasoning about cheating interleaved with library reads, board posts, DMs and reverts, and
-   the reaction to each. Code `research/analysis/storymap/` (commits fc70747, 5b25745, 15cf821; 82 offline tests);
-   taxonomy, prompts, INTERFACE.md and the hand-label references (`reference/<run>.jsonl`, 4 runs) in
-   `private/research/analysis/storymap/`. Timelines were built in the session scratchpad (rebuild with
+19. **DONE 2026-11-02 17:16 PT: agent story map, all four runs, 100/100 agents each** (docs/plan.md,
+   "Agent story map (November 2, 2026)", incl. the evening decision c6af2fb). Per-solver map of reasoning about
+   cheating interleaved with library reads, board posts, DMs and reverts, and the reaction to each. Code
+   `research/analysis/storymap/` (fc70747, 5b25745, 15cf821; 82 offline tests); taxonomy, prompts, INTERFACE.md
+   and the hand-label references (`reference/<run>.jsonl`) in `private/research/analysis/storymap/`. Stage-0
+   timelines were built in the session scratchpad (rebuild with
    `python -m research.analysis.storymap.extract --run-dir runs/<id> --out DIR`).
-   - **Stage-1 bake-off** (1ov r2, 10 agents: 8 hand-labelled fakers incl. library, self_then_library,
-     overseer_then_library, plus 2 non-fakers): Haiku 5.5 score 83.3 ($0.87), Gemini 3.8 Flash 83.3 ($3.98),
-     GPT-5.6 Luna 67.5 ($1.09); Haiku kept. Bake-off settled $6.84 inside the 1ov r2 $50.
-     Output `runs/<1ov r2>/analysis/storymap/bakeoff/` (validation in `bakeoff/validation/`).
-   - **Four runs launched in parallel 16:19 PT** (1ov r2, control r3, 2ov r3, 10ov r3; Haiku / Sonnet 5.5 /
-     Terra cross-check on 10 agents; $50 each). **All four used their full $50 by ~16:44 PT** (settled, no holds):
-     1ov r2 $49.60 (incl. bake-off), control r3 $49.64, 2ov r3 $49.72, 10ov r3 $49.80. Per run roughly Haiku
-     $5-8, Sonnet $23-29, Terra cross-check $13-16. No budget added.
-   - **Main problem: Sonnet 5.5 refuses most stage-2 (and some stage-3) requests** ("reverse engineering or
-     duplicating model outputs" content filter on the agent transcripts); refused requests are billed and
-     retried once, so about 60% of the Sonnet spend bought nothing. Stage-2 rows: 1ov r2 54 ok / 76 refused,
-     control r3 25 / 88, 2ov r3 67 / 105, 10ov r3 50 / 85. Haiku stage 1 was not refused.
-   - Coverage (agents mapped in agent order; complete stage 3): 1ov r2 15 of 100 (stage 1 for 66), control r3 13
-     (65), 2ov r3 20 (75), 10ov r3 2 (50). Partial and biased toward short, mostly non-faking timelines.
-   - Validation on mapped agents (`validation.md` in each output): source agrees with the hand labels for
-     15/15 (1ov r2; 2 fakers), 8/13 (control r3; 5 of 10 fakers, the rest library vs self_then_library),
-     19/20 (2ov r3; 2 of 3 fakers), 2/2 (10ov r3; no fakers mapped); first-fake time within 2 min for every
-     mapped faker (2/2, 10/10, 3/3). Consistency flags: no faked/credited/stopped contradictions; stage-1 quotes
-     not verbatim 5-9%; stage-2 quote-before-event flags 30-40% (windows start 3 turns before the event, so
-     this check is too strict); cross-check stage-3 source agreement 3/3 where both exist.
-   - A pipeline deadlock at budget exhaustion (fixed in 15cf821) made the runs hang until interrupted.
-   - Outputs: `runs/<id>/analysis/storymap/` (index.html, events.html, agents/, stage1-3, map.jsonl,
-     crosscheck/, validation.json/md; no pipeline.json for the main runs because they were interrupted; the
-     ledger and units hold the costs). Researcher-only: never publish.
-   - **Needs an owner decision before any more spend:** route refused Sonnet stage-2/3 units to another model
-     (for example GPT-5.6 Terra, as the simple judge does) or use a non-Anthropic stage-2/3 model, drop or
-     shrink the Terra cross-check, and set new per-run budgets to finish the maps (units are cached; a resume
-     pays only for what is missing).
+   - **Stage-1 bake-off** (1ov r2, 10 agents): Haiku 5.5 83.3 ($0.87), Gemini 3.8 Flash 83.3 ($3.98), GPT-5.6
+     Luna 67.5 ($1.09); Haiku kept. Output `runs/<1ov r2>/analysis/storymap/bakeoff/`.
+   - **First pass (16:19-16:44 PT, Sonnet 5.5 stages 2-3, Terra cross-check, $50 each):** Sonnet refused most
+     stage-2 requests (Anthropic filter: "reverse engineering or duplicating model outputs"), billed and retried;
+     all four runs spent their $50 with 2-20 complete maps. A deadlock at budget exhaustion (fixed in 15cf821)
+     hung them.
+   - **Finish (owner, c6af2fb): stages 2-3 GPT-5.6 Terra, cross-check Gemini 3.8 Flash, $200 per output folder.**
+     Smoke test on 5 agents of 1ov r2 (17:04 PT, $1.89, no refusals), then all four in parallel 17:05-17:16 PT.
+     Settled per output folder (both passes, incl. bake-off and smoke test): 1ov r2 $114.35, control r3 $112.27,
+     2ov r3 $106.10, 10ov r3 $166.51 (total $499.23). Terra refused nothing; the only failed units are 5-8 Haiku
+     stage-1 chunks per run (malformed after repair, recorded as gaps).
+   - **Validation vs the hand labels** (`validation.md` in each output): source agreement on fakers 1ov r2 49/66,
+     control r3 63/86, 2ov r3 30/42, 10ov r3 16/24 (almost all disagreements are library vs self_then_library,
+     both ways); every non-faker mapped `none` (32/32, 14/14, 58/58, 75/75); first fake time within 2 min 58/66,
+     85/86, 39/42, 24/24; awareness agreement 71-81%. Consistency: no faked/credited contradictions in 400 agents;
+     stopped-then-faked again 3 (1ov r2) and 2 (2ov r3); stage-1 quotes not verbatim 6-8%, stage-2 quotes <1%.
+     Cross-check (Gemini Flash, 10 agents per run): stage-3 source agreement 9/10, 7/10, 8/10, 10/10; faked and
+     first_fake_t 10/10 everywhere; stage-1 code Jaccard 0.52-0.65.
+   - Outputs: `runs/<id>/analysis/storymap/` (index.html, events.html, agents/, stage1-3, map.jsonl, crosscheck/,
+     pipeline.json, validation.json/md). Researcher-only: never publish.
+   - Open: the library vs self_then_library split is the weak point (the stage-3 prompt or the reference
+     normalization may need a look); the first pass's Sonnet stage-2/3 rows were superseded by Terra (units kept).
 
 ## Next steps / open items
 
