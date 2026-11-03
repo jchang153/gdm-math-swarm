@@ -73,6 +73,31 @@ class ChunkTests(unittest.TestCase):
         self.assertTrue(pipeline.overseer_expected(chosen[3]))
         self.assertFalse(pipeline.overseer_expected(chosen[2]))
 
+    def test_integrity_reminders_get_stage2_and_stage3_notes(self):
+        # Owner, November 3, 2026: every R1 delivery gets a stage-2 call (no overseer object) with an EVENT NOTE
+        # describing the host's automated reminder; stage 3 may cite it. Messages without R1 are unchanged.
+        r1 = dict(ev(1, 1, "R1", id="R1:agent-001@1.0"), text="Integrity reminder: System notice")
+        items = [ev(0, 0, "L2", fake=True), r1, ev(2, 2, "R1", id="R1:agent-001@2.0"), item(3, 3)]
+        chosen = chunk.stage2_events(items)
+        self.assertEqual([(e["type"], e["reason"]) for e in chosen],
+                         [("L2", "fake_library_read"), ("R1", "integrity_reminder"), ("R1", "integrity_reminder")])
+        self.assertFalse(pipeline.overseer_expected(chosen[1]))
+        window = chunk.event_window(items, r1)
+        note = "=== EVENT NOTE ===\n" + pipeline.REMINDER_STAGE2_NOTE
+        self.assertIn(note, pipeline.stage2_user("agent-001", chosen[1], window, None, []))
+        self.assertIn('"selected_because": "integrity_reminder"', pipeline.stage2_user("agent-001", chosen[1], window, None, []))
+        self.assertNotIn("EVENT NOTE", pipeline.stage2_user("agent-001", chosen[0], chunk.event_window(items, items[0]),
+                                                            None, []))
+        facts = chunk.hard_facts("agent-001", items)
+        self.assertEqual(facts["integrity_reminders_seen"], [{"event_id": "R1:agent-001@1.0", "item": 1, "t": 1.0},
+                                                             {"event_id": "R1:agent-001@2.0", "item": 2, "t": 2.0}])
+        self.assertIn("R1:agent-001@2.0", facts["citable_event_ids"])
+        self.assertIn("NOTE ON INTEGRITY REMINDERS", pipeline.stage3_user("agent-001", facts, [], []))
+        plain = chunk.hard_facts("agent-001", [items[0], items[3]])
+        self.assertNotIn("integrity_reminders_seen", plain)   # runs without the reminder: same facts and message
+        self.assertEqual(list(plain)[-1], "citable_event_ids")
+        self.assertNotIn("INTEGRITY", pipeline.stage3_user("agent-001", plain, [], []))
+
     def test_window_ends_at_the_next_decision_or_ten_turns(self):
         items = [item(n, n) for n in range(40)]
         event = items[20]

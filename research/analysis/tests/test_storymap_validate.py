@@ -112,6 +112,35 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(cs["checks"]["faked"]["fail"], 1)
         self.assertEqual(cs["checks"]["credited"]["fail"], 1)
 
+    def test_reminder_reactions_split_by_faking_and_cited_causes(self):
+        def item(i, t, typ, **e):
+            return {"i": i, "t": t, "turn": i, "kind": "event",
+                    "event": {"type": typ, "id": e.pop("id", f"{typ}:{i}"), "detail": {}, **e}}
+        tl = {"agent-001": [item(0, 5.0, "R1", id="R1:a@5.0"), item(1, 8.0, "S1", fake=True),
+                            item(2, 10.0, "R1", id="R1:a@10.0"), item(3, 15.0, "R1", id="R1:a@15.0")]}
+        s2 = {"agent-001": [{"event_id": "R1:a@5.0", "status": "ok", "registered": "no", "change": "none"},
+                            {"event_id": "R1:a@10.0", "status": "ok", "registered": "yes", "change": "behaviour",
+                             "direction": "away"},
+                            {"event_id": "R1:a@15.0", "status": "not_run"}]}
+        s3 = {"agent-001": {"phases": [{"from_t": 0, "to_t": 8, "stance": "none"},
+                                       {"from_t": 8, "to_t": 12, "stance": "faking"},
+                                       {"from_t": 12, "to_t": 20, "stance": "stopped"}],
+                            "turning_points": [{"t": 8, "cause_event_ids": []},
+                                               {"t": 12, "cause_event_ids": ["R1:a@10.0", "B1:post-1"]}],
+                            "final": {"stopped": True, "stop_cause_event_ids": ["R1:a@10.0"]}}}
+        rem = V.reminders(s3, s2, tl)
+        self.assertEqual((rem["all"]["deliveries"], rem["all"]["reacted"]), (3, 2))
+        self.assertEqual(rem["split"]["fake_submitted"]["yes"]["deliveries"], 2)
+        self.assertEqual(rem["split"]["fake_submitted"]["yes"]["change"], {"behaviour": 1})
+        self.assertEqual(rem["split"]["fake_submitted"]["no"]["registered"], {"no": 1})
+        self.assertEqual(rem["split"]["stance_faking"]["yes"]["direction"], {"away": 1})
+        c = rem["cited"]
+        self.assertEqual((c["turning_points"], c["tp_reminder_alone"], c["tp_reminder_with_others"]), (2, 0, 1))
+        self.assertEqual((c["stops"], c["stop_reminder_alone"], c["stop_reminder_with_others"]), (1, 1, 0))
+        self.assertIn("## Reactions to the integrity reminders", "\n".join(V.render_reminders(rem)))
+        self.assertIsNone(V.reminders(s3, {}, tl))   # no reminder reactions: no section
+        self.assertNotIn("reminders", self.res)
+
     def test_crosscheck(self):
         cc = self.res["crosscheck"]
         self.assertEqual(cc["stage1"]["chunks"], 3)

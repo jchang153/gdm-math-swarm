@@ -212,8 +212,49 @@ class ViewFixtureTest(unittest.TestCase):
                 self.assertIn(glyph, lg)
                 self.assertIn("integrity reminder (host notice)", lg)
             self.assertIn("Integrity reminder: System notice", page)
-            for other in ("index.html", "events.html"):
-                self.assertNotIn('class="g g-rem"', (tmp / "out" / other).read_text())
+            self.assertNotIn('class="g g-rem"', (tmp / "out" / "index.html").read_text())
+            events = (tmp / "out" / "events.html").read_text()   # listed there as its own section, with the star
+            self.assertIn('value="rem" checked> Integrity reminders (1)', events)
+            self.assertIn(glyph, re.search(r'<details class="legend".*?</details>', events, re.S).group(0))
+            self.assertIn("Integrity reminder no. 1 (each solver&#x27;s 1st)", events)
+
+    def test_reminder_reactions_on_agent_and_events_pages(self):
+        # Each R1 delivery's stage-2 reaction shows on the agent page and is counted in the events page's reminder
+        # group (grouped by delivery number); turning points citing a reminder name it with its minute.
+        self.assertEqual(view.event_label("R1:agent-003@21.962"), "integrity reminder at 22.0 min")
+        self.assertEqual(view.plain_ids("caused by R1:agent-003@7.8"), "caused by integrity reminder at 7.8 min")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            shutil.copytree(FIX / "timeline", tmp / "timeline")
+            shutil.copytree(FIX / "map", tmp / "map")
+            path = tmp / "timeline" / "timeline" / "agent-003.jsonl"
+            items = [json.loads(x) for x in path.read_text().splitlines()]
+            text = "System notice \u2014 reminder of the Proof Integrity rules: synthetic."
+            for t in (150.0, 160.0):
+                items.append({"i": len(items), "t": t, "ts": None, "turn": 11, "kind": "event", "tool": "get_status",
+                              "text": "Integrity reminder: " + text,
+                              "event": {"type": "R1", "id": f"R1:agent-003@{t}", "author": None, "author_role": None,
+                                        "fake": None, "tags": [], "outcome": None, "detail": {"notice": text}}})
+            path.write_text("".join(json.dumps(it) + "\n" for it in items))
+            reaction = {"agent": "agent-003", "event_id": "R1:agent-003@160.0", "event_type": "R1", "status": "ok",
+                        "registered": "yes", "change": "behaviour", "direction": "away",
+                        "reason": "reminded of the integrity rules", "self_attributed": True, "overseer": None,
+                        "next_action": "stopped submitting restatements", "quotes": [], "certainty": "high"}
+            with open(tmp / "map" / "stage2" / "agent-003.jsonl", "a") as f:
+                f.write(json.dumps(reaction) + "\n")
+            view.build(tmp / "map", tmp / "timeline", tmp / "out", taxonomy=None)
+            page = (tmp / "out" / "agents" / "agent-003.html").read_text()
+            art = re.search(r'<article class="item [^"]*" id="ev-%d".*?</article>' % (len(items) - 1), page, re.S).group(0)
+            self.assertIn("How it reacted (stage 2)", art)
+            self.assertIn("reminded of the integrity rules", art)
+            first = re.search(r'<article class="item [^"]*" id="ev-%d".*?</article>' % (len(items) - 2), page, re.S).group(0)
+            self.assertIn("No stage-2 reaction recorded", first)
+            events = (tmp / "out" / "events.html").read_text()
+            self.assertIn('value="rem" checked> Integrity reminders (2)', events)
+            row = re.search(r'<tr class="er"[^>]*data-id="R1:no-2".*?</tr>', events, re.S).group(0)
+            self.assertIn('data-sec="rem"', row)
+            self.assertIn('data-dir="away"', row)
+            self.assertIn("host (automatic)", row)
 
     def test_tooltips_name_what_each_mark_is(self):
         page = self.pages["agent-003"]

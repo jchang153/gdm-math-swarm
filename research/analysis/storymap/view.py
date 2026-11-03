@@ -13,8 +13,8 @@ Writes (default ``--out`` = ``--map``):
 * ``validation.html``: ``validation.md`` (checks against the run's records, model agreement) in the pages' words.
 * ``taxonomy.html``: the code set (``--taxonomy``, default the public copy ``storymap/taxonomy.md``) with an anchor
   per code; the pages link each code to it.
-* ``events.html``: each overseer post or DM, other relevant board post, revert and library file, with who read it
-  and when, and the breakdown of stage-2 reactions (no change / belief / behaviour by direction).
+* ``events.html``: each overseer post or DM, other relevant board post, revert, library file and (runs with the
+  periodic integrity reminder) each delivery number of the reminder, with who read it and when, and the breakdown of stage-2 reactions (no change / belief / behaviour by direction).
 
 Inputs follow private/research/analysis/storymap/INTERFACE.md. Every input is optional: an agent with only a timeline,
 or only stage outputs, still gets a row, and missing stages are stated on the page instead of guessed. The taxonomy is
@@ -120,6 +120,12 @@ def event_label(e_or_id, typ=None):
         return f"library file {rest.rsplit('@', 1)[0]}"
     if typ == "P2":
         return f"revert of its own credit (submission {rest})"
+    if typ == "R1":  # 'R1:agent-004@7.804': the delivery minute, so a cited reminder is identifiable
+        at = rest.rsplit("@", 1)[1] if "@" in rest else None
+        try:
+            return f"integrity reminder at {float(at):.1f} min"
+        except (TypeError, ValueError):
+            return type_name(typ)
     if typ == "S1" and isinstance(e_or_id, dict) and (e_or_id.get("detail") or {}).get("task_id"):
         return f"submission {rest} ({e_or_id['detail']['task_id']})"
     if typ in ("B1", "D1", "S1"):
@@ -984,14 +990,14 @@ def legend_strip():
             f'<span class="k">Mark:</span><ul>{marks}</ul></div></div></details>')
 
 
-def legend(mode="agent", names=None, href="taxonomy.html", defs=None):
+def legend(mode="agent", names=None, href="taxonomy.html", defs=None, shown_types=()):
     """Two labelled boxes built from the map's own classes: bar colour = stance; shape = event, fill = fake,
     mark = overseer or outcome (with worked examples)."""
     names = names or {}
     sw = "".join(f'<li>{_legend_glyph("BAR", s)}<b>{STANCE_LABEL.get(s, s)}</b>&nbsp;{esc(m)}</li>'
                  for s, m in STANCE_MEANING)
     shapes = "".join(f'<li>{_legend_glyph(t, c)}{esc(m)}</li>' for t, c, m in SHAPE_MEANING
-                     if mode == "agent" or t not in AGENT_ONLY_SHAPES)
+                     if mode == "agent" or t not in AGENT_ONLY_SHAPES or t in shown_types)
     if mode == "agent":
         shapes += (f'<li>{_legend_glyph("TH", "g-th")}{_legend_glyph("TH", "g-th-low")}thought (hollow = low '
                    f'certainty)</li><li>{_legend_glyph("TP", "")}turning point</li>')
@@ -1010,7 +1016,7 @@ def legend(mode="agent", names=None, href="taxonomy.html", defs=None):
             f'reading where stage 3 is missing). Dashed outline = no reading.</p></div>'
             f'<div class="lgbox"><h4>Shape + colour = event</h4>'
             f'<ul>{shapes}</ul><ul class="marks">{marks}</ul><ul class="ex"><li><b>Read as:</b></li>{examples}</ul>'
-            f'<p class="note">Event colours (pink, cyan{", amber" if mode == "agent" else ""}) are never position colours.</p>'
+            f'<p class="note">Event colours (pink, cyan{", amber" if mode == "agent" or "R1" in shown_types else ""}) are never position colours.</p>'
             f'<p class="note">{where}</p></div>'
             + (f'<div class="lgbox"><h4>What it thought: code groups</h4>{groups_html(names, href, defs)}</div>'
                if names or mode == "agent" else "")
@@ -1195,7 +1201,7 @@ def event_article(name, ev, reactions, key, names=None, href=""):
     k = "k-fake" if (e.get("fake") or typ == "P2") else "k-ov" if is_overseer(e) else ""
     kind = "sub" if typ == "S1" else "own" if typ in ("O1", "C1") else "exp"
     reacts = "".join(reaction_html(r, names, href) for r in reactions) if reactions else (
-        reaction_html(None) if typ in ("L2", "B1", "D1", "P2") else "")
+        reaction_html(None) if typ in ("L2", "B1", "D1", "P2", "R1") else "")
     head = event_label(e) if typ in ("L2", "B1", "D1", "S1", "P2", "O1") else type_name(typ)
     text = ev.get("text")
     if typ in ("L2", "S1", "P2", "L1", "P1"):
@@ -1369,8 +1375,12 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
 
 # ------------------------------------------------------------------ events.html
 
-def _group_key(e):
+def _group_key(e, ordinal=None):
+    """Library files by path, integrity reminders by delivery number (``ordinal``: the agent's k-th reminder, so
+    each group holds every solver's k-th), anything else by event id."""
     typ, eid, d = e.get("type"), str(e.get("id") or ""), e.get("detail") or {}
+    if typ == "R1":
+        return f"R1:no-{ordinal or 1}"
     if typ == "L2":
         path = d.get("path") or eid.split(":", 1)[-1].rsplit("@", 1)[0]
         return f"L2:{path}"
@@ -1378,28 +1388,35 @@ def _group_key(e):
 
 
 EV_SECTIONS = (("ov", "Overseer posts and DMs"), ("board", "Other posts and DMs"),
-               ("revert", "Reverts of own credit"), ("lib", "Library files"))
+               ("revert", "Reverts of own credit"), ("lib", "Library files"), ("rem", "Integrity reminders"))
+OPTIONAL_SECTIONS = {"rem"}  # listed only when the run has them (only runs with the periodic integrity reminder)
 EV_SECTION_HINT = {"ov": "Board posts and DMs written by an overseer",
                    "board": "Solvers' board posts and DMs that describe the trick, warn or rule about it, or drew a "
                             "stage-2 reaction",
                    "revert": "An agent seeing that an overseer removed its own credit",
-                   "lib": "Shared-library files the agents read (all revisions of one path together)"}
+                   "lib": "Shared-library files the agents read (all revisions of one path together)",
+                   "rem": "The host's periodic integrity reminder, sent to every solver on a timer; grouped by "
+                          "delivery number (each solver's first, second, ... reminder)"}
 
 
 def _event_groups(agents):
     groups, skipped = {}, Counter()
     for name, a in agents.items():
+        reminders = 0
         for ev in a["events"]:
             e = ev["event"]
             typ = e.get("type")
-            if typ not in ("L2", "B1", "D1", "P2"):
+            if typ not in ("L2", "B1", "D1", "P2", "R1"):
                 continue
+            if typ == "R1":
+                reminders += 1
             reacts = a["by_event"].get(str(e.get("id")), [])
             if typ in ("B1", "D1") and not (is_overseer(e) or set(e.get("tags") or []) & RELEVANT_TAGS or reacts):
                 skipped[typ] += 1
                 continue
-            g = groups.setdefault(_group_key(e), {"type": typ, "first": ev, "readers": {}, "fake": e.get("fake"),
-                                                  "overseer": is_overseer(e), "ids": set()})
+            g = groups.setdefault(_group_key(e, reminders), {"type": typ, "ordinal": reminders, "first": ev,
+                                                             "readers": {}, "fake": e.get("fake"),
+                                                             "overseer": is_overseer(e), "ids": set()})
             g["ids"].add(str(e.get("id")))
             rd = g["readers"].setdefault(name, {"t": ev.get("t"), "key": f"ev-{ev.get('i')}", "n": 0, "reacts": []})
             rd["n"] += 1
@@ -1426,7 +1443,19 @@ def reaction_counts(g):
 
 
 def _sec_of(g):
-    return "revert" if g["type"] == "P2" else "lib" if g["type"] == "L2" else "ov" if g["overseer"] else "board"
+    return ("revert" if g["type"] == "P2" else "lib" if g["type"] == "L2" else "rem" if g["type"] == "R1"
+            else "ov" if g["overseer"] else "board")
+
+
+def group_title(g):
+    """A group's plain title: the event's label, or for integrity reminders the delivery number."""
+    if g["type"] == "R1":
+        return f"integrity reminder no. {g.get('ordinal') or 1} (each solver's {_ordinal(g.get('ordinal') or 1)})"
+    return event_label(g["first"]["event"])
+
+
+def _ordinal(n):
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
 
 
 def events_page(agents, tmax, models="", nav="", names=None):
@@ -1439,7 +1468,8 @@ def events_page(agents, tmax, models="", nav="", names=None):
         rows.append(event_row(gk, g))
     count = Counter(_sec_of(g) for _, g in order)
     chips = "".join(f'<label class="chip" title="{esc(EV_SECTION_HINT[k])}"><input type="checkbox" name="sec" '
-                    f'value="{k}" checked> {esc(lab)} ({count[k]})</label>' for k, lab in EV_SECTIONS)
+                    f'value="{k}" checked> {esc(lab)} ({count[k]})</label>' for k, lab in EV_SECTIONS
+                    if k not in OPTIONAL_SECTIONS or count[k])
     opt = lambda vals: "".join(f'<option value="{v}">{esc(lab)}</option>' for v, lab in vals)  # noqa: E731
     filters = ('<div class="filters evf">' + chips
                + f'<label title="Show events where at least one reader changed in this direction">Direction '
@@ -1459,7 +1489,9 @@ def events_page(agents, tmax, models="", nav="", names=None):
     head = "".join(f'<th data-sort="{k}"{" class=n" if num else ""} title="{esc(tip)}">{esc(lab)}</th>'
                    for k, lab, num, tip in EV_COLUMNS)
     n_skip = sum(skipped.values())
-    body = (f"{nav}<h1>Story map: events</h1>{banner(models)}{legend('events', names, 'taxonomy.html', DEFS)}"
+    shown = {"R1"} if count["rem"] else set()
+    body = (f"{nav}<h1>Story map: events</h1>{banner(models)}"
+            f"{legend('events', names, 'taxonomy.html', DEFS, shown_types=shown)}"
             f'<p class="muted">Each event: who wrote it, when it was first seen, which agents read it, and how each '
             f'reacted (stage-2 reading). Library files are grouped by path across revisions. Click a row to open it; '
             f'click a column heading to sort. ↓ / ↑ (or j / k) move through the shown events, Enter opens one. '
@@ -1489,7 +1521,7 @@ def event_row(gk, g):
     c = reaction_counts(g)
     n = len(g["readers"])
     readers = sorted(g["readers"])
-    title = event_label(e)
+    title = group_title(g)
     text = " ".join(str(tidy_times(ev.get("text")) if e.get("type") in ("L2", "P2") else ev.get("text") or "").split())
     text = re.sub(r"^\S+ (?:by|from) \S+ \(\w+\)(?:: )?", "", text)  # the title and author are in their own cells
     icon = f'<svg class="hglyph" viewBox="0 0 18 16">{shape(e.get("type"), 9, 8, 5, glyph_class(ev), None, "")}</svg>'
@@ -1506,7 +1538,7 @@ def event_row(gk, g):
         v = vals[k]
         return f'<td class="n" data-v="{v}">{v if v or k in ("readers", "t") else "<span class=muted>0</span>"}</td>'
     kind = type_name(e.get("type")) + (" (fake)" if g["fake"] else "")
-    author = _who(e) if e.get("author") else "—"
+    author = _who(e) if e.get("author") else "host (automatic)" if e.get("type") == "R1" else "—"
     return (f'<tr class="er" tabindex="0" data-id="{esc(gk)}" data-sec="{sec}" data-dir="{dirs}" data-chg="{chgs}" '
             f'data-who="{esc(who)}" data-q="{esc(q)}">'
             f'<td class="sh">{icon}</td><td data-v="{esc(kind)}">{esc(kind)}</td>'
@@ -1555,6 +1587,8 @@ def event_section(gk, g):
     meta = [badge(type_name(e.get("type")))]
     if e.get("author"):
         meta.append(badge(("reverted by " if e.get("type") == "P2" else "by ") + _who(e), "info" if g["overseer"] else ""))
+    if e.get("type") == "R1":
+        meta.append(badge("host notice, sent to every solver on a timer"))
     if g["fake"] is True:
         meta.append(badge("fake", "bad"))
     elif g["fake"] is False:
@@ -1562,14 +1596,14 @@ def event_section(gk, g):
     meta += [badge(TAG_LABEL.get(t, str(t).replace("_", " ")), "caution") for t in e.get("tags") or []]
     ids = sorted(g["ids"])
     n = len(readers)
-    title = event_label(e)
+    title = group_title(g)
     title = title[:1].upper() + title[1:]
     icon = f'<svg class="hglyph" viewBox="0 0 18 16">{shape(e.get("type"), 9, 8, 5, glyph_class(ev), None, "")}</svg>'
     text = tidy_times(ev.get("text")) if e.get("type") in ("L2", "P2") else ev.get("text")
     return (f'<section class="ev" id="{esc(gk)}" data-sec="{_sec_of(g)}" tabindex="-1"><h3>{icon}{esc(title)}</h3>'
             f'<p>{"".join(meta)} '
             f'<small>first seen at {fmt_t(ev.get("t"))} by {esc(readers[0][0])} &middot; {plural(n, "reader")}'
-            f'{" &middot; " + plural(len(ids), "revision") if len(ids) > 1 else ""}</small></p>'
+            f'{" &middot; " + plural(len(ids), "revision") if len(ids) > 1 and g["type"] != "R1" else ""}</small></p>'
             f'<details><summary>Text as first seen</summary><pre>{esc(cut(text))}</pre></details>'
             f'<div class="sbs"><p class="muted">How the readers reacted (stage 2; '
             f'{plural(judged, "reader")} with a reaction, {c["unjudged"]} without):</p>{bars}</div>'

@@ -7,7 +7,9 @@ private/research/analysis/storymap/INTERFACE.md) and cuts it for the model stage
   ``history.estimate_tokens`` rule applied to the rendered line), cut only at turn boundaries. A single turn
   larger than twice the target is split between items and flagged ``split_turn``.
 * ``stage2_events``: the events that get one stage-2 call each: L2 of a fake file, B1/D1 written by an overseer
-  or tagged ``describes_trick``/``warning`` (first reads only; a re-read is the same exposure), and every P2.
+  or tagged ``describes_trick``/``warning`` (first reads only; a re-read is the same exposure), every P2, and
+  every R1 (each delivery of the run's periodic integrity reminder, a host notice sent to every solver on a timer;
+  owner, November 3, 2026). Runs without the reminder have no R1 events, so their selection is unchanged.
 * ``event_window``: 3 turns before the event's turn through the next stage-1 decision (a D-code thought after the
   event) or 10 turns after it, whichever comes first, trimmed to ``max_tokens`` (from the end, then the start;
   the event item is always kept).
@@ -30,7 +32,7 @@ WINDOW_BEFORE_TURNS = 3
 WINDOW_AFTER_TURNS = 10
 WINDOW_MAX_TOKENS = 40000
 STAGE2_TAGS = frozenset({"describes_trick", "warning"})
-STAGE2_TYPES = ("L2", "B1", "D1", "P2")
+STAGE2_TYPES = ("L2", "B1", "D1", "P2", "R1")
 NON_SOLVER_ROLES = frozenset({"seed", "overseer"})
 AGENT_FILE = re.compile(r"^agent-\d+$")
 
@@ -209,7 +211,7 @@ def _event(item):
 
 def stage2_reason(item):
     """Why an event item gets a stage-2 call (``"fake_library_read"``, ``"overseer_message"``,
-    ``"tagged_message"``, ``"credit_removed"``), or None."""
+    ``"tagged_message"``, ``"credit_removed"``, ``"integrity_reminder"``), or None."""
     event = _event(item)
     if event is None:
         return None
@@ -226,6 +228,8 @@ def stage2_reason(item):
         return None
     if kind == "P2":
         return "credit_removed"
+    if kind == "R1":
+        return "integrity_reminder"
     return None
 
 
@@ -382,10 +386,12 @@ def hard_facts(agent, items, index_entry=None):
                 and (event.get("detail") or {}).get("reread") is not True]
     removed = [{"event_id": event.get("id"), "item": item["i"], "t": item.get("t"), "outcome": event.get("outcome"),
                 "detail": event.get("detail")} for item, event in events if event.get("type") == "P2"]
+    reminders = [{"event_id": event.get("id"), "item": item["i"], "t": item.get("t")}
+                 for item, event in events if event.get("type") == "R1"]
     turns = [it.get("turn") for it in items if isinstance(it.get("turn"), int)]
     times = [it.get("t") for it in items if isinstance(it.get("t"), (int, float))]
     credited = [s for s in subs if s["credited"] is True or str(s["outcome"] or "").lower() in ("accepted", "credited")]
-    return {"agent": agent, "role": index_entry.get("role"), "items": len(items),
+    facts = {"agent": agent, "role": index_entry.get("role"), "items": len(items),
             "turns": (max(turns) + 1) if turns else 0, "first_min": _first(times),
             "last_min": max(times) if times else None,
             "submissions": len(subs), "fake_submissions": sum(s["fake"] is True for s in subs),
@@ -398,3 +404,6 @@ def hard_facts(agent, items, index_entry=None):
             "own_communications": sum(e.get("type") == "O1" for _, e in events),
             "submission_events": subs,
             "citable_event_ids": [e["event_id"] for e in stage2_events(items)]}
+    if reminders:   # only in runs with the periodic integrity reminder (other runs' stage-3 input is unchanged)
+        facts["integrity_reminders_seen"] = reminders
+    return facts
