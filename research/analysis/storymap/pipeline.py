@@ -23,7 +23,7 @@ Stages (``StoryMap``):
 3. One request per agent from the stage-1 and stage-2 outputs and code-derived hard facts (``chunk.hard_facts``).
 
 Cross-check: a seeded sample (``--crosscheck-fraction``, default 0.1, ``--crosscheck-seed``) of the run's solvers
-is mapped again, all three stages, by ``--crosscheck-model`` (default ``openai/gpt-5.6-terra``) into
+is mapped again, all three stages, by ``--crosscheck-model`` (default ``google/gemini-3.8-flash``) into
 ``OUT/crosscheck/``. ``--stage1-bakeoff`` runs only stage 1 for the given agents with each of
 ``--bakeoff-models`` (default haiku-5.5, gpt-5.6-luna, gemini-3.8-flash) into ``OUT/bakeoff/<model>/`` (model
 selection; nothing else runs).
@@ -80,9 +80,11 @@ ROOT = Path(__file__).resolve().parents[3]
 SCHEMA = "gdm-storymap-pipeline/1"
 UNIT_SCHEMA = "gdm-storymap-unit/1"
 PREFIX_NORMALIZATION = "storymap-prefix-v1"
-DEFAULT_MODELS = {"stage1": "anthropic/claude-haiku-5.5", "stage2": "anthropic/claude-sonnet-5.5",
-                  "stage3": "anthropic/claude-sonnet-5.5"}
-DEFAULT_CROSSCHECK_MODEL = "openai/gpt-5.6-terra"
+# November 2, 2026 (owner decision): stages 2-3 on GPT-6.1 Terra (Sonnet 5.5 was refused by Anthropic's filter;
+# the four existing maps ran on GPT-5.6 Terra and are kept), cross-check on Gemini 3.8 Flash.
+DEFAULT_MODELS = {"stage1": "anthropic/claude-haiku-5.5", "stage2": "openai/gpt-6.1-terra",
+                  "stage3": "openai/gpt-6.1-terra"}
+DEFAULT_CROSSCHECK_MODEL = "google/gemini-3.8-flash"
 DEFAULT_CROSSCHECK_FRACTION = 0.1
 DEFAULT_CROSSCHECK_SEED = 20261102
 DEFAULT_BAKEOFF_MODELS = ("anthropic/claude-haiku-5.5", "openai/gpt-5.6-luna", "google/gemini-3.8-flash")

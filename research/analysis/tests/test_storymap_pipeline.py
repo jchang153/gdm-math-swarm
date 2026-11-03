@@ -128,8 +128,9 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(self.rows("map.jsonl")), 3)
         record = json.loads((self.out / "pipeline.json").read_text())
         self.assertEqual(record["models"]["stage1"]["model_id"], "anthropic/claude-haiku-5.5")
-        self.assertEqual(record["models"]["stage2"]["model_id"], "anthropic/claude-sonnet-5.5")
-        self.assertEqual(record["crosscheck"]["model"], "openai/gpt-5.6-terra")
+        self.assertEqual(record["models"]["stage2"]["model_id"], "openai/gpt-6.1-terra")
+        self.assertEqual(record["models"]["stage3"]["model_id"], "openai/gpt-6.1-terra")
+        self.assertEqual(record["crosscheck"]["model"], "google/gemini-3.8-flash")
         self.assertEqual(len(record["crosscheck"]["agents"]), 1)
         for stage in ("stage1", "stage2", "stage3"):
             self.assertEqual(len(record["prompts"][stage]["sha256"]), 64)
@@ -148,7 +149,10 @@ class PipelineTests(unittest.TestCase):
                 self.assertEqual(body["provider"]["only"], ["anthropic"])
             else:
                 self.assertIsInstance(system["content"], str)
-                self.assertEqual(body["provider"]["only"], ["openai"])
+                expected = "google-ai-studio" if body["model"].startswith("google/") else "openai"
+                self.assertEqual(body["provider"]["only"], [expected])
+        models = {r["body"]["model"] for r in transport.requests}
+        self.assertEqual(models, {"anthropic/claude-haiku-5.5", "openai/gpt-6.1-terra", "google/gemini-3.8-flash"})
         # Stage-1 system prompts are identical across requests (cacheable prefix).
         stage1 = {json.dumps(r["body"]["messages"][0]) for r in transport.requests
                   if unit_header(r["body"]["messages"][1]["content"]).get("stage") == 1

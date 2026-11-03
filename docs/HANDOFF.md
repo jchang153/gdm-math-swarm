@@ -905,7 +905,24 @@ is being merged into main via `collab-env`.
      Cross-check (Gemini Flash, 10 agents per run): stage-3 source agreement 9/10, 7/10, 8/10, 10/10; faked and
      first_fake_t 10/10 everywhere; stage-1 code Jaccard 0.52-0.65.
    - Outputs: `runs/<id>/analysis/storymap/` (index.html, events.html, agents/, stage1-3, map.jsonl, crosscheck/,
-     pipeline.json, validation.json/md). Researcher-only: never publish.
+     pipeline.json, validation.json/md). Only the public pages (below) are published; the rest stays local.
+   - **Owner (Nov 2, docs/plan.md):** the four maps stay as they are (Terra 5.6 stages 2-3). Future story-map runs
+     use GPT-6.1 Terra (`openai/gpt-6.1-terra`, $1/$5 per M) for stages 2-3; stage 1 Haiku 5.5, cross-check Gemini
+     3.8 Flash unchanged. The validation page drops the comparison with the Nov 2 model-made source labels (not
+     ground truth); it keeps the record-consistency checks and reports the Gemini cross-check as model agreement
+     only.
+   - **Published 2026-11-02 (owner "please publish"; docs/plan.md "Story maps on the public site"):** v3 interface,
+     rendered with `--taxonomy ''` into the session scratchpad (never over `runs/`). 104 files per run (index, events,
+     validation.html/.md, 100 agent pages; 9-13 MB per run) plus a "Story map" tab on each results.html; nothing
+     else changed. Timelines, stage records, units, raw, cross-check, bake-off, map.jsonl, pipeline.json and budgets
+     stay local. Tooling: `scripts/storymap_site.py` (allowlist, screens, tab), `publish_cloudflare.py storymap
+     --run RUN=DIR` (refreshes `RUN/analysis/storymap/` of runs already on the site), `prepare_hf_library.py`
+     allowlist; tests `tests/test_storymap_site.py`. Receipt `runs/phase-b/cloudflare/receipts/storymap-20261102.json`
+     (base deployment 9bf4af37). Live:
+     - control r3: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-control-180m-notices-r3-20261028T194438Z/analysis/storymap/index.html
+     - 1ov r2: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-1ov-glm-180m-notices-r2-20261028T194542Z/analysis/storymap/index.html
+     - 2ov r3: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-2ov-glm-180m-notices-r3-20261028T194422Z/analysis/storymap/index.html
+     - 10ov r3: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-10ov-glm-180m-notices-r3-20261028T194533Z/analysis/storymap/index.html
    - Open: the library vs self_then_library split is the weak point (the stage-3 prompt or the reference
      normalization may need a look); the first pass's Sonnet stage-2/3 rows were superseded by Terra (units kept).
 

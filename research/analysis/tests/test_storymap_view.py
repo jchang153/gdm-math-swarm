@@ -82,7 +82,7 @@ class ViewFixtureTest(unittest.TestCase):
         for k in keys:
             self.assertIn(f'id="{k}"', page)
         # The revert event shows its stage-2 reaction (refake signal) and the thought quote.
-        art = re.search(r'<article class="item k-fake" id="ev-\d+"><h3>145\.0 min.*?</article>', page, re.S).group(0)
+        art = re.search(r'<article class="item k-fake" id="ev-\d+"[^>]*><h3>145\.0 min.*?</article>', page, re.S).group(0)
         self.assertIn("reads the revert as a detector to evade", art)
         self.assertIn("refake_signal", art)
         self.assertIn("I&#x27;ll weaken it differently.", page)
@@ -98,7 +98,7 @@ class ViewFixtureTest(unittest.TestCase):
 
     def test_events_page_breakdown(self):
         ev = self.events
-        sec = re.search(r'<section class="ev" id="B1:post-000006">.*?</section>', ev, re.S).group(0)
+        sec = re.search(r'<section class="ev" id="B1:post-000006"[^>]*>.*?</section>', ev, re.S).group(0)
         self.assertIn("3 reader(s)", sec)  # agents 003, 004, 005
         for a in ("agent-003", "agent-004", "agent-005"):
             self.assertIn(f'href="agents/{a}.html#sel=ev-', sec)
@@ -107,13 +107,129 @@ class ViewFixtureTest(unittest.TestCase):
         grid = {c: re.findall(r'<td class="n">(\d*)</td>', row) for c, row in cells}
         self.assertEqual(grid["belief"], ["", "1", "", ""])
         self.assertEqual(grid["none"], ["", "", "2", ""])
-        lib = re.search(r'<section class="ev" id="L2:solutions/p07_shortcut\.lean">.*?</section>', ev, re.S).group(0)
+        lib = re.search(r'<section class="ev" id="L2:solutions/p07_shortcut\.lean"[^>]*>.*?</section>', ev, re.S).group(0)
         self.assertIn("3 reader(s)", lib)
         self.assertIn(">fake<", lib)
         self.assertIn('id="P2:sub-000131"', ev)
         self.assertIn('id="D1:dm-000012"', ev)
         self.assertNotIn('id="B1:post-000002"', ev)  # unrelated, no reaction: counted, not listed
         self.assertIn("1 unrelated board posts", ev)
+
+    def test_legend_groups_on_every_page(self):
+        for text in [self.index, self.events, *self.pages.values()]:
+            self.assertIn('<details class="legend" open>', text)
+            self.assertIn("<h4>Bar colour = stance</h4>", text)
+            self.assertIn("<h4>Shape + colour = event</h4>", text)
+            self.assertIn("<b>Read as:</b>", text)
+            for stance in view.STANCES:
+                self.assertIn(f"<b>{stance}</b>", text)
+            self.assertIn("Model readings are interpretations, not ground truth", text)
+            self.assertNotIn("Researcher-only", text)
+            self.assertNotIn("off the public site", text)
+        # Legend swatches and glyphs come from the map's own classes and code, so they cannot drift.
+        legend = re.search(r'<details class="legend".*?</details>', self.pages["agent-003"], re.S).group(0)
+        for stance in view.STANCES:
+            self.assertIn(f'<rect class="ph-{stance}"', legend)
+        self.assertNotIn("style=", legend)  # no inline colours
+        self.assertIn(view.shape("D1", 8, 8.5, 4.6, "g-hollow ring", None, ""), legend)
+        self.assertIn(view.shape("S1", 8, 8.5, 4.6, "g-fill ok", None, ""), legend)
+        self.assertNotIn("data-k=", legend)
+        self.assertIn("turning point", legend)
+
+    def test_one_hue_one_meaning(self):
+        # Two palettes with no shared colour: stance hues only on the stance bars, event hues only on glyphs.
+        for tokens in (view.TOKENS_LIGHT, view.TOKENS_DARK):
+            stance = {v.lower() for k, v in tokens.items() if k.startswith("st-")}
+            event = {v.lower() for k, v in tokens.items() if k.startswith("ev-")}
+            self.assertEqual(len(stance), 6)
+            self.assertEqual(len(event), 2)
+            self.assertFalse(stance & event)
+        css = view.CSS
+        for stance in view.STANCES:
+            uses = re.findall(r"([^{}]+)\{[^}]*var\(--st-" + stance + r"\)", css)
+            self.assertEqual([u.strip() for u in uses], [f".ph-{stance}"], stance)
+        for ev in ("ev-fake", "ev-ov"):
+            for sel in re.findall(r"([^{}]+)\{[^}]*var\(--" + ev + r"\)", css):
+                self.assertTrue(sel.strip().startswith(".g"), (ev, sel))
+        page = self.pages["agent-003"]
+        lanes = page.split('<div class="lanes">', 1)[1].split("</svg>", 1)[0]
+        self.assertNotIn("style=", lanes)
+        flags = set()
+        for cls in re.findall(r'<g class="g ([^"]*)"', lanes):
+            flags |= set(cls.split())
+        self.assertLessEqual(flags, {"g-fill", "g-hollow", "g-other", "ring", "ok", "no", "g-th", "g-th-low"})
+        self.assertIn("ring", flags)  # the overseer DM in the fixture
+
+    def test_glyph_flags(self):
+        ev = lambda **e: {"event": e}  # noqa: E731
+        self.assertEqual(view.glyph_class(ev(type="L2", fake=True)), "g-fill")
+        self.assertEqual(view.glyph_class(ev(type="D1", author_role="overseer")), "g-hollow ring")
+        self.assertEqual(view.glyph_class(ev(type="S1", fake=True, outcome="accepted")), "g-fill ok")
+        self.assertEqual(view.glyph_class(ev(type="S1", outcome="rejected")), "g-hollow no")
+        self.assertEqual(view.glyph_class(ev(type="S1", detail={"credited": True})), "g-hollow ok")
+        self.assertEqual(view.glyph_class(ev(type="P1")), "g-other")
+
+    def test_tooltips_name_what_each_mark_is(self):
+        page = self.pages["agent-003"]
+        self.assertRegex(page, r'class="ph-\w+"[^>]*><title>Stance: \w+ · t=')
+        self.assertRegex(page, r'data-k="ev-\d+"[^>]*><title>[A-Z][^<]* · t=')
+        self.assertRegex(page, r'data-k="th-\d+"[^>]*><title>Thought ')
+        self.assertIn("<title>Turning point · t=", page)
+        self.assertRegex(self.index, r'<a href="agents/agent-00\d\.html#sel=ev-\d+"><g class="g [^"]*"><title>')
+
+    def test_agent_page_stepper(self):
+        page = self.pages["agent-003"]
+        for needle in ('id="pprev"', 'id="pnext"', 'id="pos"', 'id="pclose"', '<select id="kind">',
+                       '<option value="exp">only exposures</option>', '<option value="th">only thoughts</option>',
+                       '<option value="sub">only submissions</option>', "ArrowRight", "ArrowLeft", "Escape",
+                       "'#sel='+key"):
+            self.assertIn(needle, page)
+        items = re.findall(r'<article class="item[^"]*" id="([^"]+)" data-kind="(\w+)" data-t="([\d.]+)"',
+                           page.split('<div id="items">', 1)[1])
+        self.assertTrue(items)
+        times = [float(t) for _, _, t in items]
+        self.assertEqual(times, sorted(times))  # stepping order is time order
+        self.assertLessEqual({k for _, k, _ in items}, {"exp", "th", "sub", "own", "tp"})
+        self.assertIn("th", {k for _, k, _ in items})
+        # Every glyph key on the lanes has a steppable article.
+        ids = {i for i, _, _ in items}
+        for k in set(re.findall(r'data-k="([^"]+)"', page.split('<div class="lanes">', 1)[1].split("</svg>", 1)[0])):
+            self.assertIn(k, ids)
+
+    def test_events_page_keyboard(self):
+        self.assertIn("ArrowDown", self.events)
+        self.assertRegex(self.events, r'<section class="ev" id="[^"]+" tabindex="-1"><h3><svg class="hglyph"')
+
+    def test_validation_page_and_links(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            shutil.copytree(FIX / "map", tmp / "map")
+            (tmp / "map" / "validation.md").write_text(
+                "# Story map validation\n\nMap: `x`\n\n- Source accuracy: 82.7%\n\n| a | b |\n|---|---|\n| 1 | <2> |\n")
+            view.build(tmp / "map", FIX / "timeline", tmp / "out", taxonomy=None)
+            val = (tmp / "out" / "validation.html").read_text()
+            self.assertIn("<h1>Story map validation</h1>", val)
+            self.assertIn("<code>x</code>", val)
+            self.assertIn("<li>Source accuracy: 82.7%</li>", val)
+            self.assertIn("<td>&lt;2&gt;</td>", val)
+            self.assertIn('href="validation.html"', (tmp / "out" / "index.html").read_text())
+            self.assertIn('href="../validation.html"', (tmp / "out" / "agents" / "agent-001.html").read_text())
+        self.assertFalse((self.out / "validation.html").exists())
+        self.assertNotIn("validation.html", self.index)
+
+    def test_model_names(self):
+        p = {"models": {"stage1": {"model_id": "anthropic/claude-haiku-5.5"},
+                        "stage2": {"model_id": "openai/gpt-5.6-terra"}, "stage3": {"model_id": "openai/gpt-5.6-terra"}}}
+        self.assertEqual(view.model_names(p),
+                         "stage 1 anthropic/claude-haiku-5.5; stages 2-3 openai/gpt-5.6-terra")
+        self.assertEqual(view.model_names({}), "")
+
+    def test_relative_links_resolve(self):
+        for rel, text in [("index.html", self.index), ("events.html", self.events),
+                          *((f"agents/{a}.html", p) for a, p in self.pages.items())]:
+            for href in re.findall(r'href="([^"#:]+)(?:#[^"]*)?"', text):
+                target = (self.out / rel).parent / href
+                self.assertTrue(target.resolve().is_file(), (rel, href))
 
     def test_offline_no_external_assets(self):
         for text in [self.index, self.events, *self.pages.values()]:

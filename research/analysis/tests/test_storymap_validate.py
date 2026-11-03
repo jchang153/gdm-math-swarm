@@ -150,6 +150,35 @@ class ValidationTests(unittest.TestCase):
         self.assertIn("pick (cheapest of those): **cheap**", md)
         self.assertIn("Source accuracy: 75%", md)
 
+    def test_without_reference_no_label_comparison(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "map").mkdir()
+            for sub in ("stage1", "stage2", "stage3"):
+                src = FIX / "map" / sub
+                if src.is_dir():
+                    (Path(d) / "map" / sub).mkdir()
+                    for f in src.iterdir():
+                        (Path(d) / "map" / sub / f.name).write_bytes(f.read_bytes())
+            (Path(d) / "map" / "pipeline.json").write_text(json.dumps(
+                {"run_id": "run-x", "models": {"stage3": {"model_id": "openai/gpt-5.6-terra"}},
+                 "crosscheck": {"model": "google/gemini-3.8-flash", "fraction": 0.1}}))
+            V.main(["validate", "--map", str(Path(d) / "map"), "--timeline", str(FIX / "timeline"),
+                    "--crosscheck", str(FIX / "cross"), "--bakeoff", str(FIX / "bakeoff"), "--out", d])
+            data = json.loads((Path(d) / "validation.json").read_text())
+            md = (Path(d) / "validation.md").read_text()
+        for key in ("reference", "reference_counts", "agreement", "bakeoff"):
+            self.assertNotIn(key, data)
+        self.assertEqual(data["run"], "run-x")
+        for text in ("reference", "Reference", "hand label", "Source accuracy", "Disagreements", "Awareness",
+                     "Confusion", "private/"):
+            self.assertNotIn(text, md)
+        self.assertIn("## Consistency with the run's records", md)
+        self.assertIn("each reaction cites an event the agent actually saw", md)
+        self.assertIn("## Agreement between two models (openai/gpt-5.6-terra vs google/gemini-3.8-flash) on a 10% "
+                      "sample", md)
+        self.assertIn("not accuracy", md)
+        self.assertEqual(data["consistency"]["checks"]["faked"]["ok"], 5)
+
     def test_stage3_dir_fallback(self):
         with tempfile.TemporaryDirectory() as d:
             (Path(d) / "stage3").mkdir()

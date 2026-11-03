@@ -34,6 +34,11 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
     publish_cloudflare.py withdraw --run RUN [--run RUN ...] [--commit] [--receipt FILE]
         Remove runs already recorded in data/library-unlisted.json from the site (every file of each run; the
         catalogue is re-rendered without them). Other runs never change; private copies are untouched.
+    publish_cloudflare.py storymap --run RUN=PAGES_DIRECTORY [--run ...] [--commit] [--receipt FILE]
+        Add (or refresh) the agent story map of runs already on the site (owner, November 2, 2026): only the
+        allowlisted pages of PAGES_DIRECTORY (``storymap_site``: index.html, events.html, validation.html/.md,
+        agents/*.html, rendered with --taxonomy '') go to RUN/analysis/storymap/, screened for host paths, private
+        paths, taxonomy names and unpublished links; results.html gains the Story map tab. No other file changes.
     publish_cloudflare.py verify [--url URL] [--full] [--run RUN ...]
         Read-only check of the served site against its site-manifest.json (see ``verify``).
 
@@ -70,6 +75,7 @@ import dataset_logs  # noqa: E402
 import hf_visibility  # noqa: E402
 import site_layout  # noqa: E402
 import site_style  # noqa: E402
+import storymap_site  # noqa: E402
 from publish_hf_library import (SECRET, load_bundle, merge_entries, packed_text,  # noqa: E402
                                 safe_path)
 
@@ -667,6 +673,46 @@ def plan_withdraw(base_files, unlisted, runs):
                    'removed_by_run': {r: sum(1 for n in removed if run_of(n) == r) for r in runs}}
 
 
+def plan_storymap(base_files, unlisted, folders, taxonomy=()):
+    """The site with the story map pages of runs already on it (``folders``: run -> local folder of the public
+    render). Each run's RUN/analysis/storymap/ becomes exactly the allowlisted, screened pages of its folder
+    (``storymap_site.public_files``; earlier story map pages are replaced, never left stale) and its results.html
+    gains the Story map tab. No other file of any run changes and the catalogue is unchanged."""
+    if not folders:
+        raise ValueError('storymap needs at least one --run RUN=PAGES_DIRECTORY')
+    known = {run_of(n) for n in base_files if run_of(n)}
+    missing = sorted(set(folders) - known)
+    if missing:
+        raise ValueError('Run(s) not on the site (publish the run first): ' + ', '.join(missing))
+    hidden = sorted(set(folders) & set(unlisted))
+    if hidden:
+        raise ValueError('Run(s) unlisted by data/library-unlisted.json: ' + ', '.join(hidden))
+    files, added, replaced, removed = dict(base_files), [], [], []
+    for run in sorted(folders):
+        prefix = f'{run}/{storymap_site.STORYMAP_DIR}/'
+        pages = {prefix + name: data for name, data in
+                 storymap_site.public_files(folders[run], taxonomy).items()}
+        for name in sorted(n for n in base_files if n.startswith(prefix) and n not in pages):
+            removed.append(name)
+            del files[name]
+        for name, data in sorted(pages.items()):
+            if name not in base_files:
+                added.append(name)
+            elif base_files[name] != data:
+                replaced.append({'path': name, 'old': digest(base_files[name]), 'new': digest(data)})
+            files[name] = data
+        page = f'{run}/results.html'
+        if page not in base_files:
+            raise ValueError(f'{page} is not on the site')
+        new = storymap_site.add_storymap_tab(base_files[page].decode('utf-8')).encode('utf-8')
+        if new != base_files[page]:
+            replaced.append({'path': page, 'old': digest(base_files[page]), 'new': digest(new)})
+            files[page] = new
+    return files, {'source': {'kind': 'storymap', 'runs': sorted(folders)}, 'added_files': len(added),
+                   'replaced_pages': replaced, 'removed_files': removed,
+                   'added_by_run': {r: sum(1 for n in added if run_of(n) == r) for r in sorted(folders)}}
+
+
 def plan_repack(base_files):
     """The site with every run's per-agent files packed (``pack_site``, applied by ``finish``). Nothing else
     changes: no file of any run other than its instructions/ and prompts/ files (replaced by RUN/packed/), and
@@ -882,6 +928,17 @@ def download_space(revision, directory):
     return info.sha, directory
 
 
+def storymap_taxonomy():
+    """The researcher-only taxonomy names, when this checkout has them, so that none reaches the site (read
+    locally, never printed or deployed): {code: name}, {} without them."""
+    try:
+        from research.analysis.storymap.view import DEFAULT_TAXONOMY, load_taxonomy
+    except ImportError:
+        sys.path.insert(0, str(ROOT))
+        from research.analysis.storymap.view import DEFAULT_TAXONOMY, load_taxonomy
+    return load_taxonomy(DEFAULT_TAXONOMY)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -897,7 +954,10 @@ def main(argv=None):
     repack = sub.add_parser('repack', help='pack every run\'s per-agent instructions and prompts (lossless)')
     withdraw = sub.add_parser('withdraw', help='remove recorded unlisted runs (all their files) from the site')
     withdraw.add_argument('--run', action='append', required=True, help='run to remove (repeatable)')
-    for command in (mirror, bundle, restyle, withdraw, repack):
+    story = sub.add_parser('storymap', help='add the agent story map pages to runs already on the site')
+    story.add_argument('--run', action='append', required=True,
+                       help='RUN=PAGES_DIRECTORY (the public render, --taxonomy \'\'); repeatable')
+    for command in (mirror, bundle, restyle, withdraw, repack, story):
         command.add_argument('--commit', action='store_true', help='deploy; otherwise only plan')
         command.add_argument('--receipt', type=Path, help='receipt JSON (outside the bundle)')
         command.add_argument('--workdir', type=Path, help='scratch directory for staging (default: a temporary one)')
@@ -942,6 +1002,10 @@ def main(argv=None):
         elif args.command == 'repack':
             files, plan = plan_repack(base_files)
             message = f'Repack per-agent files of {len(plan["source"]["runs"])} run(s)'
+        elif args.command == 'storymap':
+            folders = dict(spec.split('=', 1) for spec in args.run)
+            files, plan = plan_storymap(base_files, unlisted, folders, storymap_taxonomy())
+            message = 'Story map ' + ', '.join(plan['source']['runs'])
         elif args.command == 'withdraw':
             files, plan = plan_withdraw(base_files, unlisted, args.run)
             message = 'Withdraw ' + ', '.join(plan['source']['runs'])

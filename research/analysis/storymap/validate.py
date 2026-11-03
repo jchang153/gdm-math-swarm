@@ -46,6 +46,12 @@ Four parts, each usable alone:
    mean of the three accuracies in percentage points; the pick is the cheapest model within 2
    points of the best.
 
+``--reference`` is optional, and the published outputs are made without it (owner, November 2, 2026: earlier
+labels are not ground truth, so no page compares the map with them). Without it, ``validate`` reports only the
+consistency with the run's own records (part 2, a matter of fact) and, with ``--crosscheck``, the agreement
+between two models on the sample (part 3, agreement, not accuracy); parts 1 and 4 need a reference and are
+skipped.
+
 Outputs ``validation.json`` and ``validation.md`` in ``--out``. Unknown and unresolved outcomes
 stay explicit (``unresolved`` counts, ``missing`` predictions).
 
@@ -53,7 +59,7 @@ CLI::
 
     python -m research.analysis.storymap.validate reference --labels-dir DIR --out FILE.jsonl
     python -m research.analysis.storymap.validate validate --map runs/<id>/analysis/storymap \
-        --timeline DIR --reference FILE.jsonl [--crosscheck DIR] [--bakeoff DIR] [--out DIR]
+        --timeline DIR [--reference FILE.jsonl] [--crosscheck DIR] [--bakeoff DIR] [--out DIR]
 """
 from __future__ import annotations
 
@@ -583,20 +589,42 @@ def bakeoff(bakeoff_dir, reference, timelines, costs=None, points=BAKEOFF_POINTS
 
 # ---------------------------------------------------------------- report
 
-def run_validation(map_dir, timeline_dir, reference_path, crosscheck_dir=None, bakeoff_dir=None, costs=None):
-    reference = load_reference(reference_path) if reference_path else {}
+def _pipeline(map_dir):
+    try:
+        return json.loads((Path(map_dir) / "pipeline.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def crosscheck_models(map_dir):
+    """(main stage-3 model, cross-check model, sample fraction) from the map's pipeline.json (None if absent)."""
+    p = _pipeline(map_dir)
+    models = p.get("models") if isinstance(p.get("models"), dict) else {}
+    main = models.get("stage3")
+    main = main.get("model_id") if isinstance(main, dict) else main
+    cc = p.get("crosscheck") if isinstance(p.get("crosscheck"), dict) else {}
+    return main, cc.get("model"), cc.get("fraction")
+
+
+def run_validation(map_dir, timeline_dir, reference_path=None, crosscheck_dir=None, bakeoff_dir=None, costs=None):
+    """Consistency with the run's records, and (optional) cross-model agreement. A reference comparison (and the
+    bake-off, scored against it) only when ``reference_path`` is given."""
     timelines = load_timelines(timeline_dir) if timeline_dir else {}
     stage3 = load_stage3(map_dir)
-    result = {
-        "map": str(map_dir), "reference": str(reference_path) if reference_path else None,
-        "tolerance_min": MINUTES_TOL, "reference_counts": reference_counts(reference.values()) if reference else None,
-        "agreement": agreement(stage3, reference) if reference else None,
-        "consistency": consistency(stage3, load_stage_lines(map_dir, "stage1"), load_stage_lines(map_dir, "stage2"), timelines),
-    }
+    result = {"run": _pipeline(map_dir).get("run_id") or Path(map_dir).resolve().parents[1].name,
+              "tolerance_min": MINUTES_TOL,
+              "consistency": consistency(stage3, load_stage_lines(map_dir, "stage1"),
+                                         load_stage_lines(map_dir, "stage2"), timelines)}
+    if reference_path:
+        reference = load_reference(reference_path)
+        result.update(reference=str(reference_path), reference_counts=reference_counts(reference.values()),
+                      agreement=agreement(stage3, reference))
+        if bakeoff_dir:
+            result["bakeoff"] = bakeoff(bakeoff_dir, reference, timelines, costs)
     if crosscheck_dir:
         result["crosscheck"] = crossmodel(map_dir, crosscheck_dir)
-    if bakeoff_dir:
-        result["bakeoff"] = bakeoff(bakeoff_dir, reference, timelines, costs)
+        main, cross, fraction = crosscheck_models(map_dir)
+        result["crosscheck"].update(main_model=main, cross_model=cross, fraction=fraction)
     return result
 
 
@@ -609,8 +637,7 @@ def _p(v):
 
 
 def render_md(res):
-    out = ["# Story map validation", "", f"Map: `{res['map']}`  ", f"Reference: `{res['reference']}`  ",
-           f"Time tolerance: +/-{res['tolerance_min']:g} min", ""]
+    out = ["# Story map validation", "", f"Run: `{res.get('run')}`  ", f"Time tolerance: +/-{res['tolerance_min']:g} min", ""]
     ag = res.get("agreement")
     if ag:
         rc = res["reference_counts"]
@@ -637,15 +664,23 @@ def render_md(res):
             out += ["", "Unscored reference rows:", ""] + [f"- {u['agent']} ({u['status']}): map {u['pred']}" for u in ag["unscored"]]
         out.append("")
     cs = res["consistency"]
-    out += ["## Consistency with the timelines", "", "| check | ok | fail | unresolved |", "|---|---|---|---|"]
+    out += ["## Consistency with the run's records", "",
+            "Each map reading checked against the agent's own records (its submissions, their outcomes and the "
+            "timeline of what it saw). These are facts of the run, not labels.", "",
+            "| check | what is compared | ok | fail | unresolved |", "|---|---|---|---|---|"]
     for k, v in cs["checks"].items():
-        out.append(f"| {k} | {v['ok']} | {v['fail']} | {v['unresolved']} |")
+        out.append(f"| {k} | {CHECK_MEANING.get(k, '')} | {v['ok']} | {v['fail']} | {v['unresolved']} |")
     if cs["flags"]:
         out += ["", f"Flags ({len(cs['flags'])}):", ""] + [f"- {f['agent']} {f['check']} ({f['result']}): {f['detail']}" for f in cs["flags"][:200]]
     out.append("")
     cc = res.get("crosscheck")
     if cc:
-        out += ["## Cross-model agreement", "",
+        pair = f"{cc.get('main_model') or 'main model'} vs {cc.get('cross_model') or 'cross-check model'}"
+        frac = cc.get("fraction")
+        sample = f"a {frac * 100:g}% sample" if isinstance(frac, (int, float)) else "a sample"
+        out += [f"## Agreement between two models ({pair}) on {sample}", "",
+                "How often two different models read the same agents the same way. This is agreement between "
+                "models, not accuracy: neither reading is ground truth.", "",
                 f"Stage 1: {cc['stage1']['agents']} agents, {cc['stage1']['chunks']} chunks, mean code-set Jaccard {_fmt(cc['stage1']['mean_jaccard'])}", "",
                 f"Stage 3 final fields ({cc['stage3']['agents']} agents):", "", "| field | agree | pct |", "|---|---|---|"]
         for f, v in cc["stage3"]["fields"].items():
@@ -659,6 +694,18 @@ def render_md(res):
         out += ["", f"Best score {_p(bo['best_score'])}; within {bo['points']:g} points: {', '.join(bo['within']) or 'none'}; "
                 f"pick (cheapest of those): **{bo['pick'] or 'none'}**", ""]
     return "\n".join(out)
+
+
+CHECK_MEANING = {
+    "faked": "faked vs the agent's own fake submissions",
+    "credited": "credited vs the submission outcomes (an accepted fake)",
+    "first_fake_t": "first fake time vs its first fake submission (+/-2 min)",
+    "stopped": "stopped vs fake submissions after the stop",
+    "stage2_event_exists": "each reaction cites an event the agent actually saw",
+    "stage2_event_before_reaction": "a reaction's quotes come after the event",
+    "stage2_quotes": "stage-2 quotes verbatim in the agent's records",
+    "stage1_quotes": "stage-1 quotes verbatim in the agent's records",
+}
 
 
 def write_outputs(res, out_dir):
@@ -693,7 +740,7 @@ def main(argv=None):
     res = run_validation(a.map, a.timeline, a.reference, a.crosscheck, a.bakeoff, costs)
     write_outputs(res, a.out or a.map)
     ag = res.get("agreement") or {}
-    print(json.dumps({"out": a.out or a.map, "source_accuracy": ag.get("source_accuracy"),
+    print(json.dumps({"out": a.out or a.map, **({"source_accuracy": ag.get("source_accuracy")} if ag else {}),
                       "checks": res["consistency"]["checks"], "bakeoff_pick": (res.get("bakeoff") or {}).get("pick")}))
     return 0
 

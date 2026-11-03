@@ -24,6 +24,7 @@ from simple_judge_site import (DATASET_FILES as SJ_DATASET_FILES, SJ_DIR, SPACE_
                                add_simple_judge_tab, simple_judge_excluded, simple_judge_files, simple_report,
                                site_page, space_report_json)
 from publish_hf_library import SECRET
+from storymap_site import STORYMAP_DIR, add_storymap_tab, public_files as storymap_public_files, storymap_excluded
 from space_navigation import private_space_navigation
 from site_style import themed
 import site_layout
@@ -151,7 +152,7 @@ def run_excluded(relative, transcript_export=False):
     allowlist."""
     parts = Path(relative).parts
     return ((not transcript_export and bool(parts) and parts[0] in LOCAL_ONLY_DIRS) or judge_excluded(relative)
-            or incident_excluded(relative) or simple_judge_excluded(relative))
+            or incident_excluded(relative) or simple_judge_excluded(relative) or storymap_excluded(relative))
 
 
 def simple_judge_publication(source, judge_plan=None):
@@ -537,6 +538,12 @@ def main():
             page = output / run_id / 'results.html'
             page.write_text(add_simple_judge_tab(page.read_text(encoding='utf-8'), simple_report(source)),
                             encoding='utf-8')
+        storymap = output / run_id / STORYMAP_DIR  # allowlisted story map pages, screened; the Story map tab
+        if storymap.is_dir():
+            for name, data in storymap_public_files(storymap).items():
+                (storymap / name).write_bytes(data)
+            page = output / run_id / 'results.html'
+            page.write_text(add_storymap_tab(page.read_text(encoding='utf-8')), encoding='utf-8')
         if incident_plans[run_id] is not None:  # the run page's Incident report tab (navigation only)
             page = output / run_id / 'results.html'
             page.write_text(add_incident_tab(page.read_text(encoding='utf-8')), encoding='utf-8')

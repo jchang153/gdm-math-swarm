@@ -1673,3 +1673,19 @@ duplicating model outputs"). Models from here: stage 1 Claude Haiku 5.5 (unchang
 Terra, cross-check Gemini 3.8 Flash on a seeded 10%. A spending limit is still required per paid
 invocation, so each run's story-map budget is set to **$200 total** (including the ~$50 already
 settled into the same output folder), chosen to be well above the estimated $20-30 needed to finish.
+
+Owner (November 2, 2026): keep the four completed story maps as they are (stages 2-3 by GPT-5.6 Terra).
+Future story-map runs use GPT-6.1 Terra (`openai/gpt-6.1-terra`, $1/$5 per M tokens) for stages 2-3; stage 1
+stays Claude Haiku 5.5 and the cross-check Gemini 3.8 Flash. The validation page no longer compares against the
+November 2 model-made source labels (not ground truth); it keeps the record-consistency checks and reports the
+Gemini cross-check as model agreement only.
+
+## Story maps on the public site (November 2, 2026)
+
+Owner decision (November 2, 2026, "can you publish them to the website"): the story maps of the four runs
+above are published on the public Cloudflare library. Only the HTML pages (`index.html`, `events.html`,
+`validation.html`, `agents/*.html`, rendered for the site with `--taxonomy ''` so the researcher-only code
+names stay local) and the validation summary (`validation.md`, without the path of the private hand-label
+reference) go public, plus a "Story map" tab on each run page. Timelines, stage 1-3 records, units, raw
+archives, cross-check, bake-off, `map.jsonl`, `pipeline.json` and budgets stay local
+(`scripts/storymap_site.py`; `publish_cloudflare.py storymap`).
