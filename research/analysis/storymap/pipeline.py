@@ -866,7 +866,10 @@ def build(args, run_dir, out_dir, model_ids, log, *, schema_module=None, transpo
                                         "purpose": "storymap"}, run_dir=run_dir, ledger=ledger)
     pool = ModelPool(ledger_path=ledger, archive_root=out_dir / "raw", anthropic_settings=anthropic,
                      extra_settings=extra, scope=scope, run_limit=run_limit, run_id=label, **common)
-    schema = SchemaAdapter(schema_module if schema_module is not None else load_schema_module())
+    from . import domain as domain_mod
+    domain = domain_mod.run_domain(run_dir)   # coding runs use the coding prompts and taxonomy (same codes)
+    schema = SchemaAdapter(schema_module if schema_module is not None
+                           else domain_mod.schema_module(domain, load_schema_module()))
     story = StoryMap(timeline_dir=args.timeline, out_dir=out_dir, pool=pool, schema=schema, run_id=run_dir.name,
                      mode="mock" if args.mock else "paid", log=log, chunk_tokens=args.chunk_tokens,
                      retry_failed=args.retry_failed, run_limit=run_limit,
@@ -874,6 +877,8 @@ def build(args, run_dir, out_dir, model_ids, log, *, schema_module=None, transpo
     meta = {"ledger": str(ledger), "scope": scope, "ledger_label_run_id": label,
             "budget_rule": "--run-limit, else RUN/settings.json behavior_judge_max_usd, else $50; earlier "
                            "invocations into this output directory count against it"}
+    if domain != domain_mod.LEAN:
+        meta["domain"] = domain
     return story, meta
 
 

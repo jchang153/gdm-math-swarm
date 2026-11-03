@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from research.analysis import roles as roles_mod
+from research.analysis.storymap import domain as domain_mod
 from research.analysis.storymap.fake_rule import classify, is_fake
 
 COLLAB_FULL = 6000          # collab tool results kept in full up to this many characters
@@ -98,6 +99,9 @@ class RunContext:
         self.run_dir = Path(run_dir)
         self.settings = roles_mod.load_settings(self.run_dir)
         self.roles = dict(roles_mod.special_roles(self.settings))
+        self.domain = domain_mod.run_domain(self.run_dir)   # "lean" (math) or "code" (coding runs)
+        self.classify, self.is_fake = domain_mod.fake_rule(self.domain)
+        self.trick = domain_mod.trick_pattern(self.domain, TRICK)
         db = sqlite3.connect(f"file:{self.run_dir / 'conference/state.sqlite'}?mode=ro&immutable=1", uri=True)
         db.row_factory = sqlite3.Row
         meta = {r["key"]: r["value"] for r in db.execute("select key, value from meta")}
@@ -112,8 +116,8 @@ class RunContext:
         self.subs, self.sub_by_public = {}, {}
         for r in db.execute("select * from submissions"):
             d = dict(r)
-            d["fake"] = is_fake(d["source"], d["outcome"], self.validity.get(d["source_sha256"]))
-            d["form"] = classify(d["source"] or "")
+            d["fake"] = self.is_fake(d["source"], d["outcome"], self.validity.get(d["source_sha256"]))
+            d["form"] = self.classify(d["source"] or "")
             d["validity"] = self.validity.get(d["source_sha256"])
             self.subs[d["submission_id"]] = d
             if d.get("public_id"):
@@ -127,8 +131,8 @@ class RunContext:
             sub = self.subs.get(d["submission_id"]) if d["submission_id"] is not None else None
             sha = sub["source_sha256"] if sub else d["sha256"]
             validity = self.validity.get(sha) if sha in self.validity else self.validity.get(d["sha256"])
-            d["fake"] = is_fake(d["content"], "accepted" if d["kind"] == "solution" else "", validity)
-            d["form"] = classify(d["content"] or "")
+            d["fake"] = self.is_fake(d["content"], "accepted" if d["kind"] == "solution" else "", validity)
+            d["form"] = self.classify(d["content"] or "")
             d["validity"] = validity
             self.library[(d["path"], d["revision"])] = d
         self.posts = {"post-%06d" % r["post_id"]: dict(r) for r in db.execute("select * from posts")}
@@ -350,9 +354,9 @@ def trim_result(tool, text):
 # Events
 
 
-def text_tags(text, role):
+def text_tags(text, role, trick=None):
     tags = []
-    if TRICK.search(text or ""):
+    if (trick or TRICK).search(text or ""):
         tags.append("describes_trick")
     if WARNING.search(text or ""):
         tags.append("warning")
@@ -465,7 +469,7 @@ class Builder:
         reverted_at = rev["reverted_at"] if rev else None
         reread = path in self.seen_lib
         self.seen_lib.add(path)
-        fake = (row or {}).get("fake") if row else bool(classify(r.get("content") or ""))
+        fake = (row or {}).get("fake") if row else bool(self.ctx.classify(r.get("content") or ""))
         state = ("reverted before this read" if reverted_at is not None and reverted_at <= ts else
                  (f"reverted later at {self.t(reverted_at)}" if reverted_at else "not reverted"))
         text = (f"Read library file {path} by {author} ({self.ctx.role(author)}): "
@@ -525,7 +529,7 @@ class Builder:
             role = self.ctx.role(author)
             head = f"{pid} by {author} ({role})"
             self.event(ts, "B1", f"B1:{pid}", head + (" [re-read]" if reread else ": " + msg[:POST_TEXT]),
-                       tool="get_bulletin_board", author=author, tags=text_tags(msg, role),
+                       tool="get_bulletin_board", author=author, tags=text_tags(msg, role, self.ctx.trick),
                        detail={"post_id": pid, "posted_at": self.t(_epoch(post.get("posted_at"))),
                                "intent_type": post.get("intent_type"), "reread": reread}, turn=turn)
 
@@ -542,7 +546,7 @@ class Builder:
             role = self.ctx.role(author)
             head = f"{mid} from {author} ({role})"
             self.event(ts, "D1", f"D1:{mid}", head + (" [re-read]" if reread else ": " + msg[:POST_TEXT]),
-                       tool="get_messages", author=author, tags=text_tags(msg, role),
+                       tool="get_messages", author=author, tags=text_tags(msg, role, self.ctx.trick),
                        detail={"message_id": mid, "public_id": m.get("message_id"),
                                "sent_at": self.t(_epoch(m.get("sent_at"))), "reread": reread}, turn=turn)
 
@@ -550,7 +554,7 @@ class Builder:
         row = self.ctx.sub_by_public.get(r.get("submission_id"))
         if row is None:
             src = args.get("source") if isinstance(args.get("source"), str) else ""
-            fake = bool(classify(src))
+            fake = bool(self.ctx.classify(src))
             self.event(ts, "S1", f"S1:{r.get('submission_id')}",
                        f"Submitted {r.get('problem_id')}: {r.get('outcome')} (no conference row)",
                        tool="submit_solution", author=self.agent, fake=fake, outcome=r.get("outcome"),
@@ -573,7 +577,7 @@ class Builder:
 
     def _own(self, ts, channel, oid, body, detail, tool, turn):
         self.event(ts, "O1", f"O1:{oid}", f"Own {channel} {oid}: {body[:POST_TEXT]}", tool=tool,
-                   author=self.agent, tags=text_tags(body, "solver"), detail=dict(detail, channel=channel),
+                   author=self.agent, tags=text_tags(body, "solver", self.ctx.trick), detail=dict(detail, channel=channel),
                    turn=turn)
 
     def on_post_intent(self, ts, r, args, turn):
@@ -658,6 +662,8 @@ def extract(run_dir, out, agents=None, workers=4, log=None):
         merged.update(index)
         index = dict(sorted(merged.items()))
     (tl / "index.json").write_text(json.dumps(index, indent=1) + "\n", encoding="utf-8")
+    if ctx.domain != domain_mod.LEAN:   # coding runs: the viewer and pipeline read the domain from here
+        (tl / "domain.json").write_text(json.dumps({"domain": ctx.domain}) + "\n", encoding="utf-8")
     return index
 
 

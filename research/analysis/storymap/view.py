@@ -1695,7 +1695,19 @@ def nav_html(prefix="", has_val=False, has_tax=False):
 
 # ------------------------------------------------------------------ main
 
-def build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY):
+def build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, domain=None):
+    """Write index.html, events.html and agents/<agent>.html; return the list of written paths. ``domain``
+    (default: recorded in pipeline.json or timeline/domain.json, else lean) selects coding wording and, when the
+    default taxonomy is asked for, the public coding taxonomy (storymap/domain.py); Lean maps are unchanged."""
+    from . import domain as domain_mod
+    domain = domain or domain_mod.map_domain(map_dir, timeline)
+    if domain == domain_mod.CODE and taxonomy and Path(taxonomy) == DEFAULT_TAXONOMY:
+        taxonomy = domain_mod.PUBLIC_CODE_TAXONOMY
+    with domain_mod.view_overrides(sys.modules[__name__], domain):
+        return _build(map_dir, timeline, out, taxonomy)
+
+
+def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY):
     """Write index.html, events.html and agents/<agent>.html; return the list of written paths."""
     agents, pipeline = load(map_dir, timeline)
     out = Path(out or map_dir)
