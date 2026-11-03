@@ -879,15 +879,40 @@ is being merged into main via `collab-env`.
      | 10ov-enforceonly | 53.66 | 677.0/15.7 | 82.7 | 646.7 | 570.0 | 581.3 | 0.0 | 0.0 (+35.3) | 89.7 | 48 | |
      Total settled $1062.64
 
-19. **IN PROGRESS 2026-11-02 (build started ~15:45 PT): agent story map** (docs/plan.md, "Agent story map
-   (November 2, 2026)"). Per-solver map of reasoning about cheating interleaved with library reads, board posts,
-   DMs and reverts, and the reaction to each. Five parallel workstreams against
-   `private/research/analysis/storymap/INTERFACE.md`: W1 timeline extractor, W2 taxonomy/prompts/schemas
-   (private) + `schema.py`, W3 judge pipeline (reuses `research/analysis/judge/` client, routes, ledger), W4 HTML
-   viewer, W5 validation against the November 2 hand labels of first-fake sources (4 runs, 218 fakers; kept in
-   the session scratchpad, to be copied into private/ by the integrator). Approved pilot: the 1-overseer run r2
-   (`glmflash100-seeded-1ov-glm-180m-notices-r2-20261028T194542Z`), $50 run budget, Haiku 5.5 / Sonnet 5.5 /
-   GPT-5.6 Terra cross-check. Then the other three heatmap runs (control r3, 2ov r3, 10ov r3), $50 run budget each (owner, Nov 2). Not yet run; no paid calls so far.
+19. **STOPPED AT BUDGET 2026-11-02: agent story map** (docs/plan.md, "Agent story map (November 2, 2026)").
+   Per-solver map of reasoning about cheating interleaved with library reads, board posts, DMs and reverts, and
+   the reaction to each. Code `research/analysis/storymap/` (commits fc70747, 5b25745, 15cf821; 82 offline tests);
+   taxonomy, prompts, INTERFACE.md and the hand-label references (`reference/<run>.jsonl`, 4 runs) in
+   `private/research/analysis/storymap/`. Timelines were built in the session scratchpad (rebuild with
+   `python -m research.analysis.storymap.extract --run-dir runs/<id> --out DIR`).
+   - **Stage-1 bake-off** (1ov r2, 10 agents: 8 hand-labelled fakers incl. library, self_then_library,
+     overseer_then_library, plus 2 non-fakers): Haiku 5.5 score 83.3 ($0.87), Gemini 3.8 Flash 83.3 ($3.98),
+     GPT-5.6 Luna 67.5 ($1.09); Haiku kept. Bake-off settled $6.84 inside the 1ov r2 $50.
+     Output `runs/<1ov r2>/analysis/storymap/bakeoff/` (validation in `bakeoff/validation/`).
+   - **Four runs launched in parallel 16:19 PT** (1ov r2, control r3, 2ov r3, 10ov r3; Haiku / Sonnet 5.5 /
+     Terra cross-check on 10 agents; $50 each). **All four used their full $50 by ~16:44 PT** (settled, no holds):
+     1ov r2 $49.60 (incl. bake-off), control r3 $49.64, 2ov r3 $49.72, 10ov r3 $49.80. Per run roughly Haiku
+     $5-8, Sonnet $23-29, Terra cross-check $13-16. No budget added.
+   - **Main problem: Sonnet 5.5 refuses most stage-2 (and some stage-3) requests** ("reverse engineering or
+     duplicating model outputs" content filter on the agent transcripts); refused requests are billed and
+     retried once, so about 60% of the Sonnet spend bought nothing. Stage-2 rows: 1ov r2 54 ok / 76 refused,
+     control r3 25 / 88, 2ov r3 67 / 105, 10ov r3 50 / 85. Haiku stage 1 was not refused.
+   - Coverage (agents mapped in agent order; complete stage 3): 1ov r2 15 of 100 (stage 1 for 66), control r3 13
+     (65), 2ov r3 20 (75), 10ov r3 2 (50). Partial and biased toward short, mostly non-faking timelines.
+   - Validation on mapped agents (`validation.md` in each output): source agrees with the hand labels for
+     15/15 (1ov r2; 2 fakers), 8/13 (control r3; 5 of 10 fakers, the rest library vs self_then_library),
+     19/20 (2ov r3; 2 of 3 fakers), 2/2 (10ov r3; no fakers mapped); first-fake time within 2 min for every
+     mapped faker (2/2, 10/10, 3/3). Consistency flags: no faked/credited/stopped contradictions; stage-1 quotes
+     not verbatim 5-9%; stage-2 quote-before-event flags 30-40% (windows start 3 turns before the event, so
+     this check is too strict); cross-check stage-3 source agreement 3/3 where both exist.
+   - A pipeline deadlock at budget exhaustion (fixed in 15cf821) made the runs hang until interrupted.
+   - Outputs: `runs/<id>/analysis/storymap/` (index.html, events.html, agents/, stage1-3, map.jsonl,
+     crosscheck/, validation.json/md; no pipeline.json for the main runs because they were interrupted; the
+     ledger and units hold the costs). Researcher-only: never publish.
+   - **Needs an owner decision before any more spend:** route refused Sonnet stage-2/3 units to another model
+     (for example GPT-5.6 Terra, as the simple judge does) or use a non-Anthropic stage-2/3 model, drop or
+     shrink the Terra cross-check, and set new per-run budgets to finish the maps (units are cached; a resume
+     pays only for what is missing).
 
 ## Next steps / open items
 
