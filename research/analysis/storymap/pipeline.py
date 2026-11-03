@@ -322,6 +322,7 @@ class StoryMap:
         self.stop = None
         self.used = []           # {"stage", "model", "path", "reused"} of every unit this invocation touched
         self._inflight = 0
+        self._waiting = 0        # in-flight requests parked in _admission_wait (they settle nothing while parked)
         self._completions = 0
         self._cond = None
         self.started = _now()
@@ -331,14 +332,29 @@ class StoryMap:
         async with self._cond:
             self._cond.notify_all()
 
+    def _closed(self):
+        return self.run_limit is not None and getattr(self.run_limit, "closed", None) is not None
+
+    def _active(self):
+        """Requests that are really in flight (they will settle and may free room)."""
+        return self._inflight - self._waiting
+
     async def _admission_wait(self, reason):
-        """A refused request's one retry was denied admission: wait while other requests are in flight."""
-        if self.stop is not None or reason not in WAITING_DENIALS or self._inflight <= 1:
+        """A refused request's one retry was denied admission: wait while other requests are really in flight
+        (parked waiters do not count: two parked requests never wait on each other). A closed run limit admits
+        nothing again, so nothing waits."""
+        if self.stop is not None or reason not in WAITING_DENIALS or self._closed() or self._active() <= 1:
             return False
         seen = self._completions
-        async with self._cond:
-            await self._cond.wait_for(lambda: self._completions > seen or self._inflight <= 1 or self.stop is not None)
-        return self.stop is None
+        self._waiting += 1
+        try:
+            await self._wake()
+            async with self._cond:
+                await self._cond.wait_for(lambda: self._completions > seen or self._active() <= 1
+                                          or self.stop is not None or self._closed())
+        finally:
+            self._waiting -= 1
+        return self.stop is None and not self._closed()
 
     async def call(self, client, **kwargs):
         """One ClientResult; a budget denial waits while other requests are in flight (their settlement may free
@@ -361,12 +377,15 @@ class StoryMap:
             self._inflight -= 1
             reason = (result.get("error") or {}).get("reason")
             if result.get("status") == "grading_failed" and reason in STOP_REASONS:
-                if reason in WAITING_DENIALS and not result.get("refusals") and self._inflight > 0 \
-                        and self.stop is None:
+                if reason in WAITING_DENIALS and not result.get("refusals") and self._active() > 0 \
+                        and self.stop is None and not self._closed():
                     async with self._cond:
-                        await self._cond.wait_for(lambda: self._completions > seen or self._inflight == 0
-                                                  or self.stop is not None)
-                    continue
+                        await self._cond.wait_for(lambda: self._completions > seen or self._active() <= 0
+                                                  or self.stop is not None or self._closed())
+                    if self._completions > seen:
+                        continue
+                    if self.stop is not None:
+                        raise BudgetStop(self.stop["reason"])
                 if self.stop is None:
                     self.stop = {"reason": reason, "unit_id": kwargs.get("unit_id"), "purpose": kwargs.get("purpose"),
                                  "at": _now(), "detail": result.get("error"), "in_flight_at_stop": self._inflight}

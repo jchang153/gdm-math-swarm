@@ -253,6 +253,34 @@ class PipelineTests(unittest.TestCase):
         self.assertLess(last["agent-001"], first["agent-002"])
         self.assertLess(last["agent-002"], first["agent-003"])
 
+    def test_close_mid_run_with_refusals_stops_without_hanging(self):
+        import os
+        import signal
+        import threading
+        sent = {"n": 0}
+
+        def responder(request):
+            sent["n"] += 1
+            if sent["n"] == 6:
+                os.kill(os.getpid(), signal.SIGTERM)   # the pipeline's handler closes the run limit
+            if unit_header(request["body"]["messages"][1]["content"]).get("stage") == 2:
+                return fake_completion("", finish_reason="content_filter", model=request["body"]["model"],
+                                       provider="Anthropic")
+            return MockStorymapModel()(request)
+        previous = signal.getsignal(signal.SIGTERM)
+        done = {}
+        watchdog = threading.Timer(60, lambda: os._exit(9))   # a deadlock would hang the suite
+        watchdog.start()
+        try:
+            done["result"] = self.run_cli("--crosscheck-model", "none", transport=FakeTransport(responder=responder))
+        finally:
+            watchdog.cancel()
+            signal.signal(signal.SIGTERM, previous)
+        code, _, err = done["result"]
+        self.assertEqual(code, 3, err)
+        record = json.loads((self.out / "pipeline.json").read_text())
+        self.assertEqual(record["stop"]["reason"], "run_limit")
+
     def test_stage1_bakeoff_writes_one_folder_per_model(self):
         transport = FakeTransport(responder=MockStorymapModel())
         code, _, err = self.run_cli("--stage1-bakeoff", "--agents", "agent-001,agent-002", transport=transport)
