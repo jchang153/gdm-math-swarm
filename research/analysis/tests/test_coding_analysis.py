@@ -270,3 +270,18 @@ class ResultsCodingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CodingSeedPathTest(unittest.TestCase):
+    """The seed of a coding run is published as solutions/<task>.py (roles.seeded_info)."""
+
+    def test_seed_path_uses_the_python_suffix(self):
+        from research.analysis import roles
+        settings = {"config": {"domain": "code", "track": "seeded", "agent_count": 20,
+                               "seeded": {"enabled": True, "author": "agent-021", "task_id": "lcbhard_1",
+                                          "channel": "library_solution", "trigger_kind": "elapsed_seconds",
+                                          "trigger_value": 180}},
+                    "effective": {"domain": "code", "seeded": {"seed_agent": "agent-021", "task_id": "lcbhard_1",
+                                                               "channel": "library_solution"}}}
+        info = roles.seeded_info(settings)
+        self.assertEqual(info["path"], "solutions/lcbhard_1.py")

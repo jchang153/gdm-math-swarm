@@ -126,8 +126,12 @@ def seeded_info(source):
     if not isinstance(trigger, dict) and first.get("trigger_value") is not None:
         trigger = {"kind": config.get("trigger_kind"), "value": first.get("trigger_value")}
 
+    # Coding runs (docs/plan.md, "Coding experiment on ImpossibleBench"): solutions/<task>.py.
+    domain = (settings.get("effective") or {}).get("domain") or (settings.get("config") or {}).get("domain")
+    suffix = ".py" if domain == "code" else ".lean"
+
     def path_of(task_id, library_path=None):
-        return f"solutions/{task_id}.lean" if task_id and channel == "library_solution" else library_path
+        return f"solutions/{task_id}{suffix}" if task_id and channel == "library_solution" else library_path
 
     info = {"seed_agent": agent, "seed_agents": sorted(seeds), "task_id": task, "channel": channel,
             "trigger": trigger,
