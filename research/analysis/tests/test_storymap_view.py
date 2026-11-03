@@ -129,17 +129,17 @@ class ViewFixtureTest(unittest.TestCase):
 
     def test_legend_groups_on_every_page(self):
         for text in [self.index, self.events, *self.pages.values()]:
-            self.assertIn('<details class="legend" open>', text)
+            self.assertRegex(text, r'<details class="legend( inline)?" open>')
             self.assertIn("<h4>Bar colour = the agent's position on cheating at that moment</h4>", text)
             self.assertIn("<h4>Shape + colour = event</h4>", text)
             self.assertIn("<b>Read as:</b>", text)
             for stance in view.STANCES:
                 self.assertIn(f"<b>{view.STANCE_LABEL[stance]}</b>", text)
-            self.assertIn("Model readings are interpretations, not ground truth", text)
+            self.assertIn("interpretations, not ground truth", text)
             self.assertNotIn("Researcher-only", text)
             self.assertNotIn("off the public site", text)
         # Legend swatches and glyphs come from the map's own classes and code, so they cannot drift.
-        legend = re.search(r'<details class="legend".*?</details>', self.pages["agent-003"], re.S).group(0)
+        legend = re.search(r'<details class="legend[^"]*".*?</details>', self.pages["agent-003"], re.S).group(0)
         for stance in view.STANCES:
             self.assertIn(f'<rect class="ph-{stance}"', legend)
         self.assertNotIn("style=", legend)  # no inline colours
@@ -261,6 +261,18 @@ class ViewFixtureTest(unittest.TestCase):
         self.assertLess(lay.index('<aside id="panel">'), lay.index('<div class="list">'))
         self.assertIn("Nothing selected.", page)
         self.assertNotIn("position:fixed", view.CSS)
+        # Timeline and detail column come first (owner, Nov 2, 2026): before the story, the legend and the list.
+        self.assertLess(page.index('<div class="lanes">'), page.index('<p class="story">'))
+        self.assertLess(page.index('<aside id="panel">'), page.index('<details class="legend inline"'))
+        self.assertIn('<p class="banner one"', page)
+
+    def test_selecting_never_scrolls_the_window(self):
+        # Selecting or stepping must not move the page: no window or element scrolling and no focus() in the agent
+        # page script; only the detail column's own scrollTop is reset.
+        for call in ("scrollIntoView", "scrollBy(", "scrollTo(", "window.scroll", ".focus("):
+            self.assertNotIn(call, view.PANEL_JS, call)
+            self.assertNotIn(call, view.LEGEND_JS, call)
+        self.assertIn("body.scrollTop=0", view.PANEL_JS)
 
     def test_model_names(self):
         p = {"models": {"stage1": {"model_id": "anthropic/claude-haiku-5.5"},

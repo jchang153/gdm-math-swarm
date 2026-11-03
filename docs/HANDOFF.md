@@ -937,6 +937,9 @@ is being merged into main via `collab-env`.
      in place), plain labels for every event code and field, one time format, a glossary, and an events page with a
      filter bar and a sortable table (cards on a toggle). Receipt `storymap-20261102c.json` (deployment 44b373e5);
      livecheck 420/420 files match. Taxonomy: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-1ov-glm-180m-notices-r2-20261028T194542Z/analysis/storymap/taxonomy
+     Then (owner): agent pages open on the timeline with the detail column beside it (story, legend and list
+     below); selecting or stepping never scrolls the window (verified: 0 moves in 25 actions and on #sel= load).
+     Receipt `storymap-20261102d.json` (deployment 087dbe85); livecheck 420/420.
    - Open: the library vs self_then_library split is the weak point (the stage-3 prompt or the reference
      normalization may need a look); the first pass's Sonnet stage-2/3 rows were superseded by Terra (units kept).
 

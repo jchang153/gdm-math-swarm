@@ -289,7 +289,7 @@ tr.xr>td{padding:0 0 8px}tr.xr section.ev{margin:4px 0}
 .sbar .s0{background:var(--fg)}.sbar .s1{background:var(--muted)}.sbar .s2{background:var(--input-line)}
 .sbar .s3{background:var(--line)}.sbs p{margin:6px 0 2px}[hidden]{display:none!important}
 @media (max-width:900px){.layout{grid-template-columns:minmax(0,1fr);grid-template-areas:"lanes" "panel" "list"}
-#panel{position:static;height:auto;max-height:none;min-height:0}#pbody{max-height:60vh}}
+#panel{position:static;height:60vh;max-height:none;min-height:260px}}
 @media (max-width:1000px){.grid{grid-template-columns:80px minmax(0,1fr)}.grid>.labels,.grid>.hd.lab{grid-column:2}}
 @media (max-width:700px){table.evt thead{display:none}table.evt,table.evt tbody{display:block}
 tr.er{display:grid;grid-template-columns:22px 1fr auto auto;gap:0 8px;border-top:1px solid var(--line);padding:4px 0}
@@ -298,7 +298,9 @@ tr.er>td.ex{grid-column:1/-1;width:auto;max-width:none;display:block;white-space
 tr.er>td:nth-child(4)::after{content:" min"}tr.er>td:nth-child(5)::after{content:" readers";color:var(--muted)}tr.xr{display:block}tr.xr>td{display:block}.sb{grid-template-columns:1fr;gap:2px}
 .sbar{width:100%}}
 @media (max-width:700px){body{padding:0 16px;margin:16px auto}.lg,.lg.three{grid-template-columns:1fr}}
-@media (min-width:701px) and (min-height:600px){details.legend{position:sticky;top:0}}
+@media (min-width:701px) and (min-height:600px){details.legend{position:sticky;top:0}details.legend.inline{position:static}}
+header.ah{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:0 0 4px}header.ah h1{margin:0}
+.banner.one{padding:5px 12px;margin:4px 0 10px;font-size:13px}.layout>.lanes{margin-top:0}
 """
 )
 
@@ -323,11 +325,8 @@ panel.classList.add('open');status();
 const g=document.querySelector('.lanes [data-k="'+key+'"]'),cu=document.getElementById('cursor');
 if(cu&&g&&g.getBBox){const b=g.getBBox(),x=g.tagName==='line'?+g.getAttribute('x1'):b.x+b.width/2;
 cu.setAttribute('x1',x);cu.setAttribute('x2',x);cu.setAttribute('visibility','visible');}
-if(how!=='click'&&g)reveal(g);
 try{history.replaceState(null,'','#sel='+key);}catch(e){}}
-function reveal(el){const r=el.getBoundingClientRect(),
-top=(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--legend-h'))||0)+8,
-bot=innerHeight-12;if(r.top<top||r.bottom>bot)scrollBy(0,r.top-(top+Math.max(bot-top,0)/2));}
+// Selecting or stepping never moves the window: only the detail column resets to its top (owner, Nov 2, 2026).
 function close(){cur=null;const cu=document.getElementById('cursor');if(cu)cu.setAttribute('visibility','hidden');document.querySelectorAll('.sel').forEach(e=>e.classList.remove('sel'));
 all.forEach(a=>a.classList.remove('hl'));panel.classList.remove('open');
 body.innerHTML='<p class="muted">Nothing selected. Click a shape on the timeline, or press \u2192 (or Next) to read '
@@ -853,6 +852,14 @@ def model_names(pipeline):
                      for g, mid in groups)
 
 
+def banner_line(models=""):
+    """The agent pages' one-line banner (the full one is on the index and events pages)."""
+    read = f" by {esc(models)}" if models else ""
+    return (f'<p class="banner one" title="Stage 1 codes the agent\'s thoughts; stage 2 judges its reaction to each '
+            f'event; stage 3 writes its positions and final reading.">Quotes are the agent\'s own; codes, reactions '
+            f'and positions are model readings{read}: interpretations, not ground truth.</p>')
+
+
 def banner(models=""):
     read = f" Readers: {esc(models)}." if models else ""
     return ('<p class="banner">Story map: what each agent read, thought and did about the cheating shortcut, quoted '
@@ -948,7 +955,7 @@ def legend(mode="agent", names=None, href="taxonomy.html", defs=None):
              "events": "Each event below carries its shape. ↓ / ↑ (or j / k) move through the events."
              }.get(mode, "Click any shape for its quote, the event and the stage-2 reaction; "
                          "→ / j next, ← / k previous, Esc closes.")
-    return (f'<details class="legend" open><summary>Legend: bar colour = position on cheating; shape + colour = '
+    return (f'<details class="legend{" inline" if mode == "agent" else ""}" open><summary>Legend: bar colour = position on cheating; shape + colour = '
             f'event{"; tick = coded thought" if mode == "agent" else ""}; terms</summary>'
             f'<div class="lg{" three" if names or mode == "agent" else ""}"><div class="lgbox"><h4>Bar colour = the agent\'s position on cheating at that moment</h4>'
             f'<p class="note">{esc(POSITION_HINT)}.</p><ul>{sw}</ul>'
@@ -1286,17 +1293,18 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
     prev_link = f'<a href="{esc(idx[pos - 1])}.html">&larr; {esc(idx[pos - 1])}</a>' if pos > 0 else ""
     next_link = f'<a href="{esc(idx[pos + 1])}.html">{esc(idx[pos + 1])} &rarr;</a>' if pos + 1 < len(idx) else ""
     info = a["index"] or {}
-    body = (nav.replace("</nav>", f"{prev_link}{next_link}</nav>") + f"<h1>{esc(name)}</h1>{banner(models)}"
-            f'<p>{final_labels(a["stage3"])}</p>'
-            f'<p class="story">{esc(s3.get("story")) or "<span class=muted>No model-written summary for this agent.</span>"}</p>'
+    # Timeline and detail column first, above the fold; the story, counts, legend and code key follow below.
+    body = (nav.replace("</nav>", f"{prev_link}{next_link}</nav>")
+            + f'<header class="ah"><h1>{esc(name)}</h1> {final_labels(a["stage3"])}</header>{banner_line(models)}'
+            f'<div class="layout"><div class="lanes"><svg viewBox="0 0 {W} {H}">{"".join(svg)}</svg></div>'
+            f'{PANEL}<div class="list"><h2>Summary (stage 3)</h2><p class="story">{esc(s3.get("story")) or "<span class=muted>No model-written summary for this agent.</span>"}</p>'
             + (f'<p class="muted">Not available for this agent: {", ".join(missing)}.</p>' if missing else "")
             + (f'<p class="muted">{len(a["malformed"])} model output(s) could not be read and are left out '
                f'({esc(", ".join(a["malformed"]))}).</p>' if a["malformed"] else "")
             + f'<p class="muted">{plural(len(a["events"]), "event")}, {plural(len(a["thoughts"]), "coded thought")}, '
             f'{plural(len(a["reactions"]), "stage-2 reaction")}. Position on cheating from the {esc(phase_src)}.'
             f'{" Role: " + esc(info.get("role")) + "." if info.get("role") else ""}</p>'
-            f'{legend("agent", names, href, DEFS)}<div class="layout"><div class="lanes"><svg viewBox="0 0 {W} {H}">{"".join(svg)}</svg></div>'
-            f'{PANEL}<div class="list"><h2>In time order</h2><div id="items">'
+            f'{legend("agent", names, href, DEFS)}<h2>In time order</h2><div id="items">'
             f'{"".join(h for _, _, h in articles) or "<div class=empty>Nothing recorded.</div>"}</div>'
             + ("<h2>Reactions to events not in the timeline</h2>" + "".join(reaction_html(r, names, href) for r in orphans)
                if orphans else "")
