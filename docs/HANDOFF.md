@@ -994,10 +994,27 @@ is being merged into main via `collab-env`.
      (`results.pre-judge-rerun.*` kept).
    - Story maps (`--run-limit 50`, 20/20 agents each, validation consistency all ok): control $5.56, 2ov $15.37;
      `runs/<id>/analysis/storymap/` (timelines in `analysis/storymap-timeline/`). Local only.
-   - **Not published.** Publishing goes to a separate Cloudflare project `gdm-impossiblebench-experiments`
-     (`publish_cloudflare.py --site ib`; owner decision Nov 3), only when the owner asks; the project is not created yet
-     (`npx wrangler pages project create gdm-impossiblebench-experiments --production-branch main` from a scratch dir
-     with `npm_config_cache` set to a scratch folder: the owner's ~/.npm cache has permission errors).
+   - **Published 2026-11-03 (~16:00 PT)** to the new Cloudflare Pages project `gdm-impossiblebench-experiments`,
+     https://gdm-impossiblebench-experiments.pages.dev (owner request; variant labels shown publicly, docs/plan.md
+     Nov 3). 250 files, 2 runs, each with results page, conference view, Inspect View (logs private, pinned to upload
+     commits `3882d806` control / `54a75fe6` 2ov), simple judge, story map (Story map tab and catalogue links), and
+     the 2ov incident report; catalogue = IB intro (`scripts/catalogue_intro_ib.py`, new "Variant" glossary entry).
+     `verify --site ib --full` all ok; a served-vs-bundle byte compare of 233 files (50 story-map) matched except each
+     Inspect View page (the documented private-logs shim swap). Receipts: `runs/phase-b/cloudflare-ib/receipts/`.
+   - How it was built (no VM bundle survived, so locally): runs copied to a scratch dir; inspect/, instructions/,
+     prompts/, snapshots/, runtime.jsonl, analysis/incident/, analysis/summary.json and analysis/timeline.* restored
+     there with `offload_runs.py restore --dest` (read-only); public story maps rendered with
+     `research.analysis.storymap.view --map ... --timeline runs/<id>/analysis/storymap-timeline` (coding taxonomy)
+     and swapped in for analysis/storymap; `analysis/storymap-timeline`, `simple_judge.seedpath-lean` and
+     `results.pre-judge-rerun.*` left out; conference view exported (`export_conference.export(..., out=)`; fixed
+     `OPTIONAL_KEYS` missing `domain`, which had made the VM's conference export fail for coding runs);
+     `inspect_ai view bundle`; `prepare_hf_library.py` with `GDM_LOGS_DATASET` set (without it, publish refuses the
+     bundle's dataset records); `publish_cloudflare.py publish --site ib --dataset-commit <upload commit>`.
+   - Gotchas: wrangler 4.154.0 `pages project create` now delegates to Workers and fails ("Could not detect a
+     directory containing static files"); the project was created with `npx --yes wrangler@4.40.0 pages project
+     create ... --production-branch main` (deploys still use 4.154.0). The catalogue has no "Timeline" link for these
+     runs: the control was first deployed without the timeline in the bundle and catalogue entries are immutable, so
+     the link was dropped from both entries for consistency (page links to the private timeline are pinned).
 
 ## Next steps / open items
 

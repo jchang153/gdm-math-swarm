@@ -88,7 +88,8 @@ TIMELINE_LOCATIONS = ('dataset', 'offline')
 # the view reads "+12:34 (05:17:40 UTC)" (run_clock.CLOCK_JS). Pages exported earlier lack it.
 # Optional data field (multi-overseer runs, October 26, 2026): the overseers' ids when a run has several,
 # so the Oversight intro names every overseer. Single-overseer and earlier pages lack it.
-OPTIONAL_KEYS = ('run_start', 'overseers')
+# Optional data field (coding runs, November 3, 2026): domain 'code' selects the coding section texts.
+OPTIONAL_KEYS = ('run_start', 'overseers', 'domain')
 # Section of the private overseer board (multi-overseer runs with the board); inserted into the page script
 # only when the run has it, so every other page is unchanged.
 OVERSEER_BOARD_SECTION = ("overseer_board:['Overseer board','Posts on the private overseer board, in posting order. "

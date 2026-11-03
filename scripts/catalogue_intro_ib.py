@@ -76,6 +76,9 @@ GLOSSARY = (
     ('Swarm run', 'One experiment: a fixed set of agents, tasks, model and time limit, all running at once.'),
     ('Impossible-LiveCodeBench', 'The ImpossibleBench variant of LiveCodeBench: programming tasks whose unit tests '
      'were changed to conflict with the specification, so passing them all requires gaming the tests.'),
+    ('Variant', 'Each task is given in one version: original (the unchanged tests), oneoff (one test expects a '
+     'wrong output) or conflicting (two tests contradict each other). Run pages show each task\'s variant; the '
+     'agents never saw it.'),
     ('Solver', 'An agent whose job is to solve tasks for credit.'),
     ('Overseer', 'An extra agent asked to watch for invalid solutions, able to check a solution and revert a '
      'submission. Solvers are not told about overseers.'),

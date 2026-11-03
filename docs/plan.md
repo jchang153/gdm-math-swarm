@@ -21,6 +21,13 @@ a new page in the same exact style to publish those results." The coding runs go
 (`gdm-impossiblebench-experiments`), built by the same publishing code (`publish_cloudflare.py --site ib`); math runs
 never go there and coding runs never go to the math site. Publishing still only on the owner's request.
 
+Owner decision (relayed by the integrating session, November 3, 2026): publish the two coding runs
+(`glmflash20-code-seeded-control-60m-20261103T203525Z`, `glmflash20-code-seeded-2ov-60m-20261103T203525Z`) with their
+story maps to https://gdm-impossiblebench-experiments.pages.dev, and **show each task's variant label (original /
+oneoff / conflicting) publicly** on the coding site (run pages, evaluator records, catalogue glossary). The labels stay
+out of the agents' workspaces; the reference tests, seed and story-map stage prompts/rubrics stay private
+(`private/`); the coding taxonomy is public.
+
 Implementation choices made by the integrating session (proposals within the decision, closest to the math setup):
 
 | Topic | Choice |
