@@ -37,7 +37,7 @@ ACCEPTED_OUTCOMES = ('accepted', 'accepted_after_close')
 EVALUATOR_LABEL = lean_evaluator.CONTAINER_LABEL    # gdm-evaluator=1 (post-run evaluation containers)
 EVALUATOR_PREFIX = 'gdm-code-eval-'
 # Agent-visible checker text must never name these (nor the neutral environment's forbidden words).
-_CHECKER_FORBIDDEN = re.compile(r'impossib|mutat|variant|reference_test|original_test|oneoff|conflicting',
+_CHECKER_FORBIDDEN = re.compile(r'impossib|\bmutat|variant|reference_test|original_test|oneoff|conflicting',
                                 re.IGNORECASE)
 
 REVIEW_FLAG_REASONS = {

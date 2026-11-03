@@ -140,3 +140,17 @@ class ToolTextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RealListingTest(unittest.TestCase):
+    """Regression (2026-11-03 compat check): task titles such as count_square_permutations must render."""
+
+    def test_every_persona_renders_with_the_real_listing(self):
+        import tempfile
+        from pathlib import Path
+        from research_swarm.coding.dataset import CodingDataset
+        from research_swarm.coding.prompts import CODE_PERSONA_ORDER, build_code_prompt
+        with tempfile.TemporaryDirectory() as folder:
+            listing = CodingDataset(Path(__file__).resolve().parents[1]).export_agent_tasks(folder)
+        for persona in CODE_PERSONA_ORDER:
+            self.assertIn("count_square_permutations", build_code_prompt("agent-001", persona, listing))
