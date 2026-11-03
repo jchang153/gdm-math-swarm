@@ -176,11 +176,21 @@ def _shown(source):
 
 
 class _Checker:
-    def __init__(self):
+    """``soft``: a list that receives record checks (quotes verbatim, item turn/t, cited event ids, length caps,
+    which are then truncated); without it they are hard problems like every shape problem."""
+
+    def __init__(self, soft=None):
         self.problems, self.warnings = [], []
+        self.soft_problems = soft
 
     def add(self, where, message):
         self.problems.append(f"{where}: {message}")
+
+    def soft(self, where, message):
+        if self.soft_problems is None:
+            self.add(where, message)
+        else:
+            self.soft_problems.append(f"{where}: {message}")
 
     def warn(self, where, message):
         self.warnings.append(f"{where}: {message}")
@@ -206,7 +216,9 @@ class _Checker:
             return None
         value = value.strip()
         if max_chars is not None and len(value) > max_chars:
-            self.add(where, f"has {len(value)} characters; at most {max_chars}")
+            self.soft(where, f"has {len(value)} characters; at most {max_chars}")
+            if self.soft_problems is not None:
+                value = value[:max_chars]
         return value
 
     def enum(self, value, allowed, where, *, allow_none=False):
@@ -259,9 +271,9 @@ class _Checker:
         if quote is None or items is None or item is None:
             return quote
         if item not in items:
-            self.add(where.rsplit(".", 1)[0] + ".item", f"item {item} is not among the items shown")
+            self.soft(where.rsplit(".", 1)[0] + ".item", f"item {item} is not among the items shown")
         elif normalize_text(quote) not in normalize_text(items[item]):
-            self.add(where, f"is not a verbatim span of item {item}'s text (copy one contiguous exact span)")
+            self.soft(where, f"is not a verbatim span of item {item}'s text (copy one contiguous exact span)")
         return quote
 
     def finish(self, value):
@@ -296,7 +308,7 @@ def _default_codes():
 # Stage 1
 
 
-def validate_stage1(raw, *, codes=None, items=None, warnings=None):
+def validate_stage1(raw, *, codes=None, items=None, warnings=None, soft=None):
     """Normalized Stage 1 output of one chunk, or ``SchemaError``.
 
     ``codes``: the allowed thought codes (default: the taxonomy's groups A, B, C, D, F, G, read
@@ -307,7 +319,7 @@ def validate_stage1(raw, *, codes=None, items=None, warnings=None):
     allowed = set(_default_codes() if codes is None else codes)
     texts = _item_texts(items)
     meta = {int(item["i"]): item for item in items} if isinstance(items, list) else {}
-    c = _Checker()
+    c = _Checker(soft)
     out = {"thoughts": [], "state": None}
     if c.keys(obj, ("thoughts", "state"), "output"):
         thoughts = obj.get("thoughts")
@@ -332,9 +344,9 @@ def validate_stage1(raw, *, codes=None, items=None, warnings=None):
             source = meta.get(item)
             if source is not None:
                 if turn is not None and source.get("turn") is not None and turn != source["turn"]:
-                    c.add(f"{where}.turn", f"item {item} is in turn {source['turn']}, not {turn}")
+                    c.soft(f"{where}.turn", f"item {item} is in turn {source['turn']}, not {turn}")
                 if t is not None and source.get("t") is not None and abs(t - float(source["t"])) > 0.005:
-                    c.add(f"{where}.t", f"item {item} is at t={source['t']}, not {t} (copy t from the header)")
+                    c.soft(f"{where}.t", f"item {item} is at t={source['t']}, not {t} (copy t from the header)")
             out["thoughts"].append({"code": code, "turn": turn, "item": item, "t": t, "quote": quote,
                                     "certainty": certainty, "note": note})
         state = obj.get("state")
@@ -356,7 +368,7 @@ def validate_stage1(raw, *, codes=None, items=None, warnings=None):
 # Stage 2
 
 
-def validate_stage2(raw, *, event_id=None, items=None, overseer_expected=None, warnings=None):
+def validate_stage2(raw, *, event_id=None, items=None, overseer_expected=None, warnings=None, soft=None):
     """Normalized Stage 2 output of one event, or ``SchemaError``.
 
     ``event_id``: the id of the event the request was about (must match). ``items``: the window's
@@ -365,7 +377,7 @@ def validate_stage2(raw, *, event_id=None, items=None, overseer_expected=None, w
     either."""
     obj = _load(raw)
     texts = _item_texts(items)
-    c = _Checker()
+    c = _Checker(soft)
     keys = ("event_id", "registered", "change", "direction", "reason", "self_attributed", "overseer",
             "next_action", "quotes", "certainty")
     out = {}
@@ -430,14 +442,14 @@ def _overseer(c, value, expected):
 # Stage 3
 
 
-def validate_stage3(raw, *, agent=None, event_ids=None, warnings=None):
+def validate_stage3(raw, *, agent=None, event_ids=None, warnings=None, soft=None):
     """Normalized Stage 3 output of one agent, or ``SchemaError``.
 
     ``agent``: the expected agent id. ``event_ids``: the ids of the agent's events (every cited
     cause must be one of them)."""
     obj = _load(raw)
     known = set(event_ids) if event_ids is not None else None
-    c = _Checker()
+    c = _Checker(soft)
     keys = ("agent", "phases", "turning_points", "story", "final", "consistency_flags")
     out = {}
     if c.keys(obj, keys, "output"):
@@ -486,7 +498,7 @@ def _event_list(c, value, where, known):
     if known is not None:
         for event in ids:
             if event not in known:
-                c.add(where, f"{event!r} is not one of the agent's event ids")
+                c.soft(where, f"{event!r} is not one of the agent's event ids")
     return ids
 
 

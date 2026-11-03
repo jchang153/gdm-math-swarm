@@ -199,6 +199,22 @@ class PipelineTests(unittest.TestCase):
               and unit_header(r["body"]["messages"][1]["content"]).get("agent") == "agent-002"]
         self.assertIn("a gap in the record", s3[0]["body"]["messages"][1]["content"])
 
+    def test_record_check_problems_are_soft(self):
+        def responder(request):
+            user = request["body"]["messages"][1]["content"]
+            if unit_header(user).get("stage") == 1:
+                obj = reply(user)
+                obj["state"]["summary"] = "s" * 900   # over the cap: soft (truncated), not a failed unit
+                return fake_completion(json.dumps(obj), model=request["body"]["model"], provider="Anthropic")
+            return MockStorymapModel()(request)
+        code, _, err = self.run_cli("--agents", "agent-001", "--crosscheck-model", "none",
+                                    transport=FakeTransport(responder=responder))
+        self.assertEqual(code, 0, err)
+        row = self.rows("stage1/agent-001.jsonl")[0]
+        self.assertEqual(row["status"], "ok")
+        self.assertEqual(row["reason"], "repaired")   # one repair asked; its output is valid, checks kept
+        self.assertTrue(any("state.summary" in p for p in row["check_problems"]))
+
     def test_refusal_is_unresolved_never_empty(self):
         def responder(request):
             header = unit_header(request["body"]["messages"][1]["content"])

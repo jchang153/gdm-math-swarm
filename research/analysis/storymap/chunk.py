@@ -347,6 +347,13 @@ def _first(values):
     return min(values) if values else None
 
 
+def event_ids(items):
+    """Every event id in an agent's timeline (what stage 3 may cite)."""
+    return list(dict.fromkeys(str(it["event"]["id"]) for it in items
+                              if it.get("kind") == "event" and isinstance(it.get("event"), dict)
+                              and it["event"].get("id") is not None))
+
+
 def hard_facts(agent, items, index_entry=None):
     """Code-derived facts of one agent's timeline (stage-3 input; W5 checks against the same records)."""
     index_entry = index_entry or {}

@@ -176,13 +176,16 @@ class SchemaAdapter:
                 **{stage: {k: info.get(k) for k in self.RECORDED} for stage, info in self._info.items()}}
 
     def validate(self, stage, raw, **context):
-        """(normalized output or None, problems)."""
+        """(normalized output or None, hard problems, soft problems). Soft problems are the schema's record
+        checks (quotes verbatim, item turn/t, cited event ids, length caps): named in the one repair, and kept
+        as ``check_problems`` on an otherwise valid output."""
         fn = getattr(self.module, f"validate_stage{stage}")
+        soft = []
         try:
-            return fn(raw, **context), []
+            return fn(raw, soft=soft, **context), [], soft
         except Exception as error:   # SchemaError carries repair-ready problems
             problems = getattr(error, "problems", None)
-            return None, [str(p) for p in problems] if problems else [f"{type(error).__name__}: {error}"]
+            return None, [str(p) for p in problems] if problems else [f"{type(error).__name__}: {error}"], []
 
 
 def load_schema_module():
@@ -444,11 +447,11 @@ class StoryMap:
                 return None, [output_limit_problem(max_tokens)], [], None
             if not str(done.get("text") or "").strip():
                 return None, ["empty reply: return the JSON object"], [], None
-            obj, hard = self.schema.validate(stage, done.get("text"), **(context or {}))
+            obj, hard, soft = self.schema.validate(stage, done.get("text"), **(context or {}))
             if hard:
                 return None, hard, [], None
-            soft, checks = parse(obj) if parse is not None else ([], None)
-            return obj, [], soft, checks
+            extra, checks = parse(obj) if parse is not None else ([], None)
+            return obj, [], soft + list(extra), checks
 
         first = await step("initial", user)
         if first.get("status") != "ok" and not _truncated(first):
@@ -569,7 +572,7 @@ class StoryMap:
         try:
             unit = await self.unit(stage=3, model_id=model_id, folder=root / "units" / "stage3", name=agent,
                                    unit_id=f"{prefix}{agent}:s3", system=self.prompts["stage3"], user=user,
-                                   context={"agent": agent, "event_ids": facts["citable_event_ids"]})
+                                   context={"agent": agent, "event_ids": chunking.event_ids(items)})
         except BudgetStop:
             row = {**meta, **self._not_run(model_id)}
             write_json(root / "stage3" / f"{agent}.json", row)

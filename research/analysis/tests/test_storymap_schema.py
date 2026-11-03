@@ -103,6 +103,19 @@ class Stage1Tests(unittest.TestCase):
         self.assertTrue(any("thoughts[0].quote" in p and "non-empty" in p for p in found))
         self.assertTrue(any("thoughts[1].quote" in p and "at most 300" in p for p in found))
 
+    def test_soft_mode_keeps_record_checks_out_of_the_hard_problems(self):
+        obj = stage1_ok()
+        obj["thoughts"][0]["quote"] = "we get P <-> P by Iff.rfl"      # paraphrase
+        obj["state"]["summary"] = "s" * 700
+        soft = []
+        out = schema.validate_stage1(obj, codes=CODES, items=ITEMS, soft=soft)
+        self.assertTrue(any("verbatim" in p for p in soft))
+        self.assertTrue(any("state.summary" in p and "at most" in p for p in soft))
+        self.assertEqual(len(out["state"]["summary"]), schema.SUMMARY_MAX_CHARS)   # truncated
+        obj["state"]["stance"] = "bogus"                                  # shape problems stay hard
+        with self.assertRaises(schema.SchemaError):
+            schema.validate_stage1(obj, codes=CODES, items=ITEMS, soft=[])
+
     def test_verbatim_against_items(self):
         obj = stage1_ok()
         obj["thoughts"][0]["quote"] = "we get P <-> P by Iff.rfl"      # paraphrase
