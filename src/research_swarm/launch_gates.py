@@ -190,6 +190,8 @@ EVIDENCE_GATES = (
     ("runtime-isolation", ("agent",), ()),
     ("runtime-capacity", ("agent",), ("lean",)),
 )
+# Evidence about the Lean judge and the comparator evaluator, which the coding domain does not use.
+CODE_SKIPPED_EVIDENCE = ("declarations", "judge", "timing", "reuse", "conference-race", "evaluator")
 # Config keys whose values must equal the configuration the capacity probe measured
 # (runtime-capacity evidence ``validated_config``).
 CAPACITY_KEYS = ("agent_count", "agent_memory", "agent_cpus", "judge_max_concurrent", "judge_memory", "judge_cpus",
@@ -530,8 +532,28 @@ class _Gates:
 
     # -- individual gates ---------------------------------------------------
 
+    def code_task_manifest(self, spec):
+        """Coding domain: the config pins data/coding/manifest.json (path, sha256, parent_manifest_sha256)."""
+        from .coding import CODE_MANIFEST, CODE_TASK_COUNT, CODE_TASK_SET
+        path = self.repo / CODE_MANIFEST
+        digest = _sha256(path)
+        problems = []
+        if self.config.get("task_set") != CODE_TASK_SET:
+            problems.append(f"task_set must be {CODE_TASK_SET} for the coding domain")
+        if Path(str(spec.get("path", ""))).as_posix() != CODE_MANIFEST:
+            problems.append(f"path must be {CODE_MANIFEST}")
+        if not (spec.get("sha256") == spec.get("parent_manifest_sha256") == digest):
+            problems.append(f"sha256 and parent_manifest_sha256 must both equal sha256({CODE_MANIFEST})")
+        if self.config.get("task_count") != CODE_TASK_COUNT:
+            problems.append(f"task_count must be {CODE_TASK_COUNT} for task_set {CODE_TASK_SET}")
+        self.add("fixed_task_manifest", not problems, "; ".join(problems) or
+                 f"config pins the frozen {CODE_TASK_COUNT}-task coding set", path, sha256=digest,
+                 task_set=self.config.get("task_set"))
+
     def task_manifest(self):
         spec = self.config.get("fixed_task_manifest")
+        if self.config.get("domain") == "code" and isinstance(spec, dict):
+            return self.code_task_manifest(spec)
         subset_path, parent_path = self.repo / PILOT_SUBSET, self.repo / PARENT_MANIFEST
         if not isinstance(spec, dict):
             return self.add("fixed_task_manifest", False, "config fixed_task_manifest must be {path, sha256, parent_manifest_sha256}")
@@ -567,6 +589,13 @@ class _Gates:
                  subset_path, sha256=subset_sha, parent_manifest_sha256=parent_sha)
 
     def frozen_dataset(self):
+        if self.config.get("domain") == "code":
+            from .coding.dataset import CodingDataset
+            dataset = CodingDataset(self.repo)  # verifies the public task files against the manifest
+            ids = [t.task_id for t in dataset.tasks]
+            return self.add("frozen_dataset", True, f"CodingDataset loads; {len(ids)} coding tasks hash-verified",
+                            self.repo / "data" / "coding" / "manifest.json", task_set=self.config.get("task_set"),
+                            task_ids=ids)
         from .dataset import FrozenDataset, task_set_of
         dataset = FrozenDataset(self.repo, task_set=task_set_of(self.config))
         for task in dataset.pilot_tasks:
@@ -601,6 +630,15 @@ class _Gates:
             approved.update(track="seeded", seeded_contagion_enabled=True)
         if track == "gemini" and self.config.get("task_set") == "all71":
             approved["task_count"] = 71  # owner decision: the whole parent pool on this track
+        if self.config.get("domain") == "code":
+            # Coding experiment (docs/plan.md, "Coding experiment on ImpossibleBench (November 3, 2026)"):
+            # 20 solvers, the 100-task coding set, no Lean compilation limit (the code_judge block instead).
+            from .coding import CODE_AGENT_COUNT, CODE_TASK_COUNT
+            approved.pop("agent_count", None)
+            if self.config.get("agent_count") != CODE_AGENT_COUNT or not _is_int(self.config.get("agent_count")):
+                approved["agent_count"] = CODE_AGENT_COUNT
+            approved["task_count"] = CODE_TASK_COUNT
+            approved.pop("compilation_timeout_seconds", None)
         if track == "gemini":
             # Owner decisions: a 6-hour clock (October 20, 2026) or a 1-hour clock (multi-model runs,
             # October 21, 2026).
@@ -1030,6 +1068,11 @@ def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy
     if overseer_model is not None:  # the overseers' own model (research_swarm.oversight ``overseer.model``)
         gates.run("route_pricing_overseer", lambda: gates.route_pricing(overseer_model, "route_pricing_overseer"))
     for prefix, required, optional in EVIDENCE_GATES:
+        if config.get("domain") == "code" and prefix in CODE_SKIPPED_EVIDENCE:
+            # No Lean judge or comparator in the coding domain: informational, never blocking.
+            gates.add(prefix, True, "INFORMATIONAL (not blocking): Lean/comparator evidence does not apply to the "
+                      "coding domain", informational=True, skipped=True)
+            continue
         gates.run(prefix, lambda p=prefix, r=required, o=optional: gates.evidence(p, r, o))
     state = {"snapshot": None}
 

@@ -1,0 +1,59 @@
+Upstream licenses for data/coding (task set ilcb100)
+
+The tasks are taken from the HF dataset fjzzq2002/impossible_livecodebench
+(revision 98650ffc3f28a01b261669b6d19fcd7773823710), released with ImpossibleBench
+(https://arxiv.org/abs/2510.20270; code https://github.com/safety-research/impossiblebench,
+checked at d4f9a149db2b9cec0fed7bab01d91c07ee10aca2). The dataset card declares no license
+field; the ImpossibleBench repository that publishes it is MIT licensed. The problems derive
+from LiveCodeBench (https://github.com/LiveCodeBench/LiveCodeBench, checked at
+28fef95ea8c9f7a547c8329f2cd3d32b92c1fa24), also MIT licensed. Both license texts follow.
+
+======================================================================
+ImpossibleBench (safety-research/impossiblebench) LICENSE
+======================================================================
+MIT License
+
+Copyright (c) 2025 ImpossibleBench Team
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+======================================================================
+LiveCodeBench (LiveCodeBench/LiveCodeBench) LICENSE
+======================================================================
+MIT License
+
+Copyright (c) 2024 LiveCodeBench
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

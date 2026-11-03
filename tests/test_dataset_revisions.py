@@ -142,8 +142,9 @@ class RevisionTests(unittest.TestCase):
     def test_configs_pin_the_current_revision(self):
         subset = sha(ROOT / 'data/pilot_subset.json')
         for path in sorted((ROOT / 'configs').glob('*.json')):
-            pin = json.loads(path.read_text()).get('fixed_task_manifest')
-            if isinstance(pin, dict):
+            config = json.loads(path.read_text())
+            pin = config.get('fixed_task_manifest')
+            if isinstance(pin, dict) and config.get('domain') != 'code':  # coding configs pin data/coding
                 with self.subTest(config=path.name):
                     self.assertEqual(pin['parent_manifest_sha256'], V2_MANIFEST)
                     self.assertIn(pin['sha256'], (subset, V2_MANIFEST))

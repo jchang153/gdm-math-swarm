@@ -30,6 +30,7 @@ if str(ROOT) not in sys.path:  # research/analysis/roles.py (participant roles)
 from research.analysis import roles as participant_roles  # noqa: E402
 from research.analysis import agent_badges  # noqa: E402
 import site_layout  # noqa: E402
+import coding_results  # noqa: E402  (coding runs only: config.domain == "code")
 STYLE = '''
 :root{font-family:system-ui,sans-serif;color:var(--fg);background:var(--bg);line-height:1.55}
 body{max-width:1280px;margin:32px auto;padding:0 24px}a{color:var(--accent)}h1{margin-bottom:8px}
@@ -197,6 +198,7 @@ def export(run, out=None):
     reverted_submissions = {row['submission_id']: row for row in reversions}
     withdrawn_artifacts = {row['artifact_id']: row for row in reversions if row.get('artifact_id') is not None}
     proof_checks = [e for e in events if e['kind'] == 'proof_checked']
+    code_run = coding_results.domain(settings) == 'code'   # coding runs: Python solutions, solution checks
     if [x['seq'] for x in tables['events']] != [x['seq'] for x in events]:
         raise ValueError('Database/event-log sequence mismatch')
     for row, event in zip(tables['events'], events):
@@ -255,6 +257,10 @@ def export(run, out=None):
         detail = {k: v for k, v in row.items() if k != 'source'}
         detail['independent_evaluation'] = ({'validity': evaluation['validity'], 'reason': evaluation['reason']}
                                             if evaluation else {'validity': 'not independently evaluated'})
+        if evaluation and code_run:   # coding evaluator fields (variant: researcher-only manifest)
+            detail['independent_evaluation'].update({k: evaluation[k] for k in (
+                'variant', 'hardcoded_fake', 'visible_passed', 'visible_total', 'reference_passed', 'reference_total')
+                if k in evaluation})
         reverted = reverted_submissions.get(row['submission_id'])
         if reverted:
             detail['reverted'] = {'by': reverted['reverted_by'], 'reason': reverted['reason'],
@@ -276,7 +282,8 @@ def export(run, out=None):
         p = event.get('payload') or {}
         target = p.get('submission_id') if p.get('target') == 'accepted_submission' else p.get('file_path')
         records.append(record('oversight', 'proof-check-' + str(event['seq']),
-                              f"Proof check · {p.get('problem_id')} · {'verified' if p.get('verified') else 'not verified'}",
+                              f"{'Solution check' if code_run else 'Proof check'} · {p.get('problem_id')} · "
+                              f"{'verified' if p.get('verified') else 'not verified'}",
                               f"{p.get('target')}: {target}. {p.get('reason') or ''}", event['timestamp'],
                               [event.get('agent_id')], p.get('problem_id'), detail=p))
 
@@ -318,6 +325,8 @@ def export(run, out=None):
         data['run_start'] = start
     if len(overseer_ids) > 1:
         data['overseers'] = overseer_ids
+    if code_run:
+        data['domain'] = 'code'
     (out / 'index.html').write_text(agent_badges.decorate_page(render_index(data), 'conference-view/index.html', badge_map))
     packs, index = pack_captures(run.name, versions)
     write_packed_files(out, packs, index, start, badge_map)
@@ -674,7 +683,20 @@ for(const id of ['search','agent','task'])el(id).addEventListener(id==='search'?
         script = script.replace("'Credits the overseer reverted (with its stated reason) and the proof checks it ran. "
                                 "A reverted credit removed the credit and the library entry and reopened the problem; "
                                 "the original submission stays in the records.'", MULTI_OVERSIGHT_INTRO, 1)
+    if data.get('domain') == 'code':   # coding runs: section texts about solutions and tests, not proofs
+        for old, new in CODE_SECTION_WORDING:
+            script = script.replace(old, new)
     return site_layout.apply('conference-view/index.html', compact_browser_page(page('Conference · ' + data['run'], body + '<script id="data" type="application/json">' + encoded + '</script><script>' + script + '</script>')))
+
+
+CODE_SECTION_WORDING = (
+    ("Complete accepted proofs were published automatically", "Accepted solutions were published automatically"),
+    ("“problem_closed” does not mean a proof was mathematically rejected.",
+     "“problem_closed” does not mean a solution was rejected by its tests."),
+    ("and the proof checks it ran", "and the solution checks it ran"),
+    ("no proof check was run", "no solution check was run"),
+    ("'Compilation: '", "'Tests: '"),
+)
 
 
 def published_data(document):

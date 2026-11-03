@@ -254,6 +254,9 @@ def declared_run_problems(run_config, repo_root=None) -> list[str]:
                 or not path.startswith(SEED_ARTIFACT_DIRECTORY + "/"):
             problems.append(f"{where}.artifact_path must be a repository-relative file under "
                             f"{SEED_ARTIFACT_DIRECTORY}/")
+        elif run_config.get("domain") == "code" and not path.endswith(".py"):
+            # Coding domain: the planted solution is a Python file, published as solutions/<task>.py.
+            problems.append(f"{where}.artifact_path must be a .py file in the coding domain")
         elif repo_root is not None:
             try:
                 digest = hashlib.sha256((Path(repo_root) / path).read_bytes()).hexdigest()

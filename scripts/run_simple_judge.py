@@ -219,6 +219,8 @@ def _run(args, run_dir, out_dir, log):
             "budget": run_limit.record()}
     if seeded:
         meta["seeded"] = seeded
+    if any(case.get("domain") == "code" for case in cases.values()):   # coding run: coding rubric
+        meta["domain"] = "code"
     if any(role != "seed" for role in roles.values()):
         meta["roles"] = {a: r for a, r in roles.items() if r != "seed"}
     report = pipeline.write_outputs(out_dir, run_dir.name, rows, meta=meta, comparison=comparison)

@@ -8,6 +8,14 @@ build_experiment_index.py from each run's profile (scripts/run_profile.py). No e
 loaded; the only external link is the paper.
 """
 import html
+import sys
+
+# Page title, brand and headline. Another library in the same style (catalogue_intro_ib.py, the ImpossibleBench
+# site, November 3, 2026) defines the same names and passes its module as ``text`` to the functions below.
+TITLE = 'GDM Math Swarm experiments'
+BRAND = 'GDM Math Swarm'
+HEADLINE = 'Do AI research swarms cheat, and does anyone stop them?'
+PAPER_LABEL = 'Reconstructs'
 
 PAPER_URL = 'https://arxiv.org/pdf/2609.04170'
 PAPER_TITLE = 'A Case Study on Emergent Cheating and Whistleblowing in Autonomous Research Swarms'
@@ -109,21 +117,28 @@ def _fmt(n):
     return f'{n:,}'
 
 
-def topnav():
-    return ('<nav class="topnav jump" aria-label="Site"><a class="brand" href="#top">GDM Math Swarm</a>'
+def _text(text):
+    return text if text is not None else sys.modules[__name__]
+
+
+def topnav(text=None):
+    t = _text(text)
+    return (f'<nav class="topnav jump" aria-label="Site"><a class="brand" href="#top">{html.escape(t.BRAND)}</a>'
             '<span class="tn-links"><a href="#runs-top">Runs</a><a href="#table-view">Table</a><a href="#about">About</a>'
-            f'<a href="{PAPER_URL}" target="_blank" rel="noopener noreferrer">Paper</a></span></nav>')
+            f'<a href="{t.PAPER_URL}" target="_blank" rel="noopener noreferrer">Paper</a></span></nav>')
 
 
-def hero(stats):
+def hero(stats, text=None):
     """The page top: navigation, title, a two-sentence summary, headline numbers and the compact paper credit.
-    stats: [(label, number)]."""
+    stats: [(label, number)]; ``text``: the module holding the site's texts (default: this one)."""
+    t = _text(text)
     tiles = ''.join(f'<div><dt>{html.escape(k)}</dt><dd>{_fmt(v) if isinstance(v, int) else html.escape(str(v))}</dd></div>'
                     for k, v in stats)
-    return (topnav() + '<header class="hero" id="top"><p class="eyebrow">Experiment library</p>'
-            '<h1>Do AI research swarms cheat, and does anyone stop them?</h1>'
-            f'<p class="lead">{html.escape(LEAD)}</p><dl class="stats">{tiles}</dl>'
-            f'<p class="paper"><span class="paper-k">Reconstructs</span> {PAPER}. <span class="muted">{html.escape(DISCLAIMER)}'
+    return (topnav(t) + '<header class="hero" id="top"><p class="eyebrow">Experiment library</p>'
+            f'<h1>{html.escape(t.HEADLINE)}</h1>'
+            f'<p class="lead">{html.escape(t.LEAD)}</p><dl class="stats">{tiles}</dl>'
+            f'<p class="paper"><span class="paper-k">{html.escape(t.PAPER_LABEL)}</span> {t.PAPER}. '
+            f'<span class="muted">{html.escape(t.DISCLAIMER)}'
             '</span></p></header>')
 
 
@@ -134,12 +149,13 @@ def toc(series):
         for k, t, n in series) + '</nav>')
 
 
-def about_section():
+def about_section(text=None):
     """Everything a newcomer may want, collapsed: the experiment, how a run works, the pages, the glossary."""
-    exp = ''.join(f'<li><strong>{html.escape(t)}.</strong> {d}</li>' for t, d in EXPERIMENT)
-    steps = ''.join(f'<li><strong>{html.escape(t)}</strong><span>{html.escape(d)}</span></li>' for t, d in STEPS)
-    pages = ''.join(f'<div><dt>{html.escape(t)}</dt><dd>{html.escape(d)}</dd></div>' for t, d in PAGES)
-    terms = ''.join(f'<div><dt>{html.escape(t)}</dt><dd>{html.escape(d)}</dd></div>' for t, d in GLOSSARY)
+    x = _text(text)
+    exp = ''.join(f'<li><strong>{html.escape(t)}.</strong> {d}</li>' for t, d in x.EXPERIMENT)
+    steps = ''.join(f'<li><strong>{html.escape(t)}</strong><span>{html.escape(d)}</span></li>' for t, d in x.STEPS)
+    pages = ''.join(f'<div><dt>{html.escape(t)}</dt><dd>{html.escape(d)}</dd></div>' for t, d in x.PAGES)
+    terms = ''.join(f'<div><dt>{html.escape(t)}</dt><dd>{html.escape(d)}</dd></div>' for t, d in x.GLOSSARY)
     return ('<section class="about" id="about"><h2>About this library</h2>'
             '<p class="sub">Background, the pages of a run and the terms used on cards and reports.</p>'
             f'<details id="experiment" open><summary>The experiment</summary><ul class="facts">{exp}</ul></details>'

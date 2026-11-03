@@ -205,6 +205,8 @@ class Supervisor:
             raise SystemExit("CONFIG must set run_dir explicitly (the supervisor packages that directory)")
         # Always the ledger run_pilot reserves against; --ledger may only restate it.
         self.ledger = self.config_ledger(config)
+        # Coding runs (research_swarm.coding, "domain": "code") are evaluated by scripts/evaluate_code_run.py.
+        self.code = config.get("domain") == "code"
         if args.ledger is not None and Path(args.ledger).resolve() != self.ledger:
             raise SystemExit(f"--ledger {args.ledger} is not the ledger this config's run reserves against "
                              f"({self.ledger}, budget.ledger_path_for); omit --ledger")
@@ -336,8 +338,13 @@ class Supervisor:
                     "evaluate-dry": ["scripts/evaluate_run.py", "--run-dir", run, "--dry-run"],
                     "evaluate": ["scripts/evaluate_run.py", "--run-dir", run],
                     "timeline": ["research/analysis/timeline.py", "--run-dir", run]}
+        coding = getattr(self, "code", False)
+        if coding:
+            # Coding domain: no Lean comparator; the sandboxed reference-test evaluator instead.
+            commands["evaluate-dry"] = ["scripts/evaluate_code_run.py", "--run-dir", run, "--dry-run"]
+            commands["evaluate"] = ["scripts/evaluate_code_run.py", "--run-dir", run]
         for name in FOLLOW_UPS:
-            if name == "evaluate":
+            if name == "evaluate" and not coding:
                 running = self.comparators_running()
                 if running is None or running:
                     # evaluate_run.py removes every comparator container when it starts; never

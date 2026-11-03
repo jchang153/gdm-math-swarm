@@ -102,6 +102,13 @@ def build(runs, hosted=False, unlisted=None):
                      'distinct_verified_tasks': len(distinct),
                      'task_count': config.get('task_count'), 'agent_exits': data['agent_exits'],
                      'links': {}, 'summary': run_summary(path.parent, data)}
+            if data.get('domain') == 'code':  # coding runs (scripts/coding_results.py): hard-coded fakes by variant
+                coding = data.get('coding') or {}
+                entry['domain'] = 'code'
+                entry['hardcoded_fake_tasks'] = coding.get('hardcoded_fake_tasks')
+                entry['by_variant_group'] = {k: {f: v.get(f) for f in ('accepted_tasks', 'hardcoded_fake_tasks',
+                                                                       'genuine_tasks')}
+                                             for k, v in (coding.get('by_variant_group') or {}).items()}
             # Visual summary of the run card (scripts/run_profile.py; owner request, October 27, 2026).
             entry['profile'] = run_profile.profile(data, settings)
             for name, target in [('Report', 'results.html'),
@@ -407,8 +414,10 @@ def series_sections(groups):
     return ''.join(out)
 
 
-def write_index(runs, entries, warnings=(), *, hosted=False):
-    """Render catalogue entries, including previously published remote runs."""
+def write_index(runs, entries, warnings=(), *, hosted=False, intro=None):
+    """Render catalogue entries, including previously published remote runs. ``intro``: the module with the
+    library's texts (default catalogue_intro, the math library; catalogue_intro_ib for the ImpossibleBench site)."""
+    intro = intro or catalogue_intro
     runs = Path(runs)
     runs.mkdir(parents=True, exist_ok=True)
     entries = newest_first(entries)
@@ -471,15 +480,15 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
         f'<option value="">{first}</option>{extra}</select></label>')
     body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
-            '<title>GDM Math Swarm experiments</title><style>' + STYLE + '</style></head><body>'
-            + catalogue_intro.hero(stats)
+            f'<title>{esc(intro.TITLE)}</title><style>' + STYLE + '</style></head><body>'
+            + intro.hero(stats)
             + (live_section(entries) if hosted else '') +
             '<section class="block runs" id="runs-top"><div class="runs-head"><h2>Runs</h2>'
             f'<p class="sub">{len(entries)} saved experiment{"" if len(entries) == 1 else "s"} in {len(groups)} series, '
             'newest first. Tick 2 to 4 runs to compare them side by side.'
             + (f' {mapped} run{"" if mapped == 1 else "s"} {"has" if mapped == 1 else "have"} an agent story map '
                '(the Story map link).' if mapped else '') + '</p></div>'
-            + catalogue_intro.toc([(k, t, len(es)) for k, t, _, es in groups]) +
+            + intro.toc([(k, t, len(es)) for k, t, _, es in groups]) +
             '<div class="controls"><div class="toolbar">'
             '<label class="grow"><span class="sr">Find</span><input id="filter" type="search" '
             'placeholder="Search runs, models, conditions…" aria-label="Find"></label>'
@@ -515,7 +524,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
             'judge, by cohort (below); a row shows both when both ran. "not run" means no judge outputs are '
             'published for the run; "…" means the entry predates these columns and the run\'s own records could '
             'not be read here.</dd>' + glossary + '</dl></details></section>'
-            + catalogue_intro.about_section() +
+            + intro.about_section() +
             f'<footer class="foot"><p>{esc(note)}</p></footer>'
             f'<script type="application/json" id="catalogue-data">{blob}</script>'
             '<script>' + SCRIPT.replace('/*CARDJS*/', run_profile.CARD_JS) + '</script></body></html>')

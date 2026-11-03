@@ -9,3 +9,4 @@ judging and no restart or rescore machinery. See README.md in this folder.
 from ..private_material import install_module as _install_private_module
 
 _install_private_module(__name__ + ".prompts", "research/analysis/simple_judge/prompts.py")
+_install_private_module(__name__ + ".prompts_code", "research/analysis/simple_judge/prompts_code.py")  # coding runs

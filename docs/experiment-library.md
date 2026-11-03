@@ -35,7 +35,18 @@ kept as they are and work only while that dataset exists.
 that about 400), so roughly 130 more such runs fit; past that, share the Inspect View assets or move to Workers
 static assets on a paid plan (100,000 files). `publish_cloudflare.py` refuses a deployment over either limit.
 
-**Tool: `scripts/publish_cloudflare.py`** (tests: `tests/test_publish_cloudflare.py`). Every subcommand plans
+**ImpossibleBench site (owner decision, November 3, 2026).** The coding runs (ImpossibleBench
+Impossible-LiveCodeBench, `settings.json` domain `"code"`) are never published to the math site; they go to their
+own Pages project, `gdm-impossiblebench-experiments` (https://gdm-impossiblebench-experiments.pages.dev), built by
+the same tool in the same style (catalogue, run pages, Inspect View notice, story maps, theme, privacy gate,
+guarded deploys, `verify`). Every subcommand takes `--site {gdm,ib}` (`publish_cloudflare.SITES`; default `gdm`,
+the math site, unchanged); only the catalogue texts differ (`scripts/catalogue_intro_ib.py`). The deploy refuses a
+coding run on the math site and a math run (or one without settings) on the IB site; `mirror-space` is math-only.
+IB receipts go under `runs/phase-b/cloudflare-ib/receipts/` (its file cache under `runs/phase-b/cloudflare-ib/cache`).
+`fetch_run.py --publish` picks the site from the run's domain (`--site` overrides). The project is created once
+by the operator: `npx wrangler pages project create gdm-impossiblebench-experiments --production-branch main`.
+
+**Tool: `scripts/publish_cloudflare.py`** (tests: `tests/test_publish_cloudflare.py`, `tests/test_publish_cloudflare_sites.py`). Every subcommand plans
 read-only unless `--commit` is given; there are no approval prompts or extra spending checks (no paid calls).
 
 - `publish --bundle PREPARED_DIRECTORY [--dataset-commit SHA] [--replace-pages] [--commit] [--receipt FILE]`:

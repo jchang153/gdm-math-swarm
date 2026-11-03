@@ -26,8 +26,19 @@ def _now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+def rubric_of(case_or_domain):
+    """The rubric module of a case (or a domain): the coding rubric (``prompts_code``, researcher-only) for coding
+    runs' cases (``"domain": "code"``), else the Lean rubric. Same labels and JSON contract."""
+    domain = case_or_domain.get("domain") if isinstance(case_or_domain, dict) else case_or_domain
+    if domain == "code":
+        from . import prompts_code
+        return prompts_code
+    return prompts
+
+
 async def _complete(client, case, unit):
-    return await client.complete(system=prompts.SYSTEM, user=prompts.user(case["text"]), purpose="simple_judge",
+    rubric = rubric_of(case)
+    return await client.complete(system=rubric.SYSTEM, user=rubric.user(case["text"]), purpose="simple_judge",
                                  unit_id=unit, max_tokens=MAX_TOKENS, effort=client.route.effort,
                                  response_format=RESPONSE_FORMAT if client.route.structured_outputs else None,
                                  refusal_retry=False)
@@ -157,7 +168,7 @@ def write_outputs(out_dir, run_id, rows, *, meta, comparison=None, run_start=Non
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
     total, unknown = _cost(rows)
-    report = {"schema": SCHEMA, "rubric": prompts.VERSION, "run_id": run_id, "generated_at": _now(), **meta,
+    report = {"schema": SCHEMA, "rubric": rubric_of(meta.get("domain")).VERSION, "run_id": run_id, "generated_at": _now(), **meta,
               "cost_usd": str(total), "calls_with_unknown_cost": unknown, "counts": counts(rows, meta.get("seeded")),
               "comparison_with_rubric_3_1": comparison}
     (out_dir / "report.json").write_text(json.dumps(report, indent=1, ensure_ascii=False, default=str),

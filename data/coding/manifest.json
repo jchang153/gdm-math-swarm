@@ -1,0 +1,2024 @@
+{
+  "schema_version": 1,
+  "task_set": "ilcb100",
+  "upstream": {
+    "dataset": "fjzzq2002/impossible_livecodebench",
+    "revision": "98650ffc3f28a01b261669b6d19fcd7773823710",
+    "url": "https://huggingface.co/datasets/fjzzq2002/impossible_livecodebench",
+    "paper": "https://arxiv.org/abs/2510.20270",
+    "code": "https://github.com/safety-research/impossiblebench",
+    "code_revision": "d4f9a149db2b9cec0fed7bab01d91c07ee10aca2",
+    "problems_source": "https://github.com/LiveCodeBench/LiveCodeBench",
+    "license": "ImpossibleBench code (safety-research/impossiblebench) is MIT licensed (Copyright (c) 2025 ImpossibleBench Team); LiveCodeBench, the source of the problems, is MIT licensed (Copyright (c) 2024 LiveCodeBench). The HF dataset card declares no license. See data/coding/UPSTREAM_LICENSE.",
+    "parquet_sha256": {
+      "original": "3f128b7a8419fd4f2d1c11f3eca7cd5bceac0e2385810950e926276d07a784c5",
+      "oneoff": "31a89b06195a223268c4e66ea9ae87c5ed5b744bb7d230ed950d2e012c2c6c56",
+      "conflicting": "9a13116c6cf48e8c2dc64ca2facdac4122aad30fe1aa52ab552a3b35638c22c8"
+    }
+  },
+  "selection_seed": 260904170,
+  "selection_method": "Eligible base tasks (prompt and original tests parse with ast) sampled with random.Random(260904170).sample(sorted ids, 100). Difficulty proxy: prompt docstring length in characters (ties by numeric id). Sorted by the proxy and cut into strata of 3; each full stratum gets the first seeded-random permutation of (original, oneoff, conflicting) whose mutated tests conform (oneoff: exactly one assert differs; conflicting: a repeated input with a different expectation); the leftover task is oneoff. Each base task appears once, in one variant.",
+  "task_count": 100,
+  "tasks": [
+    {
+      "task_id": "lcbhard_0",
+      "title": "count_beautiful_integers",
+      "entry_point": "count_beautiful_integers",
+      "dir": "data/coding/tasks/lcbhard_0",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_0/problem.md",
+          "sha256": "40307109a1b708a32d90ba23ef562316a5105413f6b4f8f327c11fea58a044c0"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_0/solution.py",
+          "sha256": "7ec6f113b9470943bfc8529daa112b2b425644c7a2a2d14eb59462c4b1164974"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_0/tests.py",
+          "sha256": "f1669a00010868bf845f5710c03f8feca3bf7b2fff02cb00a5ee3c592354143d"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_1",
+      "title": "count_powerful_integers",
+      "entry_point": "count_powerful_integers",
+      "dir": "data/coding/tasks/lcbhard_1",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_1/problem.md",
+          "sha256": "1827d61c4ad5ba650b4d56c664f137ec9f0fc324908bb248294ce6a19d7bcf79"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_1/solution.py",
+          "sha256": "46a8ecde5a02f754439ea9449c1cdc06597ef32195efbab91cf306159e06e6d9"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_1/tests.py",
+          "sha256": "777c4b4edf98325804726cb4c83d7fe7294e237b447914c6a74f8e0f9bf7e225"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_2",
+      "title": "count_valid_colorings",
+      "entry_point": "count_valid_colorings",
+      "dir": "data/coding/tasks/lcbhard_2",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_2/problem.md",
+          "sha256": "4b245ebb756398379689de74588bb4e589a2859c8f57449d0ddc80b22d4157bf"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_2/solution.py",
+          "sha256": "ab61ccf9bf4c88cdf4fdb2fb5901863e75b13c47bf0c263ada16ffcc3cbf1cc4"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_2/tests.py",
+          "sha256": "35fc4c2146924a936d764d95276cc0f86d568bb94a16e5a3e341176fa4345626"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_3",
+      "title": "count_square_permutations",
+      "entry_point": "count_square_permutations",
+      "dir": "data/coding/tasks/lcbhard_3",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_3/problem.md",
+          "sha256": "69ae964a40ab6bedbf6d122c836b37305d0fccc2245b9200884930b293862364"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_3/solution.py",
+          "sha256": "936b4cae2de02c240eeec24dd953363fe32f85a0385cb7276bce9cccd3edc34b"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_3/tests.py",
+          "sha256": "e00686c23102077cfbb0560911cda6678694926b3153bdd8e991c8cc8d2dc044"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_4",
+      "title": "solve_grid",
+      "entry_point": "solve_grid",
+      "dir": "data/coding/tasks/lcbhard_4",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_4/problem.md",
+          "sha256": "c927ecb189eb364efe5f4d99c2f1a0685b246d30cecb28b48e27c3a12977e89d"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_4/solution.py",
+          "sha256": "ce3c0c132c9a54e422d6a24cf52890a775f91cf411c7d62adf809f466f08d674"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_4/tests.py",
+          "sha256": "dfa18c5c85eea9f6b84bf731cef2a50d8b0cfde099859ad2ff6de7e14609555d"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_5",
+      "title": "find_cube_placement",
+      "entry_point": "find_cube_placement",
+      "dir": "data/coding/tasks/lcbhard_5",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_5/problem.md",
+          "sha256": "fe877d183071e7598d747d1cf8a31bdbc222f1616c84088c62df9f97065ad0e0"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_5/solution.py",
+          "sha256": "484d12d8701b6a1287a3e8c3c3ab24c2915c0d82fb6bc0aeaeb47fb6fc562dd9"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_5/tests.py",
+          "sha256": "071891938b53ef20e3ec18f166c6add2280a03099eb37a19b6fea7f6725eecb6"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_6",
+      "title": "can_tile_grid",
+      "entry_point": "can_tile_grid",
+      "dir": "data/coding/tasks/lcbhard_6",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_6/problem.md",
+          "sha256": "b523cbbafbf8097a17b1cb014b403a405a72da37ce5ced0d7f6478447b9c0853"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_6/solution.py",
+          "sha256": "b3de65e41138ae0faddb2137ddaf36e36b50b412fdda68a4cef6082b35d83aaf"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_6/tests.py",
+          "sha256": "25bd535235f0144cbdff0dd7dd5aa6d9a39c07ab478d67cf92505f815200615d"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_7",
+      "title": "calculate_black_area_doubled",
+      "entry_point": "calculate_black_area_doubled",
+      "dir": "data/coding/tasks/lcbhard_7",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_7/problem.md",
+          "sha256": "70ea137945c916c0c57bc365099e0125ae5f13a6bce13eff4fa98da9d6892baf"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_7/solution.py",
+          "sha256": "2300466b09d87a1137c02c772878dbc17e08b2032e951779d3114332fc265ef6"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_7/tests.py",
+          "sha256": "0d7742c1b8d308e99194d2f34d0fa1227b552e424bbadee1581146e725ab1f08"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_8",
+      "title": "kth_smallest_amount",
+      "entry_point": "kth_smallest_amount",
+      "dir": "data/coding/tasks/lcbhard_8",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_8/problem.md",
+          "sha256": "dcdfd343723676f0b74aae6045c7bd5e4bef45074014d48227364c0bb53fef6e"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_8/solution.py",
+          "sha256": "e007c0cab7a70203f4e334764e53af124de6d0e187e2568c9c3db194b53813f3"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_8/tests.py",
+          "sha256": "e4ee491d2de402fc2ba0f94403370b087ea6bb7a90a7d022fc809b532c0a4932"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_9",
+      "title": "count_ways_to_stair",
+      "entry_point": "count_ways_to_stair",
+      "dir": "data/coding/tasks/lcbhard_9",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_9/problem.md",
+          "sha256": "1e0530bca802d2a89ce7814744da06d32fa31059f072f9d7dfed718abf5a7785"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_9/solution.py",
+          "sha256": "598e099a1da69f8ef4b4bf2d03f55712bd345dbe539a4ca58f7f28deb1f07ba1"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_9/tests.py",
+          "sha256": "c3d73e298fd72af4c6496115fec0d8b302ca552f94124cf9deb2c456ba1c5ad2"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_10",
+      "title": "count_valid_strings",
+      "entry_point": "count_valid_strings",
+      "dir": "data/coding/tasks/lcbhard_10",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_10/problem.md",
+          "sha256": "4235175ad5c08d05f6070bff4ae21059410e6ab9a50401eb757bdb3b6d65884b"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_10/solution.py",
+          "sha256": "bcdc2a032f7b1fad400e17529622d45caebc55a98b83682b60fe7e1a32af5cae"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_10/tests.py",
+          "sha256": "5ea4f98aa5067b4ca47716efb05f8863c750870de27b6f9e5aa4ca15ec4548a3"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_11",
+      "title": "expected_black_ball_position",
+      "entry_point": "expected_black_ball_position",
+      "dir": "data/coding/tasks/lcbhard_11",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_11/problem.md",
+          "sha256": "e06becaa1fa3c897b117736f5f1bb366a560ed08cf16c93a1ba436a676239ccf"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_11/solution.py",
+          "sha256": "b8d03f7860644915fada39e0d79ee37800629f46d636f75b44f1ed355db9c990"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_11/tests.py",
+          "sha256": "b4920d833d2b481e43d7ef3a3ad3ea9525558d566ab271202880afb038cf5f88"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_12",
+      "title": "min_operations_to_rearrange",
+      "entry_point": "min_operations_to_rearrange",
+      "dir": "data/coding/tasks/lcbhard_12",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_12/problem.md",
+          "sha256": "252565b653861eb4527e85cbd3b8583679b982a790e4aaa08174541e56418111"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_12/solution.py",
+          "sha256": "4fd60436d83cf7e462381a49f87d2589c6325ea7f6459ef8edf0235346b7738d"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_12/tests.py",
+          "sha256": "4f9b8841415df96f17345ffab5be6e45d012b5de259504218427f3feeecd33de"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_13",
+      "title": "count_power_representations",
+      "entry_point": "count_power_representations",
+      "dir": "data/coding/tasks/lcbhard_13",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_13/problem.md",
+          "sha256": "64a7e3c4aa6b6b240415d11f42df4ae44aed4d9441ed796b2078ceb157b5c468"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_13/solution.py",
+          "sha256": "2b8405a21cdb84e1dddd5a92c9284a9684e188de7cd25a0062a5016f3fc760b0"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_13/tests.py",
+          "sha256": "3250ea4078f79d97d9f1445438af998ee3918eea1bfe9c918d37d0cc99808d4f"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_14",
+      "title": "find_palindrome_expression",
+      "entry_point": "find_palindrome_expression",
+      "dir": "data/coding/tasks/lcbhard_14",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_14/problem.md",
+          "sha256": "4eccee2b43b93120f8f0dc96a26634e504f5af8ffb877f5a49d3bec9033f7ad8"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_14/solution.py",
+          "sha256": "ea73b18db32a51313c0514c20737f11d2f4e976179cfc649c3c0fb64a8bf3e80"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_14/tests.py",
+          "sha256": "2813214753b5798230ebd697c28384a0fa409894b3addaed526acce9bf9896d5"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_15",
+      "title": "min_absolute_difference",
+      "entry_point": "min_absolute_difference",
+      "dir": "data/coding/tasks/lcbhard_15",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_15/problem.md",
+          "sha256": "04afa17c81f43741bf71024839daa6eb02a78ee6f591d0d71e8f5576c5b39cba"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_15/solution.py",
+          "sha256": "d210ff3782aa3e1938feb6edd442b54f2a2a09604bc0ba71727f381945e92e4b"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_15/tests.py",
+          "sha256": "4a9535eb2903653eaf371c352a602ffc7f452a44986b90031c37b84e9b484ad9"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_16",
+      "title": "count_good_sequences",
+      "entry_point": "count_good_sequences",
+      "dir": "data/coding/tasks/lcbhard_16",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_16/problem.md",
+          "sha256": "86c5c41f00845b840807790f3091feba6d5c293704fb61f21714ff9c61f920df"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_16/solution.py",
+          "sha256": "9a9baabdf8647ea2d2741778b0470c053e4a8e83554134785fe6553ebdd51acc"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_16/tests.py",
+          "sha256": "15eec74b56d7d029ccb420757cc1964c5a87d18579b9217827d038336d857342"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_17",
+      "title": "sum_of_scores",
+      "entry_point": "sum_of_scores",
+      "dir": "data/coding/tasks/lcbhard_17",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_17/problem.md",
+          "sha256": "ddbf6dd50d8a461b1504fa5c839d66c0c286dabcf2c7e761090f2d135c7224b6"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_17/solution.py",
+          "sha256": "d86652ca24ea92a6dea14b8e6fb9db57064156a15b9fc0a6719b03db6e3bacf2"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_17/tests.py",
+          "sha256": "2ce157ff817372545c6f3ce1ed1c404c3fc1132bacea0017a8474bfd05d77689"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_18",
+      "title": "count_k_palindromic_numbers",
+      "entry_point": "count_k_palindromic_numbers",
+      "dir": "data/coding/tasks/lcbhard_18",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_18/problem.md",
+          "sha256": "3d5c9c4281cacadf5000dafd7f5e535abbb8d95aae133b83306081184b854326"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_18/solution.py",
+          "sha256": "4499d4f147f6d1131dae8d27767a27df80b81fcfb97362ef420fa14e6f1ae82a"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_18/tests.py",
+          "sha256": "7afb53f2e9acb244b49ce05d7e1fdc2f893b85cda84b178e5dece1fe7c76601b"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_19",
+      "title": "count_special_permutations",
+      "entry_point": "count_special_permutations",
+      "dir": "data/coding/tasks/lcbhard_19",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_19/problem.md",
+          "sha256": "ec20595736c8bbec683531d1278dceba56372bfc88888b9c1040ad0b56d49f02"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_19/solution.py",
+          "sha256": "2781173c6d5e5228f2569dd62042ea05f462af6a3069faf28bb4fcfe7e61d23a"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_19/tests.py",
+          "sha256": "a1e6c24394383b83b51546dd4cdf33a7fb296317c6870d5c039b0f5055390977"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_20",
+      "title": "min_tile_moves",
+      "entry_point": "min_tile_moves",
+      "dir": "data/coding/tasks/lcbhard_20",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_20/problem.md",
+          "sha256": "faadef30844b25e5a5137e98d61cebc750441437f894d45f1091d3f6775dbc83"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_20/solution.py",
+          "sha256": "75e06e0222127b969d7b4caede7f8149c0cd81c4d7dac087670c8f7e5c9118eb"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_20/tests.py",
+          "sha256": "78cf979fc656e011d59b132981b6a6e5c13364cb98da5ecd8b53ca84beab7bcb"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_21",
+      "title": "expected_operations",
+      "entry_point": "expected_operations",
+      "dir": "data/coding/tasks/lcbhard_21",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_21/problem.md",
+          "sha256": "5d567eac0a2d3c0118a98c9906909c87bac5ff1482442a2c3af6a0e503b797e1"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_21/solution.py",
+          "sha256": "3288c1304090825d724a86ff478b116e4ba73987083f2f110f5fb8e8e7bde568"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_21/tests.py",
+          "sha256": "9177066be4e139541c24320e5c7cbde9d5cf16b5abc7312609924f73e6c1c667"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_22",
+      "title": "can_color_all_points",
+      "entry_point": "can_color_all_points",
+      "dir": "data/coding/tasks/lcbhard_22",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_22/problem.md",
+          "sha256": "cd27c4209b9e52f76c573681c72c7593fe3e63057e0e716a5aae596914dc0ace"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_22/solution.py",
+          "sha256": "69c275572b0db3cbc748b62a4d36fa262202f8a84888353fa60182a04d9433b3"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_22/tests.py",
+          "sha256": "bb8713131f31d95d83ee482b6d83b4b75bbd203b37041cb361768df09eef460e"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_23",
+      "title": "count_event_ways",
+      "entry_point": "count_event_ways",
+      "dir": "data/coding/tasks/lcbhard_23",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_23/problem.md",
+          "sha256": "253ec8c0568d33ca05c738e8d375b0f8723c09a1f429989568759ba73cf4d42b"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_23/solution.py",
+          "sha256": "7050417eb3a936b27265e53761f6586295a205c306b212371a357c22838f4857"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_23/tests.py",
+          "sha256": "fefb629dba5d4e34163ee7395df51ad73df8ebb688380ae165152f58b9260e4d"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_24",
+      "title": "count_good_arrays",
+      "entry_point": "count_good_arrays",
+      "dir": "data/coding/tasks/lcbhard_24",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_24/problem.md",
+          "sha256": "ff5b7f5669a1dc3121377817ccbfcf4b78ba8324dbd676d610c76570a61ee019"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_24/solution.py",
+          "sha256": "d771eae87fab6299376147d7287d84f94e255358c6f39004dcf8687adbad2478"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_24/tests.py",
+          "sha256": "f8e037364bb36ba701a51979879dcc53718988c7777867454d29be91a5a7edc3"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_25",
+      "title": "sum_concatenated_permutations",
+      "entry_point": "sum_concatenated_permutations",
+      "dir": "data/coding/tasks/lcbhard_25",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_25/problem.md",
+          "sha256": "56fdb6205e28c59d6cfc053c155f39412891c197b854652538c252f8434011df"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_25/solution.py",
+          "sha256": "fe857e5e45cdea955b1a41f3f2b43ab1c4c92f566a86d7ddfcd7adf40bd93fbf"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_25/tests.py",
+          "sha256": "b5c88e9c45505839ea4224121458dc25c08485f4dfc30cb512116a5840c2e30d"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_26",
+      "title": "find_cube_difference_pair",
+      "entry_point": "find_cube_difference_pair",
+      "dir": "data/coding/tasks/lcbhard_26",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_26/problem.md",
+          "sha256": "6569239aa1a68cc34a3f8b9332cf5c8b1114794afe541eabc08cc902269ea6d1"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_26/solution.py",
+          "sha256": "7e2267ccae4dfa63d5016559c800c83977415d0a44ca97665f075d0362697381"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_26/tests.py",
+          "sha256": "af35b1ee597eb4bbb2489879cc22828f7dd89fadcd8e9b3d626cfaf51b937da4"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_27",
+      "title": "find_largest_400_number",
+      "entry_point": "find_largest_400_number",
+      "dir": "data/coding/tasks/lcbhard_27",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_27/problem.md",
+          "sha256": "06d2924f011e713f9f850edff6834e29325b62d6b5bd3707e6549f944caf9e8c"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_27/solution.py",
+          "sha256": "4ada0912bf646575f43e14d2ead97114c71f43199654b57612315d024bb20623"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_27/tests.py",
+          "sha256": "f28bfb1748030c485f0b12c95ad56fed284f5e82ec3b1e93fcb65ab1042136a8"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_28",
+      "title": "count_beautiful_numbers",
+      "entry_point": "count_beautiful_numbers",
+      "dir": "data/coding/tasks/lcbhard_28",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_28/problem.md",
+          "sha256": "24735ad1b813878322928d207f0ceb3f5118ec936cf9d28fdb3346f54b918a9d"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_28/solution.py",
+          "sha256": "4ca446758bd3aa8487d3f54e64065c6b4ad954baaf6ed62769289cbdca198c7c"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_28/tests.py",
+          "sha256": "d87433a8984d72e0c2ebb982ae0fbcea747512ab828fd8c5e39a877df430ea0b"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_29",
+      "title": "sum_manhattan_distances",
+      "entry_point": "sum_manhattan_distances",
+      "dir": "data/coding/tasks/lcbhard_29",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_29/problem.md",
+          "sha256": "199cdcc813fc7001ac8585b019d5387a0a5da0fbf4ceac0c5808cac65a9d1608"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_29/solution.py",
+          "sha256": "1d32850805924ba8edba78fb81a093b3adae437faf4e3e9704b6d047f1472187"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_29/tests.py",
+          "sha256": "e9b2679a5ed364cefe239ec11939e0b1344161b4f31e8da5fae6c267ca8d3b2b"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_30",
+      "title": "count_good_integers",
+      "entry_point": "count_good_integers",
+      "dir": "data/coding/tasks/lcbhard_30",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_30/problem.md",
+          "sha256": "3dcadaa8d490e074dfb4c47b2647239194edf99ca21204733ce8eefc6b98f140"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_30/solution.py",
+          "sha256": "5b29b3380651f50530bf7ddcb5606baca6ce8dac61abb48872aadef46cb01fac"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_30/tests.py",
+          "sha256": "ec76d1c2925054b66a783ff14143b971d464a9a08e4579a015dbfdfd671ee038"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_31",
+      "title": "paint_walls",
+      "entry_point": "paint_walls",
+      "dir": "data/coding/tasks/lcbhard_31",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_31/problem.md",
+          "sha256": "241ba29c1153126eaf71c50aff5c4a1148e2be9ca0121e01007da10bc8600af0"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_31/solution.py",
+          "sha256": "e4c879593c0c91bb95714d38d577faa3cf25e6a0e083892214de879f0ed582c9"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_31/tests.py",
+          "sha256": "6356e3687cb203ce652ced64149b60c0e63f7c022c2ae58e3a3be9e3e6fa0e7d"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_33",
+      "title": "min_changes_for_semi_palindromes",
+      "entry_point": "min_changes_for_semi_palindromes",
+      "dir": "data/coding/tasks/lcbhard_33",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_33/problem.md",
+          "sha256": "4459c47c96e846e83077398e703f98c9275351339e511f73e856b8ce0e656745"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_33/solution.py",
+          "sha256": "8ec41875750767eb41ef949a4ef727b0d2c69be4cd10f0b0ffb3bb7548354711"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_33/tests.py",
+          "sha256": "864ada4828341454462e6adfcf373127f971a1c91c7acd6aed02a5aa5939f014"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_34",
+      "title": "count_stepping_numbers",
+      "entry_point": "count_stepping_numbers",
+      "dir": "data/coding/tasks/lcbhard_34",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_34/problem.md",
+          "sha256": "c92501750b3e0508dfaef034caefb224b4acb56a5bbe24342ca4906afbece03a"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_34/solution.py",
+          "sha256": "350f0dafba17a7cf0bc97b394610591550c7654b933befed1a497712077acd37"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_34/tests.py",
+          "sha256": "c4bf7caa774c20bba7daeae1d56185329c4c3058e2f81efa03c2313b2bed1918"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_35",
+      "title": "min_time_to_reduce_sum",
+      "entry_point": "min_time_to_reduce_sum",
+      "dir": "data/coding/tasks/lcbhard_35",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_35/problem.md",
+          "sha256": "b250bb7ef631f6c5672fd5d8385c5b6e5039c580558205a273db32e664e007e8"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_35/solution.py",
+          "sha256": "44bd411b1196ecfb9491bb4d1a392a9344e89ef62832c83b36572d62c3af6a38"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_35/tests.py",
+          "sha256": "d879f1b814ef5c7754d543a21b06a0b04437c1653368c70f5fe57bb0a5ce2393"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_36",
+      "title": "min_operations_to_sum",
+      "entry_point": "min_operations_to_sum",
+      "dir": "data/coding/tasks/lcbhard_36",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_36/problem.md",
+          "sha256": "bdca343effd8db333b852aa1e3434727086867503d50e7648ff4f6975cef792a"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_36/solution.py",
+          "sha256": "1df7c889bfd891a67bab64dfd6a7d0feeafb6da99be67df5fbaeee0368cc19d0"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_36/tests.py",
+          "sha256": "4410380a5385ae2b58d6cc28f849681387ec78bd35b233f11d7ef72d6df91182"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_38",
+      "title": "dice_sum_probability",
+      "entry_point": "dice_sum_probability",
+      "dir": "data/coding/tasks/lcbhard_38",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_38/problem.md",
+          "sha256": "64b01386fe6f9b45cc5af38290bfe78a1efab50b737c229e7b7b9be6aff879bd"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_38/solution.py",
+          "sha256": "3ef60f8a57f1d2f302f630dbbddeb85e179446afa5c33c8f572073f2ecffede6"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_38/tests.py",
+          "sha256": "b90b8d25da1461f88930f37bd9e4029643518f5d4d1e8d9248bef7258b012c55"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_39",
+      "title": "min_cost_to_achieve_goal",
+      "entry_point": "min_cost_to_achieve_goal",
+      "dir": "data/coding/tasks/lcbhard_39",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_39/problem.md",
+          "sha256": "d3168e639b00d902d27b0533aa2f0a2297eb8d8ad1d5c70c30df60be715facab"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_39/solution.py",
+          "sha256": "edb6f3ffb2da6a27ace3848f871581568b71b3096f47ad9469c9afa3cd279e04"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_39/tests.py",
+          "sha256": "40352a4e1befcd79673a75e1f05a0204d42eb0757112d81a191e1dbcc345918d"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_40",
+      "title": "min_sensor_cost",
+      "entry_point": "min_sensor_cost",
+      "dir": "data/coding/tasks/lcbhard_40",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_40/problem.md",
+          "sha256": "64c1913a435e376cf582a5cd9f2a26ccb0fabd98b49dd3f8b7ce1861d5ba4154"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_40/solution.py",
+          "sha256": "c1154c0efb5c03788b02e092fd74cc0548d73915c5803d6a9cce1780dcb9bd33"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_40/tests.py",
+          "sha256": "4ba0449574bfb8a06e9ac3183ee0e490d9d473aba5f7973ab565a6be403bb700"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_41",
+      "title": "min_spanning_tree_mod_k",
+      "entry_point": "min_spanning_tree_mod_k",
+      "dir": "data/coding/tasks/lcbhard_41",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_41/problem.md",
+          "sha256": "e7ad9c55a0e7dded049c00a38f9362a285152131df0df0ff7cc7b875aeed478c"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_41/solution.py",
+          "sha256": "daadd3fa68fe0f489ef52ec5e81c78c38a6bd407f80ae9f34980ba18517d06d3"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_41/tests.py",
+          "sha256": "6173cc561110090930649130a59dfe036a0f62f1dd3f031dff11ec045f285a5b"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_42",
+      "title": "min_operations_to_match_grids",
+      "entry_point": "min_operations_to_match_grids",
+      "dir": "data/coding/tasks/lcbhard_42",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_42/problem.md",
+          "sha256": "5b5f01b5d06affe938499e5ef8a08604016106ab5f23cc0e15783c161a847551"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_42/solution.py",
+          "sha256": "fc798a48f065f3a4a3d34b10c7f690a77ac118a82d004edb4b49bb03a502d94d"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_42/tests.py",
+          "sha256": "8b08774fd59d7aab8e8d9c0ca433cad0c56023fe9fc7dc4dd0b3ae8602d58790"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_43",
+      "title": "min_weight_hamiltonian_walk",
+      "entry_point": "min_weight_hamiltonian_walk",
+      "dir": "data/coding/tasks/lcbhard_43",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_43/problem.md",
+          "sha256": "a2c2bbf1df2830f1c94f77439c96c68d7a3c069de347a90bca8f0524ace4a26a"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_43/solution.py",
+          "sha256": "7ab32e4139bd1511281048b978938ffb1e1793dfd0a7311d95fe36390b6feb51"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_43/tests.py",
+          "sha256": "0098d05c8f194b59fc939a5fbf7b08139f2e29241f5de370c82b17ddb86aa8b1"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_44",
+      "title": "divide_into_good_sequences",
+      "entry_point": "divide_into_good_sequences",
+      "dir": "data/coding/tasks/lcbhard_44",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_44/problem.md",
+          "sha256": "cf5585f6511a915c6852d711168128e38fa14884182bf17b648a781aed47b845"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_44/solution.py",
+          "sha256": "f94655e516b3ce26add8d87edd532135e57526130b6513cb9cac93b39b0f6aee"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_44/tests.py",
+          "sha256": "fe826630206efad4587f2b4d628f0d7919c287b93df7fbade9c2b47307c21ff8"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_45",
+      "title": "tic_tac_toe_winner",
+      "entry_point": "tic_tac_toe_winner",
+      "dir": "data/coding/tasks/lcbhard_45",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_45/problem.md",
+          "sha256": "c3c17b4bf70492438cb4a68ff0b9fbe1e786beebc2c4374a4b22e8d46cbb25fb"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_45/solution.py",
+          "sha256": "90b5e7394cdc2b3f55e754c5ed9ddfefb5d8f1b11a5d639f8f5cb28d14f599a4"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_45/tests.py",
+          "sha256": "3f2ae44faeb1699707bafc2ef523bbda23dc61023bb539fc40bbc939f3987f05"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_46",
+      "title": "card_game_winner",
+      "entry_point": "card_game_winner",
+      "dir": "data/coding/tasks/lcbhard_46",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_46/problem.md",
+          "sha256": "9fbd0b14701ca50d0daaa599926aaedc2b6289ab4426873eb8cf5777eb0eba07"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_46/solution.py",
+          "sha256": "9f42985352ff84e0cde67ba6db50776ce017ff9b326da5d1fac268988e845b86"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_46/tests.py",
+          "sha256": "47cdf080d6c6347b5ed8a729f95a538d38213da62f4a479a508d97728689296e"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_47",
+      "title": "sum_of_subsequence_powers",
+      "entry_point": "sum_of_subsequence_powers",
+      "dir": "data/coding/tasks/lcbhard_47",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_47/problem.md",
+          "sha256": "76094f554e2e898b9c937819f8d9f879db63b253ab88d0bf5df7dc97be314385"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_47/solution.py",
+          "sha256": "d2941c3179872b4465912a052282f980037730649e0bc8e0b59ad2f25a379ec2"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_47/tests.py",
+          "sha256": "ab0f2cae8a36069118b3cea1c707ff0d1143f69b680bb56e2a621ed8086336bd"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_48",
+      "title": "sum_of_powers",
+      "entry_point": "sum_of_powers",
+      "dir": "data/coding/tasks/lcbhard_48",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_48/problem.md",
+          "sha256": "a1c94de17bb49cb67ac6ac95cef783749decd2ac35d398ae8a7592a3e339cd45"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_48/solution.py",
+          "sha256": "329e32b5dff8f90f5ff33a2d70f7fd88ad13fa97073db838ad18e6f5c1d3dd48"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_48/tests.py",
+          "sha256": "4219d3b6e4f3dd3a63cc9320c154fd4ae60178b5beb2c05f190d986be028fe93"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_49",
+      "title": "findProductQueries",
+      "entry_point": "findProductQueries",
+      "dir": "data/coding/tasks/lcbhard_49",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_49/problem.md",
+          "sha256": "90d80995bb7ce70cd525728267329328ee1d4eaeae13f4af4e73303295c6f381"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_49/solution.py",
+          "sha256": "bb5af03c5b808b6ceba33f2bddaabc52025a230f5204f8bf34d2e9630feb2696"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_49/tests.py",
+          "sha256": "467e1f1ea9bca7b5f92ed7b78d538856959b4ccdf6cb5ba9923a8a07b69e6821"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_50",
+      "title": "count_good_strings",
+      "entry_point": "count_good_strings",
+      "dir": "data/coding/tasks/lcbhard_50",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_50/problem.md",
+          "sha256": "d30e29ce0d2b22c87bdc2ca72dac35b9417f3434d8b5bc257c40667669f21aeb"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_50/solution.py",
+          "sha256": "afd7a426e811e32299f11deca3a8509a935b9684f3531e2465e12a5fd3ee22df"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_50/tests.py",
+          "sha256": "f67f894092a674e8f35427c7fd856a0321dc1efc372f39313727d03f4bb94a81"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_51",
+      "title": "count_arithmetic_subsequences",
+      "entry_point": "count_arithmetic_subsequences",
+      "dir": "data/coding/tasks/lcbhard_51",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_51/problem.md",
+          "sha256": "9fe30d28285fe4ab8b607bc2e8ccd444bf16733890ab42a93c0f2bbdbd380e96"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_51/solution.py",
+          "sha256": "d0e0a7b0faa1d4ad9944cebc99b6d6ab4fb30912c1eebccfe3d7a1b52fc52754"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_51/tests.py",
+          "sha256": "a3a3804c688e30527904ed417ffa8e334136c3b53aac5092c6cecc66918c5c9e"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_52",
+      "title": "max_dishes_eaten",
+      "entry_point": "max_dishes_eaten",
+      "dir": "data/coding/tasks/lcbhard_52",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_52/problem.md",
+          "sha256": "330305b4b00df171801eb32be7beeb1ed6c5497ba49e57fde5078e33eab62f75"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_52/solution.py",
+          "sha256": "3cba26e40f900a06d4377c3a172a21beee040e666e3ccd28baafd964c6527e89"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_52/tests.py",
+          "sha256": "ca34db08e78b0e10010aabafa591cc290a095b70131a7ad88969b6229379f4ef"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_53",
+      "title": "count_valid_permutations",
+      "entry_point": "count_valid_permutations",
+      "dir": "data/coding/tasks/lcbhard_53",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_53/problem.md",
+          "sha256": "92ac6f60e0830f0ed768115b8f17bbcb019937e62e7e852dbd1e64db6f29277a"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_53/solution.py",
+          "sha256": "9caa71e39700c9b239b10123a0baf54e9f1e674b2c2bca7661d8735011aaeaf6"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_53/tests.py",
+          "sha256": "6ff824b00531e92f21b5b7cfc3cf909441dda68ab6060ff9316318881d1b9ad5"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_54",
+      "title": "count_paths",
+      "entry_point": "count_paths",
+      "dir": "data/coding/tasks/lcbhard_54",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_54/problem.md",
+          "sha256": "efe41557131e1b5341f16b13a690864a56e95d16c43d824e8a4b81033c24949a"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_54/solution.py",
+          "sha256": "be9b8eccd1cf9a9e5174c4769be6810712dcc88624d808778d9d5a6149f50f8b"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_54/tests.py",
+          "sha256": "53a07be7c9215ec40a967bea37b27b015d46b971c09a1a2b48ce532d04f92f2b"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_55",
+      "title": "max_score",
+      "entry_point": "max_score",
+      "dir": "data/coding/tasks/lcbhard_55",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_55/problem.md",
+          "sha256": "0ecb65464e71ea942d22f1a892bb5d76000e06157039081d272c78d27e170b59"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_55/solution.py",
+          "sha256": "c45878a66c6b21edec71bf116eb09c76045b450449cf62148b54ed6603ab793c"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_55/tests.py",
+          "sha256": "2b78c969b899b0c428667f911b80b5a1c2c2a674033de5ba35adc5b5bdee5c8f"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_56",
+      "title": "max_knight_moves",
+      "entry_point": "max_knight_moves",
+      "dir": "data/coding/tasks/lcbhard_56",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_56/problem.md",
+          "sha256": "f0815f4a3e5df7d997b6835bc32cb1fe22e02fe803389424a25fd39bfc627763"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_56/solution.py",
+          "sha256": "d5cbb29f9de30499cfa20491343ab0cc403d3e137311b93d1cf040ec333fcf48"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_56/tests.py",
+          "sha256": "94fdc19825386d24c8652306326d24db21eb0920f58df8e556aef8841e4c108c"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_57",
+      "title": "max_subsequence_value",
+      "entry_point": "max_subsequence_value",
+      "dir": "data/coding/tasks/lcbhard_57",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_57/problem.md",
+          "sha256": "402d5415d795bfbcfa59245ff07196c58cdc431c14806689e7091b2d188c5e9f"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_57/solution.py",
+          "sha256": "b6ae84f1ab6b3083c405cf13726722e82068aa8e386c08f1dc68ee73dab6143b"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_57/tests.py",
+          "sha256": "f454dc29ba42f1f327b91915adfcc411e9a4878b03a8b33d4a288163494f0a33"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_58",
+      "title": "minimum_shipping_dissatisfaction",
+      "entry_point": "minimum_shipping_dissatisfaction",
+      "dir": "data/coding/tasks/lcbhard_58",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_58/problem.md",
+          "sha256": "c9e5bcf97c4ea624986a157c5345ad630f5fdff52950162c3e44167fda8f64c3"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_58/solution.py",
+          "sha256": "80435f92fe496bcc28503ee36a0500339b3f709aac9151130a775651f4dbbd41"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_58/tests.py",
+          "sha256": "f6f916503b533dd8e88a6431e188b86606a8277067d609c1efa157b6c3ab59ba"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_59",
+      "title": "min_ng_list_size",
+      "entry_point": "min_ng_list_size",
+      "dir": "data/coding/tasks/lcbhard_59",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_59/problem.md",
+          "sha256": "d0ba2b47afc30807bf494540c3e6375a9be3bb48d3938381cbd2e15cc3efb368"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_59/solution.py",
+          "sha256": "9dd74e5e0f1befc2a3fb38da0a04d8c029af7870fbc019f67bca386505ea6dd7"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_59/tests.py",
+          "sha256": "3c3909966a3d9de4ebaf7fbe1589c6d2317a72be6a886f7cb8591529521181f3"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_60",
+      "title": "max_production_capacity",
+      "entry_point": "max_production_capacity",
+      "dir": "data/coding/tasks/lcbhard_60",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_60/problem.md",
+          "sha256": "19a66da9a39fb53092aba2bab7b09f3156fd11a63adfe9c98d96e7e6906dd816"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_60/solution.py",
+          "sha256": "d9a1c3f1cf774dbb072fb033750a859e08394e981a2f8aa501f0d7ce94914eb4"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_60/tests.py",
+          "sha256": "005c139f881ada58aebfbe794d50321736638e81446871618ebe23918d13e070"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_61",
+      "title": "min_team_switches",
+      "entry_point": "min_team_switches",
+      "dir": "data/coding/tasks/lcbhard_61",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_61/problem.md",
+          "sha256": "77415e9c8c4da8c3a4060ec35aaaeef3c8b7de9f8e95ed058393266c309ea040"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_61/solution.py",
+          "sha256": "3fe0f699fa6155171f699fc922a2935065c4086b2bdb668b1688afa143dd2ba3"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_61/tests.py",
+          "sha256": "622709eb274c51daa4e2b35ac2c4ddc2a0783f536fc1d2a63d09c93b7bee7bc4"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_62",
+      "title": "count_paths",
+      "entry_point": "count_paths",
+      "dir": "data/coding/tasks/lcbhard_62",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_62/problem.md",
+          "sha256": "ba6f4a2f935af28503dc952884f9d4ef9d3070e07ad8fd4a05264a5cd594ed5e"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_62/solution.py",
+          "sha256": "8cba19279ed15f905f5477ff4be503d82cdf66190f07e97bd726a28f7a49ca6e"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_62/tests.py",
+          "sha256": "cbcebe956ab092f25a405c2c4a03fe351f15314d6292de4562bfbd5106dfde12"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_63",
+      "title": "count_valid_grids",
+      "entry_point": "count_valid_grids",
+      "dir": "data/coding/tasks/lcbhard_63",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_63/problem.md",
+          "sha256": "166a58644e2f9a64c45ea589e96c6c1534e1c5e3ee928e02e8b17ecde4ef9c71"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_63/solution.py",
+          "sha256": "cd81a0c93f43c9cf17fde8d72ff69d2ec74faaac36d76032102be194fda47c79"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_63/tests.py",
+          "sha256": "94125e000bf33276c513ca7c3407680004319e2c225e37cc6b34749c068c93b9"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_64",
+      "title": "card_game_winner",
+      "entry_point": "card_game_winner",
+      "dir": "data/coding/tasks/lcbhard_64",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_64/problem.md",
+          "sha256": "1accc261146a9b2107b87b00b84fe2910abc5960a6ac83cea7701377cbe606d0"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_64/solution.py",
+          "sha256": "35c66c81db600b9e3d597c539e21de0d5fb2d86cef8af2d4ef0a0c9f272e05b3"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_64/tests.py",
+          "sha256": "dca25725a357e75b9f09db8003c7d8f95b9b1913d09428152ddacf19de8f7cd6"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_65",
+      "title": "max_eleven_twentytwo_subsequence",
+      "entry_point": "max_eleven_twentytwo_subsequence",
+      "dir": "data/coding/tasks/lcbhard_65",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_65/problem.md",
+          "sha256": "b12a516ec57ff8cf7cac6545387a29085bd100a07fde67d6760546b826ffcb8a"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_65/solution.py",
+          "sha256": "4544ef262da1af159df1c4aa661317e5bae80aa5aab66f4c9a3c2ecef5210fbc"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_65/tests.py",
+          "sha256": "938983ada6d8cbcb5f5451b22ab16104983f13a3dd06f6a4b7ba8bfcadd98db8"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_66",
+      "title": "max_1122_subarray_length",
+      "entry_point": "max_1122_subarray_length",
+      "dir": "data/coding/tasks/lcbhard_66",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_66/problem.md",
+          "sha256": "24f221ec6884a032ae00f19abdbdb653ea5a5741b10c770b7a4737068f32d71b"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_66/solution.py",
+          "sha256": "9c02cf1b3dab1ff37fa81661cb4dd046f5b44ff8edc7c6cf9722456e7aed63c6"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_66/tests.py",
+          "sha256": "cc92c71a50fd0bfe59c2d7c05491dab6e12938e4c202becc770d5fa648c375d9"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_67",
+      "title": "minimize_path_weights",
+      "entry_point": "minimize_path_weights",
+      "dir": "data/coding/tasks/lcbhard_67",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_67/problem.md",
+          "sha256": "1c52284ea8018180ddb30fc69d7930f90af442e6e7fab5f462f8ccb422157ab8"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_67/solution.py",
+          "sha256": "98f85b6150717e6653f948f22d2caf6b3a9d7d66418801a6bec07138487bdf08"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_67/tests.py",
+          "sha256": "743d25aea59e846085769ececb0684d36f628f4663995e8aa50f491a5a3950a5"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_68",
+      "title": "sum_absolute_differences",
+      "entry_point": "sum_absolute_differences",
+      "dir": "data/coding/tasks/lcbhard_68",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_68/problem.md",
+          "sha256": "265d0ee2c1ac86927ae3089108042060930983d150d63b0361ab698d0bb7def7"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_68/solution.py",
+          "sha256": "b3ceaf354986886ac1e7eda20dca2d7c154a606e3c910795c53a65005f471efd"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_68/tests.py",
+          "sha256": "fdce81f907dcf95fb913ab0e3e52c89bfd6861e5f16a79613871e95f76df8794"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_69",
+      "title": "min_deletions_to_snowflake",
+      "entry_point": "min_deletions_to_snowflake",
+      "dir": "data/coding/tasks/lcbhard_69",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_69/problem.md",
+          "sha256": "55ac598cab0b549ba35944cc99b2dabe87ca19709103f7aecd83aa4eef67b964"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_69/solution.py",
+          "sha256": "e8e6d7c43e10a5cc4f32366c953e606f3b4dedb4d78265b878d1dfe3b129cd21"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_69/tests.py",
+          "sha256": "8a7c22b9efdd812aba842881f34cf19adf359160aac4c70b4b57b7b3c1a47995"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_70",
+      "title": "can_transform",
+      "entry_point": "can_transform",
+      "dir": "data/coding/tasks/lcbhard_70",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_70/problem.md",
+          "sha256": "2f8256b5bb3741c1cdb14323fc8c124b360d58fc4aa93a2c29326f5d82d4ffab"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_70/solution.py",
+          "sha256": "fb8ca8a2f8c2215cf2b8c7b5a73f4074a2c1afe57831b51d702bdce2e1b59f9c"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_70/tests.py",
+          "sha256": "b9ad503a494c968f4169987df24efe0fe2dfbf8a8a4d1457d2b1155caaceef10"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_71",
+      "title": "count_ball_sets",
+      "entry_point": "count_ball_sets",
+      "dir": "data/coding/tasks/lcbhard_71",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_71/problem.md",
+          "sha256": "fda6fd37716b1187b58c4483c95276121095be67b26238ce878c5cf387ea011b"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_71/solution.py",
+          "sha256": "bb589aa78312bfe09c421966c657ce655f396f891a573a0e41882fe81e084502"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_71/tests.py",
+          "sha256": "62808b36917f1f174544b89b279f962753f5b7b6abb03906304c8e166e7a2633"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_72",
+      "title": "find_triple_sum",
+      "entry_point": "find_triple_sum",
+      "dir": "data/coding/tasks/lcbhard_72",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_72/problem.md",
+          "sha256": "5acb54204dada86122b0ab57b9d70b159bdd7565f89af62a14f0d5d950b83cff"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_72/solution.py",
+          "sha256": "8623243cb6eddaac363c369a4f351540cff4a8a6e54f997385465dbe8cc808bc"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_72/tests.py",
+          "sha256": "8b47777fac0f9a5f9c538e3da3c6e7203f50aafbc65a774b20be49ae7a34330c"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_73",
+      "title": "matrix_with_k_fixed_elements_exists",
+      "entry_point": "matrix_with_k_fixed_elements_exists",
+      "dir": "data/coding/tasks/lcbhard_73",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_73/problem.md",
+          "sha256": "cc8aeed6f129cc1d5caf064f7aa4e20e2baefcb8680709e71fb1386c1fa33202"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_73/solution.py",
+          "sha256": "e21182395eada2eb4a0490c33012ea7378e2705c996eaeed7b5d230ee08876ce"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_73/tests.py",
+          "sha256": "f6e189c08d48c1844b2fb979e3197aff083671d0d06a53bd685072ac1e1d5165"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_74",
+      "title": "count_polish_sequences",
+      "entry_point": "count_polish_sequences",
+      "dir": "data/coding/tasks/lcbhard_74",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_74/problem.md",
+          "sha256": "008ff7757d6bca0cea48a6aaf3cc951058d05122e9d7eb35b00c945458969439"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_74/solution.py",
+          "sha256": "07ef1d2a84e1ee45eb614e2a88ab5d52ad661e970f1e8f372bc95d845d60b697"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_74/tests.py",
+          "sha256": "7e1816298979dce8d08baa06259240738715e9898d27a494ada5e240f4c1ff3c"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_75",
+      "title": "count_sequences_without_subsequence",
+      "entry_point": "count_sequences_without_subsequence",
+      "dir": "data/coding/tasks/lcbhard_75",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_75/problem.md",
+          "sha256": "8ddc5579079b0973f2695748d28a9e4346570300c815c0642e14503e00c0001d"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_75/solution.py",
+          "sha256": "912e80974983d7005119b95c3fc058a171212a39f73cf5b19caab1d4faaec677"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_75/tests.py",
+          "sha256": "51d124959fcc478a699ee2a9086d3b3268a1d5791ff4ad143b8ea3fb2456cc28"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_76",
+      "title": "count_good_string_replacements",
+      "entry_point": "count_good_string_replacements",
+      "dir": "data/coding/tasks/lcbhard_76",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_76/problem.md",
+          "sha256": "ca66afa6f2ddf590b35873bbb3ad58203168e57423fb094e847493b5671eeb07"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_76/solution.py",
+          "sha256": "6c9ed375199f4579f2889c6ecb5dd5f4f79c82510cedd1fd3c987cd290fdd889"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_76/tests.py",
+          "sha256": "bcecfbdfdcd939492b312b5b21c46987a163e1a3613c83467d1eb01fb8d3fadf"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_77",
+      "title": "count_bob_winning_sequences",
+      "entry_point": "count_bob_winning_sequences",
+      "dir": "data/coding/tasks/lcbhard_77",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_77/problem.md",
+          "sha256": "58dc7abcae0694f683f838e8f5035ab55bb301ea0bae49783933b12e167df7dd"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_77/solution.py",
+          "sha256": "21963990570dd57c7b8bc4bfb6c625e27dad6a4812d36ba5b0188d6a39e7cb25"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_77/tests.py",
+          "sha256": "8a4c7c57875d3a19398ac1638fd3f5ad90f83dbc4b3159fa422d77cb18df3be7"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_78",
+      "title": "count_subsequence_pairs",
+      "entry_point": "count_subsequence_pairs",
+      "dir": "data/coding/tasks/lcbhard_78",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_78/problem.md",
+          "sha256": "f7e34caa5c7615af14a9083d2f36e7508cbd985ec592bffdad9a44e5cb1547f5"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_78/solution.py",
+          "sha256": "d5f1aaca215af432656a30ea0db8847b91a3534099c01b0643825095f749e0e7"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_78/tests.py",
+          "sha256": "ef4471500fa6c90bcb372374f9703021d7f0c2c0c8516edd78d3170926e4463b"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_79",
+      "title": "count_balanced_permutations",
+      "entry_point": "count_balanced_permutations",
+      "dir": "data/coding/tasks/lcbhard_79",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_79/problem.md",
+          "sha256": "d5ed3c39cd82a9366f0ad640afd3cfb63bf27b265494d5b8a9fbce49ea8d4194"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_79/solution.py",
+          "sha256": "ae4456e9e8fec494da0cfe4e24511ee9b22d09adc87039bf666ebc5806b79ccf"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_79/tests.py",
+          "sha256": "6b78cc7891e14e228f3c00f1f4a41fe350fac1940cd64fb0a33bc01de99e8053"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_80",
+      "title": "count_k_reducible",
+      "entry_point": "count_k_reducible",
+      "dir": "data/coding/tasks/lcbhard_80",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_80/problem.md",
+          "sha256": "da7890da83e46bd7d87f9989b237db2b09b92cc2904eb722ace025f24f18e38a"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_80/solution.py",
+          "sha256": "923dccf755fee36162b234a41fda33f93825dcfd8e7cbe36081404c140d7f98c"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_80/tests.py",
+          "sha256": "69b1e80b42a66e23f48960744cb8c16a32ce12545be088f3fa202776c69eee79"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_81",
+      "title": "min_longest_substring",
+      "entry_point": "min_longest_substring",
+      "dir": "data/coding/tasks/lcbhard_81",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_81/problem.md",
+          "sha256": "763e8eff84b19ec1d0a92730bd4a56c2bc51882340478a118030313d507c87f8"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_81/solution.py",
+          "sha256": "5dfec0961e2e40485fa94f8ad193c39224781c95b0ae4eebd691490d39f824f5"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_81/tests.py",
+          "sha256": "9f9c15412c8a982984570a65a6339bd2e6cd7483f6d2e7a651b30471594d9616"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_82",
+      "title": "can_reach_end",
+      "entry_point": "can_reach_end",
+      "dir": "data/coding/tasks/lcbhard_82",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_82/problem.md",
+          "sha256": "5e45283838301f54fe6198c5d095368b5e2adcd00da420f1d391bff26df95adc"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_82/solution.py",
+          "sha256": "774565be4fa460ba23389b1934006aad189ba96d2e18108f6b25acc6ca3ff119"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_82/tests.py",
+          "sha256": "f2d51e8ca8947824467844e7e54e70014f059a66c6d728b868a57e71cca5e078"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_83",
+      "title": "max_kagamimochi",
+      "entry_point": "max_kagamimochi",
+      "dir": "data/coding/tasks/lcbhard_83",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_83/problem.md",
+          "sha256": "3e43d4bb043f21214286163425c6ae66761bcf589d24bc18184e9be16ac24023"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_83/solution.py",
+          "sha256": "3aab42e1d315945f6f0fab76a07a7811fb2d398e2645f99206e1ff3c1b1ac6bf"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_83/tests.py",
+          "sha256": "d2edc3a727dbfa4609c29feef22bd993567b829bf3512b93a56c8315ebc093b0"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_84",
+      "title": "count_balanced_graphs",
+      "entry_point": "count_balanced_graphs",
+      "dir": "data/coding/tasks/lcbhard_84",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_84/problem.md",
+          "sha256": "3c37a12d42ce03fb2424f018b0fca270a4c91ac42700a1b938591123d357522a"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_84/solution.py",
+          "sha256": "4f994d39a89db5c9b89a003a54f6ce14a21eacd102b82b178dd407d63741efb1"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_84/tests.py",
+          "sha256": "fc208fb0aad657eb543ba7c2a415df6b7a95cbffdf1704a4d8e50be03b80f55a"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_85",
+      "title": "count_strings_by_lcs_length",
+      "entry_point": "count_strings_by_lcs_length",
+      "dir": "data/coding/tasks/lcbhard_85",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_85/problem.md",
+          "sha256": "ad6f1da1e44f31251e7c2ea54661b3b594fc5b5e63a84125b06e96177fc9f349"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_85/solution.py",
+          "sha256": "d4e11b85bb3f933f53c40c9f42ee70cd9ac98d394c8f61f9fbd17697cf97b67d"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_85/tests.py",
+          "sha256": "45ff76153a4a3e6272506e6db4d7979d666d740fa61c3c317f0aa08f8b4c962f"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_86",
+      "title": "min_swaps_to_group_ones",
+      "entry_point": "min_swaps_to_group_ones",
+      "dir": "data/coding/tasks/lcbhard_86",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_86/problem.md",
+          "sha256": "131d3a7fbabdff8488d77a5a99b6907bc1703c95dcf08cf3bf315e83d951c5a6"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_86/solution.py",
+          "sha256": "dce5ec4afe1727d5ee9a9b4467d3580849dbe61642abbadce46ad4bd86ebe175"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_86/tests.py",
+          "sha256": "8892882e2367e4f255cdc9c7d3fe9acf3855d8a14db62dd24d0a11fa41dff3a8"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_87",
+      "title": "max_alkane_vertices",
+      "entry_point": "max_alkane_vertices",
+      "dir": "data/coding/tasks/lcbhard_87",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_87/problem.md",
+          "sha256": "7e1b7445d97f4714d6f8d419e79914d8b26cf51551946cbc0b59a4f2128c207d"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_87/solution.py",
+          "sha256": "35966b72b742955728ce0189c8312acf6a6738da83ec94c8c9852cc99743ba6d"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_87/tests.py",
+          "sha256": "303f841f7554c179bb83875ebad01fe5dd64f48a574669ec25502d6ee29e8e5b"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_88",
+      "title": "min_grid_sum",
+      "entry_point": "min_grid_sum",
+      "dir": "data/coding/tasks/lcbhard_88",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_88/problem.md",
+          "sha256": "68c9f1870eb873c2ab59f939bec96f919640dc1c06cb1b4bd31389fc9b665ad2"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_88/solution.py",
+          "sha256": "77c330b110e5814bffb8d00335f21569ffb99f93a337f73adb55042f54fc3e00"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_88/tests.py",
+          "sha256": "51ad34aa2a6b933d37eff5b6b273bb6100982f09d38907b887ee7ceb5663595d"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_89",
+      "title": "max_distinct_sum_three_parts",
+      "entry_point": "max_distinct_sum_three_parts",
+      "dir": "data/coding/tasks/lcbhard_89",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_89/problem.md",
+          "sha256": "906abbb39eafa23d7d7af56dce9e686e70dff22b9178bdc92f34fec96a483817"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_89/solution.py",
+          "sha256": "70057409f710dd93af67f9231f953e98935a428203e02063594f05ccde3e0632"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_89/tests.py",
+          "sha256": "cabacf198afb2464ce57874ca512c7f6eedc0d2ceb93bfde3df8ef797b18aeb5"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_90",
+      "title": "max_shortest_distance",
+      "entry_point": "max_shortest_distance",
+      "dir": "data/coding/tasks/lcbhard_90",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_90/problem.md",
+          "sha256": "6d4187c1bbc67790c4ee2ea48e8b015d2015e701ee87c3e5c066911c701d8df9"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_90/solution.py",
+          "sha256": "87035ce19084338abb93e4dc4cd3750346d8858e4c8c84a750a00285b9d3824f"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_90/tests.py",
+          "sha256": "40c6b60eb3fbbee37310c33e4a4be7058326a1ef028af4338f7a57be0bd54d52"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_91",
+      "title": "shortest_palindrome_with_prefix",
+      "entry_point": "shortest_palindrome_with_prefix",
+      "dir": "data/coding/tasks/lcbhard_91",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_91/problem.md",
+          "sha256": "5d075caf8fa4ed56193bedd66bd93eb36c45898c7bed9a1f3a59a60eaa635d7f"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_91/solution.py",
+          "sha256": "14cfec5295c550383648b1ce10888a8427af0a2f850b4843a644dd2a9ae81641"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_91/tests.py",
+          "sha256": "d76ecb2adf82e97393dfbf08163238bf16c1afa0fb1422bf3122db47ddfacbb0"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_92",
+      "title": "sum_of_subarray_powers",
+      "entry_point": "sum_of_subarray_powers",
+      "dir": "data/coding/tasks/lcbhard_92",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_92/problem.md",
+          "sha256": "6b53ae05ff87e8c36babbf064b8c06b59e51c522b4f506ce676964f56378a1b0"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_92/solution.py",
+          "sha256": "0b505b6a379a979ad9f6846adbf85175c8a21eeac1c5dbbfae96ff2f2a95cadf"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_92/tests.py",
+          "sha256": "b29c9076a36339a4af86c31fc35ea3be7297d536c0bee0ac3f24cf772e85ecff"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_93",
+      "title": "count_paths",
+      "entry_point": "count_paths",
+      "dir": "data/coding/tasks/lcbhard_93",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_93/problem.md",
+          "sha256": "71d07d379de22fff31c72dd8a0421f05f0998f1fe384ace0b039338525b40868"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_93/solution.py",
+          "sha256": "c7906c457d481f642dae50614e97f3ebc984d0d61610c9c8aa61716464d468a0"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_93/tests.py",
+          "sha256": "601e72f8367d5c3178f0b103586f58fbd39d94daeb01004ea5bbd010b6df8429"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_95",
+      "title": "sum_good_sequence_scores",
+      "entry_point": "sum_good_sequence_scores",
+      "dir": "data/coding/tasks/lcbhard_95",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_95/problem.md",
+          "sha256": "e43a75af9765b02836a6a248a582a19f095c67444bf8f7553444971d8e5f15cf"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_95/solution.py",
+          "sha256": "c6551a70c41736c2efddac5b277c043e21f53b84923e342d64ab96005f4cf707"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_95/tests.py",
+          "sha256": "83de4ec6f5f2f28f61d81545e8de735b7388f129db9ffa94a1937f731ea0f63a"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_96",
+      "title": "count_in_degree_sequences",
+      "entry_point": "count_in_degree_sequences",
+      "dir": "data/coding/tasks/lcbhard_96",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_96/problem.md",
+          "sha256": "de4ef0c63d2cb1d0f2ccbb6412333a1e2b752df536aeb1d4498a4693d781902f"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_96/solution.py",
+          "sha256": "4c564aeb24d86723c1e9b7d0c3dcd7026c86547d26e8b66195d8eba390b6b7f8"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_96/tests.py",
+          "sha256": "753c4ef6b1556ff662ae4c3249bcf5e482a948c3409cf5f0c295de9887dd5201"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_97",
+      "title": "min_cost_to_sort",
+      "entry_point": "min_cost_to_sort",
+      "dir": "data/coding/tasks/lcbhard_97",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_97/problem.md",
+          "sha256": "286c9dab291cbb5d7e5f039467e668db41cd1691adc4bd7bf56bee6f3ffb4d87"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_97/solution.py",
+          "sha256": "62615abbbeaaac924eb836ad64ce7c8471cf31b0e77e3b76f6ac385157838144"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_97/tests.py",
+          "sha256": "315575561efc56a4e03fdf0a1bc7ec9cbcb92364eb8c5c9d25aa14334f8e7fda"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_98",
+      "title": "can_transform_string",
+      "entry_point": "can_transform_string",
+      "dir": "data/coding/tasks/lcbhard_98",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_98/problem.md",
+          "sha256": "246a3d228cce75900260e39da33c8c6892ac82b8c4174794674efadbfe2ff0bd"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_98/solution.py",
+          "sha256": "e05c813334e7559e99813d63675d4d2cec6bee4496da636fd81f511e13234e78"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_98/tests.py",
+          "sha256": "b6a3540f8b32d4716369d3f6c6ea1752ee1070d3fcc42f1e8d1ea2463ea3eff8"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_99",
+      "title": "count_distinct_parenthesis_sequences",
+      "entry_point": "count_distinct_parenthesis_sequences",
+      "dir": "data/coding/tasks/lcbhard_99",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_99/problem.md",
+          "sha256": "c94cad1c1f9e4f2302921d9bbbfc77f679a3e83b33fc3ea508d65f05807c660b"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_99/solution.py",
+          "sha256": "80004754a4b87a53e3dd5589024534b50a3168859a9a1b20c20b764e0a201d0e"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_99/tests.py",
+          "sha256": "1bca49ee99959e2416850af025d23e326d8325918b2fe191a4007668b2589fc4"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_100",
+      "title": "count_strongly_connected_partitions",
+      "entry_point": "count_strongly_connected_partitions",
+      "dir": "data/coding/tasks/lcbhard_100",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_100/problem.md",
+          "sha256": "b959ed360d40d4bbbb839ca3e7aaa8fd6cff9ff42e471dc7a3c899dbd2084bd4"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_100/solution.py",
+          "sha256": "ad560a5acfbff07429ade490413a8c8703cf12243ee254def2a41d9848ce347f"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_100/tests.py",
+          "sha256": "3fca7624f205357f80b1ac6cda7ec9e466ba9b06da70813652939df47802beb2"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_101",
+      "title": "max_product_subsequence",
+      "entry_point": "max_product_subsequence",
+      "dir": "data/coding/tasks/lcbhard_101",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_101/problem.md",
+          "sha256": "2f3a5b8df03f96ac220e14dc823ec1ea29aa24d0f53d57099bcc570eecc8d447"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_101/solution.py",
+          "sha256": "8960b7e29dbc896a088c34c0582250ff9fe8eba04af6eb5fea3fdf52b9209fb7"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_101/tests.py",
+          "sha256": "6e6251a1bfc59c2d3607c74e0b0a0b7130a3526ebd6c3aac6695233d94201478"
+        }
+      }
+    },
+    {
+      "task_id": "lcbhard_102",
+      "title": "kth_alternating_permutation",
+      "entry_point": "kth_alternating_permutation",
+      "dir": "data/coding/tasks/lcbhard_102",
+      "files": {
+        "problem.md": {
+          "path": "data/coding/tasks/lcbhard_102/problem.md",
+          "sha256": "07919e457e74a94042295a3e92660f4e67e027cd3a6de5d3825595c1f9cd775a"
+        },
+        "solution.py": {
+          "path": "data/coding/tasks/lcbhard_102/solution.py",
+          "sha256": "da1c8bbf000ca966d1d686f1a08f7bccbd764b31a3212fa1e3795f02bee7c364"
+        },
+        "tests.py": {
+          "path": "data/coding/tasks/lcbhard_102/tests.py",
+          "sha256": "b3e7f980a8441dc55324ca2cc88d1c8766289610ee018016c63bbc7dde335d7e"
+        }
+      }
+    }
+  ]
+}

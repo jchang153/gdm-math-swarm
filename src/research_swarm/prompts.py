@@ -361,7 +361,9 @@ PROMPT_VARIANTS: dict[str, tuple] = {
 }
 
 # Variants that switch on the neutral environment for everything agent-visible.
-NEUTRAL_VARIANTS = frozenset({"collab_max_pressure_no_rule6", "collab_max_pressure", "collab"})
+NEUTRAL_VARIANTS = frozenset({"collab_max_pressure_no_rule6", "collab_max_pressure", "collab",
+                              # Coding domain (research_swarm.coding.prompts.CODE_VARIANT): neutral as well.
+                              "code_collab_max_pressure"})
 # Words that must never reach an agent in the neutral environment (prompts, initial and
 # continuation messages, tool definitions and replies).
 NEUTRAL_FORBIDDEN = re.compile(r"claude|anthropic|conference|organi[sz]er", re.IGNORECASE)
@@ -382,6 +384,13 @@ PROMPT_VARIANT_KEY = "prompt_variant"
 
 def prompt_variant_problems(config) -> list[str]:
     """Config check: an absent key means the baseline; any value must name a variant."""
+    if config.get("domain") == "code":
+        # Coding domain (research_swarm.coding.prompts): its own variant, required.
+        from .coding.prompts import CODE_VARIANTS
+        value = config.get(PROMPT_VARIANT_KEY)
+        if value not in CODE_VARIANTS:
+            return [f"{PROMPT_VARIANT_KEY} {value!r} is not one of {sorted(CODE_VARIANTS)} (domain code)"]
+        return []
     if PROMPT_VARIANT_KEY not in config:
         return []
     value = config[PROMPT_VARIANT_KEY]

@@ -78,6 +78,7 @@ import run_clock  # noqa: E402
 import run_profile  # noqa: E402
 from site_theme import BASE as STYLE, badge_class  # noqa: E402
 import site_layout  # noqa: E402
+import coding_results  # noqa: E402  (coding runs only: config.domain == "code")
 if str(Path(__file__).resolve().parents[1]) not in sys.path:  # research/analysis/roles.py (participant roles)
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from research.analysis import roles as participant_roles  # noqa: E402
@@ -533,6 +534,7 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
     every = conference(run, ids)
     accepted = [dict(r, independent_validity='not_evaluated') for r in every if r['operational_outcome'] in ACCEPTED]
     evaluation = evaluate(run, accepted)
+    coding = coding_results.annotate(run, accepted) if coding_results.domain(settings) == 'code' else None
     judge = judge_summary(run)
     reverted = reversions(run)
     tokens = runtime['tokens']
@@ -623,6 +625,9 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
         results['reverted_submissions'] = overseen['reverted_submissions']
     if seed_facts:
         results['seeded'] = seed_facts
+    if coding:
+        results['domain'] = 'code'
+        results['coding'] = coding
     page = render(results, title, inspect_logs(run), settings)
     if has_simple_judge(run):  # navigation only: the simplified judge becomes the Behavior judge tab
         page = add_simple_judge_tab(page, simple_report(run))
@@ -726,6 +731,7 @@ def summary_card(results):
              ('Accepted tasks', f'{results["operationally_accepted_tasks"]} of {tasks}',
               f'{accepted} accepted submission(s); operational only'),
              ('Genuine tasks', genuine, genuine_note),
+             *(coding_results.tiles(results['coding']) if results.get('coding') else ()),
              ('Model cost', spend, spend_note),
              ('Behavior judge', judge['status'].replace('_', ' '),
               'findings on the Behavior judge tab' if judge['status'] != 'not_run' else 'no judge outputs')]
@@ -905,6 +911,8 @@ def render(results, title, inspect_logs=(), settings=None):
         body += oversight_section(results['oversight'])
     if results.get('seeded'):
         body += seeded_section(results['seeded'])
+    if results.get('coding'):
+        body += coding_results.section(results['coding'])
     if ev['status'] == 'not_run':
         body.append('<p>Proof checker: not run</p>')
     else:
@@ -948,6 +956,8 @@ def render(results, title, inspect_logs=(), settings=None):
     if judge['status'] != 'not_run':
         records.insert(1, ('Behavior judge', judge['report']))
     body.append('<h2>Records</h2><p>' + ' · '.join(link(label, href) for label, href in records) + '</p></main>')
+    if results.get('domain') == 'code':
+        body = [coding_results.reword(part) for part in body]
     return site_layout.apply('results.html', run_profile.add_intro(restamp_page(themed(
         '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
         f'content="width=device-width,initial-scale=1"><title>{esc(title or results["run"] + " results")}</title>'

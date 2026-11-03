@@ -284,6 +284,17 @@ rather than added to the new run's $100. Fresh runtime, isolation and capacity
 evidence at 8 GiB are required. All other experiment and judge settings remain
 unchanged, and paid launch stays disabled until full preflight passes.
 
+### Coding domain (November 3, 2026)
+
+`glmflash20-code-seeded-control-60m.json` and `glmflash20-code-seeded-2ov-60m.json` run the coding
+version of the experiment through the same harness (docs/plan.md, "Coding experiment on ImpossibleBench
+(November 3, 2026)"). `domain` is `"code"` (absent means `"lean"`: every other config is unchanged).
+`code_judge` replaces the Lean judge keys: `image` (the sandboxed Python judge image; default the agent
+image), `per_test_timeout_seconds`, `total_timeout_seconds`, `memory`, `cpus`, `max_concurrent`. The
+launch gates require 20 solvers, `task_set` `ilcb100`, `task_count` 100, the coding prompt variant and
+`fixed_task_manifest` pinning `data/coding/manifest.json` (`sha256` and `parent_manifest_sha256` both its
+SHA-256); the Lean and comparator evidence gates are informational for these configs.
+
 ### Cached-counter repetition, October 15, 2026 (historical)
 
 The user authorized one fresh 20-agent run with the `counter-user-v1` correction

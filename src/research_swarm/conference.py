@@ -107,6 +107,13 @@ class ConferenceTask:
     theorem_name: str
     answer_based: bool
     template_source: str
+    # Coding domain (research_swarm.coding); the defaults keep every Lean task unchanged. A code task
+    # carries the entry point in theorem_name too, the starter file in template_source, the visible
+    # tests the judge runs and the agent-visible statement.
+    domain: str = "lean"
+    entry_point: str = ""
+    visible_tests: str = ""
+    statement: str = ""
 
 
 class ToolError(Exception):
@@ -404,10 +411,15 @@ class ConferenceService:
                  judge: Callable, observer: Callable | None = None,
                  agent_ids: list[str] | None = None, clock=time.time, *,
                  track: str = seeded_track_module.SPONTANEOUS, seeded_track=None,
-                 observer_join_timeout: float | None = DEFAULT_OBSERVER_JOIN_SECONDS):
+                 observer_join_timeout: float | None = DEFAULT_OBSERVER_JOIN_SECONDS, domain: str | None = None):
         tasks = list(tasks)
         if not tasks:
             raise ValueError("At least one conference task is required")
+        # "lean" (every earlier run) or "code" (research_swarm.coding): library suffix, problem views and
+        # the few agent-visible wordings that name the language. None: the tasks' own domain.
+        self.domain = domain or tasks[0].domain
+        if self.domain not in ("lean", "code") or any(task.domain != self.domain for task in tasks):
+            raise ValueError("Conference tasks and domain disagree")
         ids = [task.task_id for task in tasks]
         if len(set(ids)) != len(ids):
             raise ValueError("Duplicate conference task identifiers")
@@ -709,6 +721,10 @@ class ConferenceService:
         return db.execute("SELECT status, credited_agent, accepted_at, library_artifact FROM tasks "
                           "WHERE task_id = ?", (task_id,)).fetchone()
 
+    def _solution_path(self, task_id):
+        """Library path of an accepted solution: solutions/<task>.lean (Lean) or solutions/<task>.py (code)."""
+        return f"solutions/{task_id}{'.py' if self.domain == 'code' else '.lean'}"
+
     def _library_path_of(self, db, artifact_id):
         if artifact_id is None:
             return None
@@ -994,6 +1010,13 @@ class ConferenceService:
     def _problem_view(self, db, task_id):
         task = self._tasks[task_id]
         status, credited, accepted_at, artifact = self._task_row(db, task_id)
+        if self.domain == "code":  # coding layout: /workspace/problems/<task>/{problem.md,solution.py,tests.py}
+            return {"problem_id": task_id, "title": task.title, "entry_point": task.entry_point,
+                    "workspace_dir": f"{PROBLEM_DIRECTORY}/{task_id}",
+                    "workspace_file": f"{PROBLEM_DIRECTORY}/{task_id}/solution.py",
+                    "tests_file": f"{PROBLEM_DIRECTORY}/{task_id}/tests.py", "status": status,
+                    "credited_agent": credited, "accepted_at": _iso(accepted_at),
+                    "library_path": self._library_path_of(db, artifact)}
         return {"problem_id": task_id, "title": task.title, "theorem_name": task.theorem_name,
                 "answer_based": bool(task.answer_based),
                 "workspace_file": f"{PROBLEM_DIRECTORY}/{task_id}.lean", "status": status,
@@ -1139,6 +1162,11 @@ class ConferenceService:
         with self._transaction() as db:
             view = self._problem_view(db, problem_id)
             self._emit("problem_viewed", agent_id, {"problem_id": problem_id}, "get_problem", call_id)
+        if self.domain == "code":
+            task = self._tasks[problem_id]
+            view.update(statement=task.statement, starter_source=task.template_source,
+                        visible_tests=task.visible_tests)
+            return {"ok": True, **view}
         view["template_source"] = self._tasks[problem_id].template_source
         return {"ok": True, **view}
 
@@ -1203,16 +1231,16 @@ class ConferenceService:
                 outcome = "accepted"
                 # Revision 1 unless an earlier accepted solution was reverted (revert_submission).
                 solution_revision = (db.execute("SELECT MAX(revision) FROM library WHERE path = ?",
-                                                (f"solutions/{problem_id}.lean",)).fetchone()[0] or 0) + 1
+                                                (self._solution_path(problem_id),)).fetchone()[0] or 0) + 1
                 artifact = db.execute(
                     "INSERT INTO library (path, revision, kind, author, task_id, submission_id, "
                     "origin_path, content, sha256, published_at) VALUES (?, ?, 'solution', ?, ?, ?, ?, ?, ?, ?)",
-                    (f"solutions/{problem_id}.lean", solution_revision, agent_id, problem_id, submission, file_path,
+                    (self._solution_path(problem_id), solution_revision, agent_id, problem_id, submission, file_path,
                      source, digest, judged_at)).lastrowid
                 db.execute("UPDATE tasks SET status = 'closed', credited_agent = ?, accepted_at = ?, "
                            "accepted_submission = ?, library_artifact = ? WHERE task_id = ? AND status = 'open'",
                            (agent_id, judged_at, submission, artifact, problem_id))
-                credited, accepted_at, artifact_path = agent_id, judged_at, f"solutions/{problem_id}.lean"
+                credited, accepted_at, artifact_path = agent_id, judged_at, self._solution_path(problem_id)
             elif result.accepted:
                 outcome = "accepted_after_close"
             else:
@@ -1662,7 +1690,8 @@ class ConferenceService:
                                         (problem_id,)).fetchone()[0]
                 if submission is None:
                     raise ToolError(f"Problem {problem_id} has no accepted submission; give file_path to check a "
-                                    "Lean file from your workspace.")
+                                    + ("Python file" if self.domain == "code" else "Lean file")
+                                    + " from your workspace.")
                 source, public_id = db.execute("SELECT source, public_id FROM submissions WHERE submission_id = ?",
                                                (submission,)).fetchone()
             target, submission_id = "accepted_submission", f"sub-{submission:06d}"
@@ -1676,7 +1705,8 @@ class ConferenceService:
             result = dict(self._proof_checker(task, source))
             verified = result.get("verified") is True
         except Exception as exc:
-            result = {"validity": "unresolved", "reason": "The proof checker failed: " + type(exc).__name__,
+            result = {"validity": "unresolved", "reason": ("The solution checker failed: " if self.domain == "code"
+                                                           else "The proof checker failed: ") + type(exc).__name__,
                       "comparator_status": None}
             verified = False
         seconds = round(time.monotonic() - started, 3)
@@ -1800,7 +1830,7 @@ class ConferenceService:
         artifact = artifact if artifact is not None else self._seeded
         task_id = config.task_id
         source, digest = artifact.content, artifact.sha256
-        path = f"solutions/{task_id}.lean"
+        path = self._solution_path(task_id)
         public_id = self._new_public_id(db, "submissions", "sub")
         submission = db.execute(
             "INSERT INTO submissions (agent_id, task_id, source, source_sha256, file_path, submitted_at, "

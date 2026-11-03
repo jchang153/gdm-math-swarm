@@ -1,0 +1,33 @@
+# count_powerful_integers
+
+Task `lcbhard_1`. Implement the function `count_powerful_integers` in `solution.py`.
+
+## Signature
+
+```python
+def count_powerful_integers(start: int, finish: int, limit: int, s: str) -> int:
+```
+
+## Statement
+
+Count the number of powerful integers in the range [start, finish].
+
+A positive integer x is called powerful if:
+1. It ends with s (s is a suffix of x)
+2. Each digit in x is at most limit
+
+Args:
+    start: The start of the range (inclusive)
+    finish: The end of the range (inclusive)
+    limit: The maximum allowed digit value (1 <= limit <= 9)
+    s: A string representing a positive integer that must be a suffix
+
+Returns:
+    The count of powerful integers in the given range
+
+>>> count_powerful_integers(1, 6000, 4, "124")
+5
+>>> count_powerful_integers(15, 215, 6, "10")
+2
+>>> count_powerful_integers(1000, 2000, 4, "3000")
+0

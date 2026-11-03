@@ -45,6 +45,12 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
     publish_cloudflare.py verify [--url URL] [--full] [--run RUN ...]
         Read-only check of the served site against its site-manifest.json (see ``verify``).
 
+Every subcommand takes ``--site {gdm,ib}`` (``SITES``; default gdm, the math library, unchanged). Owner decision,
+November 3, 2026: the ImpossibleBench coding runs go to their own Pages project (``ib``), built by the same code in
+the same style (catalogue texts from catalogue_intro_ib.py); a run's domain (RUN/settings.json ``effective.domain``,
+else ``config.domain``, absent = "lean") must match the site, so a coding run is never deployed to the math site
+nor a math run to the ImpossibleBench site. ``mirror-space`` (the HF Space is the math library) is math-only.
+
 The site's own state is its ``site-manifest.json`` (every served file with bytes and SHA-256). A deploy rebuilds
 the full tree from that manifest (fetched from the pinned production deployment, with a local content-addressed
 cache) plus the change, so every collaborator's runs are preserved. Guards: the production deployment must be the
@@ -57,6 +63,7 @@ Wrangler runs with the operator's own login, from a clean working directory (nev
 import argparse
 import base64
 import datetime
+import importlib
 import hashlib
 import html
 import json
@@ -82,6 +89,7 @@ import site_style  # noqa: E402
 import storymap_site  # noqa: E402
 from publish_hf_library import (SECRET, load_bundle, merge_entries, packed_text,  # noqa: E402
                                 safe_path)
+from typing import NamedTuple  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = 'gdm-math-swarm-experiments'
@@ -101,6 +109,68 @@ PAGES_SPECIAL = frozenset({'_worker.js', '_headers', '_redirects', '_routes.json
 WRANGLER = os.environ.get('WRANGLER', 'npx --yes wrangler@4.154.0')
 CACHE = ROOT / 'runs' / 'phase-b' / 'cloudflare' / 'cache'
 SHIM_FILE = Path(__file__).resolve().parent / 'cf_site' / 'private-logs.js'
+
+
+class Site(NamedTuple):
+    """One public Cloudflare Pages library: its project, the run domain it accepts, the module with its catalogue
+    texts (catalogue_intro.py style), where its receipts and its content-addressed file cache live."""
+    key: str
+    project: str
+    domain: str
+    intro: str
+    receipts: Path
+    cache: Path
+    mirror_space: bool = False
+
+    @property
+    def url(self):
+        return f'https://{self.project}.pages.dev'
+
+
+# Owner decision, November 3, 2026: the ImpossibleBench (coding) runs get their own site, never the math one.
+SITES = {
+    'gdm': Site('gdm', PROJECT, 'lean', 'catalogue_intro', ROOT / 'runs' / 'phase-b' / 'cloudflare' / 'receipts',
+                CACHE, mirror_space=True),
+    'ib': Site('ib', 'gdm-impossiblebench-experiments', 'code', 'catalogue_intro_ib',
+               ROOT / 'runs' / 'phase-b' / 'cloudflare-ib' / 'receipts', ROOT / 'runs' / 'phase-b' / 'cloudflare-ib' / 'cache'),
+}
+DEFAULT_SITE = 'gdm'
+DOMAIN_KEY = 'domain'
+LEAN = 'lean'
+
+
+def site_of(site):
+    """The ``Site`` for a key, a Site or None (the math library)."""
+    if site is None:
+        return SITES[DEFAULT_SITE]
+    return site if isinstance(site, Site) else SITES[site]
+
+
+def settings_domain(data):
+    """A run's domain from its settings.json bytes (research_swarm.coding.domain_of_run): ``effective.domain``,
+    else ``config.domain``; "lean" when absent or unreadable (every run before the coding version)."""
+    try:
+        settings = json.loads(data)
+    except (TypeError, ValueError):
+        return LEAN
+    if not isinstance(settings, dict):
+        return LEAN
+    effective = settings.get('effective') if isinstance(settings.get('effective'), dict) else {}
+    config = settings.get('config') if isinstance(settings.get('config'), dict) else {}
+    return effective.get(DOMAIN_KEY) or config.get(DOMAIN_KEY) or LEAN
+
+
+def check_domains(files, site=None):
+    """Refuse a site holding a run of another domain (a coding run on the math site, a math run on the
+    ImpossibleBench site). Returns {run: domain}."""
+    site = site_of(site)
+    runs = sorted({run_of(n) for n in files if run_of(n) and run_of(n) != 'live'})
+    domains = {run: settings_domain(files.get(f'{run}/settings.json')) for run in runs}
+    wrong = sorted(run for run, domain in domains.items() if domain != site.domain)
+    if wrong:
+        raise ValueError(f'Run(s) of another domain refused on the {site.key} site ({site.project}, domain '
+                         f'{site.domain!r}): ' + ', '.join(f'{r} ({domains[r]!r})' for r in wrong))
+    return domains
 SHIM_MARKER = 'id="private-logs"'
 HF_SHIM = re.compile(r'<script id="evallog-fetch"[^>]*>.*?</script>', re.S)
 CF_SHIM = re.compile(r'<script id="private-logs"[^>]*>.*?</script>', re.S)
@@ -496,16 +566,20 @@ def run_of(name):
     return name.split('/')[0] if '/' in name else None
 
 
-def render_catalogue(entries, unlisted, files=None):
+def render_catalogue(entries, unlisted, files=None, site=None):
     """The catalogue pages; with ``files`` (the site after the change), each entry's Story map link follows
-    whether RUN/analysis/storymap/index.html is on the site."""
+    whether RUN/analysis/storymap/index.html is on the site. ``site`` picks the catalogue texts."""
+    site = site_of(site)
     entries = [x for x in entries if x['run'] not in unlisted]
     if files is not None:
         entries = [{**e, 'links': with_storymap_link(e['links'], e['run'], f'{e["run"]}/{STORYMAP_TARGET}' in files)}
                    if (STORYMAP_LABEL in e['links']) != (f'{e["run"]}/{STORYMAP_TARGET}' in files) else e
                    for e in entries]
     with tempfile.TemporaryDirectory() as tmp:
-        write_index(tmp, entries, hosted=True)
+        if site.key == DEFAULT_SITE:
+            write_index(tmp, entries, hosted=True)
+        else:
+            write_index(tmp, entries, hosted=True, intro=importlib.import_module(site.intro))
         return {name: (Path(tmp) / name).read_bytes() for name in ('index.html', 'experiments.json')}
 
 
@@ -533,15 +607,18 @@ def space_files(snapshot):
     return files, private
 
 
-def plan_mirror(base_files, space, revision, unlisted):
-    """The site after mirroring the Space: Space files win; runs only on the site are preserved and stay listed."""
+def plan_mirror(base_files, space, revision, unlisted, site=None):
+    """The site after mirroring the Space: Space files win; runs only on the site are preserved and stay listed.
+    The HF Space is the math library: refused for any other site."""
+    if not site_of(site).mirror_space:
+        raise ValueError(f'mirror-space copies the math library\'s HF Space; not for the {site_of(site).key} site')
     space_runs = {run_of(n) for n in space if run_of(n)}
     kept = {n: d for n, d in base_files.items() if run_of(n) and run_of(n) not in space_runs}
     files = {**kept, **space}
     preserved = sorted({run_of(n) for n in kept})
     if preserved:  # another collaborator's runs published only on the site: keep their catalogue entries
         site_only = [e for e in catalogue(base_files) if e['run'] in preserved]
-        files.update(render_catalogue(merge_entries(catalogue(space), site_only), unlisted, files))
+        files.update(render_catalogue(merge_entries(catalogue(space), site_only), unlisted, files, site=site))
     changed = sorted(n for n in space if run_of(n) and n in base_files and base_files[n] != space[n])
     removed = sorted(n for n in base_files if n not in files and n not in GENERATED)  # run files the Space removed
     return files, {'source': {'kind': 'hf-space', 'repo': hf_visibility.SPACE_REPO, 'revision': revision},
@@ -569,7 +646,7 @@ def dataset_checker(commit, api=None):
     return check
 
 
-def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages=False, remote=None):
+def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages=False, remote=None, site=None):
     """The site after merging a prepared bundle (immutable existing run files unless --replace-pages). A bundle
     whose dataset files are already in the logs dataset (left on the VM) needs ``dataset_commit``; ``remote``
     defaults to dataset_checker(dataset_commit)."""
@@ -621,7 +698,8 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
             if new != old:
                 raise ValueError('Immutable site run file differs: ' + run + '/' + PACK_FOLDER)
     entries = merge_entries(catalogue(base_files), incoming)
-    files.update(render_catalogue(entries, unlisted, files))
+    check_domains({n: d for n, d in files.items() if run_of(n) in selected}, site)
+    files.update(render_catalogue(entries, unlisted, files, site=site))
     if 'archive-manifest.json' in base_files:  # the HF-origin run record; new runs are recorded in site-manifest
         files['archive-manifest.json'] = base_files['archive-manifest.json']
     return files, {'source': {'kind': 'bundle', 'runs': sorted(selected),
@@ -631,7 +709,7 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
                                                   'bytes': sum(x['bytes'] for x in private.values())}}
 
 
-def plan_restyle(base_files, unlisted, runs=None):
+def plan_restyle(base_files, unlisted, runs=None, site=None):
     """The site with its run pages in the current layout (``site_layout.apply``) and the catalogue re-rendered.
 
     Pages only: no file is added or removed, non-HTML files never change, and a page changes only by the layout
@@ -654,12 +732,12 @@ def plan_restyle(base_files, unlisted, runs=None):
             continue
         replaced.append({'path': name, 'old': digest(old), 'new': digest(new)})
         files[name] = new
-    files.update(render_catalogue(catalogue(base_files), unlisted, files))
+    files.update(render_catalogue(catalogue(base_files), unlisted, files, site=site))
     return files, {'source': {'kind': 'restyle', 'runs': sorted(runs) if runs else 'all'},
                    'replaced_pages': replaced, 'unthemed_pages_left_as_served': legacy}
 
 
-def plan_withdraw(base_files, unlisted, runs):
+def plan_withdraw(base_files, unlisted, runs, site=None):
     """The site without the given runs: every file of each run is removed and the catalogue re-rendered.
 
     Owner-requested take-down (for example a failed run). Each run must already be recorded in the tracked
@@ -677,7 +755,7 @@ def plan_withdraw(base_files, unlisted, runs):
         raise ValueError('Record the run(s) in data/library-unlisted.json first: ' + ', '.join(unrecorded))
     removed = sorted(n for n in base_files if run_of(n) in runs)
     files = {n: d for n, d in base_files.items() if run_of(n) not in runs}
-    files.update(render_catalogue(catalogue(base_files), unlisted, files))
+    files.update(render_catalogue(catalogue(base_files), unlisted, files, site=site))
     return files, {'source': {'kind': 'withdraw', 'runs': runs},
                    'removed_files': len(removed),
                    'removed_by_run': {r: sum(1 for n in removed if run_of(n) == r) for r in runs}}
@@ -723,11 +801,11 @@ def plan_storymap(base_files, unlisted, folders, taxonomy=()):
                    'added_by_run': {r: sum(1 for n in added if run_of(n) == r) for r in sorted(folders)}}
 
 
-def plan_catalogue(base_files, unlisted):
+def plan_catalogue(base_files, unlisted, site=None):
     """The site with only its catalogue re-rendered from its entries (index.html and experiments.json; Story map
     links follow the story map pages on the site). No run file changes."""
     files = dict(base_files)
-    files.update(render_catalogue(catalogue(base_files), unlisted, base_files))
+    files.update(render_catalogue(catalogue(base_files), unlisted, base_files, site=site))
     changed = sorted(n for n in ('index.html', 'experiments.json') if base_files.get(n) != files[n])
     return files, {'source': {'kind': 'catalogue'}, 'changed_files': changed,
                    'storymap_links': sorted(e['run'] for e in catalogue(files) if STORYMAP_LABEL in e['links'])}
@@ -741,9 +819,15 @@ def plan_repack(base_files):
     return dict(base_files), {'source': {'kind': 'repack', 'runs': pending}}
 
 
-def finish(files, base_manifest, plan, project=PROJECT):
-    """Add the generated pages and the site manifest; gate every file and the deployment limits."""
+def finish(files, base_manifest, plan, project=None, site=None):
+    """Add the generated pages and the site manifest; gate every file, every run's domain (``check_domains``)
+    and the deployment limits."""
+    site = site_of(site)
+    project = project or site.project
+    if project != site.project:
+        raise ValueError(f'Project {project} is not the {site.key} site\'s ({site.project})')
     files = {n: d for n, d in files.items() if n not in GENERATED}
+    check_domains(files, site)
     files, packed = pack_site(files)
     if packed:
         plan['packed_runs'] = packed
@@ -769,8 +853,8 @@ def finish(files, base_manifest, plan, project=PROJECT):
     return files, manifest
 
 
-def summary(files, base_files, plan, base):
-    return {**plan, 'project': PROJECT, 'base_deployment': base,
+def summary(files, base_files, plan, base, site=None):
+    return {**plan, 'project': site_of(site).project, 'base_deployment': base,
             'files': len(files), 'bytes': sum(len(d) for d in files.values()),
             'largest_file_bytes': max(len(d) for d in files.values()),
             'new_or_changed': sum(1 for n, d in files.items() if base_files.get(n) != d and n != SITE_MANIFEST),
@@ -979,17 +1063,20 @@ def main(argv=None):
                        help='RUN=PAGES_DIRECTORY (the public render, --taxonomy \'\'); repeatable')
     cat = sub.add_parser('catalogue', help='re-render only the catalogue (index.html, experiments.json)')
     for command in (mirror, bundle, restyle, withdraw, repack, story, cat):
+        command.add_argument('--site', choices=sorted(SITES), default=DEFAULT_SITE,
+                             help='which library (default gdm, the math site; ib: the ImpossibleBench site)')
         command.add_argument('--commit', action='store_true', help='deploy; otherwise only plan')
         command.add_argument('--receipt', type=Path, help='receipt JSON (outside the bundle)')
         command.add_argument('--workdir', type=Path, help='scratch directory for staging (default: a temporary one)')
     check = sub.add_parser('verify', help='read-only check of the served site')
-    check.add_argument('--url', default=SITE_URL)
+    check.add_argument('--site', choices=sorted(SITES), default=DEFAULT_SITE)
+    check.add_argument('--url', help='deployment to check (default: the site\'s URL)')
     check.add_argument('--run', action='append')
     check.add_argument('--full', action='store_true', help='check every file, not only pages and records')
     check.add_argument('--output', type=Path)
     args = parser.parse_args(argv)
     if args.command == 'verify':
-        result = verify(args.url, args.run, args.full)
+        result = verify(args.url or SITES[args.site].url, args.run, args.full)
         text = json.dumps(result, indent=2)
         if args.output:
             args.output.write_text(text)
@@ -999,12 +1086,15 @@ def main(argv=None):
         parser.error('--dataset-commit must be a full commit')
     if args.receipt and args.command == 'publish' and args.receipt.resolve().is_relative_to(args.bundle.resolve()):
         parser.error('--receipt must be outside the prepared bundle')
+    site = SITES[args.site]
+    if args.command == 'mirror-space' and not site.mirror_space:
+        parser.error(f'mirror-space copies the math library\'s HF Space; not for --site {site.key}')
     with tempfile.TemporaryDirectory(prefix='cf-publish-') as tmp:
         workdir = args.workdir or Path(tmp)
         workdir.mkdir(parents=True, exist_ok=True)
-        current = deployments(workdir)
+        current = deployments(workdir, project=site.project)
         base = current[0] if current else None
-        base_manifest, base_files = load_site(base['url'] if base else None)
+        base_manifest, base_files = load_site(base['url'] if base else None, cache=site.cache)
         unlisted = unlisted_runs()
         if args.command == 'mirror-space':
             if args.snapshot:
@@ -1014,35 +1104,36 @@ def main(argv=None):
             else:
                 revision, snapshot = download_space(args.revision, workdir / 'space')
             space, private = space_files(snapshot)
-            files, plan = plan_mirror(base_files, space, revision, unlisted)
+            files, plan = plan_mirror(base_files, space, revision, unlisted, site=site)
             plan['private_files_not_deployed'] = private
             message = f'Mirror HF Space {revision[:12]}'
         elif args.command == 'restyle':
-            files, plan = plan_restyle(base_files, unlisted, args.run)
+            files, plan = plan_restyle(base_files, unlisted, args.run, site=site)
             message = f'Restyle {len(plan["replaced_pages"])} page(s) and the catalogue'
         elif args.command == 'repack':
             files, plan = plan_repack(base_files)
             message = f'Repack per-agent files of {len(plan["source"]["runs"])} run(s)'
         elif args.command == 'catalogue':
-            files, plan = plan_catalogue(base_files, unlisted)
+            files, plan = plan_catalogue(base_files, unlisted, site=site)
             message = 'Re-render the catalogue'
         elif args.command == 'storymap':
             folders = dict(spec.split('=', 1) for spec in args.run)
             files, plan = plan_storymap(base_files, unlisted, folders, storymap_taxonomy())
             message = 'Story map ' + ', '.join(plan['source']['runs'])
         elif args.command == 'withdraw':
-            files, plan = plan_withdraw(base_files, unlisted, args.run)
+            files, plan = plan_withdraw(base_files, unlisted, args.run, site=site)
             message = 'Withdraw ' + ', '.join(plan['source']['runs'])
         else:
-            files, plan = plan_bundle(base_files, args.bundle, unlisted, args.dataset_commit, args.replace_pages)
+            files, plan = plan_bundle(base_files, args.bundle, unlisted, args.dataset_commit, args.replace_pages,
+                                      site=site)
             message = 'Publish ' + ', '.join(plan['source']['runs'])
-        files, manifest = finish(files, base_manifest, plan)
-        result = {**summary(files, base_files, plan, base), 'committed': False}
+        files, manifest = finish(files, base_manifest, plan, site=site)
+        result = {**summary(files, base_files, plan, base, site=site), 'committed': False}
         if args.commit:
-            remember(files)
-            deployment, tail = deploy(files, base, message, workdir)
-            result.update(committed=True, deployment=deployment, site=SITE_URL)
-            result['verify'] = verify(deployment['url'] or SITE_URL)
+            remember(files, cache=site.cache)
+            deployment, tail = deploy(files, base, message, workdir, project=site.project)
+            result.update(committed=True, deployment=deployment, site=site.url)
+            result['verify'] = verify(deployment['url'] or site.url)
         text = json.dumps(result, indent=2)
         if args.receipt:
             args.receipt.parent.mkdir(parents=True, exist_ok=True)

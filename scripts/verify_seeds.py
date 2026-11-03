@@ -14,6 +14,11 @@ It also replays the seeded injection path (no Lean, no model): a seeded conferen
 with a controlled clock must inject every seed at its trigger time, closing each task and publishing
 ``solutions/<task>.lean``.
 
+A coding config (``"domain": "code"``) runs the same three checks with the coding pieces: the code
+operational judge on the visible tests (sandboxed Python runner from ``code_judge``), check_solution
+(internal check_proof: the private reference tests) and ``scripts/evaluate_code_run.py``; the replay
+publishes ``solutions/<task>.py``.
+
 Writes ``data/validation/seed-verification-<UTC>.json`` (verdicts, digests and reasons; never the
 seed sources) and keeps the throwaway run under ``runs/phase-b/seed-verification-<UTC>/`` (it holds
 the seed sources: researcher-only, Git-ignored). Runs on the VM, with no run in progress on Docker.
@@ -79,7 +84,9 @@ def main(argv=None):
     folder.mkdir(parents=True)
     (folder / "RESEARCHER_ONLY.txt").write_text("Seed verification (scripts/verify_seeds.py): holds planted exploit "
                                                 "sources. Never mount, copy or reuse for an experimental run.\n")
-    tasks = tasks_from_dataset(FrozenDataset(ROOT, task_set=task_set_of(config)))
+    code = runtime.domain_of(config) == "code"
+    tasks = runtime.code_conference_tasks(ROOT) if code else tasks_from_dataset(
+        FrozenDataset(ROOT, task_set=task_set_of(config)))
     seeds = seeded.expand_block(config["seeded"])
     record = {"schema": "gdm-seed-verification/1", "created_at": stamp, "config": str(args.config),
               "experiment": config.get("experiment"), "throwaway_run": str(folder.relative_to(ROOT)),
@@ -93,9 +100,17 @@ def main(argv=None):
     if not args.replay_only:
         from research_swarm.oversight import make_proof_checker
         run_dir = folder / "judge-run"
-        compiler = runtime.make_lean_compiler(config)
-        service = ConferenceService(run_dir, tasks, operational_judge(compiler),
-                                    observer=runtime.queue_observer(run_dir), agent_ids=[AGENT, OVERSEER])
+        if code:
+            from research_swarm.coding.judge import code_operational_judge
+            from research_swarm.oversight import make_code_proof_checker
+            compiler = runtime.make_code_runner(config)
+            make_proof_checker = make_code_proof_checker(compiler)  # noqa: F811
+            service = ConferenceService(run_dir, tasks, code_operational_judge(compiler),
+                                        observer=runtime.code_queue_observer(run_dir), agent_ids=[AGENT, OVERSEER])
+        else:
+            compiler = runtime.make_lean_compiler(config)
+            service = ConferenceService(run_dir, tasks, operational_judge(compiler),
+                                        observer=runtime.queue_observer(run_dir), agent_ids=[AGENT, OVERSEER])
         try:
             for item in results:
                 source = (ROOT / item["artifact_path"]).read_text()
@@ -109,7 +124,11 @@ def main(argv=None):
                                                                  "error")}
         finally:
             service.close()
-        done = subprocess.run([sys.executable, str(ROOT / "scripts" / "evaluate_run.py"), "--run-dir", str(run_dir)],
+        evaluator_script = "evaluate_code_run.py" if code else "evaluate_run.py"
+        if code:  # the throwaway run is a coding run (coding.domain_of_run reads it)
+            (run_dir / "settings.json").write_text(json.dumps({"config": config, "effective": {
+                "domain": "code", "task_set": config.get("task_set")}}, indent=2))
+        done = subprocess.run([sys.executable, str(ROOT / "scripts" / evaluator_script), "--run-dir", str(run_dir)],
                               cwd=ROOT, capture_output=True, text=True,
                               env={**__import__("os").environ, "PYTHONPATH": f"{ROOT / 'src'}:{ROOT}"})
         record["evaluate_run_exit"] = done.returncode

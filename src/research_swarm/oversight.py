@@ -142,6 +142,8 @@ def overseer_problems(config) -> list[str]:
     if not prompts.neutral_environment(variant):
         problems.append(f"{OVERSEER_KEY} requires a neutral collaboration prompt variant "
                         f"({sorted(prompts.NEUTRAL_VARIANTS)})")
+    elif config.get("domain") == "code":
+        pass  # the coding variant (research_swarm.coding.prompts) always has its rules block
     elif not prompts.variant_sections(variant)["INTEGRITY_PROMPT"]:
         problems.append(f"{OVERSEER_KEY} requires a prompt variant with the rules block")
     return problems
@@ -410,12 +412,15 @@ def build_overseer_prompt(agent_id, solver_ids, task_listing, variant, powers=Fa
     return prompt
 
 
-def overseer_extra_definitions(overseer) -> list[dict]:
+def overseer_extra_definitions(overseer, domain="lean") -> list[dict]:
     """The tools an overseer gets in addition to every normal tool: the oversight tools (with
-    powers) and the overseer board tools (with ``board``)."""
+    powers) and the overseer board tools (with ``board``). In the coding domain the check tool is
+    ``check_solution`` (internal action check_proof; research_swarm.coding.tools_text)."""
     if not overseer:
         return []
     from .tools import overseer_board_tool_definitions, oversight_tool_definitions
+    if domain == "code":
+        from .coding.tools_text import code_oversight_tool_definitions as oversight_tool_definitions
     return ((oversight_tool_definitions() if overseer.get("powers") else [])
             + (overseer_board_tool_definitions() if overseer.get("board") else []))
 
@@ -425,21 +430,21 @@ def contact_allowed(overseer) -> bool:
     return not overseer or overseer.get("contact") is not False
 
 
-def definitions_for(agent_id, overseer, definitions) -> list[dict]:
+def definitions_for(agent_id, overseer, definitions, domain="lean") -> list[dict]:
     """Tool definitions for ``agent_id``: the normal ones, plus the overseer tools for an overseer;
     an overseer without contact loses the contact tools (NO_CONTACT_TOOL_NAMES)."""
     if is_overseer(agent_id, overseer):
         normal = [d for d in definitions if contact_allowed(overseer) or d["name"] not in NO_CONTACT_TOOL_NAMES]
-        return normal + overseer_extra_definitions(overseer)
+        return normal + overseer_extra_definitions(overseer, domain)
     return list(definitions)
 
 
-def effective_overseer(overseer, proof_checker=None, own_settings=None) -> dict:
+def effective_overseer(overseer, proof_checker=None, own_settings=None, domain="lean") -> dict:
     """``settings.json`` ``effective.overseer``. The single form keeps its earlier keys exactly; the
     several-overseers form lists ``agent_ids`` (no ``agent_id``), the board tools and the overseers'
     model (``model_id``/``provider_route``; the full settings are ``settings.json`` ``overseer_model``)."""
     from .tools import OVERSEER_BOARD_TOOL_NAMES
-    names = [d["name"] for d in overseer_extra_definitions(overseer)]
+    names = [d["name"] for d in overseer_extra_definitions(overseer, domain)]
     first = overseer_ids(overseer)[0]
     if "agent_ids" not in overseer:
         return {**overseer, "oversight_tools": names, "proof_checker": proof_checker,
@@ -458,9 +463,13 @@ def continue_message_for(agent_id, overseer):
     return OVERSEER_CONTINUE_MESSAGE if is_overseer(agent_id, overseer) else None
 
 
-def prompt_for(agent_id, overseer, other_agent_ids, task_listing, variant) -> str:
+def prompt_for(agent_id, overseer, other_agent_ids, task_listing, variant, domain="lean") -> str:
     """The system prompt of overseer ``agent_id``: ``other_agent_ids`` are the solvers (and the seed);
-    with several overseers the others are named, and the board is described when enabled."""
+    with several overseers the others are named, and the board is described when enabled. The
+    coding domain uses research_swarm.coding.oversight_prompt."""
+    if domain == "code":
+        from .coding.oversight_prompt import code_prompt_for
+        return code_prompt_for(agent_id, overseer, other_agent_ids, task_listing, variant)
     fellows = [a for a in overseer_ids(overseer) if a != agent_id] if "agent_ids" in overseer else []
     return build_overseer_prompt(agent_id, other_agent_ids, task_listing, variant, overseer["powers"],
                                  fellow_overseers=fellows, board=overseer.get("board") is True,
@@ -505,6 +514,15 @@ def make_proof_checker(backend=None):
                              "axiom": record.get("axiom"), "answer": evidence.get("answer")}}
     checker.backend = backend
     return checker
+
+
+def make_code_proof_checker(runner):
+    """The coding overseer's check tool (check_solution): ``coding.evaluator.make_code_checker`` on the
+    run's sandboxed Python runner, against the private reference tests (counts only reach the agent)."""
+    def factory():
+        from .coding.evaluator import make_code_checker
+        return make_code_checker(runner)
+    return factory
 
 
 def enable(conference, overseer, record=None, checker_factory=make_proof_checker):

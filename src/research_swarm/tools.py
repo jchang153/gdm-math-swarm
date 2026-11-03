@@ -260,7 +260,10 @@ MCP_SERVER = "conference"
 NEUTRAL_MCP_SERVER = "collab"
 MCP_SERVERS = (MCP_SERVER, NEUTRAL_MCP_SERVER)
 # Exposed neutral name -> conference service action name.
-TOOL_ALIASES = {"get_status": "get_conference_status"}
+TOOL_ALIASES = {"get_status": "get_conference_status",
+                # Coding domain (research_swarm.coding.tools_text): the overseer's check tool. No Lean
+                # definition is named check_proof among TOOL_DEFINITIONS, so the Lean tools are unchanged.
+                "check_solution": "check_proof"}
 
 _NEUTRAL_DESCRIPTIONS = {
     "submit_feedback": (

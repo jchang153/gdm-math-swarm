@@ -25,7 +25,7 @@ def entry(run, start):
     return {'run': run, 'start_utc': start, 'links': {'Report': f'{run}/results.html'}}
 
 
-def fake_catalogue(entries, unlisted, files=None):
+def fake_catalogue(entries, unlisted, files=None, site=None):
     entries = [e for e in entries if e['run'] not in unlisted]
     data = json.dumps({'experiments': entries, 'warnings': []}).encode()
     return {'index.html': b'<html>' + b','.join(e['run'].encode() for e in entries) + b'</html>',

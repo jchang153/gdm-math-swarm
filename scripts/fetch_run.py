@@ -18,7 +18,10 @@ gcloud), checks each against ``completed-checksums.json`` (SHA-256), extracts th
 ``retrieved.marker`` on the VM (the supervisor then shuts an idle VM down) and rebuilds runs/index.html.
 With ``--publish`` it also publishes the run to the Cloudflare site, pinned to the dataset commit of the upload
 (``publish_cloudflare.py publish --bundle ... --dataset-commit ... --commit``, then ``verify --run``); without it,
-it prints the publication preview. The scratch bundle is deleted either way.
+it prints the publication preview. The scratch bundle is deleted either way. The site follows the run's domain
+(owner, November 3, 2026): a coding run (settings.json domain "code") goes to the ImpossibleBench site
+(``--site ib``, receipts under runs/phase-b/cloudflare-ib/receipts/), every other run to the math site; ``--site``
+overrides (publish_cloudflare.py refuses a run of the wrong domain either way).
 
     export GCLOUD=... GDM_GCP_PROJECT=... GDM_GCP_ZONE=... GDM_LOGS_DATASET=...   # HANDOFF.local.md
     PYTHONPATH=scripts:src:. .venv/bin/python scripts/fetch_run.py --vm VM --run RUN [--publish]
@@ -130,7 +133,7 @@ def safe_extract(archive, destination, *, strip=None, force=False):
 
 
 def fetch(run, cloud, *, remote_root='gdm-math-swarm', publish=False, marker=True, force=False, scratch=None,
-          runner=subprocess.run, log=print):
+          runner=subprocess.run, log=print, site=None):
     if not RUN_ID.fullmatch(run):
         raise ValueError('Invalid run ID')
     phase_remote = f'{remote_root}/runs/phase-b/{run}'
@@ -170,7 +173,7 @@ def fetch(run, cloud, *, remote_root='gdm-math-swarm', publish=False, marker=Tru
         if 'completed-site.tgz' in names:
             safe_extract(tmp / 'completed-site.tgz', tmp, force=True)
             record['publication'] = publish_site(run, tmp / 'site-bundle', upload, publish=publish, runner=runner,
-                                                 log=log)
+                                                 log=log, site=site)
         else:
             record['publication'] = {'outcome': 'no site bundle on the VM (see site-steps.json)'}
     if marker:
@@ -184,26 +187,41 @@ def fetch(run, cloud, *, remote_root='gdm-math-swarm', publish=False, marker=Tru
     return record
 
 
-def publish_site(run, bundle, upload, *, publish, runner, log):
-    """Preview (default) or publish the bundle on Cloudflare, pinned to the upload's dataset commit."""
+def site_for(run, bundle):
+    """The Cloudflare site (publish_cloudflare.SITES key) of the run's domain, from the bundle's settings.json."""
+    import publish_cloudflare as cf
+    settings = Path(bundle) / run / 'settings.json'
+    domain = cf.settings_domain(settings.read_bytes() if settings.is_file() else None)
+    sites = [key for key, value in cf.SITES.items() if value.domain == domain]
+    if not sites:
+        raise ValueError(f'No Cloudflare site publishes runs of domain {domain!r}')
+    return sites[0]
+
+
+def publish_site(run, bundle, upload, *, publish, runner, log, site=None):
+    """Preview (default) or publish the bundle on Cloudflare, pinned to the upload's dataset commit. ``site``
+    defaults to the site of the run's domain (``site_for``)."""
+    import publish_cloudflare as cf
     commit = upload.get('dataset_commit')
     if upload.get('outcome') != 'uploaded' or not commit:
         return {'outcome': 'not published: the run is not in the logs dataset yet',
                 'hf_upload': upload.get('outcome')}
-    receipt = ROOT / 'runs' / 'phase-b' / 'cloudflare' / 'receipts' / f'{run}.json'
+    site = site or site_for(run, bundle)
+    choice = [] if site == cf.DEFAULT_SITE else ['--site', site]
+    receipt = ROOT / cf.SITES[site].receipts.relative_to(cf.ROOT) / f'{run}.json'
     command = [sys.executable, str(SCRIPTS / 'publish_cloudflare.py'), 'publish', '--bundle', str(bundle),
-               '--dataset-commit', commit]
+               '--dataset-commit', commit, *choice]
     if publish:
         command += ['--commit', '--receipt', str(receipt)]
     done = runner(command, cwd=ROOT, capture_output=True, text=True)
     result = {'outcome': ('published' if publish else 'previewed') if done.returncode == 0 else 'failed',
-              'exit': done.returncode, 'dataset_commit': commit}
+              'exit': done.returncode, 'dataset_commit': commit, **({'site': site} if choice else {})}
     if done.returncode:
         result['detail'] = (done.stderr or done.stdout or '').strip()[-1500:]
     elif publish:
         result['receipt'] = str(receipt.relative_to(ROOT))
-        check = runner([sys.executable, str(SCRIPTS / 'publish_cloudflare.py'), 'verify', '--run', run], cwd=ROOT,
-                       capture_output=True, text=True)
+        check = runner([sys.executable, str(SCRIPTS / 'publish_cloudflare.py'), 'verify', '--run', run, *choice],
+                       cwd=ROOT, capture_output=True, text=True)
         result['verify_exit'] = check.returncode
     log(f'{run}: Cloudflare {result["outcome"]}')
     return result
@@ -215,13 +233,15 @@ def main(argv=None):
     parser.add_argument('--run', required=True)
     parser.add_argument('--remote-root', default='gdm-math-swarm', help='checkout on the VM, relative to its home')
     parser.add_argument('--publish', action='store_true', help='deploy to the Cloudflare site (default: preview)')
+    parser.add_argument('--site', choices=('gdm', 'ib'),
+                        help='Cloudflare site (default: from the run\'s domain: code -> ib, else gdm)')
     parser.add_argument('--no-marker', action='store_true', help='do not touch retrieved.marker on the VM')
     parser.add_argument('--force', action='store_true', help='replace existing local files that differ')
     args = parser.parse_args(argv)
     if not VM_NAME.fullmatch(args.vm):
         parser.error('invalid VM name')
     record = fetch(args.run, Cloud(args.vm), remote_root=args.remote_root, publish=args.publish,
-                   marker=not args.no_marker, force=args.force)
+                   marker=not args.no_marker, force=args.force, site=args.site)
     print(json.dumps(record, indent=2))
     publication = record.get('publication') or {}
     return 1 if publication.get('outcome') == 'failed' or publication.get('verify_exit') else 0

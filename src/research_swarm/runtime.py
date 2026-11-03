@@ -209,6 +209,27 @@ def persona_counts(personas):
     return {name: counts.get(name, 0) for name in sorted({*PERSONA_NAMES, *counts})}
 
 
+def domain_of(config):
+    """"lean" (absent key) or "code" (research_swarm.coding)."""
+    from .coding import domain_of_config
+    return domain_of_config(config)
+
+
+def personas_for(config, count, seed):
+    """``assign_personas`` for Lean; the coding personas (same balanced, seeded allocation) for code."""
+    if domain_of(config) == "code":
+        from .coding.prompts import assign_code_personas
+        return assign_code_personas(count, seed)
+    return assign_personas(count, seed)
+
+
+def persona_counts_for(config, personas):
+    if domain_of(config) == "code":
+        from .coding.prompts import code_persona_counts
+        return code_persona_counts(personas)
+    return persona_counts(personas)
+
+
 def compose_text(image=AGENT_IMAGE, memory="1g", cpus=None, pids=256):
     """The per-sample compose file content (``write_compose`` writes exactly this).
 
@@ -259,6 +280,30 @@ def export_public_tasks(repo_root, task_set="pilot14"):
         listing = dataset.export_agent_tasks(folder)
         files = {f"{PROBLEMS_DIR}/{p.name}": p.read_text() for p in sorted(Path(folder).iterdir()) if p.is_file()}
     return listing, files
+
+
+def export_code_tasks(repo_root):
+    """Coding domain: CodingDataset.export_agent_tasks (problems/tasks.json and
+    problems/<task>/{problem.md,solution.py,tests.py}) plus /workspace/run_tests.py, the local test
+    runner with the judge's semantics. Returns (listing, files) as ``export_public_tasks``."""
+    from .coding import RUN_TESTS_PATH
+    from .coding.dataset import CodingDataset
+    from .coding.judge import local_runner_source
+    dataset = CodingDataset(repo_root)
+    with tempfile.TemporaryDirectory(prefix="gdm-export-code-") as folder:
+        listing = dataset.export_agent_tasks(folder)
+        files = {f"{PROBLEMS_DIR}/{p.relative_to(folder).as_posix()}": p.read_text()
+                 for p in sorted(Path(folder).rglob("*")) if p.is_file() and not p.is_symlink()}
+    files[RUN_TESTS_PATH] = local_runner_source()
+    return listing, files
+
+
+def export_tasks_for(config, repo_root):
+    """(listing, files) for the config's domain and task set."""
+    if domain_of(config) == "code":
+        return export_code_tasks(repo_root)
+    from .dataset import task_set_of
+    return export_public_tasks(repo_root, task_set=task_set_of(config))
 
 
 def agent_files(task_files):
@@ -771,7 +816,11 @@ def image_ids(images):
 
 
 def image_tags(config):
-    """{role: configured tag} for the agent and Lean (judge) images."""
+    """{role: configured tag} for the agent and Lean (judge) images; in the coding domain the agent
+    image and the Python judge image (``code_judge.image``, default the agent image), role "judge"."""
+    if domain_of(config) == "code":
+        agent = config.get("agent_image") or AGENT_IMAGE
+        return {"agent": agent, "judge": code_judge_options(config)["image"] or agent}
     return {"agent": config.get("agent_image") or AGENT_IMAGE, "lean": config.get("lean_image") or LEAN_IMAGE}
 
 
@@ -793,7 +842,7 @@ def pin_images(config, lookup=None):
 def check_pinned_against_preflight(images, report):
     """Refuse when an image ID changed between preflight and pinning (a re-tag in between)."""
     docker = (report or {}).get("docker") or {}
-    for role, key in (("agent", "agent_image"), ("lean", "lean_image")):
+    for role, key in ((role, f"{role}_image") for role in images):  # agent + lean (code: agent + judge)
         seen = docker.get(key)
         if isinstance(seen, dict) and seen.get("id") and seen.get("tag") == images[role]["tag"] \
                 and seen["id"] != images[role]["id"]:
@@ -1141,9 +1190,9 @@ def integrity_reminder_problems(config):
     return []
 
 
-def _one_seed_settings(block):
+def _one_seed_settings(block, suffix=".lean"):
     return {"task_id": block.get("task_id"), "channel": block.get("channel"),
-            "path": f"solutions/{block.get('task_id')}.lean" if block.get("channel") == "library_solution" else None,
+            "path": f"solutions/{block.get('task_id')}{suffix}" if block.get("channel") == "library_solution" else None,
             "trigger": {"kind": block.get("trigger_kind"), "value": block.get("trigger_value")},
             "artifact_path": block.get("artifact_path"), "artifact_sha256": block.get("artifact_sha256"),
             "source": block.get("source")}
@@ -1155,11 +1204,12 @@ def seeded_settings(config):
     from .seeded import ARTIFACTS_KEY, expand_block
     block = config.get("seeded") or {}
     blocks = expand_block(block) if block else [block]
+    suffix = ".py" if domain_of(config) == "code" else ".lean"
     record = {"declared_seeded_run": True, "seed_agent": block.get("author"), "role": "seed",
-              **_one_seed_settings(blocks[0]),
+              **_one_seed_settings(blocks[0], suffix),
               "note": "Planted by the researchers (owner decision 2026-10-25); never shown to agents as seeded."}
     if ARTIFACTS_KEY in block:
-        record["seeds"] = [dict(_one_seed_settings(one), family=one.get("family")) for one in blocks]
+        record["seeds"] = [dict(_one_seed_settings(one, suffix), family=one.get("family")) for one in blocks]
     return record
 
 
@@ -1181,7 +1231,13 @@ def preflight(config, repo_root):
     blockers.extend(budget_track_problems(config))
     blockers.extend(concurrent_run_problems(config))
     track = track_of(config)
-    if track is not None:
+    from .coding import CODE_AGENT_COUNT, domain_problems
+    blockers.extend(domain_problems(config))
+    if domain_of(config) == "code":
+        # Coding experiment (docs/plan.md, "Coding experiment on ImpossibleBench (November 3, 2026)"): 20 solvers.
+        if config.get("agent_count") != CODE_AGENT_COUNT or type(config.get("agent_count")) is not int:
+            blockers.append(f"The coding experiment uses {CODE_AGENT_COUNT} solvers")
+    elif track is not None:
         counts = track_agent_counts(track)
         if config.get("agent_count") not in counts or type(config.get("agent_count")) is not int:
             blockers.append(f"The {track} track allows {sorted(counts)} peers")
@@ -1230,8 +1286,8 @@ def preflight(config, repo_root):
     blockers.extend(integrity_reminder_problems(config))  # docs/plan.md, "periodic integrity reminder"
     allocation = None
     try:
-        allocation = persona_counts(assign_personas(int(config.get("agent_count", APPROVED_AGENT_COUNT)),
-                                                    int(config.get("persona_seed", DEFAULT_PERSONA_SEED))))
+        allocation = persona_counts_for(config, personas_for(config, int(config.get("agent_count", APPROVED_AGENT_COUNT)),
+                                                             int(config.get("persona_seed", DEFAULT_PERSONA_SEED))))
     except (TypeError, ValueError):
         blockers.append("agent_count and persona_seed must be integers")
     if allocation is not None and config.get("persona_counts") is not None and config["persona_counts"] != allocation:
@@ -1253,7 +1309,9 @@ def preflight(config, repo_root):
                 docker.update(cpu_count=info.get("NCPU"), memory_bytes=info.get("MemTotal"))
             else:
                 blockers.append("Docker engine unavailable")
-            images = {"agent_image": config.get("agent_image", AGENT_IMAGE), "lean_image": config.get("lean_image", LEAN_IMAGE)}
+            images = ({f"{role}_image": tag for role, tag in image_tags(config).items()} if domain_of(config) == "code"
+                      else {"agent_image": config.get("agent_image", AGENT_IMAGE),
+                            "lean_image": config.get("lean_image", LEAN_IMAGE)})
             ids = image_ids(images.values())
             for key, tag in images.items():
                 docker[key] = {"tag": tag, "id": ids.get(tag)}
@@ -1290,6 +1348,69 @@ def make_lean_compiler(config, image=None):
         return DockerLeanCompiler(**kwargs)
     except TypeError as ex:
         raise RuntimeError("research_swarm.lean.DockerLeanCompiler lacks the agreed max_concurrent parameter") from ex
+
+
+CODE_JUDGE_DEFAULTS = {"image": None, "per_test_timeout_seconds": 10, "total_timeout_seconds": 120,
+                       "memory": "1g", "cpus": 1, "max_concurrent": 16}
+
+
+def code_judge_options(config):
+    """The config's ``code_judge`` block over the defaults (coding domain)."""
+    block = config.get("code_judge") or {}
+    return {k: block.get(k, v) if block.get(k) is not None else v for k, v in CODE_JUDGE_DEFAULTS.items()}
+
+
+def make_code_runner(config, image=None):
+    """Coding domain operational judge runner (research_swarm.coding.judge.DockerPythonRunner);
+    ``image`` (the pinned judge image ID) overrides ``code_judge.image``."""
+    from .coding.judge import DockerPythonRunner
+    options = code_judge_options(config)
+    return DockerPythonRunner(image or options["image"] or config.get("agent_image") or AGENT_IMAGE,
+                              per_test_timeout=options["per_test_timeout_seconds"],
+                              total_timeout=options["total_timeout_seconds"], memory=str(options["memory"]),
+                              cpus=options["cpus"], max_concurrent=options["max_concurrent"])
+
+
+def code_conference_tasks(repo_root):
+    """ConferenceTasks of the coding task set (public fields only: statement, starter, visible tests)."""
+    from .coding.dataset import CodingDataset
+    from .conference import ConferenceTask
+    dataset = CodingDataset(repo_root)
+    return [ConferenceTask(t.task_id, t.title, t.entry_point, False, t.starter, domain="code",
+                           entry_point=t.entry_point, visible_tests=t.visible_tests, statement=t.problem)
+            for t in dataset.tasks]
+
+
+def code_conference_factory(repo_root, observer=None, runner=None):
+    """``default_conference_factory`` for the coding domain: the coding tasks, the code operational judge
+    (visible tests in the sandboxed runner) and the coding evaluator queue observer."""
+    def factory(run_dir, agent_ids, **track_arguments):
+        from .coding.judge import code_operational_judge
+        from .conference import ConferenceService
+        return ConferenceService(run_dir, code_conference_tasks(repo_root), code_operational_judge(runner),
+                                 observer=observer, agent_ids=agent_ids, domain="code", **track_arguments)
+    return factory
+
+
+def code_queue_observer(run_dir, record=None):
+    """Researcher-side coding evaluator queue (RUN/evaluations, as ``queue_observer``), or None loudly."""
+    record = record or (lambda *args: None)
+    try:
+        from .coding.evaluator import make_code_queue_observer
+        from .evaluator import run_evaluations_dir
+    except ImportError as ex:
+        message = f"Coding evaluator queue observer unavailable ({ex}); submissions remain only in conference state"
+        warnings.warn(message, RuntimeWarning, stacklevel=2)
+        record("observer_unavailable", None, {"error": str(ex)[:300]})
+        return None
+    return make_code_queue_observer(run_evaluations_dir(run_dir))
+
+
+def skipped_warm_up(record):
+    """The coding domain has no Lean: the warm-up is skipped and recorded as such."""
+    result = {"skipped": True, "ok": None, "reason": "code domain: no Lean prelude to warm up"}
+    record("lean_warm_up_skipped", None, result)
+    return result
 
 
 def parse_vm_state(text):
@@ -1422,8 +1543,15 @@ def make_conference(repo_root, run_dir, agent_ids, config, record, *, lean_image
     Anything else is refused (``LaunchBlocked``) before a compiler is built.
     """
     track_arguments = conference_track_arguments(config, repo_root)
-    compiler = make_lean_compiler(config, image=lean_image)
     observer = None
+    if domain_of(config) == "code":
+        # Coding domain: ``compiler`` is the sandboxed Python runner (judge image passed as lean_image).
+        compiler = make_code_runner(config, image=lean_image)
+        if conference_factory is None:
+            observer = code_queue_observer(run_dir, record)
+            conference_factory = code_conference_factory(repo_root, observer=observer, runner=compiler)
+    else:
+        compiler = make_lean_compiler(config, image=lean_image)
     if conference_factory is None:
         observer = queue_observer(run_dir, record)
         from .dataset import task_set_of
@@ -1438,6 +1566,30 @@ def make_conference(repo_root, run_dir, agent_ids, config, record, *, lean_image
             raise LaunchBlocked("The conference factory did not apply the configured seeded track")
         return conference, compiler, observer
     return conference_factory(run_dir, agent_ids), compiler, observer
+
+
+def _file_sha256(path):
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def agent_tool_definitions(config, neutral=False):
+    """The solvers' tool definitions: the Lean ones, or the coding ones (neutral names, Python wording)."""
+    if domain_of(config) == "code":
+        from .coding.tools_text import code_tool_definitions
+        return code_tool_definitions()
+    from .tools import tool_definitions
+    return tool_definitions(neutral)
+
+
+def agent_initial_message(config, variant):
+    if domain_of(config) == "code":
+        from .coding.prompts import initial_message as code_initial_message
+        return code_initial_message(variant)
+    from .prompts import initial_message
+    return initial_message(variant)
 
 
 def _compose_args(config, agent_image):
@@ -1667,6 +1819,9 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     neutral_args = {"neutral": True} if neutral else {}
     reviewing = config.get(PERSONA_REVIEWING_KEY, PERSONA_REVIEWING_DEFAULT)  # checked by preflight
     in_flight_grace = in_flight_grace_seconds(config)
+    domain = domain_of(config)
+    code = domain == "code"  # research_swarm.coding: Python tasks, sandboxed test judge, no Lean
+    judge_role = "judge" if code else "lean"
     images = pin_images(config)
     check_pinned_against_preflight(images, report)
     run_dir = Path(config.get("run_dir", Path(repo_root) / "runs" / time.strftime("%Y%m%d-%H%M%S"))).resolve()
@@ -1695,7 +1850,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     # Pricing and compatibility evidence were checked by launch_gates above, against
     # the same settings_from_config object (route-pricing gate compares frozen_fields).
     settings = settings_from_config(config, pricing_verified=True, live_compatibility_verified=True)
-    personas = assign_personas(agent_count, persona_seed)
+    personas = personas_for(config, agent_count, persona_seed)
     # Overseer role (research_swarm.oversight): one more participant after the solvers, no persona.
     from . import oversight
     overseer = oversight.overseer_config(config)
@@ -1714,17 +1869,21 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     overseer_settings = oversight.overseer_settings(config, pricing_verified=True, live_compatibility_verified=True)
     roles = oversight.roles(solver_ids, overseer, seed)
     from .dataset import task_set_of
-    task_set = task_set_of(config)
-    listing, task_files = export_public_tasks(repo_root, task_set=task_set)
+    task_set = config.get("task_set") if code else task_set_of(config)
+    listing, task_files = export_tasks_for(config, repo_root)
     # Before any agent container starts (and so before the barrier): warm the page cache.
-    warm_up = await asyncio.to_thread(warm_up_lean, images["lean"]["id"], record, **warm_up_options(config))
+    warm_up = (skipped_warm_up(record) if code else
+               await asyncio.to_thread(warm_up_lean, images["lean"]["id"], record, **warm_up_options(config)))
     resume = None
     conference, compiler, observer = make_conference(repo_root, run_dir, conference_ids, config, record,
-                                                     lean_image=images["lean"]["id"],
+                                                     lean_image=images[judge_role]["id"],
                                                      conference_factory=conference_factory)
     try:
-        # check_proof / revert_submission for an overseer with powers (research_swarm.oversight).
-        proof_checker = oversight.enable(conference, overseer, record)
+        # check_proof / revert_submission for an overseer with powers (research_swarm.oversight); in the
+        # coding domain check_solution runs the private reference tests (coding.evaluator.make_code_checker).
+        proof_checker = (oversight.enable(conference, overseer, record,
+                                          checker_factory=oversight.make_code_proof_checker(compiler))
+                         if code else oversight.enable(conference, overseer, record))
         unread_notices = unread_notices_enabled(config)  # default on; explicit false turns it off
         if unread_notices:  # docs/plan.md, "Unread notices (October 27, 2026)"
             conference.enable_unread_notices()
@@ -1750,8 +1909,10 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                         "model_id": overseer_settings.model_id,
                                         "provider_route": overseer_settings.provider_route})
         effective = {
-            "agent_count": agent_count, "persona_seed": persona_seed, "persona_counts": persona_counts(personas),
-            "agent_image": images["agent"]["tag"], "lean_image": images["lean"]["tag"], "images": images,
+            "agent_count": agent_count, "persona_seed": persona_seed,
+            "persona_counts": persona_counts_for(config, personas),
+            "agent_image": images["agent"]["tag"], "lean_image": None if code else images["lean"]["tag"],
+            "images": images,
             "image_ids": {v["tag"]: v["id"] for v in images.values()}, "agent_memory": config.get("agent_memory", "1g"),
             "agent_cpus": config.get("agent_cpus"),
             "compose_sha256": hashlib.sha256(Path(compose).read_bytes()).hexdigest(),
@@ -1760,7 +1921,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                                                 ("max_concurrent", "max_concurrent"))},
             "lean_warm_up": warm_up, "system_prompt_mode": mode, "prompt_variant": variant,
             "task_set": task_set, "task_ids": [t["task_id"] for t in listing],
-            "dataset_revision": CURRENT_DATASET_REVISION,
+            "dataset_revision": None if code else CURRENT_DATASET_REVISION,
             "persona_reviewing": reviewing,
             "claude_auto_memory": auto_memory,
             "prompt_cache_normalization": TOKEN_COUNTER_NORMALIZATION_VERSION,
@@ -1781,7 +1942,15 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "conference_participants": len(conference_ids),
             "seeded": None if seed is None else seeded_settings(config),
             "overseer": None if overseer is None else oversight.effective_overseer(overseer, proof_checker,
-                                                                                    overseer_settings)}
+                                                                                    overseer_settings,
+                                                                                    domain=domain)}
+        if code:  # settings.json: the domain only for the coding runs (Lean settings stay as they were)
+            effective.update(domain=domain, judge_image=images["judge"]["tag"],
+                             code_judge={**code_judge_options(config),
+                                         "per_test_timeout": getattr(compiler, "per_test_timeout", None),
+                                         "total_timeout": getattr(compiler, "timeout", None)},
+                             fixed_task_manifest_sha256=_file_sha256(Path(repo_root) / "data" / "coding" / "manifest.json"),
+                             run_tests_path="/workspace/run_tests.py")
         (run_dir / "settings.json").write_text(json.dumps({"config": config, "effective": effective,
                                                             "model": asdict(settings),
                                                             **({"overseer_model": asdict(overseer_settings)}
@@ -1802,8 +1971,14 @@ async def _run_pilot(config, repo_root, conference_factory=None):
         def prompt_for(agent, persona):
             if oversight.is_overseer(agent, overseer):
                 # The seed is one more "other agent" to the overseer, like to everyone else.
-                return oversight.prompt_for(agent, overseer, solver_ids + ([seed] if seed else []), listing, variant)
+                return oversight.prompt_for(agent, overseer, solver_ids + ([seed] if seed else []), listing, variant,
+                                            domain=domain)
+            if code:
+                from .coding.prompts import build_code_prompt
+                return build_code_prompt(agent, persona, listing, variant, reviewing)
             return build_prompt(agent, persona, listing, variant, reviewing)
+
+        definitions = agent_tool_definitions(config, neutral)
 
         def filter_for(agent):
             # Overseers with their own model reserve, request and settle with its settings.
@@ -1811,10 +1986,10 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             return budget_filter(agent, ledger, overseer_settings if own else settings, barrier, record, "pilot",
                                  archive, clock.stop, **neutral_args, model_override=overseer_model if own else None)
 
-        solver = peer_solver(conference=conference, definitions=tool_definitions(neutral), personas=personas,
+        solver = peer_solver(conference=conference, definitions=definitions, personas=personas,
                              prompt_for=prompt_for, roles=({a: r for a, r in roles.items() if a in agent_ids}
                                                            if overseer else None),
-                             definitions_for=lambda a: oversight.definitions_for(a, overseer, tool_definitions(neutral)),
+                             definitions_for=lambda a: oversight.definitions_for(a, overseer, definitions, domain=domain),
                              continue_for=lambda a: oversight.continue_message_for(a, overseer),
                              env_for=lambda a: oversight.claude_code_env_for(a, overseer),
                              filter_for=filter_for,
@@ -1826,7 +2001,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                     "persona_reviewing": reviewing, "personas": personas, "persona_seed": persona_seed,
                                     **({"track": "seeded", "seed_agent": seed} if seed else {}),
                                     **({"neutral_environment": NEUTRAL_ENVIRONMENT_VERSION} if neutral else {})},
-                          initial_message=initial_message(variant),
+                          initial_message=agent_initial_message(config, variant),
                           initial_messages=({a: oversight.OVERSEER_INITIAL_MESSAGE for a in overseer_ids}
                                             if overseer else None))
         return await supervise(eval_async(task, model=model, **eval_options(len(agent_ids), run_dir, config)),

@@ -122,6 +122,8 @@ sys.path.insert(0, str(ROOT / "src"))
 os.environ.setdefault("INSPECT_DISPLAY", "plain")  # eval_async has no display argument
 
 from research_swarm import runtime  # noqa: E402
+from research_swarm.coding import CODE_AGENT_COUNT  # noqa: E402
+from research_swarm.coding.prompts import CODE_PERSONA_ORDER  # noqa: E402
 from research_swarm.tools import canonical_tool_name  # noqa: E402
 from research_swarm.budget import (DEFAULT_LEDGER_PATH, BudgetExceeded, BudgetLedger, describe_budget,  # noqa: E402
                                    ledger_path_for, list_requests, run_budget)
@@ -639,7 +641,7 @@ def build_evidence(*, checks, images, settings, spent_usd, request_ids, created_
     request_ids = list(dict.fromkeys(str(i) for i in request_ids))
     record = {"schema": SCHEMA, "created_at": created_at or iso_now(),
               "all_required_passed": all(c["passed"] for c in checks.values() if c["required"]),
-              "image_ids": {"agent": images["agent"]["id"], "lean": images["lean"]["id"]},
+              "image_ids": {role: images[role]["id"] for role in images},  # agent + lean (code: agent + judge)
               "model_id": settings.model_id, "provider_route": settings.provider_route,
               "settings": frozen_fields(settings), "spent_usd": str(spent_usd), "requests": len(request_ids),
               "request_ids": request_ids, "checks": checks, **details}
@@ -767,8 +769,10 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path, provide
     neutral_args = {"neutral": True} if neutral else {}
     prompt_variant = variant if neutral else BASELINE_VARIANT
     dotenv = disable_inspect_dotenv()  # before anything Inspect runs; the builder below is the only .env reader
-    persona = args.persona or runtime.assign_personas(
-        runtime.APPROVED_AGENT_COUNT, int(config.get("persona_seed", runtime.DEFAULT_PERSONA_SEED)))[AGENT_ID]
+    code = runtime.domain_of(config) == "code"  # coding domain: same construction, coding tasks/judge/prompt
+    persona = args.persona or runtime.personas_for(
+        config, CODE_AGENT_COUNT if code else runtime.APPROVED_AGENT_COUNT,
+        int(config.get("persona_seed", runtime.DEFAULT_PERSONA_SEED)))[AGENT_ID]
     personas = {AGENT_ID: persona}
     mode = config.get("system_prompt_mode", "replace")
     auto_memory = bool(config.get("claude_auto_memory", True))
@@ -781,14 +785,16 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path, provide
     # live_compatibility_verified stays False: this run is what establishes it.
     settings = settings_from_config(config if role_config is None else role_config, pricing_verified=True,
                                     live_compatibility_verified=False)
-    listing, task_files = runtime.export_public_tasks(ROOT)
+    listing, task_files = runtime.export_code_tasks(ROOT) if code else runtime.export_public_tasks(ROOT)
     warm_up = None
-    if not args.no_warm_up:
+    if code:
+        warm_up = runtime.skipped_warm_up(record)
+    elif not args.no_warm_up:
         warm_up = await asyncio.to_thread(runtime.warm_up_lean, images["lean"]["id"], record,
                                           **runtime.warm_up_options(config))
     before = ledger.run_snapshot()  # this check's run (registered by main with its budget)
     conference, compiler, observer = runtime.make_conference(ROOT, run_dir, [AGENT_ID], config, record,
-                                                             lean_image=images["lean"]["id"])
+                                                             lean_image=images["judge" if code else "lean"]["id"])
     guards, logs, cancelled, probe_error, provider_limit = {}, None, False, None, None
     barrier = runtime.StartBarrier(1, record)
     clock = runtime.RunClock(barrier)
@@ -802,7 +808,11 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path, provide
                                           max_requests=args.max_requests)
             return guards[agent_id]
         compose = runtime.make_compose(run_dir, config, images["agent"]["id"])
-        solver = runtime.peer_solver(conference=conference, definitions=tool_definitions(neutral), personas=personas,
+        if code:
+            from research_swarm.coding.prompts import build_code_prompt as build_prompt  # noqa: F811
+        solver = runtime.peer_solver(conference=conference,
+                                     definitions=(runtime.agent_tool_definitions(config, neutral) if code
+                                                  else tool_definitions(neutral)), personas=personas,
                                      prompt_for=lambda a, p: build_prompt(a, p, listing, prompt_variant),
                                      filter_for=filter_for, **neutral_args,
                                      run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,
@@ -810,7 +820,8 @@ async def run_check(config, args, stamp, *, images, ledger, ledger_path, provide
         task = runtime.build_task(agent_ids=[AGENT_ID], files=runtime.agent_files(task_files), solver=solver,
                                   compose=compose, metadata={"condition": "paid-compatibility-check",
                                                              "personas": personas},
-                                  initial_message=initial_message(prompt_variant))
+                                  initial_message=(runtime.agent_initial_message(config, prompt_variant) if code
+                                                   else initial_message(prompt_variant)))
         # The credential is read here (inside the shared builder) and nowhere else; the
         # key's provider-side limit is recorded (unpaid, informational) before any paid request.
         # One agent: one in-flight request (the pilot's rule, max_connections == agent count).
@@ -887,7 +898,7 @@ def parse_args(argv=None):
                         help="run config: provider settings and run_budget_usd (this check's budget; default $100)")
     parser.add_argument("--max-requests", type=int, default=DEFAULT_MAX_REQUESTS)
     parser.add_argument("--max-minutes", type=float, default=DEFAULT_MAX_MINUTES)
-    parser.add_argument("--persona", choices=runtime.PERSONA_NAMES,
+    parser.add_argument("--persona", choices=runtime.PERSONA_NAMES + CODE_PERSONA_ORDER,
                         help="default: agent-001's persona in the pilot allocation")
     parser.add_argument("--no-warm-up", action="store_true")
     parser.add_argument("--cap-probe-max-tokens", type=int, default=DEFAULT_CAP_PROBE_MAX_TOKENS,

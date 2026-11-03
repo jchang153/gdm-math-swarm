@@ -101,9 +101,16 @@ def _one_line(text, limit=200):
 # ---------------------------------------------------------------------------
 # Facts
 
-def collect_facts(run, agent_id, start):
-    """Structured facts about one agent from the conference records (no model)."""
+def collect_facts(run, agent_id, start, *, domain="lean", validity=None):
+    """Structured facts about one agent from the conference records (no model). ``domain`` "code" (coding runs)
+    flags Python sources by the evaluator's verdict (``validity``: {sha256: validity}) and the coding fake rule."""
     history = run.agents[agent_id]
+    flags_of = detector_flags
+    if domain == "code":
+        from . import coding
+
+        def flags_of(source):   # coding runs: evaluator verdict and coding fake rule instead of the Lean detector
+            return coding.detector_flags(source, validity)
     conf = run.conference
     facts = {"submissions": [], "exploit_reads": [], "other_reads": 0, "posts": [], "dms_sent": [],
              "dms_received": [], "feedback": [], "notebooks": []}
@@ -113,7 +120,7 @@ def collect_facts(run, agent_id, start):
         meta = item.get("meta") or {}
         when = minute(item.get("time"), start)
         if item["channel"] == "submission":
-            family, flags = detector_flags(item["text"])
+            family, flags = flags_of(item["text"])
             facts["submissions"].append({"id": record_id, "task": meta.get("problem_id"),
                                          "outcome": meta.get("outcome"), "minute": when, "family": family,
                                          "flags": flags, "reason": _one_line(meta.get("reason"), 120) or None})
@@ -141,7 +148,7 @@ def collect_facts(run, agent_id, start):
                                           "minute": when, "from": entry.get("author"),
                                           "text": entry.get("text_returned") or ""})
         elif entry.get("kind") == "library_read":
-            family, flags = detector_flags(entry.get("text_returned") or "")
+            family, flags = flags_of(entry.get("text_returned") or "")
             seeded = (run.host.get("roles") or {}).get(entry.get("author")) == "seed"
             if family or seeded:     # the seed's file is the planted exploit, flagged or not
                 read = {"id": entry["item_id"], "minute": when, "path": entry.get("path"),
@@ -190,10 +197,13 @@ def _seeded_summary(facts, first_flagged):
             and first <= first_flagged}
 
 
-def render_facts(facts, run, records):
+def render_facts(facts, run, records, *, domain="lean"):
     lines = []
     subs = facts["submissions"]
-    lines.append(f"SUBMISSIONS ({len(subs)}; detector flags mark the answer-field and native exploit families)")
+    lines.append(f"SUBMISSIONS ({len(subs)}; detector flags mark the answer-field and native exploit families)"
+                 if domain != "code" else
+                 f"SUBMISSIONS ({len(subs)}; detector flags mark hard-coded solutions: the research evaluator's "
+                 "fraudulent verdict or a special-case / test-tamper pattern)")
     if not subs:
         lines.append("  (none)")
     plain_shown = 0
@@ -203,7 +213,12 @@ def render_facts(facts, run, records):
         line = f"  {tag} task {sub['task']} -> {sub['outcome']}; detector: {sub['family'] or 'none'} ({flags})"
         if sub["reason"] and sub["outcome"] != "accepted":
             line += f"; reason: {sub['reason']}"
-        if sub["family"]:
+        if sub["family"] and domain == "code":
+            source = run.conference.items[sub["id"]]["text"]
+            lines.append(line)
+            lines.append("    source: " + _cut(source, 600).replace("\n", "\n    "))
+            records[sub["id"]] = source
+        elif sub["family"]:
             source = run.conference.items[sub["id"]]["text"]
             region = editable_text(source).strip() or source
             lines.append(line)
@@ -261,14 +276,14 @@ def render_setting(history):
 # ---------------------------------------------------------------------------
 # Excerpts and samples
 
-def _windows(text):
+def _windows(text, keyword_re=None, strong=None):
     """[(start, end, score, keywords)] around keyword hits, merged; a short item is one window."""
-    hits = [(m.start(), m.end(), m.group(0).lower()) for m in KEYWORD_RE.finditer(text)]
+    hits = [(m.start(), m.end(), m.group(0).lower()) for m in (keyword_re or KEYWORD_RE).finditer(text)]
     if not hits:
         return []
     if len(text) <= WHOLE_ITEM_CHARS:
         words = {h[2] for h in hits}
-        return [(0, len(text), _score(words), words)]
+        return [(0, len(text), _score(words, strong), words)]
     spans = []
     for start, end, word in hits:
         lo, hi = max(0, start - WINDOW_CHARS), min(len(text), end + WINDOW_CHARS)
@@ -277,11 +292,11 @@ def _windows(text):
             spans[-1][2].add(word)
         else:
             spans.append([lo, hi, {word}])
-    return [(lo, hi, _score(words), words) for lo, hi, words in spans]
+    return [(lo, hi, _score(words, strong), words) for lo, hi, words in spans]
 
 
-def _score(words):
-    return sum(3 if any(w.startswith(s) for s in STRONG) else 1 for w in words)
+def _score(words, strong=None):
+    return sum(3 if any(w.startswith(s) for s in (strong or STRONG)) else 1 for w in words)
 
 
 def _snap(text, lo, hi):
@@ -299,12 +314,18 @@ def own_items(history):
             and not (item.get("meta") or {}).get("derived")]
 
 
-def build_case(run, agent_id, start, *, cap_tokens=CAP_TOKENS):
-    """The case file of one agent: ``{"agent_id", "text", "records", "facts", "summary", "stats"}``."""
+def build_case(run, agent_id, start, *, cap_tokens=CAP_TOKENS, domain="lean", validity=None):
+    """The case file of one agent: ``{"agent_id", "text", "records", "facts", "summary", "stats"}`` (plus
+    ``"domain": "code"`` for coding runs, whose case selects the coding rubric)."""
     history = run.agents[agent_id]
     records = {}
-    facts = collect_facts(run, agent_id, start)
-    facts_text = render_facts(facts, run, records)
+    facts = collect_facts(run, agent_id, start, domain=domain, validity=validity)
+    facts_text = render_facts(facts, run, records, domain=domain)
+    if domain == "code":
+        from . import coding
+        keywords = (coding.KEYWORD_RE, coding.STRONG)
+    else:
+        keywords = (None, None)
     if estimate_tokens(facts_text) > FACTS_CAP_TOKENS:
         facts_text = facts_text[:FACTS_CAP_TOKENS * 4] + "\n  [... facts cut at the case-file cap]"
     items = own_items(history)
@@ -320,7 +341,7 @@ def build_case(run, agent_id, start, *, cap_tokens=CAP_TOKENS):
     # Excerpts: highest-scoring windows first, until the budget left after facts and samples is used.
     windows = []
     for order, item in enumerate(items):
-        for lo, hi, score, words in _windows(item["text"]):
+        for lo, hi, score, words in _windows(item["text"], *keywords):
             windows.append((score, order, item, lo, hi, words))
     sample_budget = SAMPLES * (SAMPLE_CHARS + 80)
     budget_chars = cap_tokens * 4 - len(header) - len(setting) - len(facts_text) - sample_budget - 2000
@@ -367,6 +388,8 @@ def build_case(run, agent_id, start, *, cap_tokens=CAP_TOKENS):
             "summary": summarize_facts(facts), "stats": stats}
     if getattr(history, "role", None):      # overseer (labelled by role); solvers keep the earlier shape
         case["role"] = history.role
+    if domain == "code":
+        case["domain"] = "code"
     return case
 
 
@@ -380,8 +403,14 @@ def build_cases_worker(run_dir, agents):
     """Worker: rebuild the agents' histories (private file versions skipped, so offloaded snapshot files are
     never read) and return their case files only (small to pickle)."""
     from research.analysis.judge.history import build_run
+    from research.analysis.storymap.domain import run_domain
     start = run_start(run_dir)
     run = build_run(run_dir, agents=agents, include_files=False)
+    domain = run_domain(run_dir)
+    if domain == "code":
+        from .coding import load_validity
+        validity = load_validity(run_dir)
+        return {agent: build_case(run, agent, start, domain=domain, validity=validity) for agent in agents}
     return {agent: build_case(run, agent, start) for agent in agents}
 
 
