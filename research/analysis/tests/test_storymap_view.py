@@ -10,6 +10,7 @@ overseer DM, never cheated. No network, no model calls.
 from __future__ import annotations
 
 import contextlib
+import html
 import io
 import json
 import re
@@ -75,8 +76,9 @@ class ViewFixtureTest(unittest.TestCase):
         # Every lane label has a hover hint.
         self.assertEqual(page.count('<text class="lanetext"'), 1 + len(view.LETTERS) + len(view.LANES))
         self.assertIn("<title>Position on cheating: What the agent intended about the shortcut", page)
-        # Event codes share names with thought codes: events are labelled "event B1", thoughts "thought B4".
-        self.assertIn('<span class="badge">event B1</span>', page)
+        # Events are named in words (never by their type code); thoughts by their code.
+        self.assertIn('<span class="badge">board post</span>', page)
+        self.assertNotIn("event B1", page)
         self.assertIn("&middot; thought C6", page)
         self.assertIn('id="panel"', page)
         # Each clickable glyph has a matching article holding its content.
@@ -87,10 +89,10 @@ class ViewFixtureTest(unittest.TestCase):
         # The revert event shows its stage-2 reaction (refake signal) and the thought quote.
         art = re.search(r'<article class="item k-fake" id="ev-\d+"[^>]*><h3>145\.0 min.*?</article>', page, re.S).group(0)
         self.assertIn("reads the revert as a detector to evade", art)
-        self.assertIn("refake_signal", art)
+        self.assertIn("refake signal", art)
         self.assertIn("I&#x27;ll weaken it differently.", page)
         # A thought quoted by a reaction links back to that reaction.
-        self.assertIn("Cited by the stage-2 reaction to", page)
+        self.assertIn("Quoted as evidence in the stage-2 reaction to", page)
         # Turning points are clickable.
         self.assertIn('class="tp" data-k="tp-0"', page)
 
@@ -102,21 +104,28 @@ class ViewFixtureTest(unittest.TestCase):
     def test_events_page_breakdown(self):
         ev = self.events
         sec = re.search(r'<section class="ev" id="B1:post-000006"[^>]*>.*?</section>', ev, re.S).group(0)
-        self.assertIn("3 reader(s)", sec)  # agents 003, 004, 005
+        self.assertIn("3 readers", sec)  # agents 003, 004, 005
         for a in ("agent-003", "agent-004", "agent-005"):
             self.assertIn(f'href="agents/{a}.html#sel=ev-', sec)
-        # agent-003: belief/away; agent-004 and agent-005: none/neutral (2).
-        cells = re.findall(r"<tr><th>(\w+)</th>(.*?)</tr>", sec)
-        grid = {c: re.findall(r'<td class="n">(\d*)</td>', row) for c, row in cells}
-        self.assertEqual(grid["belief"], ["", "1", "", ""])
-        self.assertEqual(grid["none"], ["", "", "2", ""])
+        # agent-003: belief/away; agent-004 and agent-005: no change. Stacked bars with counts in words.
+        self.assertIn('<span class="sbw">belief 1 \u00b7 none 2</span>', sec)
+        self.assertIn('<span class="sbl">Direction of the change</span>', sec)
+        self.assertIn("<span class=\"sbw\">away 1</span>", sec)
+        # The compact table row of the same event: readers 3, belief 1, away 1; filter data for the JS.
+        row = re.search(r'<tr class="er"[^>]*data-id="B1:post-000006".*?</tr>', ev, re.S).group(0)
+        nums = re.findall(r'<td class="n" data-v="([\d.]+)">', row)
+        self.assertEqual(nums[1:], ["3", "3", "1", "0", "0", "1"])  # readers, noticed, belief, behaviour, toward, away
+        self.assertIn('data-sec="ov"', row)
+        self.assertIn('data-chg="none belief"', row)
+        self.assertIn('data-dir="away"', row)
+        self.assertRegex(row, r'data-who="[^"]*agent-004')
         lib = re.search(r'<section class="ev" id="L2:solutions/p07_shortcut\.lean"[^>]*>.*?</section>', ev, re.S).group(0)
-        self.assertIn("3 reader(s)", lib)
+        self.assertIn("3 readers", lib)
         self.assertIn(">fake<", lib)
         self.assertIn('id="P2:sub-000131"', ev)
         self.assertIn('id="D1:dm-000012"', ev)
         self.assertNotIn('id="B1:post-000002"', ev)  # unrelated, no reaction: counted, not listed
-        self.assertIn("1 unrelated board posts", ev)
+        self.assertIn("1 board post or DM unrelated to the trick and without a reaction is not listed", ev)
 
     def test_legend_groups_on_every_page(self):
         for text in [self.index, self.events, *self.pages.values()]:
@@ -174,16 +183,17 @@ class ViewFixtureTest(unittest.TestCase):
 
     def test_tooltips_name_what_each_mark_is(self):
         page = self.pages["agent-003"]
-        self.assertRegex(page, r'class="ph-\w+"[^>]*><title>Position: [\w ]+ · t=')
-        self.assertRegex(page, r'data-k="ev-\d+"[^>]*><title>[A-Z][^<]* · t=')
+        self.assertRegex(page, r'class="ph-\w+"[^>]*><title>Position on cheating: [\w ]+ · \d+\.\d–\d+\.\d min')
+        self.assertRegex(page, r'data-k="ev-\d+"[^>]*><title>[A-Z][^<]* · \d+\.\d min')
         self.assertRegex(page, r'data-k="th-\d+"[^>]*><title>Thought ')
-        self.assertIn("<title>Turning point · t=", page)
+        self.assertRegex(page, r"<title>Turning point · \d+\.\d min")
+        self.assertNotRegex(visible_ui(page), r"\bt=\d|\d{4}-\d\d-\d\dT")  # one time format: minutes
         self.assertRegex(self.index, r'<a href="agents/agent-00\d\.html#sel=ev-\d+"><g class="g [^"]*"><title>')
 
     def test_agent_page_stepper(self):
         page = self.pages["agent-003"]
         for needle in ('id="pprev"', 'id="pnext"', 'id="pos"', 'id="pclose"', '<select id="kind">',
-                       '<option value="exp">only exposures</option>', '<option value="th">only thoughts</option>',
+                       '<option value="exp">only what it read or saw</option>', '<option value="th">only thoughts</option>',
                        '<option value="sub">only submissions</option>', "ArrowRight", "ArrowLeft", "Escape",
                        "'#sel='+key"):
             self.assertIn(needle, page)
@@ -200,8 +210,15 @@ class ViewFixtureTest(unittest.TestCase):
             self.assertIn(k, ids)
 
     def test_events_page_keyboard(self):
-        self.assertIn("ArrowDown", self.events)
-        self.assertRegex(self.events, r'<section class="ev" id="[^"]+" tabindex="-1"><h3><svg class="hglyph"')
+        ev = self.events
+        self.assertIn("ArrowDown", ev)
+        self.assertRegex(ev, r'<section class="ev" id="[^"]+" data-sec="\w+" tabindex="-1"><h3><svg class="hglyph"')
+        # Filter bar, table view by default with a cards toggle, sortable columns, shareable state in the hash.
+        for needle in ('<input type="checkbox" name="sec" value="ov" checked>', 'id="fdir"', 'id="fchg"', 'id="fwho"',
+                       'id="fq"', 'id="fview"', 'id="fshown"', '<table class="evt" id="evt">', '<div id="cards" hidden>',
+                       'data-sort="readers"', 'data-sort="behaviour"', "URLSearchParams", "' events shown'"):
+            self.assertIn(needle, ev)
+        self.assertEqual(ev.count('<tr class="er"'), ev.count('<section class="ev"'))
 
     def test_validation_page_and_links(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -223,12 +240,14 @@ class ViewFixtureTest(unittest.TestCase):
     def test_plain_labels_and_axis(self):
         self.assertIn('<option value="self_then_library">Own idea, then library</option>', self.index)
         self.assertIn('data-source="self_then_library"', self.index)
-        self.assertIn("Source: Overseer, then library", self.index)
+        self.assertIn("Source of the fake: Overseer, then library", self.index)
         self.assertNotIn("flag(s)", self.index)
         self.assertRegex(self.index, r'<span class="badge b-caution" title="[^"]+">\d+ consistency flags?</span>')
         self.assertEqual(view.model_label("google/gemini-3.8-flash"), "Gemini 3.8 Flash")
         self.assertEqual(view.model_label("openai/gpt-6-luna"), "GPT-6 Luna")
-        self.assertEqual(view._shown("submitted_at", 20.259), "20.3")
+        self.assertEqual(view._shown("submitted_at", 20.259), "20.3 min")
+        self.assertEqual(view._shown("credited", True), "yes")
+        self.assertEqual(view._shown("stop_cause_event_ids", ["B1:post-000006"]), "board post post-000006")
         self.assertEqual(view._shown("count", 2.5), 2.5)
         a = {"items": [{"t": 181.7}], "thoughts": [], "stage3": None}
         self.assertEqual(view.axis_max({"x": a}), 180.0)  # a few seconds past the run's end: same axis
@@ -274,6 +293,107 @@ class ViewFixtureTest(unittest.TestCase):
         self.assertEqual(view.load_taxonomy(self.tmp / "missing.md"), {})
 
 
+# Raw names that must never be visible text: event type codes used as labels, and the timeline's field names.
+RAW_EVENT = re.compile(r"\bevent [LPBDSOCN][12]\b|\b[LPBDSOCN][12]:[\w/.-]")
+RAW_FIELDS = ("task_id", "submission_id", "public_id", "post_id", "message_id", "intent_type", "posted_at",
+              "submitted_at", "judged_at", "reverted_at", "task_status_at_submission", "open_count", "own_credit",
+              "reverted_before_read", "has_more", "fake_paths", "pre_tokens", "status_now", "credited_now",
+              "first_fake_t", "stop_cause_event_ids", "aware_cheating", "self_attributed", "registered:",
+              "source_integrity", "iffrfl_main", "problem_closed", "describes_trick", "revert_notice",
+              "toward_cheating", "self_then_library", "overseer_then_library", "has_trick", "believes_judge",
+              "compile_only", "checks_answer", "stage2_quotes", "stage1_quotes", "not_found", "wrong_item")
+
+
+def visible_ui(page):
+    """The page's visible text and tooltips, without quotes, event texts, model prose and code definitions (those
+    are the agents' or the models' own words, or the taxonomy's, shown as they are)."""
+    page = re.sub(r"<(script|style|blockquote|pre)\b.*?</\1>", " ", page, flags=re.S)
+    page = re.sub(r'<p class="(story|def)">.*?</p>|<details class="code">.*?</details>', " ", page, flags=re.S)
+    page = re.sub(r"<p>(Why|E4 [^:]*|What it did next|Reader note|Caused by[^:]*):.*?</p>", " ", page, flags=re.S)
+    page = re.sub(r"<li>[^<]*(?:Stage-1 quotes|Stage-2 quotes|Stopped faking)[^<]*</li>", " ", page)
+    # Model prose: consistency flags (list and badge tooltip), stage-1 summaries, the story as a link tooltip.
+    page = re.sub(r"<h3>Consistency flags</h3>.*?</ul>", " ", page, flags=re.S)
+    page = re.sub(r'title="Consistency flags:[^"]*"|<a href="[^"]*" title="[^"]*">', " ", page)
+    page = re.sub(r"<td>[^<]*</td></tr>", " ", page)  # the last column: a reader's summary or a reaction's reason
+    titles = " ".join(t for t in re.findall(r'title="([^"]*)"', page)
+                      if not t.startswith(("Thought ", "Position")) and not re.match(r"[A-G]\d{0,2} ", t))
+    text = re.sub(r"<title>(Thought |Position)[^<]*</title>", " ", page)
+    return re.sub(r"<[^>]+>", " ", text) + " " + titles
+
+
+class NoRawNamesTest(unittest.TestCase):
+    """No raw event code or raw field name appears as visible text or a tooltip, in either mode."""
+
+    def check(self, out):
+        for path in sorted(out.rglob("*.html")):
+            if path.name == "taxonomy.html":
+                continue  # the taxonomy itself defines the event codes
+            ui = visible_ui(path.read_text())
+            self.assertIsNone(RAW_EVENT.search(ui), (path.name, RAW_EVENT.search(ui)))
+            for raw in RAW_FIELDS:
+                self.assertNotIn(raw, ui, (path.name, raw))
+            self.assertNotIn("reader(s)", ui)
+            self.assertNotIn("Stage-2 reaction</b>", ui)
+
+    def test_generic_and_named(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            shutil.copytree(FIX / "map", tmp / "map")
+            (tmp / "map" / "validation.md").write_text(
+                "| check | ok |\n|---|---|\n| first_fake_t | 1 |\n| stage1_quotes | 2 |\n\n"
+                "- agent-001 stage2_quotes (fail): B1:post-000006: quote not_found at item 3: 'x'\n")
+            for tax, sub in ((None, "generic"), (view.DEFAULT_TAXONOMY, "named")):
+                view.build(tmp / "map", FIX / "timeline", tmp / sub, taxonomy=tax)
+                self.check(tmp / sub)
+
+    def test_detector_catches_raw_names(self):
+        self.assertTrue(RAW_EVENT.search(visible_ui('<span class="badge">event S1</span>')))
+        self.assertTrue(RAW_EVENT.search(visible_ui("<h3>1.0 min · B1:post-000003</h3>")))
+        self.assertIn("task_id", visible_ui("<dl><dt>task_id</dt><dd>x</dd></dl>"))
+        self.assertNotIn("task_id", visible_ui("<blockquote>task_id</blockquote>"))
+
+
+class ViewTaxonomyTest(unittest.TestCase):
+    """With the public taxonomy (owner, November 2, 2026): names, definitions and the codes page on every page."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp())
+        view.build(FIX / "map", FIX / "timeline", cls.tmp, taxonomy=view.DEFAULT_TAXONOMY)
+        cls.page = (cls.tmp / "agents" / "agent-003.html").read_text()
+        cls.names = view.load_taxonomy(view.DEFAULT_TAXONOMY)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_codes_page_and_nav(self):
+        tax = (self.tmp / "taxonomy.html").read_text()
+        for code in ("A1", "C6", "D11", "F3", "G2", "E1"):
+            self.assertIn(f'id="code-{code}"', tax)
+        self.assertIn('id="event-L2"', tax)
+        self.assertNotIn("researcher-only", tax.lower())
+        for rel in ("index.html", "events.html", "agents/agent-003.html"):
+            self.assertIn(">Codes</a>", (self.tmp / rel).read_text())
+
+    def test_names_and_definitions_in_place(self):
+        page = self.page
+        self.assertIn(f">Thought C: {self.names['C']}</text>", page)  # lane label with the group name
+        self.assertIn("<h4>What it thought: code groups</h4>", page)
+        self.assertIn(f"<b>C6</b> {html.escape(self.names['C6'], quote=False)}", page)
+        self.assertIn('href="../taxonomy.html#code-C6"', page)
+        self.assertRegex(page, r'<p class="def">C6 [^<]+: [^<]+</p>')  # the definition in the panel article
+        self.assertRegex(page, r'data-k="th-\d+"[^>]*><title>Thought C6 [^<]*\n\nC6 ')  # and in the tooltip
+        for text in ((self.tmp / "index.html").read_text(), (self.tmp / "events.html").read_text()):
+            self.assertIn("<h4>What it thought: code groups</h4>", text)
+            self.assertIn('href="taxonomy.html#code-A1"', text)
+
+    def test_reaction_codes_named(self):
+        self.assertIn(f"E1 {self.names['E1']}: ", self.page)
+        self.assertIn("F3 ", self.page)
+        self.assertNotIn("overseer check 3", self.page)
+
+
 class ViewPartialInputTest(unittest.TestCase):
     def test_timeline_only_and_wrapped_and_flat_dirs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -288,9 +408,9 @@ class ViewPartialInputTest(unittest.TestCase):
             view.build(mp, flat, tmp / "out", taxonomy=None)
             page = (tmp / "out" / "agents" / "agent-002.html").read_text()
             self.assertIn("Not available for this agent: stage-2 reactions, a stage-3 summary.", page)
-            self.assertIn("stage-1 states (no stage 3)", page)
+            self.assertIn("stage-1 reading (no stage-3 reading)", page)
             self.assertIn("could not be read and are left out", page)
-            self.assertIn("No reading", (tmp / "out" / "index.html").read_text())
+            self.assertIn("No final reading", (tmp / "out" / "index.html").read_text())
             self.assertTrue((tmp / "out" / "agents" / "agent-005.html").is_file())
 
     def test_cli(self):

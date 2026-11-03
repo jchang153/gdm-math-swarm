@@ -1693,3 +1693,12 @@ names stay local) and the validation summary (`validation.md`, without the path 
 reference) go public, plus a "Story map" tab on each run page. Timelines, stage 1-3 records, units, raw
 archives, cross-check, bake-off, `map.jsonl`, `pipeline.json` and budgets stay local
 (`scripts/storymap_site.py`; `publish_cloudflare.py storymap`).
+
+Owner (November 2, 2026): the story-map taxonomy (codes, names, definitions, examples) is public, published as
+taxonomy.html with each story map; stage prompts and references stay private. The earlier researcher-only marking
+was the agent's own analogy to rubrics, not an owner instruction. (This replaces the `--taxonomy ''` rendering
+above: the public copy `research/analysis/storymap/taxonomy.md` is the default taxonomy of
+`research/analysis/storymap/view.py`; names and definitions appear in place on every page; the guard in
+`scripts/storymap_site.py` allows them and taxonomy.html and still refuses private/ paths, prompt text, host paths
+and credential-shaped strings. The private original `private/research/analysis/storymap/taxonomy.md` is unchanged
+and still the one the pipeline reads.)

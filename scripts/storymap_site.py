@@ -2,10 +2,13 @@
 
 Owner decision, November 2, 2026 (docs/plan.md, "Story maps on the public site (November 2, 2026)"): the story map
 pages of research/analysis/storymap/view.py are published. Only the pages and the validation summary go to the site:
-RUN/analysis/storymap/index.html, events.html, validation.html, validation.md and agents/<agent>.html. Everything
+RUN/analysis/storymap/index.html, events.html, validation.html, validation.md, taxonomy.html and agents/<agent>.html.
+Owner, November 2, 2026 (docs/plan.md): the taxonomy (codes, names, definitions, examples) is public; its committed
+copy research/analysis/storymap/taxonomy.md is rendered as taxonomy.html and its names appear on every page. Everything
 else in the folder stays local: the stage-0 timelines (timeline/, a private category), stage1/-stage3/, units/,
-raw/, crosscheck/, bakeoff/, map.jsonl, pipeline.json, validation.json and run-budgets.json. The pages are rendered
-for the site with ``--taxonomy ''`` (code letters only; the researcher-only taxonomy names stay local), and the
+raw/, crosscheck/, bakeoff/, map.jsonl, pipeline.json, validation.json and run-budgets.json. The stage prompts
+(private/.../prompts.md), INTERFACE.md and the hand-label references stay private: a page quoting a prompt line that is
+not also taxonomy text is refused, as are host paths, paths into private/ and credential-shaped strings. The
 validation summary loses the path of the private hand-label reference. The run page (results.html) gains a
 "Story map" tab before Inspect. No model calls, network or credentials.
 """
@@ -16,7 +19,7 @@ import re
 from incident_site import _insert
 
 STORYMAP_DIR = 'analysis/storymap'
-STORYMAP_FILES = ('index.html', 'events.html', 'validation.html', 'validation.md')
+STORYMAP_FILES = ('index.html', 'events.html', 'validation.html', 'validation.md', 'taxonomy.html')
 AGENT_PAGE = re.compile(r'agents/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.html')
 STORYMAP_INDEX = STORYMAP_DIR + '/index.html'
 STORYMAP_LABEL = 'Story map'
@@ -26,9 +29,14 @@ STORYMAP_HELP = ('Per-agent map of reasoning about cheating next to what each ag
 TAB_MARKER = 'data-tab="storymap"'
 TAB = f'<a {TAB_MARKER} href="{STORYMAP_INDEX}">{STORYMAP_LABEL}</a>'
 HELP = f'<li {TAB_MARKER}><strong>{STORYMAP_LABEL}</strong>: {html.escape(STORYMAP_HELP)}</li>'
-# A public story map page carries no researcher-only taxonomy names (rendered with --taxonomy ''): every thought
-# lane is labelled "What it thought: X" (older pages: "thought X: codes"); a name after the letter is refused.
-TAXONOMY_LANE = re.compile('>thought [A-G]: (?!codes<)|>What it thought: [A-G] \u00b7')
+REPO = Path(__file__).resolve().parents[1]
+PROMPTS = REPO / 'private' / 'research' / 'analysis' / 'storymap' / 'prompts.md'
+PUBLIC_TAXONOMY = REPO / 'research' / 'analysis' / 'storymap' / 'taxonomy.md'
+PROMPT_LINE_MIN = 40  # a prompt line this long (stripped) that is not taxonomy text must not appear on a page
+# Credential-shaped strings (provider keys, tokens, private keys): never on a published page.
+SECRET = re.compile(rb'sk-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{10,}|hf_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}'
+                    rb'|AIza[0-9A-Za-z_-]{35}|gh[pousr]_[A-Za-z0-9]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}'
+                    rb'|-----BEGIN [A-Z ]*PRIVATE KEY-----')
 # Host paths never appear in a published file. The agents' own container home (/home/researcher, quoted from
 # their transcripts) is not a host path and may appear.
 HOST_PATH = re.compile(rb'/(?:Users|private/tmp|private/var|var/folders)/')
@@ -61,23 +69,39 @@ def public_copy(relative, data):
     return data
 
 
-def page_problems(relative, data, names, taxonomy=()):
-    """Why a story map file may not be published (empty if it may). ``names``: the published folder's files;
-    ``taxonomy``: {code: researcher-only name}; a name labelling its code (``C1: name``, ``C1 &middot; name``) is
-    refused (names are never echoed in the result; an agent quote that happens to contain one is allowed)."""
+def prompt_lines(prompts=PROMPTS, taxonomy=PUBLIC_TAXONOMY):
+    """Stripped lines of the private stage prompts (at least PROMPT_LINE_MIN characters) that are not public
+    taxonomy text; empty when this checkout has no prompts file."""
+    try:
+        lines = Path(prompts).read_text(encoding='utf-8').splitlines()
+    except OSError:
+        return frozenset()
+    try:
+        public = Path(taxonomy).read_text(encoding='utf-8')
+    except OSError:
+        public = ''
+    return frozenset(s for s in (x.strip() for x in lines)
+                     if len(s) >= PROMPT_LINE_MIN and s not in public and not s.startswith(('#', '|', '```')))
+
+
+def page_problems(relative, data, names, taxonomy=(), prompts=None):
+    """Why a story map file may not be published (empty if it may). ``names``: the published folder's files.
+    ``taxonomy`` is accepted for older callers and ignored: the taxonomy is public (owner, November 2, 2026).
+    ``prompts``: private prompt lines (default: prompt_lines()); a page holding one, raw or HTML-escaped, is refused
+    (the line is never echoed in the result)."""
     problems = []
     if HOST_PATH.search(data):
         problems.append('host path')
     if PRIVATE_PATH.search(data):
         problems.append('path into private/')
+    if SECRET.search(data):
+        problems.append('credential-shaped string')
     text = data.decode('utf-8', 'replace')
-    if any(name and re.search(r'\b' + re.escape(code) + r'(?::|\s*(?:&middot;|\u00b7|[-\u2013\u2014]))\s*'
-                              + re.escape(html.escape(name, quote=False)), text)
-           for code, name in dict(taxonomy).items()):
-        problems.append('researcher-only taxonomy name next to its code')
+    lines = prompt_lines() if prompts is None else prompts
+    if any(line in text or html.escape(line, quote=True) in text or html.escape(line, quote=False) in text
+           for line in lines):
+        problems.append('text of the private stage prompts')
     if relative.endswith('.html'):
-        if TAXONOMY_LANE.search(text):
-            problems.append('researcher-only taxonomy names (render with --taxonomy \'\')')
         folder = relative.rsplit('/', 1)[0] + '/' if '/' in relative else ''
         for url in HREF.findall(text):
             if not url or re.match(r'[a-z][a-z0-9+.-]*:|//', url, re.I):

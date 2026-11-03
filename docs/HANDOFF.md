@@ -932,6 +932,11 @@ is being merged into main via `collab-env`.
        "4 runs have an agent story map". `publish_cloudflare.py catalogue` re-renders only index.html and
        experiments.json; every catalogue render links a run's story map exactly when its pages are on the site
        (`build_experiment_index.with_storymap_link`; tests `tests/test_catalogue_storymap.py`).
+   - **Taxonomy public, jargon audit, events filters (owner, Nov 2, docs/plan.md):** pages re-rendered with the public
+     taxonomy (`research/analysis/storymap/taxonomy.md`; `taxonomy.html` "Codes" in every nav; names and definitions
+     in place), plain labels for every event code and field, one time format, a glossary, and an events page with a
+     filter bar and a sortable table (cards on a toggle). Receipt `storymap-20261102c.json` (deployment 44b373e5);
+     livecheck 420/420 files match. Taxonomy: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-1ov-glm-180m-notices-r2-20261028T194542Z/analysis/storymap/taxonomy
    - Open: the library vs self_then_library split is the weak point (the stage-3 prompt or the reference
      normalization may need a look); the first pass's Sonnet stage-2/3 rows were superseded by Terra (units kept).
 

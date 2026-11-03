@@ -41,7 +41,8 @@ def storymap_folder(root, **extra):
 class AllowlistTests(unittest.TestCase):
     def test_only_pages_and_validation_are_published(self):
         keep = ['analysis/storymap/index.html', 'analysis/storymap/events.html', 'analysis/storymap/validation.md',
-                'analysis/storymap/validation.html', 'analysis/storymap/agents/agent-001.html']
+                'analysis/storymap/validation.html', 'analysis/storymap/taxonomy.html',
+                'analysis/storymap/agents/agent-001.html']
         drop = ['analysis/storymap/map.jsonl', 'analysis/storymap/pipeline.json', 'analysis/storymap/validation.json',
                 'analysis/storymap/run-budgets.json', 'analysis/storymap/timeline/agent-001.jsonl',
                 'analysis/storymap/stage2/agent-001.json', 'analysis/storymap/raw/x.json',
@@ -66,17 +67,35 @@ class AllowlistTests(unittest.TestCase):
 
     def test_public_files_refuses_problems(self):
         cases = {'agents/agent-001.html': AGENT + '<p>/Users/someone/x</p>',
-                 'events.html': '<span>thought B: Secret group name</span>',
-                 'index.html': INDEX + '<a href="timeline/agent-001.jsonl">t</a>'}
+                 'events.html': '<p>see private/research/analysis/storymap/prompts.md</p>',
+                 'index.html': INDEX + '<a href="timeline/agent-001.jsonl">t</a>',
+                 'taxonomy.html': '<p>key sk-ant-' + 'a' * 30 + '</p>'}
         for name, text in cases.items():
             with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ValueError, msg=name):
                 sm.public_files(storymap_folder(Path(tmp), **{name: text}))
-        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ValueError):
-            sm.public_files(storymap_folder(Path(tmp), **{'events.html': 'thought C1 &middot; Hidden Title'}),
-                            taxonomy={'C1': 'Hidden Title'})
-        with tempfile.TemporaryDirectory() as tmp:  # an agent quote that happens to contain a name is allowed
-            sm.public_files(storymap_folder(Path(tmp), **{'events.html': '<blockquote>Hidden Title: x</blockquote>'}),
-                            taxonomy={'C1': 'Hidden Title'})
+        # The taxonomy is public (owner, November 2, 2026): names next to their codes and taxonomy.html are allowed.
+        with tempfile.TemporaryDirectory() as tmp:
+            files = sm.public_files(storymap_folder(Path(tmp), **{
+                'events.html': '<span>thought C1 &middot; Calls it cheating</span><a href="taxonomy.html#code-C1">c</a>',
+                'taxonomy.html': '<h3 id="code-C1">C1 - Calls it cheating</h3><a href="index.html">i</a>'}),
+                taxonomy={'C1': 'Calls it cheating'})
+            self.assertIn('taxonomy.html', files)
+
+    def test_prompt_text_is_refused(self):
+        line = 'Return one JSON object with exactly these keys and nothing else around it.'
+        self.assertEqual(sm.page_problems('index.html', f'<p>{line}</p>'.encode(), {'index.html'}, prompts={line}),
+                         ['text of the private stage prompts'])
+        escaped = 'Quote the agent\'s words "verbatim" and never paraphrase anything at all here.'
+        import html as _html
+        page = f'<p>{_html.escape(escaped)}</p>'.encode()
+        self.assertTrue(sm.page_problems('index.html', page, {'index.html'}, prompts={escaped}))
+        self.assertEqual(sm.page_problems('index.html', b'<p>ok</p>', {'index.html'}, prompts={line}), [])
+        with tempfile.TemporaryDirectory() as tmp:  # taxonomy text that the prompts also carry is not prompt text
+            tmp = Path(tmp)
+            (tmp / 'p.md').write_text('# Prompt\n' + line + '\nThe agent cites others\' use or acceptance as a reason.\n')
+            (tmp / 't.md').write_text('The agent cites others\' use or acceptance as a reason.\n')
+            self.assertEqual(sm.prompt_lines(tmp / 'p.md', tmp / 't.md'), frozenset({line}))
+            self.assertEqual(sm.prompt_lines(tmp / 'missing.md', tmp / 't.md'), frozenset())
 
     def test_tab_before_inspect_and_idempotent(self):
         page = sm.add_storymap_tab(RESULTS)
