@@ -123,10 +123,33 @@ def build(runs, hosted=False, unlisted=None):
             # Model-written incident report (docs/plan.md, October 21, 2026); only its allowlisted files are published.
             if has_incident_report(path.parent):
                 entry['links'] = with_incident_link(entry['links'], path.parent.name)
+            if (path.parent / STORYMAP_TARGET).is_file():
+                entry['links'] = with_storymap_link(entry['links'], path.parent.name)
             entries.append(entry)
         except (ValueError, KeyError, TypeError, OSError) as error:
             warnings.append(f'{path.parent.name}: {type(error).__name__}')
     return {**write_index(runs, entries, warnings, hosted=hosted), 'unlisted': hidden}
+
+
+# Agent story map (owner, November 2, 2026; docs/plan.md "Story maps on the public site"): a "Story map" link for
+# runs whose RUN/analysis/storymap/index.html exists (locally, or on the Cloudflare site: publish_cloudflare).
+STORYMAP_LABEL = 'Story map'
+STORYMAP_TARGET = 'analysis/storymap/index.html'
+
+
+def with_storymap_link(links, run, present=True):
+    """Catalogue links with 'Story map' placed before the raw Inspect log link(s) (else last) when ``present``;
+    without it otherwise. Any earlier story map link is replaced."""
+    out, placed = {}, not present
+    for label, url in links.items():
+        if label == STORYMAP_LABEL:
+            continue
+        if not placed and (label == 'Inspect logs' or label.startswith('Inspect log ')):
+            out[STORYMAP_LABEL], placed = quote(run, safe='') + '/' + STORYMAP_TARGET, True
+        out[label] = url
+    if not placed:
+        out[STORYMAP_LABEL] = quote(run, safe='') + '/' + STORYMAP_TARGET
+    return out
 
 
 def judge_summary(report):
@@ -440,6 +463,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
                    + f'><button type="button">{esc(t)}</button></th>' if k else
                    f'<th scope="col">{"<span class=sr>Select</span>" if not t else esc(t)}</th>' for t, k in headers)
     groups = series_groups(entries)
+    mapped = sum(1 for e in entries if STORYMAP_LABEL in e['links'])
     stats = [('Runs', len(entries)), ('Series', len(groups)), ('Agents run', sum(int(e['agents']) for e in entries)),
              ('Models', len({e['model'] for e in entries}))]
     select = lambda id_, label, first, extra='': (  # noqa: E731
@@ -452,7 +476,9 @@ def write_index(runs, entries, warnings=(), *, hosted=False):
             + (live_section(entries) if hosted else '') +
             '<section class="block runs" id="runs-top"><div class="runs-head"><h2>Runs</h2>'
             f'<p class="sub">{len(entries)} saved experiment{"" if len(entries) == 1 else "s"} in {len(groups)} series, '
-            'newest first. Tick 2 to 4 runs to compare them side by side.</p></div>'
+            'newest first. Tick 2 to 4 runs to compare them side by side.'
+            + (f' {mapped} run{"" if mapped == 1 else "s"} {"has" if mapped == 1 else "have"} an agent story map '
+               '(the Story map link).' if mapped else '') + '</p></div>'
             + catalogue_intro.toc([(k, t, len(es)) for k, t, _, es in groups]) +
             '<div class="controls"><div class="toolbar">'
             '<label class="grow"><span class="sr">Find</span><input id="filter" type="search" '

@@ -85,6 +85,10 @@ read-only unless `--commit` is given; there are no approval prompts or extra spe
   taxonomy name next to its code or link to an unpublished file refuses the run. Earlier story map pages of the
   run are replaced (stale ones removed) and `results.html` gains a "Story map" tab; nothing else changes.
   `prepare_hf_library.py` applies the same allowlist and screens to a run's `analysis/storymap/`.
+- `catalogue [--commit] [--receipt FILE]` (November 2, 2026): re-render only the catalogue (`index.html`,
+  `experiments.json`) from its entries. Every catalogue render (this one, `publish`, `restyle`, `withdraw`,
+  `mirror-space`) gives an entry a "Story map" link exactly when `RUN/analysis/storymap/index.html` is on the site,
+  and the run list's line notes how many runs have one. No run file changes.
 - `verify [--url URL] [--run RUN ...] [--full]`: read-only; the served site against its `site-manifest.json`:
   manifest served; each checked file (all pages, `results.json` and `listing.json`, root files; every file with
   `--full`) with HTTP 200 and its exact recorded bytes, pages as `text/html`; no private file recorded; a probe of

@@ -927,6 +927,11 @@ is being merged into main via `collab-env`.
      - 1ov r2: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-1ov-glm-180m-notices-r2-20261028T194542Z/analysis/storymap/index.html
      - 2ov r3: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-2ov-glm-180m-notices-r3-20261028T194422Z/analysis/storymap/index.html
      - 10ov r3: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-10ov-glm-180m-notices-r3-20261028T194533Z/analysis/storymap/index.html
+     - Main page (owner, Nov 2: "accessible from the main page"): https://gdm-math-swarm-experiments.pages.dev/ links
+       each of the four as "Story map" (card and table links, before the Inspect logs) and the run list's line says
+       "4 runs have an agent story map". `publish_cloudflare.py catalogue` re-renders only index.html and
+       experiments.json; every catalogue render links a run's story map exactly when its pages are on the site
+       (`build_experiment_index.with_storymap_link`; tests `tests/test_catalogue_storymap.py`).
    - Open: the library vs self_then_library split is the weak point (the stage-3 prompt or the reference
      normalization may need a look); the first pass's Sonnet stage-2/3 rows were superseded by Terra (units kept).
 

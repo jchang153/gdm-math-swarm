@@ -34,6 +34,9 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
     publish_cloudflare.py withdraw --run RUN [--run RUN ...] [--commit] [--receipt FILE]
         Remove runs already recorded in data/library-unlisted.json from the site (every file of each run; the
         catalogue is re-rendered without them). Other runs never change; private copies are untouched.
+    publish_cloudflare.py catalogue [--commit] [--receipt FILE]
+        Re-render only the catalogue (index.html, experiments.json) from its entries; each entry's "Story map" link
+        follows whether RUN/analysis/storymap/index.html is on the site. No run file changes.
     publish_cloudflare.py storymap --run RUN=PAGES_DIRECTORY [--run ...] [--commit] [--receipt FILE]
         Add (or refresh) the agent story map of runs already on the site (owner, November 2, 2026): only the
         allowlisted pages of PAGES_DIRECTORY (``storymap_site``: index.html, events.html, validation.html/.md,
@@ -70,7 +73,8 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_experiment_index import unlisted_runs, write_index  # noqa: E402
+from build_experiment_index import (STORYMAP_LABEL, STORYMAP_TARGET, unlisted_runs,  # noqa: E402
+                                    with_storymap_link, write_index)
 import dataset_logs  # noqa: E402
 import hf_visibility  # noqa: E402
 import site_layout  # noqa: E402
@@ -492,8 +496,14 @@ def run_of(name):
     return name.split('/')[0] if '/' in name else None
 
 
-def render_catalogue(entries, unlisted):
+def render_catalogue(entries, unlisted, files=None):
+    """The catalogue pages; with ``files`` (the site after the change), each entry's Story map link follows
+    whether RUN/analysis/storymap/index.html is on the site."""
     entries = [x for x in entries if x['run'] not in unlisted]
+    if files is not None:
+        entries = [{**e, 'links': with_storymap_link(e['links'], e['run'], f'{e["run"]}/{STORYMAP_TARGET}' in files)}
+                   if (STORYMAP_LABEL in e['links']) != (f'{e["run"]}/{STORYMAP_TARGET}' in files) else e
+                   for e in entries]
     with tempfile.TemporaryDirectory() as tmp:
         write_index(tmp, entries, hosted=True)
         return {name: (Path(tmp) / name).read_bytes() for name in ('index.html', 'experiments.json')}
@@ -531,7 +541,7 @@ def plan_mirror(base_files, space, revision, unlisted):
     preserved = sorted({run_of(n) for n in kept})
     if preserved:  # another collaborator's runs published only on the site: keep their catalogue entries
         site_only = [e for e in catalogue(base_files) if e['run'] in preserved]
-        files.update(render_catalogue(merge_entries(catalogue(space), site_only), unlisted))
+        files.update(render_catalogue(merge_entries(catalogue(space), site_only), unlisted, files))
     changed = sorted(n for n in space if run_of(n) and n in base_files and base_files[n] != space[n])
     removed = sorted(n for n in base_files if n not in files and n not in GENERATED)  # run files the Space removed
     return files, {'source': {'kind': 'hf-space', 'repo': hf_visibility.SPACE_REPO, 'revision': revision},
@@ -611,7 +621,7 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
             if new != old:
                 raise ValueError('Immutable site run file differs: ' + run + '/' + PACK_FOLDER)
     entries = merge_entries(catalogue(base_files), incoming)
-    files.update(render_catalogue(entries, unlisted))
+    files.update(render_catalogue(entries, unlisted, files))
     if 'archive-manifest.json' in base_files:  # the HF-origin run record; new runs are recorded in site-manifest
         files['archive-manifest.json'] = base_files['archive-manifest.json']
     return files, {'source': {'kind': 'bundle', 'runs': sorted(selected),
@@ -644,7 +654,7 @@ def plan_restyle(base_files, unlisted, runs=None):
             continue
         replaced.append({'path': name, 'old': digest(old), 'new': digest(new)})
         files[name] = new
-    files.update(render_catalogue(catalogue(base_files), unlisted))
+    files.update(render_catalogue(catalogue(base_files), unlisted, files))
     return files, {'source': {'kind': 'restyle', 'runs': sorted(runs) if runs else 'all'},
                    'replaced_pages': replaced, 'unthemed_pages_left_as_served': legacy}
 
@@ -667,7 +677,7 @@ def plan_withdraw(base_files, unlisted, runs):
         raise ValueError('Record the run(s) in data/library-unlisted.json first: ' + ', '.join(unrecorded))
     removed = sorted(n for n in base_files if run_of(n) in runs)
     files = {n: d for n, d in base_files.items() if run_of(n) not in runs}
-    files.update(render_catalogue(catalogue(base_files), unlisted))
+    files.update(render_catalogue(catalogue(base_files), unlisted, files))
     return files, {'source': {'kind': 'withdraw', 'runs': runs},
                    'removed_files': len(removed),
                    'removed_by_run': {r: sum(1 for n in removed if run_of(n) == r) for r in runs}}
@@ -711,6 +721,16 @@ def plan_storymap(base_files, unlisted, folders, taxonomy=()):
     return files, {'source': {'kind': 'storymap', 'runs': sorted(folders)}, 'added_files': len(added),
                    'replaced_pages': replaced, 'removed_files': removed,
                    'added_by_run': {r: sum(1 for n in added if run_of(n) == r) for r in sorted(folders)}}
+
+
+def plan_catalogue(base_files, unlisted):
+    """The site with only its catalogue re-rendered from its entries (index.html and experiments.json; Story map
+    links follow the story map pages on the site). No run file changes."""
+    files = dict(base_files)
+    files.update(render_catalogue(catalogue(base_files), unlisted, base_files))
+    changed = sorted(n for n in ('index.html', 'experiments.json') if base_files.get(n) != files[n])
+    return files, {'source': {'kind': 'catalogue'}, 'changed_files': changed,
+                   'storymap_links': sorted(e['run'] for e in catalogue(files) if STORYMAP_LABEL in e['links'])}
 
 
 def plan_repack(base_files):
@@ -957,7 +977,8 @@ def main(argv=None):
     story = sub.add_parser('storymap', help='add the agent story map pages to runs already on the site')
     story.add_argument('--run', action='append', required=True,
                        help='RUN=PAGES_DIRECTORY (the public render, --taxonomy \'\'); repeatable')
-    for command in (mirror, bundle, restyle, withdraw, repack, story):
+    cat = sub.add_parser('catalogue', help='re-render only the catalogue (index.html, experiments.json)')
+    for command in (mirror, bundle, restyle, withdraw, repack, story, cat):
         command.add_argument('--commit', action='store_true', help='deploy; otherwise only plan')
         command.add_argument('--receipt', type=Path, help='receipt JSON (outside the bundle)')
         command.add_argument('--workdir', type=Path, help='scratch directory for staging (default: a temporary one)')
@@ -1002,6 +1023,9 @@ def main(argv=None):
         elif args.command == 'repack':
             files, plan = plan_repack(base_files)
             message = f'Repack per-agent files of {len(plan["source"]["runs"])} run(s)'
+        elif args.command == 'catalogue':
+            files, plan = plan_catalogue(base_files, unlisted)
+            message = 'Re-render the catalogue'
         elif args.command == 'storymap':
             folders = dict(spec.split('=', 1) for spec in args.run)
             files, plan = plan_storymap(base_files, unlisted, folders, storymap_taxonomy())
