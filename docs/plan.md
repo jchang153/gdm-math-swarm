@@ -1666,3 +1666,10 @@ switches the stage-1 model).
 
 Owner (November 2, 2026): run all four in parallel once the build is done (no separate pilot gate). The
 10-agent stage-1 model comparison still runs first, inside the 1-overseer run's $50 budget.
+
+Owner (November 2, 2026, evening): finish all four story maps "no matter the cost" after Sonnet 5.5
+refused most stage-2 requests (Anthropic filter, transcripts flagged as "reverse engineering or
+duplicating model outputs"). Models from here: stage 1 Claude Haiku 5.5 (unchanged), stages 2-3 GPT-5.6
+Terra, cross-check Gemini 3.8 Flash on a seeded 10%. A spending limit is still required per paid
+invocation, so each run's story-map budget is set to **$200 total** (including the ~$50 already
+settled into the same output folder), chosen to be well above the estimated $20-30 needed to finish.
