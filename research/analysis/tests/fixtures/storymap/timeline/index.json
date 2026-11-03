@@ -1,0 +1,26 @@
+{
+ "agent-001": {
+  "items": 30,
+  "est_tokens": 1418,
+  "first_min": 0.0,
+  "last_min": 25.0,
+  "role": "solver",
+  "source": "session_jsonl"
+ },
+ "agent-002": {
+  "items": 19,
+  "est_tokens": 776,
+  "first_min": 0.0,
+  "last_min": 31.0,
+  "role": "solver",
+  "source": "session_jsonl"
+ },
+ "agent-003": {
+  "items": 13,
+  "est_tokens": 357,
+  "first_min": 0.0,
+  "last_min": 41.0,
+  "role": "solver",
+  "source": "session_jsonl"
+ }
+}

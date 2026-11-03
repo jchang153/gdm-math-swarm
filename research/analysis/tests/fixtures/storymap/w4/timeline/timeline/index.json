@@ -1,0 +1,37 @@
+{
+ "agent-001": {
+  "items": 19,
+  "est_tokens": 760,
+  "first_min": 2,
+  "last_min": 150,
+  "role": "solver"
+ },
+ "agent-002": {
+  "items": 18,
+  "est_tokens": 720,
+  "first_min": 4,
+  "last_min": 90,
+  "role": "solver"
+ },
+ "agent-003": {
+  "items": 20,
+  "est_tokens": 800,
+  "first_min": 3,
+  "last_min": 152,
+  "role": "solver"
+ },
+ "agent-004": {
+  "items": 25,
+  "est_tokens": 1000,
+  "first_min": 2,
+  "last_min": 170,
+  "role": "solver"
+ },
+ "agent-005": {
+  "items": 14,
+  "est_tokens": 560,
+  "first_min": 1,
+  "last_min": 130,
+  "role": "solver"
+ }
+}

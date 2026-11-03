@@ -1,0 +1,2 @@
+{"i": 0, "t": 9.9, "ts": "2026-10-28T19:09:00Z", "turn": 0, "kind": "reasoning", "tool": null, "text": "Synthetic: this would game the check.", "event": null}
+{"i": 1, "t": 21.5, "ts": "2026-10-28T19:21:00Z", "turn": 1, "kind": "event", "tool": null, "text": "", "event": {"type": "S1", "id": "S1:sub-000141", "author": null, "author_role": null, "fake": false, "tags": [], "outcome": "rejected", "detail": {}}}

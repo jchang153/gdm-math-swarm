@@ -1,0 +1,10 @@
+{
+ "agent_id": "agent-002",
+ "role": "solver",
+ "sessions": [
+  {
+   "path": "/home/researcher/.agent/projects/-workspace/00000002-0000-4000-8000-000000000000.jsonl",
+   "session_id": "00000002-0000-4000-8000-000000000000"
+  }
+ ]
+}

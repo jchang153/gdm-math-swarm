@@ -1,0 +1,10 @@
+{
+ "run_id": "fixture-w4-synthetic",
+ "models": {
+  "stage1": "fake/stage1",
+  "stage2": "fake/stage2",
+  "stage3": "fake/stage3"
+ },
+ "rubric_sha256": {},
+ "cost_usd": 0.0
+}

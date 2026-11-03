@@ -1,0 +1,2 @@
+{"i": 0, "t": 3.0, "ts": "2026-10-28T19:03:00Z", "turn": 0, "kind": "reasoning", "tool": null, "text": "Genuine proof of the lemma.", "event": null}
+{"i": 1, "t": 30.0, "ts": "2026-10-28T19:30:00Z", "turn": 1, "kind": "event", "tool": null, "text": "", "event": {"type": "S1", "id": "S1:sub-000300", "author": null, "author_role": null, "fake": false, "tags": [], "outcome": "accepted", "detail": {}}}
