@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-04 13:15 PT by Claude (Opus 5.5) operator subagent (item 31: commsonly push runs prepared, blocked on gcloud login).
+Last updated: 2026-11-04 13:45 PT by Claude (Opus 5.5) operator subagent (item 31: 9 commsonly push runs launched).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1404,15 +1404,21 @@ is being merged into main via `collab-env`.
      `--replace-pages` by the run agent) has no Story map tab and no heatmap section in results.html although the
      catalogue links its story map and faking-heatmap.png is served.
 
-31. **BLOCKED 2026-11-04 13:15 PT (gcloud login expired): 9 push-delivery communication-only overseer runs** (owner
+31. **IN FLIGHT (launched 2026-11-04 13:27-13:34 PT): 9 push-delivery communication-only overseer runs** (owner
    decision 13:10 PT, docs/plan.md "Push-delivery communication-only overseers (November 4, 2026)"). Configs
    `configs/glmflash100-seeded-{1,2,10}ov-glm-120m-push-commsonly.json` (copies of the item 23 push configs; only
-   `experiment`, `overseer.powers` false (prompt A) and `overseer.note` differ); 3 replicates each, 120 min, $100 run
-   budget, simple judge; catalogue series `push120comms` ("120-minute communication-only overseers with pushed
-   messages", `scripts/run_profile.py`, before `push120`, whose pattern is now `-120m-push-r<digit>`). Not launched:
-   `gcloud compute` needs reauthentication (owner: `gcloud auth login`, account in `HANDOFF.local.md`). Then launch as
-   item 23 (one per owner VM, n2d-highmem-96, compat check + preflight, `supervise_run.py` in tmux), fetch core with
-   `fetch_keep`, stop + resize back, publish the core set (no story maps: not authorised), offload.
+   `experiment`, `overseer.powers` false (prompt A) and `overseer.note` differ); 120 min, $100 run budget, simple
+   judge; catalogue series `push120comms` ("120-minute communication-only overseers with pushed messages",
+   `scripts/run_profile.py`, before `push120`, whose pattern is now `-120m-push-r<digit>`). One per owner VM
+   (n2d-highmem-96; VM per run in `HANDOFF.local.md`); compat checks and preflight passed for all 9; `settings.json`
+   confirms `powers` false, `push_delivery` true, notices `["library"]`. Expected end ~15:35 PT plus post-processing.
+   Run ids (`glmflash100-seeded-` omitted), launch PT:
+   `10ov-glm-120m-push-commsonly-r1-20261104T212811Z` 13:28, `-r2-20261104T212755Z` 13:27, `-r3-20261104T212908Z` 13:29;
+   `2ov-glm-120m-push-commsonly-r1-20261104T212946Z` 13:29, `-r2-20261104T212922Z` 13:29, `-r3-20261104T212903Z` 13:29;
+   `1ov-glm-120m-push-commsonly-r1-20261104T213147Z` 13:31, `-r2-20261104T213422Z` 13:34, `-r3-20261104T212935Z` 13:29.
+   After the runs: operator scratchpad `pushc/post.sh` (wait for the core, `fetch_keep` without publishing, stop +
+   resize the VM back to n2-standard-64, heatmap) and `pushc/deployq.sh` (one bundle publish at a time under
+   `cf-deploy.lock`); then one heatmap and one catalogue deploy, `verify`, offload. No story maps (not authorised).
 
 ## Next steps / open items
 
