@@ -27,10 +27,12 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
         its entries. Only existing .html pages change; text, links, records and every other file stay as
         served, and each replacement is recorded with old and new digests.
     publish_cloudflare.py repack [--commit] [--receipt FILE]
-        Pack every run's per-agent instructions (instructions/, instructions/received/) and prompts (prompts/)
-        into RUN/packed/ (pack files with each file's exact bytes and SHA-256, an index and a viewer page); the
-        old URLs keep working (RUN/instructions/404.html, RUN/prompts/404.html: the viewer). Every deployment packs new runs the same way; unpacking is
-        checked to reproduce every original byte for byte.
+        Pack every run's folders of many files (``PACK_GROUPS``: per-agent instructions and prompts, the proof
+        checker's sources, story map agent pages, behavior judge per-agent files) into RUN/packed/ (pack files with
+        each file's exact bytes and SHA-256, an index and a viewer page); the old URLs keep working
+        (RUN/<group>/404.html: the viewer, which renders a packed page in place). Every deployment packs every run
+        the same way (plans work on the unpacked site); unpacking is checked to reproduce every original byte for
+        byte.
     publish_cloudflare.py withdraw --run RUN [--run RUN ...] [--commit] [--receipt FILE]
         Remove runs already recorded in data/library-unlisted.json from the site (every file of each run; the
         catalogue is re-rendered without them). Other runs never change; private copies are untouched.
@@ -206,31 +208,59 @@ def private_category(name):
     return dataset_logs.category('/'.join(parts[1:])) if len(parts) > 1 else None
 
 
-# --- per-agent file packs (owner, October 30, 2026: Pages' 20,000-file limit) ------------------------------
-# Each run's per-agent instructions (instructions/, instructions/received/) and prompts (prompts/) are about 300
-# small files per 100-agent run. They are deployed as a few pack files per run, RUN/packed/<folder>-NN.json, with
-# every file's exact bytes (UTF-8 text, else base64) and SHA-256, an index RUN/packed/index.json and a viewer page
-# RUN/packed/index.html. Old URLs keep working: RUN/instructions/404.html and RUN/prompts/404.html are copies of
-# the viewer, which Pages serves (HTTP 404, the URL unchanged) for any missing file below those folders; the viewer
-# reads the path and shows that file. (Pages' _redirects cannot substitute a placeholder into a query or a 200
-# rewrite, tested October 30, 2026, so no _redirects is used.)
-# Nothing is dropped: unpack(pack) reproduces every original file byte for byte (checked on every deployment).
-PACKED_DIRS = ('instructions', 'prompts')
+# --- run file packs (owner, October 30, 2026; extended November 3, 2026: Pages' 20,000-file limit) ----------
+# Folders of many small files per run are deployed as a few pack files per run, RUN/packed/<group>-NN.json (the
+# group's folder with "/" read as "-"), with every file's exact bytes (UTF-8 text, else base64) and SHA-256, one
+# index RUN/packed/index.json and a viewer page RUN/packed/index.html. October 30, 2026: the per-agent instructions
+# (instructions/, instructions/received/) and prompts (prompts/). November 3, 2026 (owner decision, docs/plan.md
+# "Pack more files per run (November 3, 2026)"): also the proof checker's submitted sources (evaluations/sources/),
+# the story map agent pages (analysis/storymap/agents/) and the behavior judge's per-agent files
+# (analysis/judge/agents/, analysis/judge/packages/, analysis/judge/review/agents/).
+# Old URLs keep working: RUN/<group>/404.html is a copy of the viewer, which Pages serves (HTTP 404, the URL
+# unchanged) for any missing file below that folder; the viewer reads the path and shows that file, and an HTML
+# page (a story map agent page, a judge review page) is rendered in place as the page itself, so its relative
+# links resolve as before. (Pages' _redirects cannot substitute a placeholder into a query or a 200 rewrite,
+# tested October 30, 2026, so no _redirects is used.)
+# The site's state is packed; every plan works on the unpacked tree (``unpack_site`` after loading) and
+# ``finish`` packs it again. Nothing is dropped: unpack(pack) reproduces every original file byte for byte
+# (checked on every deployment), and the credential screen reads every pack entry decoded.
+PACK_GROUPS = ('instructions', 'prompts', 'evaluations/sources', 'analysis/storymap/agents',
+               'analysis/judge/agents', 'analysis/judge/packages', 'analysis/judge/review/agents')
+PACKED_DIRS = PACK_GROUPS  # earlier name
+PAGE_GROUPS = frozenset({'analysis/storymap/agents', 'analysis/judge/review/agents'})
 PACK_FOLDER = 'packed'
 PACK_SCHEMA = 'gdm-site-pack/1'
 PACK_PART_BYTES = 20 * 1024 * 1024
-PACK_NAME = re.compile(r'[^/]+/packed/(?:instructions|prompts)-\d{2}\.json')
+PAGE_PART_BYTES = 6 * 1024 * 1024  # page groups: smaller parts, so one page loads quickly
 VIEWER_404 = '404.html'
 
 
-def packable(name):
+def pack_slug(group):
+    return group.replace('/', '-')
+
+
+PACK_NAME = re.compile(r'[^/]+/packed/(?:' + '|'.join(re.escape(pack_slug(g)) for g in PACK_GROUPS)
+                       + r')-\d{2}\.json')
+
+
+def group_of(name):
+    """The pack group of a site path (RUN/<group>/...), or None. The group's own 404.html is the viewer."""
     parts = name.split('/')
-    return (len(parts) >= 3 and parts[0] != 'live' and parts[1] in PACKED_DIRS
-            and not (len(parts) == 3 and parts[2] == VIEWER_404))
+    if len(parts) < 3 or parts[0] == 'live':
+        return None
+    relative = '/'.join(parts[1:])
+    for group in sorted(PACK_GROUPS, key=len, reverse=True):
+        if relative.startswith(group + '/'):
+            return None if relative == f'{group}/{VIEWER_404}' else group
+    return None
 
 
-def viewer_names(run):
-    return [f'{run}/{PACK_FOLDER}/index.html'] + [f'{run}/{folder}/{VIEWER_404}' for folder in PACKED_DIRS]
+def packable(name):
+    return group_of(name) is not None
+
+
+def viewer_names(run, groups=PACK_GROUPS):
+    return [f'{run}/{PACK_FOLDER}/index.html'] + [f'{run}/{group}/{VIEWER_404}' for group in groups]
 
 
 def is_pack_file(name):
@@ -249,16 +279,21 @@ def _entry_bytes(entry):
 
 
 def pack_run(run, originals):
-    """{name: bytes} of a run's pack files, index and viewer for ``originals`` ({RUN/folder/...: bytes})."""
+    """{name: bytes} of a run's pack files, index and viewers for ``originals`` ({RUN/<group>/...: bytes}).
+    Instructions and prompts keep their viewer even when empty (as before November 3, 2026); other groups get
+    one only when the run has files there."""
     out, index = {}, {}
-    for folder in PACKED_DIRS:
-        names = sorted(n for n in originals if n.split('/')[1] == folder)
+    present = {group_of(n) for n in originals}
+    groups = [g for g in PACK_GROUPS if g in present or g in ('instructions', 'prompts')]
+    for group in PACK_GROUPS:
+        names = sorted(n for n in originals if group_of(n) == group)
+        limit = PAGE_PART_BYTES if group in PAGE_GROUPS else PACK_PART_BYTES
         parts, current, size = [], {}, 0
         for name in names:
             relative = name[len(run) + 1:]
             entry = {**digest(originals[name]), **_entry(originals[name])}
-            weight = len(entry['content']) + 200
-            if current and size + weight > PACK_PART_BYTES:
+            weight = len(entry['content'].encode('utf-8')) + 200
+            if current and size + weight > limit:
                 parts.append(current)
                 current, size = {}, 0
             current[relative] = entry
@@ -266,21 +301,22 @@ def pack_run(run, originals):
         if current:
             parts.append(current)
         for number, files in enumerate(parts, 1):
-            pack = f'{folder}-{number:02d}.json'
+            pack = f'{pack_slug(group)}-{number:02d}.json'
             out[f'{run}/{PACK_FOLDER}/{pack}'] = json.dumps(
-                {'schema': PACK_SCHEMA, 'run': run, 'folder': folder, 'part': number, 'files': files},
+                {'schema': PACK_SCHEMA, 'run': run, 'folder': group, 'part': number, 'files': files},
                 ensure_ascii=False, indent=0, sort_keys=True).encode('utf-8')
             for relative, entry in files.items():
                 index[relative] = {'pack': pack, 'bytes': entry['bytes'], 'sha256': entry['sha256']}
     out[f'{run}/{PACK_FOLDER}/index.json'] = json.dumps(
         {'schema': PACK_SCHEMA, 'run': run, 'files': dict(sorted(index.items()))}, indent=1).encode()
-    for name in viewer_names(run):
-        out[name] = pack_viewer(run)
+    viewer = pack_viewer(run)
+    for name in viewer_names(run, groups):
+        out[name] = viewer
     return out
 
 
 def unpack_run(run, files):
-    """{RUN/folder/...: bytes} restored from a run's pack files (checks every SHA-256)."""
+    """{RUN/<group>/...: bytes} restored from a run's pack files (checks every SHA-256)."""
     restored = {}
     for name, data in files.items():
         if name.startswith(run + '/') and is_pack_file(name):
@@ -294,30 +330,52 @@ def unpack_run(run, files):
 
 
 def packed_run_text(name, data):
-    """Decoded base64 entries of a per-agent pack (UTF-8 entries are screened in the JSON itself)."""
+    """Every entry of a run file pack, decoded (the credential screen reads the exact original bytes)."""
     if not is_pack_file(name):
         return b''
     pack = json.loads(data)
-    return b'\n'.join(_entry_bytes(e) for e in pack['files'].values() if e['encoding'] != 'utf-8')
+    return b'\n'.join(_entry_bytes(e) for e in pack['files'].values())
+
+
+def unpack_site(files):
+    """The site with every run's packs replaced by the original files (pack files, index and viewers removed).
+    Every index entry must be restored with its digest; an original also present unpacked must be identical."""
+    files = dict(files)
+    runs = sorted(n.split('/')[0] for n in files if n.count('/') == 2 and n.endswith(f'/{PACK_FOLDER}/index.json'))
+    for run in runs:
+        restored = unpack_run(run, files)
+        index = json.loads(files[f'{run}/{PACK_FOLDER}/index.json'])['files']
+        if {f'{run}/{r}': {'bytes': x['bytes'], 'sha256': x['sha256']} for r, x in index.items()} != \
+                {n: digest(d) for n, d in restored.items()}:
+            raise ValueError(f'{run}: packed index and pack files disagree')
+        for name in [n for n in files if n.startswith(f'{run}/{PACK_FOLDER}/') and
+                     (is_pack_file(n) or n.endswith(('/index.json', '/index.html')))] + viewer_names(run):
+            files.pop(name, None)
+        for name, data in restored.items():
+            if name in files and files[name] != data:
+                raise ValueError(f'{name}: differs from the packed copy already on the site')
+            files[name] = data
+    return files
 
 
 def pack_site(files):
-    """Pack every run's per-agent files. Returns (files, record); refuses any loss of content."""
-    files = dict(files)
+    """Pack every run's pack groups (packs already present are unpacked first). Returns (files, record);
+    refuses any loss of content."""
+    files = unpack_site(files)
     runs = sorted({run_of(n) for n in files if packable(n)})
     record = {}
     for run in runs:
         originals = {n: files.pop(n) for n in sorted(files) if n.startswith(run + '/') and packable(n)}
         packed = pack_run(run, originals)
-        existing = {n: files.pop(n) for n in sorted(files)
-                    if n.startswith(f'{run}/{PACK_FOLDER}/') or n in viewer_names(run)}
-        if existing and {n: d for n, d in existing.items() if not n.endswith('.html')} != \
-                {n: d for n, d in packed.items() if not n.endswith('.html')}:
-            raise ValueError(f'{run}: per-agent files differ from the packed ones already on the site')
+        clash = sorted(n for n in packed if n in files)
+        if clash:
+            raise ValueError('Pack output would overwrite a site file: ' + clash[0])
         if unpack_run(run, packed) != originals:
             raise ValueError('Packing would lose content: ' + run)
         files.update(packed)
-        record[run] = {'packed_files': len(originals), 'pack_files': len(packed)}
+        record[run] = {'packed_files': len(originals), 'pack_files': len(packed),
+                       'by_group': {g: n for g in PACK_GROUPS
+                                    if (n := sum(1 for x in originals if group_of(x) == g))}}
     return files, record
 
 
@@ -329,7 +387,7 @@ const list = document.getElementById('list'), view = document.getElementById('vi
 let wanted = '';
 if (location.pathname.startsWith(base)) {
   const rest = decodeURIComponent(location.pathname.slice(base.length));
-  if (/^(instructions|prompts)\//.test(rest)) wanted = rest;
+  if (rest && !rest.startsWith('packed/')) wanted = rest;
 }
 const packs = {};
 function pack(name) {
@@ -340,10 +398,20 @@ function bytes(e) {
   if (e.encoding === 'utf-8') return new TextEncoder().encode(e.content);
   return Uint8Array.from(atob(e.content), c => c.charCodeAt(0));
 }
+function resolve(index, path) {
+  if (!path) return '';
+  for (const p of [path, path + '.html', path.replace(/\/$/, '') + '/index.html']) if (index.files[p]) return p;
+  return '';
+}
 async function show(path, index) {
   const meta = index.files[path];
-  if (!meta) { view.textContent = 'No such file in this run: ' + path; return; }
   const e = (await pack(meta.pack)).files[path];
+  if (/\.html?$/i.test(path)) {  // a packed page: rendered in place, at its own URL
+    const text = e.encoding === 'utf-8' ? e.content : new TextDecoder().decode(bytes(e));
+    document.open(); document.write(text); document.close();
+    return 'page';
+  }
+  document.getElementById('viewer').hidden = false;
   document.getElementById('name').textContent = path + ' (' + e.bytes + ' bytes, SHA-256 ' + e.sha256 + ')';
   const pre = document.createElement('pre');
   let text = e.encoding === 'utf-8' ? e.content : '[binary file: use the download link]';
@@ -356,32 +424,43 @@ async function show(path, index) {
   view.replaceChildren(a, pre);
   document.title = path + ' - ' + run;
 }
-fetch(base + 'packed/index.json').then(r => r.json()).then(index => {
-  for (const path of Object.keys(index.files)) {
+fetch(base + 'packed/index.json').then(r => r.json()).then(async index => {
+  const path = resolve(index, wanted);
+  if (path && await show(path, index) === 'page') return;
+  if (!path) {
+    document.getElementById('viewer').hidden = false;
+    document.getElementById('name').textContent = wanted ? 'Not found' : 'Run files';
+    if (wanted) view.textContent = 'No such file in this run: ' + wanted;
+  }
+  const folder = wanted.includes('/') ? wanted.slice(0, wanted.lastIndexOf('/') + 1) : '';
+  for (const p of Object.keys(index.files)) {
+    if (folder && !p.startsWith(folder)) continue;
     const li = document.createElement('li'), a = document.createElement('a');
-    a.textContent = path;
-    a.setAttribute('href', base + path.split('/').map(encodeURIComponent).join('/'));
+    a.textContent = p;
+    a.setAttribute('href', base + p.split('/').map(encodeURIComponent).join('/'));
     li.append(a); list.append(li);
   }
-  if (wanted) show(wanted, index); else document.getElementById('all').open = true;
+  if (!path) document.getElementById('all').open = true;
+  document.getElementById('wait').hidden = true;
 });
 """
     safe = html.escape(run, quote=True)
     body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
-            '<title>Agent instructions and prompts</title>'
+            '<title>Run files</title>'
             '<style>body{font:15px/1.5 system-ui,sans-serif;max-width:1100px;margin:24px auto;padding:0 16px;'
             'background:var(--bg);color:var(--fg)}a{color:var(--link)}pre{white-space:pre-wrap;overflow-wrap:anywhere;'
             'border:1px solid var(--line, #8884);padding:12px;border-radius:6px}'
-            'details{margin:12px 0}ul{columns:2;font-size:13px}</style></head>'
-            f'<body data-run="{safe}"><p><a href="/{safe}/results.html">Back to the run</a></p>'
-            '<h1>Agent instructions and prompts</h1>'
-            f'<p>{safe}: every agent\'s instruction files and prompt, kept in a few pack files (exact bytes and '
-            'SHA-256 of each original file). The old file links show the file here.</p>'
-            '<h2 id="name"></h2><div id="view"></div><details id="all"><summary>All files</summary>'
-            f'<ul id="list"></ul></details><script>{script}</script></body></html>')
+            'h1{font-size:20px;overflow-wrap:anywhere}details{margin:12px 0}ul{columns:2;font-size:13px}</style></head>'
+            f'<body data-run="{safe}"><p id="wait">Loading...</p><div id="viewer" hidden>'
+            f'<p><a href="/{safe}/results.html">Back to the run</a></p>'
+            '<h1 id="name"></h1><div id="view"></div>'
+            f'<p>{safe}: files kept in a few pack files (agent instructions and prompts, submitted proof sources, '
+            'story map agent pages, behavior judge files; exact bytes and SHA-256 of each original file). The old '
+            'file links open the file here; pages open as themselves.</p>'
+            '<details id="all"><summary>All files</summary>'
+            f'<ul id="list"></ul></details></div><script>{script}</script></body></html>')
     return themed(body).encode('utf-8')
-
 
 def site_gate(name, data):
     """The last screen of every deployed file: path rules, host-only and credential file names, Pages special
@@ -925,9 +1004,9 @@ def plan_catalogue(base_files, unlisted, site=None):
 
 
 def plan_repack(base_files):
-    """The site with every run's per-agent files packed (``pack_site``, applied by ``finish``). Nothing else
-    changes: no file of any run other than its instructions/ and prompts/ files (replaced by RUN/packed/), and
-    unpacking reproduces each of them byte for byte."""
+    """The site with every run's pack groups packed (``pack_site``, applied by ``finish``). Nothing else
+    changes: no file of any run other than the files of its pack groups (replaced by RUN/packed/ and the
+    viewers), and unpacking reproduces each of them byte for byte."""
     pending = sorted({run_of(n) for n in base_files if packable(n)})
     return dict(base_files), {'source': {'kind': 'repack', 'runs': pending}}
 
@@ -1036,7 +1115,24 @@ def verify(base, runs=None, full=False, getter=fetch, head_getter=None):
                        | {n for n in recorded if '/' not in n}
                        | {n for n in recorded for r in runs
                           if n.startswith(r + '/') and n.endswith(('.html', 'results.json', 'listing.json'))})
-    bad, notice, links = [], [], []
+    indexes = {}
+
+    def packed_index(run):  # {relative: record} of a run's packed files ({} for a run without packs)
+        if run not in indexes:
+            indexes[run] = {}
+            if f'{run}/{PACK_FOLDER}/index.json' in recorded:
+                code, _, body = getter(file_url(base, f'{run}/{PACK_FOLDER}/index.json'))
+                if code == 200:
+                    indexes[run] = json.loads(body)['files']
+        return indexes[run]
+
+    def is_packed(target):
+        run, _, relative = target.partition('/')
+        index = packed_index(run) if run in recorded_runs else {}
+        return relative in index or relative + '.html' in index
+
+    recorded_runs = {n.split('/')[0] for n in recorded if '/' in n}
+    bad, notice, links, members = [], [], [], {}
     for name in names:
         status, headers, served = getter(file_url(base, name))
         record = recorded[name]
@@ -1044,6 +1140,13 @@ def verify(base, runs=None, full=False, getter=fetch, head_getter=None):
             bad.append(f'{name} (HTTP {status})')
             continue
         content_type = {k.lower(): v for k, v in headers.items()}.get('content-type', '')
+        if is_pack_file(name):  # --full: every pack entry against its own digest
+            try:
+                for relative, entry in json.loads(served)['files'].items():
+                    ok = digest(_entry_bytes(entry)) == {'bytes': entry['bytes'], 'sha256': entry['sha256']}
+                    members[f'{name.split("/")[0]}/{relative}'] = (PurePosixPath(name).name, ok)
+            except (ValueError, KeyError) as error:
+                bad.append(f'{name} (unreadable pack: {error})')
         if name.endswith('.html'):
             if 'text/html' not in content_type or 'attachment' in str(headers.get('Content-Disposition', '')):
                 bad.append(f'{name} ({content_type})')
@@ -1061,7 +1164,8 @@ def verify(base, runs=None, full=False, getter=fetch, head_getter=None):
                     links.append(f'{name} -> {url}')
                     continue
                 if target not in recorded and target + '/index.html' not in recorded and target != SITE_MANIFEST \
-                        and not (target == '' or url.endswith('/') and (target + '/index.html') in recorded):
+                        and not (target == '' or url.endswith('/') and (target + '/index.html') in recorded) \
+                        and not is_packed(target):
                     links.append(f'{name} -> {url}')
     check('served_bytes', not bad, '; '.join(bad[:5]))
     check('inspect_notice', not notice, ', '.join(notice[:5]))
@@ -1084,15 +1188,31 @@ def verify(base, runs=None, full=False, getter=fetch, head_getter=None):
     status, _, _ = getter(file_url(base, 'no-such-page-' + sha256(base.encode())[:8] + '.html'))
     check('not_found_404', status == 404, f'HTTP {status}')
     packed = sorted({n.split('/')[0] for n in recorded if is_pack_file(n)})
-    if packed:  # an old per-agent file URL shows the run's pack viewer (its folder's 404.html, URL unchanged)
-        run = packed[0]
-        status, _, data = getter(file_url(base, f'{run}/{PACK_FOLDER}/index.json'))
-        first = next(iter(json.loads(data)['files']), None) if status == 200 else None
-        viewer = recorded.get(f'{run}/{first.split("/")[0]}/{VIEWER_404}') if first else None
-        code, _, body = getter(file_url(base, f'{run}/{first}')) if first else (status, {}, b'')
-        check('packed_old_urls', bool(viewer) and code == 404 and digest(body) == {'bytes': viewer['bytes'],
-                                                                                  'sha256': viewer['sha256']},
-              f'HTTP {code}')
+    if packed:  # an old file URL of each pack group shows the run's viewer (the group's 404.html, URL unchanged)
+        old, tried = [], set()
+        sample = packed if full else [r for r in packed if r in runs] or packed
+        for run in sample:
+            for relative in packed_index(run):
+                group = group_of(f'{run}/{relative}')
+                if group is None or (group, run) in tried or (not full and any(g == group for g, _ in tried)):
+                    continue
+                tried.add((group, run))
+                viewer = recorded.get(f'{run}/{group}/{VIEWER_404}')
+                code, _, body = getter(file_url(base, f'{run}/{relative}'))
+                if not (viewer and code == 404 and digest(body) == {'bytes': viewer['bytes'],
+                                                                    'sha256': viewer['sha256']}):
+                    old.append(f'{run}/{relative} (HTTP {code})')
+        check('packed_old_urls', tried and not old, '; '.join(old[:5]) or f'{len(tried)} group(s) checked')
+    if full and packed:  # every indexed file is in its pack with its digest, and nothing else is packed
+        wrong = []
+        for run in packed:
+            for relative, record in packed_index(run).items():
+                pack, ok = members.get(f'{run}/{relative}', (None, False))
+                if pack != record['pack'] or not ok:
+                    wrong.append(f'{run}/{relative}')
+        indexed = {f'{r}/{x}' for r in packed for x in packed_index(r)}
+        wrong += sorted(set(members) - indexed)
+        check('packed_members', not wrong, ', '.join(wrong[:5]) or f'{len(members)} packed files')
     return {'url': base, 'ok': all(c['ok'] for c in checks), 'checked_files': len(names),
             'site_files': len(recorded) + 1, 'runs': len(runs), 'checks': checks}
 
@@ -1168,7 +1288,8 @@ def main(argv=None):
     bundle.add_argument('--replace-pages', action='store_true', help='allow the bundle runs\' .html pages to change')
     restyle = sub.add_parser('restyle', help='re-render the layout of published run pages and the catalogue')
     restyle.add_argument('--run', action='append', help='only this run\'s pages (repeatable; default all runs)')
-    repack = sub.add_parser('repack', help='pack every run\'s per-agent instructions and prompts (lossless)')
+    repack = sub.add_parser('repack', help='pack every run\'s pack groups (per-agent files, sources, story map '
+                                           'agent pages, judge files; lossless)')
     withdraw = sub.add_parser('withdraw', help='remove recorded unlisted runs (all their files) from the site')
     withdraw.add_argument('--run', action='append', required=True, help='run to remove (repeatable)')
     story = sub.add_parser('storymap', help='add the agent story map pages to runs already on the site')
@@ -1212,7 +1333,8 @@ def main(argv=None):
         workdir.mkdir(parents=True, exist_ok=True)
         current = deployments(workdir, project=site.project)
         base = current[0] if current else None
-        base_manifest, base_files = load_site(base['url'] if base else None, cache=site.cache)
+        base_manifest, served = load_site(base['url'] if base else None, cache=site.cache)
+        base_files = unpack_site(served)  # plans see every file; finish packs again
         unlisted = unlisted_runs()
         if args.command == 'mirror-space':
             if args.snapshot:
@@ -1253,7 +1375,7 @@ def main(argv=None):
                                       site=site)
             message = 'Publish ' + ', '.join(plan['source']['runs'])
         files, manifest = finish(files, base_manifest, plan, site=site)
-        result = {**summary(files, base_files, plan, base, site=site), 'committed': False}
+        result = {**summary(files, served, plan, base, site=site), 'committed': False}
         if args.commit:
             remember(files, cache=site.cache)
             deployment, tail = deploy(files, base, message, workdir, project=site.project)

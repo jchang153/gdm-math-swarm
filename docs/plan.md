@@ -1964,3 +1964,25 @@ publisher (never two at once). Content is verified on the live site (story-map f
 results tab, heatmap, conference and judge pages, catalogue links), not only status codes. Each run is offloaded after
 publishing. Target: everything ready to analyze by 09:00 PT on November 4. The site reaches about 17,300 of 20,000
 files; a file-packing change comes later (not done in this batch).
+
+## Pack more files per run (November 3, 2026)
+
+Owner decision (chat, November 3, 2026, relayed by the coordinating agent: "option 1"): reduce the number of files
+each run uses on the math Pages site by packing more files per run, so the site stays far below Cloudflare Pages'
+20,000-file limit (about 9,900 files before the 15 push runs, about 17,300 with them). Target: well under 200 files
+per run, without losing any page or link; every existing URL keeps working (catalogue links, story-map links from
+results pages, old per-agent URLs). The 25 MiB per-file limit, the privacy screens, the story-map redaction and the
+credential scan stay. Applied to the ImpossibleBench site too, for consistency. Deadline: everything published and
+packed by 09:00 PT on November 4; the full repack is deployed only after the other deploys of that night (the
+redesigned story maps and the 15 push runs) are done, never concurrently.
+
+Implementation (`scripts/publish_cloudflare.py`, extending the October 30 per-agent packs): the pack groups are
+`instructions/`, `prompts/` (as before), `evaluations/sources/` (the proof checker's content-addressed sources),
+`analysis/storymap/agents/` (story map agent pages), `analysis/judge/agents/`, `analysis/judge/packages/` and
+`analysis/judge/review/agents/` (behavior judge per-agent files). Each run's groups go to `RUN/packed/<group>-NN.json`
+(parts up to 20 MiB; page groups 6 MiB so one page loads quickly) with one `RUN/packed/index.json`; `RUN/<group>/404.html`
+is the viewer, which Pages serves for any missing file in that folder (HTTP 404, URL unchanged): it shows a packed
+file, and renders a packed HTML page in place as the page itself (relative links and `#sel=` anchors work as before).
+The site is packed as served; every plan works on the unpacked tree (`unpack_site`) and every deployment packs again,
+checked lossless. `verify` resolves links into packs, checks an old URL per pack group (every run with `--full`) and,
+with `--full`, every pack entry against its digest. The Inspect View assets stay per run (October 30 reasoning).

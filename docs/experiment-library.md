@@ -81,6 +81,17 @@ read-only unless `--commit` is given; there are no approval prompts or extra spe
   `verify` checks that an old per-agent URL serves the viewer (`packed_old_urls`). The Inspect View assets
   (26 files per run) stay per run: sharing them would mean rewriting each run's Inspect View page and its relative
   asset paths, and packing alone brings the site from 19,736 to about 6,600 files.
+  **More groups (owner decision, November 3, 2026; docs/plan.md "Pack more files per run"):** the pack groups
+  (`PACK_GROUPS`) are now also `evaluations/sources/` (the proof checker's sources, up to ~480 per run),
+  `analysis/storymap/agents/` (story map agent pages, ~100 per mapped run), `analysis/judge/agents/`,
+  `analysis/judge/packages/` and `analysis/judge/review/agents/`, packed as `RUN/packed/<group with - for />-NN.json`
+  (page groups in 6 MiB parts so one page loads quickly). Each group folder gets the viewer as its `404.html`; a packed
+  HTML page is rendered in place at its old URL (document.write of the original bytes: relative links, `#sel=`
+  anchors and the page's scripts work as before; HTTP status 404). The served site is packed; `main` unpacks it right
+  after loading (`unpack_site`), so every plan (publish, storymap, heatmap, judge-labels, restyle, withdraw) sees and
+  changes the original files, and `finish` packs again (checked lossless; the credential screen decodes every
+  entry). `verify` treats a link to a packed file as present, checks an old URL of each pack group (of every run with
+  `--full`) and, with `--full`, every pack entry against its recorded digest (`packed_members`).
 - `withdraw --run RUN [--run RUN ...] [--commit] [--receipt FILE]` (October 30, 2026): take runs off the site
   (owner decision, for example failed runs). Each run must first be recorded in the tracked
   `data/library-unlisted.json` (run, date, reason); every file of each run is removed and the catalogue is

@@ -204,6 +204,15 @@ def agent_files(run, variant=b''):
             f'{run}/prompts/agent-002.txt': b'\xff\xfe binary \x00'}
 
 
+def more_files(run):
+    return {f'{run}/evaluations/sources/{"a" * 64}.lean': b'theorem x : True := trivial\n',
+            f'{run}/analysis/storymap/agents/agent-001.html': '<html><a href="../index.html">map</a> caf\u00e9</html>'
+            .encode(),
+            f'{run}/analysis/judge/agents/agent-001.json': b'{"label": "x"}',
+            f'{run}/analysis/judge/packages/agent-001.json': b'{"p": 1}',
+            f'{run}/analysis/judge/review/agents/agent-001.html': b'<html>review</html>'}
+
+
 class PackTests(unittest.TestCase):
     def test_pack_is_lossless_and_keeps_old_urls(self):
         files = {**site(RUN, OTHER), **agent_files(RUN), **agent_files(OTHER)}
@@ -263,22 +272,82 @@ class PackTests(unittest.TestCase):
                 cf.plan_bundle(base, root, unlisted=(), replace_pages=True)
 
     def test_verify_checks_old_urls(self):
-        files, _ = cf.finish({**LoadAndVerifyTests.site(None), **agent_files(RUN)}, {}, {'source': {}})
-        viewer = files[f'{RUN}/instructions/404.html']
-
-        def pages(missing_body):
-            served = Served(files)
-
-            def get(url):
-                status, headers, body = served(url)
-                if status == 404 and f'{RUN}/instructions/' in url:
-                    return 404, {'Content-Type': 'text/html'}, missing_body
-                return status, headers, body
-            return get
-        result = cf.verify('https://d.p.pages.dev', getter=pages(viewer))
+        files, _ = cf.finish({**LoadAndVerifyTests.site(None), **agent_files(RUN), **more_files(RUN)}, {},
+                             {'source': {}})
+        result = cf.verify('https://d.p.pages.dev', getter=Served(files, nested_404=True))
         self.assertTrue(result['ok'], result)
-        result = cf.verify('https://d.p.pages.dev', getter=pages(b'not found'))
+        old = next(c for c in result['checks'] if c['check'] == 'packed_old_urls')
+        self.assertIn('7 group(s)', old['detail'])
+        result = cf.verify('https://d.p.pages.dev', getter=Served(files))
         self.assertEqual({c['check'] for c in result['checks'] if not c['ok']}, {'packed_old_urls'})
+        full = cf.verify('https://d.p.pages.dev', full=True, getter=Served(files, nested_404=True))
+        self.assertTrue(full['ok'], full)
+        self.assertIn('packed_members', {c['check'] for c in full['checks']})
+        name = next(n for n in files if n.endswith('analysis-storymap-agents-01.json'))
+        pack = json.loads(files[name])
+        pack['files'][next(iter(pack['files']))]['content'] += 'x'
+        tampered = Served(files, {name: (200, {}, json.dumps(pack).encode())}, nested_404=True)
+        result = cf.verify('https://d.p.pages.dev', full=True, getter=tampered)
+        self.assertFalse(result['ok'])
+
+    def test_more_groups_are_packed_and_links_into_packs_resolve(self):
+        files = {**site(RUN), **agent_files(RUN), **more_files(RUN)}
+        files[f'{RUN}/analysis/storymap/index.html'] = (b'<html><a href="agents/agent-001.html">a</a>'
+                                                        b'<a href="../../results.html">r</a></html>')
+        out, manifest = cf.finish(files, {}, {'source': {}})
+        self.assertFalse([n for n in out if cf.packable(n)])
+        self.assertEqual(cf.unpack_run(RUN, out), {**agent_files(RUN), **more_files(RUN)})
+        for group in cf.PACK_GROUPS:
+            self.assertIn(f'{RUN}/{group}/404.html', out)
+        self.assertIn(f'{RUN}/packed/analysis-storymap-agents-01.json', out)
+        self.assertIn(f'{RUN}/packed/evaluations-sources-01.json', out)
+        self.assertEqual(out[f'{RUN}/analysis/storymap/index.html'], files[f'{RUN}/analysis/storymap/index.html'])
+        # the site's state round-trips: unpacking the served files gives back every original
+        self.assertEqual(cf.unpack_site({n: d for n, d in out.items() if n not in cf.GENERATED}),
+                         {n: d for n, d in out.items() if n not in cf.GENERATED and not cf.is_pack_file(n)
+                          and '/packed/' not in n and not n.endswith('/404.html')} | agent_files(RUN)
+                         | more_files(RUN))
+        result = cf.verify('https://d.p.pages.dev', getter=Served(out, nested_404=True))
+        self.assertTrue(result['ok'], result)
+        broken = dict(out)
+        broken[f'{RUN}/analysis/storymap/index.html'] = b'<html><a href="agents/agent-999.html">a</a></html>'
+        broken, _ = cf.finish({n: d for n, d in broken.items() if n not in cf.GENERATED}, {}, {'source': {}})
+        result = cf.verify('https://d.p.pages.dev', getter=Served(broken, nested_404=True))
+        self.assertEqual({c['check'] for c in result['checks'] if not c['ok']}, {'no_broken_links'})
+
+    def test_page_groups_use_smaller_parts(self):
+        pages = {f'{RUN}/analysis/storymap/agents/agent-{i:03d}.html': b'<html>' + b'x' * 50 + b'</html>'
+                 for i in range(10)}
+        with patch.object(cf, 'PAGE_PART_BYTES', 300):
+            out = cf.pack_run(RUN, pages)
+        self.assertGreater(sum(cf.is_pack_file(n) for n in out), 3)
+        self.assertEqual(cf.unpack_run(RUN, out), pages)
+
+    @patch.object(cf, 'render_catalogue', side_effect=fake_catalogue)
+    def test_storymap_on_a_packed_site(self, _):
+        old = {f'{RUN}/analysis/storymap/agents/agent-00{i}.html': b'<html>old</html>' for i in (1, 2)}
+        page = (b'<html><nav class="tabs"><a href="inspect-view/index.html">Inspect</a></nav>'
+                b'<a href="results.json">r</a></html>')
+        served, _ = cf.finish({**site(RUN), f'{RUN}/results.html': page, **old,
+                               f'{RUN}/analysis/storymap/index.html': b'<html></html>'}, {}, {'source': {}})
+        base = cf.unpack_site({n: d for n, d in served.items() if n not in cf.GENERATED})
+        self.assertEqual({n: base[n] for n in old}, old)
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, 'agents').mkdir()
+            Path(tmp, 'index.html').write_text('<a href="agents/agent-001.html">a</a>')
+            Path(tmp, 'agents', 'agent-001.html').write_text('<html>new</html>')
+            with patch.object(cf.storymap_site, 'prompt_lines', return_value=frozenset()):
+                files, plan = cf.plan_storymap(base, (), {RUN: tmp})
+        out, _ = cf.finish(files, {}, plan)
+        restored = cf.unpack_run(RUN, out)
+        self.assertEqual(restored, {f'{RUN}/analysis/storymap/agents/agent-001.html': b'<html>new</html>'})
+        self.assertNotIn(f'{RUN}/analysis/storymap/agents/agent-002.html', out)
+
+    def test_unpack_refuses_conflicting_copies(self):
+        out, _ = cf.finish({**site(RUN), **agent_files(RUN)}, {}, {'source': {}})
+        name = next(iter(agent_files(RUN)))
+        with self.assertRaises(ValueError):
+            cf.unpack_site({**out, name: b'different'})
 
 
 class FakeWrangler:
@@ -321,15 +390,24 @@ class DeployTests(unittest.TestCase):
 
 
 class Served:
-    """A fake Pages host serving ``files``; 404 otherwise."""
-    def __init__(self, files, overrides=None):
-        self.files, self.overrides = files, overrides or {}
+    """A fake Pages host serving ``files``; 404 otherwise (``nested_404``: the nearest folder's 404.html, as
+    Pages does)."""
+    def __init__(self, files, overrides=None, nested_404=False):
+        self.files, self.overrides, self.nested_404 = files, overrides or {}, nested_404
 
     def __call__(self, url):
         name = url.split('pages.dev/', 1)[1]
         if name in self.overrides:
             return self.overrides[name]
         if name not in self.files:
+            parts = name.split('/')[:-1]
+            while self.nested_404:
+                page = '/'.join(parts + ['404.html'])
+                if page in self.files:
+                    return 404, {'Content-Type': 'text/html'}, self.files[page]
+                if not parts:
+                    break
+                parts.pop()
             return 404, {'Content-Type': 'text/html'}, b'not found'
         kind = 'text/html' if name.endswith('.html') else 'application/json'
         return 200, {'Content-Type': kind}, self.files[name]
