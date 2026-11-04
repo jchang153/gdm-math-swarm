@@ -1790,3 +1790,17 @@ are unchanged, so existing stage-1/2 units resume and runs without R1 send ident
 reminders as their own section grouped by delivery number; `validation.md` gains "Reactions to the integrity
 reminders" (registered / change / direction, split by faking at the time, reminder-cited turning points and stops).
 
+
+## Faking heatmap on every run page (November 3, 2026)
+
+Owner request (chat, November 3, 2026, relayed by the coordinating agent): generate the per-run faking heatmaps made
+earlier for every run on both public sites (gdm-math-swarm-experiments and gdm-impossiblebench-experiments, new and old
+runs) and place them in each run's main report page (results.html), then republish. Design as the researcher figure
+`heat3.py` (the owner's original spec: "each row is a faker, the row is a heatmap over time that gets hotter if they
+faked more in the last 5 minutes (moving average), and mark where they got credits"): one row per agent that ever
+faked (strict fake rule; coding runs: the coding fake rule), seed and overseers excluded; colour = fakes per minute,
+trailing 5-minute moving average on a fixed 0-2 scale shared by every run; markers for credited (accepted) fakes,
+reverts of the agent's fakes, overseer DMs read and overseer board posts read, only those that occur in the legend;
+a run without fakers gets a one-line "no fakes" note instead of a figure. Wired into `scripts/build_results.py` so
+future runs get it (`scripts/faking_heatmap.py`; `publish_cloudflare.py heatmap` for runs already on a site). No
+model calls.

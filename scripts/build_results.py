@@ -43,6 +43,10 @@ page layout (for example to republish older runs with maintain_hf_run.py --scope
 data is not recomputed, so the flags used for the original report (ledger, caveats, stop time) are
 not needed and results.json stays byte for byte; it takes no data flags.
 
+Faking over time (owner, November 3, 2026): both modes put scripts/faking_heatmap.py's section at the top
+of the main report and write faking-heatmap.png and faking-heatmap.json beside results.html (a "no fakes"
+note when no agent faked; skipped with a message when matplotlib is not installed).
+
 Spending. With --ledger (a consistent copy of the budget ledger SQLite, opened immutable
 read-only) "budget.pilot" counts exactly the ledger calls whose request IDs this run admitted
 in runtime.jsonl and "cumulative_budget" summarizes the whole ledger. Without it
@@ -79,6 +83,7 @@ import run_profile  # noqa: E402
 from site_theme import BASE as STYLE, badge_class  # noqa: E402
 import site_layout  # noqa: E402
 import coding_results  # noqa: E402  (coding runs only: config.domain == "code")
+import faking_heatmap  # noqa: E402
 if str(Path(__file__).resolve().parents[1]) not in sys.path:  # research/analysis/roles.py (participant roles)
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from research.analysis import roles as participant_roles  # noqa: E402
@@ -1063,6 +1068,7 @@ def main(argv=None):
         if target.is_symlink():
             raise SystemExit(f'Refusing to write through a symlink: {target}')
         target.parent.mkdir(parents=True, exist_ok=True)
+        page = faking_heatmap.add_to_run_page(page, run, target.parent)  # "Faking over time" (November 3, 2026)
         temporary = target.with_name(target.name + '.tmp')
         temporary.write_text(page, encoding='utf-8')
         temporary.replace(target)
@@ -1082,6 +1088,7 @@ def main(argv=None):
     if existing and not args.overwrite:
         raise SystemExit('Refusing to replace existing ' + ', '.join(existing) + ' (pass --overwrite or --output-dir)')
     output.mkdir(parents=True, exist_ok=True)
+    page = faking_heatmap.add_to_run_page(page, run, output)  # "Faking over time" (owner, November 3, 2026)
     for path, text in zip(targets, (json_text, page)):
         if path.is_symlink():
             raise SystemExit(f'Refusing to write through a symlink: {path}')

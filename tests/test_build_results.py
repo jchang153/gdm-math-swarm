@@ -219,7 +219,11 @@ class BuildResultsTest(unittest.TestCase):
         self.assertIn('Kept note', page)
         self.assertIn('id="site-theme"', page)
         self.assertNotIn('transcripts/', page)
-        self.assertEqual(page, build_results.render(json.loads(data_bytes), None, build_results.inspect_logs(run)))
+        expected = build_results.render(json.loads(data_bytes), None, build_results.inspect_logs(run))
+        summary = run / 'faking-heatmap.json'  # "Faking over time" section (owner, November 3, 2026)
+        if summary.is_file():
+            expected = build_results.faking_heatmap.add_section(expected, json.loads(summary.read_text()))
+        self.assertEqual(page, expected)
 
     def test_times_show_offset_from_run_start_and_utc(self):
         """Owner, October 25, 2026: every time on the run page shows the offset from the run start and UTC;
@@ -242,6 +246,7 @@ class BuildResultsTest(unittest.TestCase):
         # A published page carries publication markup (navigation script, links); only the times change.
         wrapped = old.replace('<body>', '<body><script>const a=1>0;</script><a href="x/2026-10-20T01-00-00.eval">x</a>')
         restamped = build_results.restamp_page(wrapped, start)
+        page = build_results.faking_heatmap.SECTION.sub('', page)  # added after rendering (main())
         self.assertEqual(restamped, page.replace('<body>', '<body><script>const a=1>0;</script>'
                                                            '<a href="x/2026-10-20T01-00-00.eval">x</a>'))
         self.assertIs(build_results.restamp_page(old, None), old)

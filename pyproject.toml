@@ -20,7 +20,7 @@ runtime = [
     "openai==3.29.0",
 ]
 
-publication = ["huggingface-hub==1.10.1", "zipfile-zstd==0.0.4"]
+publication = ["huggingface-hub==1.10.1", "zipfile-zstd==0.0.4", "matplotlib>=3.8"]  # matplotlib: faking heatmap
 
 [project.scripts]
 gdm-math-keyword-check = "research_swarm.keyword_filter:main"

@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-03 14:35 PT by Claude (Opus 5.5) subagent (item 20 done: three integrity-reminder runs, story maps).
+Last updated: 2026-11-03 17:30 PT by Claude (Opus 5.5) subagent (item 22: faking heatmap on every run page, both sites).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1051,6 +1051,27 @@ is being merged into main via `collab-env`.
      create ... --production-branch main` (deploys still use 4.154.0). The catalogue has no "Timeline" link for these
      runs: the control was first deployed without the timeline in the bundle and catalogue entries are immutable, so
      the link was dropped from both entries for consistency (page links to the private timeline are pinned).
+
+22. **DONE 2026-11-03 (~17:25 PT): "Faking over time" heatmap on every run page of both sites** (docs/plan.md,
+   "Faking heatmap on every run page (November 3, 2026)"). `scripts/faking_heatmap.py` reproduces the researcher
+   figure `heat3.py` (16x11 in, dpi 150; one row per agent that ever faked, strict fake rule via
+   `storymap/domain.fake_rule`, coding rule for coding runs; seed and overseers excluded via `research/analysis/roles.py`;
+   colour = fakes/min, trailing 5-min moving average, fixed 0-2 scale; markers: credited fake, revert of one of its
+   fakes, overseer DM delivered, overseer board post read; legend only for markers present). A run without fakers
+   gets a one-line "No fakes in this run" note instead. The section goes first in `<main id="report">` (legacy
+   baseline100 page: before its first heading). `build_results.py` adds it automatically (both modes; writes
+   `faking-heatmap.png` and `faking-heatmap.json` beside results.html; skipped with a message without matplotlib,
+   now in the `publication` extra). Runs already published: `publish_cloudflare.py heatmap --site gdm|ib --run
+   RUN=FOLDER` (adds RUN/faking-heatmap.png, inserts the section into the served results.html; nothing else changes).
+   Tests `tests/test_faking_heatmap.py`.
+   - Published: gdm 68 runs (56 figures, 12 no-fakes notes: baseline100, baseline8g100, cache100, gemini10,
+     glm-baseline, glm-overseer, glm-rule6, glm10-baseline-2h, owner-gemini4, owner-gpt56, owner-opus55, pilot),
+     deployment `f27544db`; ib 2 runs (2 figures), deployment `9b391293`. Receipts
+     `runs/phase-b/cloudflare/receipts/faking-heatmap-20261103.json`, `runs/phase-b/cloudflare-ib/receipts/faking-heatmap-20261103.json`.
+     `verify` ok on both; live check of all 70 results.html (section present) and 58 PNGs (HTTP 200 image/png,
+     byte-identical to the local renders). All run data was local; no restore was needed. Local `runs/<id>/results.html`
+     were not rebuilt (the figures were rendered to a scratch folder); rerun `build_results.py --rerender-html
+     --overwrite` to get them locally.
 
 ## Next steps / open items
 

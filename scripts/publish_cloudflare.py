@@ -42,6 +42,11 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
         allowlisted pages of PAGES_DIRECTORY (``storymap_site``: index.html, events.html, validation.html/.md,
         agents/*.html, rendered with --taxonomy '') go to RUN/analysis/storymap/, screened for host paths, private
         paths, taxonomy names and unpublished links; results.html gains the Story map tab. No other file changes.
+    publish_cloudflare.py heatmap --run RUN=FOLDER [--run ...] [--commit] [--receipt FILE]
+        Add (or refresh) the "Faking over time" heatmap of runs already on the site (owner, November 3, 2026):
+        FOLDER holds scripts/faking_heatmap.py's faking-heatmap.json (and faking-heatmap.png when the run has
+        fakers); RUN/faking-heatmap.png is added and RUN/results.html gains the section at the top of its main
+        report. No other file changes.
     publish_cloudflare.py verify [--url URL] [--full] [--run RUN ...]
         Read-only check of the served site against its site-manifest.json (see ``verify``).
 
@@ -801,6 +806,53 @@ def plan_storymap(base_files, unlisted, folders, taxonomy=()):
                    'added_by_run': {r: sum(1 for n in added if run_of(n) == r) for r in sorted(folders)}}
 
 
+def plan_heatmap(base_files, unlisted, folders):
+    """The site with the "Faking over time" heatmap of runs already on it (owner, November 3, 2026; ``folders``:
+    run -> local folder holding scripts/faking_heatmap.py's faking-heatmap.json and, for a run with fakers,
+    faking-heatmap.png). RUN/faking-heatmap.png is added or replaced (removed when the run has no fakers) and the
+    section is put at the top of RUN/results.html's main report (``faking_heatmap.add_section``, idempotent). No
+    other file changes and the catalogue is unchanged."""
+    import faking_heatmap
+    if not folders:
+        raise ValueError('heatmap needs at least one --run RUN=FOLDER')
+    known = {run_of(n) for n in base_files if run_of(n)}
+    missing = sorted(set(folders) - known)
+    if missing:
+        raise ValueError('Run(s) not on the site (publish the run first): ' + ', '.join(missing))
+    # An unlisted run still on the site (baseline100) is only left out of the catalogue, which this never
+    # touches; its served page gets the section like any other (owner: every run on the site).
+    files, added, replaced, removed = dict(base_files), [], [], []
+    for run in sorted(folders):
+        folder = Path(folders[run])
+        summary = json.loads((folder / faking_heatmap.SUMMARY).read_text(encoding='utf-8'))
+        if summary.get('run') != run:
+            raise ValueError(f'{folder} holds the heatmap of {summary.get("run")}, not {run}')
+        image = f'{run}/{faking_heatmap.IMAGE}'
+        if summary['rows']:
+            data = (folder / faking_heatmap.IMAGE).read_bytes()
+            if not data.startswith(b'\x89PNG\r\n\x1a\n'):
+                raise ValueError(f'{folder / faking_heatmap.IMAGE} is not a PNG')
+            if image not in base_files:
+                added.append(image)
+            elif base_files[image] != data:
+                replaced.append({'path': image, 'old': digest(base_files[image]), 'new': digest(data)})
+            files[image] = data
+        elif image in files:
+            removed.append(image)
+            del files[image]
+        page = f'{run}/results.html'
+        if page not in base_files:
+            raise ValueError(f'{page} is not on the site')
+        new = faking_heatmap.add_section(base_files[page].decode('utf-8'), summary).encode('utf-8')
+        if new != base_files[page]:
+            replaced.append({'path': page, 'old': digest(base_files[page]), 'new': digest(new)})
+            files[page] = new
+    return files, {'source': {'kind': 'heatmap', 'runs': sorted(folders)}, 'added_files': len(added),
+                   'replaced_pages': replaced, 'removed_files': removed,
+                   'without_fakers': sorted(r for r in folders if not json.loads(
+                       (Path(folders[r]) / faking_heatmap.SUMMARY).read_text(encoding='utf-8'))['rows'])}
+
+
 def plan_catalogue(base_files, unlisted, site=None):
     """The site with only its catalogue re-rendered from its entries (index.html and experiments.json; Story map
     links follow the story map pages on the site). No run file changes."""
@@ -1061,8 +1113,11 @@ def main(argv=None):
     story = sub.add_parser('storymap', help='add the agent story map pages to runs already on the site')
     story.add_argument('--run', action='append', required=True,
                        help='RUN=PAGES_DIRECTORY (the public render, --taxonomy \'\'); repeatable')
+    heat = sub.add_parser('heatmap', help='add the "Faking over time" heatmap to runs already on the site')
+    heat.add_argument('--run', action='append', required=True,
+                      help='RUN=FOLDER holding faking_heatmap.py output (repeatable)')
     cat = sub.add_parser('catalogue', help='re-render only the catalogue (index.html, experiments.json)')
-    for command in (mirror, bundle, restyle, withdraw, repack, story, cat):
+    for command in (mirror, bundle, restyle, withdraw, repack, story, heat, cat):
         command.add_argument('--site', choices=sorted(SITES), default=DEFAULT_SITE,
                              help='which library (default gdm, the math site; ib: the ImpossibleBench site)')
         command.add_argument('--commit', action='store_true', help='deploy; otherwise only plan')
@@ -1120,6 +1175,10 @@ def main(argv=None):
             folders = dict(spec.split('=', 1) for spec in args.run)
             files, plan = plan_storymap(base_files, unlisted, folders, storymap_taxonomy())
             message = 'Story map ' + ', '.join(plan['source']['runs'])
+        elif args.command == 'heatmap':
+            folders = dict(spec.split('=', 1) for spec in args.run)
+            files, plan = plan_heatmap(base_files, unlisted, folders)
+            message = f'Faking heatmap for {len(folders)} run(s)'
         elif args.command == 'withdraw':
             files, plan = plan_withdraw(base_files, unlisted, args.run, site=site)
             message = 'Withdraw ' + ', '.join(plan['source']['runs'])
