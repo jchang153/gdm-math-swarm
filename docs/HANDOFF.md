@@ -966,6 +966,21 @@ is being merged into main via `collab-env`.
    session in its resume bundle; its timeline came from the Inspect log (`inspect/` restored from the dataset).
    R1 events in the timelines vs delivery events: r1 520/529, r2 514/514, r3 454/455 (a few deliveries were in
    tool results missing from the session transcripts).
+   - **Reminders as story-map interventions (DONE 2026-11-03 16:10 PT; owner, docs/plan.md "Integrity reminders as
+     story-map interventions"):** every R1 delivery now gets a stage-2 reaction (EVENT NOTE: automated host notice,
+     not an overseer) and stage 3 may cite reminders as causes (code c7ebb51; system prompts unchanged, so the old
+     stage-1/2 units were reused). Re-run on all three, `--run-limit 40` each, cross-check and validation included;
+     previous outputs in `analysis/storymap.pre-reminder/`. New spend: r1 $15.37, r2 $14.32, r3 $13.90. 2 transient
+     provider errors were retried; every R1 has a reaction (527 / 514 / 454). Reminder reactions (noticed yes;
+     behaviour or belief change; of the changes, toward cheating / away): r1 110; 54; 48 / 6. r2 106; 55; 46 / 7.
+     r3 122; 62; 54 / 7. Almost all changes come at reminders before the agent's first fake: agents quote the rule
+     and argue that the restatement "does not circumvent verification". Medium or low certainty only; rarely
+     self-attributed; one decision is often credited to several consecutive reminders. Turning points citing a
+     reminder: 4/184, 6/167, 3/169 (one alone, in r3); stops citing one: 0 of 8 in each run. Full tables in each
+     run's `validation.md` ("Reactions to the integrity reminders"). Live (the other agent's 16:00 deploy rendered
+     these outputs; livecheck 315/315 byte-identical, the four 180-min maps 420/420):
+     https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-reminder5m-60m-notices-r1-20261103T201956Z/analysis/storymap/
+     (same path for r2-20261103T201955Z, r3-20261103T202243Z).
 
 21. **DONE 2026-11-03 (14:15 PT): coding experiment on ImpossibleBench, 2 runs** (docs/plan.md, "Coding experiment on
    ImpossibleBench (November 3, 2026)"). Impossible-LiveCodeBench, 100 tasks (34 oneoff, 33 conflicting, 33 original;
