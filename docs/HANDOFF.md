@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-04 05:00 PT by Claude (Opus 5.5) operator subagent (item 23: push runs done, story maps blocked on credit).
+Last updated: 2026-11-04 13:15 PT by Claude (Opus 5.5) operator subagent (item 31: commsonly push runs prepared, blocked on gcloud login).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1403,6 +1403,16 @@ is being merged into main via `collab-env`.
      reminder r1, r2 (incomplete: OpenRouter 402); none for the other 10. 2ov r1 (republished with
      `--replace-pages` by the run agent) has no Story map tab and no heatmap section in results.html although the
      catalogue links its story map and faking-heatmap.png is served.
+
+31. **BLOCKED 2026-11-04 13:15 PT (gcloud login expired): 9 push-delivery communication-only overseer runs** (owner
+   decision 13:10 PT, docs/plan.md "Push-delivery communication-only overseers (November 4, 2026)"). Configs
+   `configs/glmflash100-seeded-{1,2,10}ov-glm-120m-push-commsonly.json` (copies of the item 23 push configs; only
+   `experiment`, `overseer.powers` false (prompt A) and `overseer.note` differ); 3 replicates each, 120 min, $100 run
+   budget, simple judge; catalogue series `push120comms` ("120-minute communication-only overseers with pushed
+   messages", `scripts/run_profile.py`, before `push120`, whose pattern is now `-120m-push-r<digit>`). Not launched:
+   `gcloud compute` needs reauthentication (owner: `gcloud auth login`, account in `HANDOFF.local.md`). Then launch as
+   item 23 (one per owner VM, n2d-highmem-96, compat check + preflight, `supervise_run.py` in tmux), fetch core with
+   `fetch_keep`, stop + resize back, publish the core set (no story maps: not authorised), offload.
 
 ## Next steps / open items
 

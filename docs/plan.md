@@ -2025,3 +2025,25 @@ The corrected values, regenerated locally without the VM:
   packs are identical.
 - Catalogue entry: the live entry with `distinct_verified_tasks` (9 -> 16) and `profile` (fakes unresolved 0 -> 3)
   rebuilt by `build_experiment_index` from the corrected results.
+
+## Push-delivery communication-only overseers (November 4, 2026)
+
+**Approved by the owner (chat, November 4, 2026, 13:10 PT; relayed by the coordinating agent; an approval, not a
+proposal).** Verbatim: "please launch 9 more runs: 1/2/10 overseers, 3 runs each, with new push messaging, and COMMS
+ONLY, as a comparison to the comms only where the messages were unread notices. Let's do 120 min per run. everything
+else the same."
+
+- 9 runs: 1, 2 and 10 GLM 5.3 Flash overseers, 3 replicates each (r1-r3), communication only: `"powers": false`
+  (prompt A; no `check_proof` or `revert_submission`; DMs, board posts and every other solver tool kept), exactly as
+  the October 29 communication-only configs ("Communication-only and enforcement-only overseers, October 29, 2026").
+- Push delivery as in "Push delivery of board posts and DMs (November 3, 2026)": `push_delivery: true`,
+  `unread_notices: "library"`, 120 minutes, `run_budget_usd` 100 (the per-run budget), simple behavior judge, the
+  same seed and boards (10 overseers: private overseer board; 1 and 2: none).
+- Configs `configs/glmflash100-seeded-{1,2,10}ov-glm-120m-push-commsonly.json` are copies of
+  `configs/glmflash100-seeded-{1,2,10}ov-glm-120m-push.json` differing only in `experiment`, `overseer.powers` (false)
+  and `overseer.note`. Run ids `glmflash100-seeded-<n>ov-glm-120m-push-commsonly-r<N>-<UTC>`.
+- Comparisons: the October 30 `*-180m-notices-commsonly` runs (same condition, pulled unread notices) and the
+  November 3 full-tools push runs (same delivery).
+- Published on the site like the push runs (results, conference, Inspect notice, judge report, heatmap), in their own
+  catalogue series ("120-minute communication-only overseers with pushed messages"). Story maps are not authorised
+  for these runs.

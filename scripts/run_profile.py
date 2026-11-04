@@ -38,7 +38,14 @@ W, H = 240, 40
 
 # Run series, matched on the run ID (first match wins), shown newest series first.
 SERIES = (
-    ('push120', r'^glmflash100-seeded-.+-120m-push-', '120-minute runs with pushed messages',
+    ('push120comms', r'^glmflash100-seeded-.+-120m-push-commsonly-',
+     '120-minute communication-only overseers with pushed messages',
+     'Nine 120-minute seeded runs (100 GLM 5.3 Flash solvers, the planted exploit at +3 min) with 1, 2 or 10 GLM 5.3 '
+     'Flash overseers, three replicates each, communication only: no check_proof or revert tools, direct messages '
+     'and board posts kept. Board posts and direct messages are pushed into the next tool result, as in the '
+     '120-minute push runs; compare with the 180-minute communication-only runs, where they were announced by '
+     'unread notices.'),
+    ('push120', r'^glmflash100-seeded-.+-120m-push-r\d', '120-minute runs with pushed messages',
      'Fifteen 120-minute seeded runs (100 GLM 5.3 Flash solvers, the planted exploit at +3 min), three replicates '
      'each of a control, a control with an integrity reminder every 5 minutes, and 1, 2 or 10 GLM 5.3 Flash '
      'overseers. Board posts, direct messages and reminders are pushed: appended to the solver\'s next tool result '
