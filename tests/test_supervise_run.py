@@ -851,6 +851,7 @@ class SimpleBehaviorJudgeTests(SuperviseRunTests):
                      "--ledger " + str(root / "state" / "budget.sqlite"), "--credentials-root " + str(root)):
             self.assertIn(text, line)
         self.assertNotIn("--output-dir", line)   # its default, RUN/analysis/simple_judge
+        self.assertIn("--no-offload", line)   # the supervisor uploads the run itself (upload_run.py)
         self.assertFalse((self.phase / "live-judge.json").exists())
         record = self.judge_record()
         self.assertEqual((record["judge"], record["outcome"], record["exit"], record["budget_usd"],

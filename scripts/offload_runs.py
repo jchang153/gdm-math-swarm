@@ -28,14 +28,26 @@ Usage (export GDM_LOGS_DATASET first; HANDOFF.local.md):
 
     python scripts/offload_runs.py offload --unit RUN [--unit phase-b/NAME ...] [--all] [--workers 4]
                                            [--dry-run] [--keep-all]
-    python scripts/offload_runs.py restore --unit RUN [--prefix snapshots/] [--force]
+    python scripts/offload_runs.py restore --unit RUN [--prefix snapshots/] [--force] [--dest DIR]
+                                           [--no-offload] [-- CMD ARGS]
+
+``offload --all`` takes every unit with something to offload: not offloaded yet, or holding files outside its
+core again (restored, or analysis outputs added later); units in use (a lease, below) are skipped.
+
+Always offload (owner decision, November 3, 2026: docs/plan.md, "Always offload to the logs dataset"): the
+behavior judge (scripts/run_simple_judge.py), the story map (scripts/run_storymap.py) and ``restore ... -- CMD``
+offload their run again as their last step (``auto_offload``; ``--no-offload`` skips it). Steps hold a lease
+(``RUN/.inuse/``, never uploaded) while they use a run; the offload waits for the last holder. ``restore --dest
+DIR`` (a scratch folder) is preferred over restoring in place; with ``-- CMD`` the folder is deleted afterwards.
 
 ``restore`` downloads the dataset objects named in OFFLOADED.json at the recorded commit and writes each
 offloaded file back to its original path after checking its SHA-256 (existing files are left alone).
 """
 import argparse
 import concurrent.futures
+import contextlib
 import datetime
+import fcntl
 import gzip
 import hashlib
 import io
@@ -44,6 +56,8 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import socket
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -272,6 +286,9 @@ def offload_unit(unit, *, repo, work, dry_run=False, keep_all=False, log=print, 
         shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True)
     files, local, excluded = [], [], []
+    previous_file = unit_dir / 'OFFLOADED.json'
+    earlier_excluded = ({r['path']: r for r in json.loads(previous_file.read_text()).get('excluded_by_screen', [])}
+                        if previous_file.is_file() else {})
     for relative, size in unit_files(unit_dir):
         if relative == 'OFFLOADED.json':
             continue
@@ -296,7 +313,15 @@ def offload_unit(unit, *, repo, work, dry_run=False, keep_all=False, log=print, 
         if problems:
             row = {'path': relative, 'bytes': length, 'sha256': sha256, 'problems': problems[:5],
                    'problem_count': len(problems), 'kept_locally': True}
-            if all(x.startswith('credential file name in member ') for x in problems) and not dry_run:
+            earlier = earlier_excluded.get(relative)
+            if (earlier and earlier.get('sha256') == sha256 and earlier.get('repacked_dataset_path') in present
+                    and matches(present[earlier['repacked_dataset_path']], earlier['repacked_sha256'],
+                                earlier['repacked_bytes'])):
+                # already repacked and uploaded by an earlier offload (a repack today may differ in its gzip bytes)
+                row.update({k: earlier[k] for k in ('repacked_dataset_path', 'repacked_sha256', 'repacked_bytes',
+                                                    'repacked_without') if k in earlier})
+                row['repacked_already_present'] = True
+            elif all(x.startswith('credential file name in member ') for x in problems) and not dry_run:
                 repacked = Path(work) / unit.replace('/', '__') / 'repacked' / relative
                 skipped = repack(unit_dir / relative, repacked)
                 with open(repacked, 'rb') as handle:
@@ -310,7 +335,6 @@ def offload_unit(unit, *, repo, work, dry_run=False, keep_all=False, log=print, 
         files.append({'path': relative, 'bytes': length, 'sha256': sha256,
                       'kept_locally': keep_all or keep_locally(unit, relative, length)})
     log(f'{unit}: {len(files)} files to record, {len(local)} local-only, {len(excluded)} excluded by the screen')
-    previous_file = unit_dir / 'OFFLOADED.json'
     if previous_file.is_file():  # a rerun: files already recorded with the same bytes are not uploaded again
         earlier = {r['path']: r for r in json.loads(previous_file.read_text()).get('files', [])}
         for row in files:
@@ -472,8 +496,12 @@ def finish_unit(state, revision, log=print):
             bad.append(target)
     for row in excluded:
         target = row.get('repacked_dataset_path')
-        if target and (target not in final or not verified(api, repo, revision, target, final[target],
-                                                             row['repacked_sha256'], row['repacked_bytes'])):
+        if not target:
+            pass
+        elif target not in final:
+            bad.append(target)
+        elif not row.get('repacked_already_present') and not verified(api, repo, revision, target, final[target],
+                                                                      row['repacked_sha256'], row['repacked_bytes']):
             bad.append(target)
         row.pop('_local', None)
     for row in files:
@@ -536,16 +564,182 @@ def verified(api, repo, revision, target, entry, sha256, size):
         return file_sha256(Path(path)) == sha256
 
 
-def all_units():
-    """Units not offloaded yet (no OFFLOADED.json); name a unit with --unit to run it again."""
+def all_units(runs_root=None):
+    """Units with something to offload: not offloaded yet (no OFFLOADED.json), or holding files outside the
+    core again (restored or added later, e.g. analysis outputs). Units in use (a live lease) are left out, and
+    so are the Cloudflare site caches (phase-b/cloudflare*: rebuildable, deleted after verify, never uploaded)."""
+    root = Path(runs_root or RUNS)
+    candidates = [p.name for p in sorted(root.iterdir()) if p.is_dir() and p.name not in SKIP_UNITS]
+    if (root / 'phase-b').is_dir():
+        candidates += ['phase-b/' + p.name for p in sorted((root / 'phase-b').iterdir())
+                       if p.is_dir() and p.name != STAMP and not p.name.startswith('cloudflare')]
     units = []
-    for path in sorted(RUNS.iterdir()):
-        if path.is_dir() and path.name not in SKIP_UNITS and not (path / 'OFFLOADED.json').is_file():
-            units.append(path.name)
-    for path in sorted((RUNS / 'phase-b').iterdir()):
-        if path.is_dir() and path.name != STAMP and not (path / 'OFFLOADED.json').is_file():
-            units.append('phase-b/' + path.name)
+    for unit in candidates:
+        unit_dir = root / unit
+        if live_leases(unit_dir):
+            continue
+        if not (unit_dir / 'OFFLOADED.json').is_file() or pending_bytes(unit, runs_root=root):
+            units.append(unit)
     return units
+
+
+# --- automatic offload after local analysis (owner decision, November 3, 2026) ------------------------
+# docs/plan.md, "Always offload to the logs dataset (November 3, 2026)": after the behavior judge, the story map
+# and any restore-and-run, the run is offloaded again so only its core stays local (--no-offload skips it).
+# Steps that use a run's files hold a lease (RUN/.inuse/, a dot-folder: never uploaded); the automatic offload
+# waits for the last lease holder, and an offload holds RUN/.offload.lock, which new leases wait for.
+
+LEASE_DIR = '.inuse'
+LOCK_NAME = '.offload.lock'
+
+
+def dataset_repo():
+    repo = os.environ.get('GDM_LOGS_DATASET') or hf_visibility.DATASET_REPO
+    return None if repo in (None, '', 'HF-ORG/LOGS-DATASET') else repo
+
+
+def unit_of(run_dir, runs_root=None):
+    """The offload unit (``RUN`` or ``phase-b/NAME``) of a folder under runs/, or None."""
+    try:
+        relative = Path(run_dir).resolve().relative_to(Path(runs_root or RUNS).resolve())
+    except ValueError:
+        return None
+    parts = relative.parts
+    if len(parts) == 1 and parts[0] not in SKIP_UNITS:
+        return parts[0]
+    if len(parts) == 2 and parts[0] == 'phase-b' and parts[1] != STAMP:
+        return relative.as_posix()
+    return None
+
+
+def pending_bytes(unit, runs_root=None):
+    """Bytes of local files an offload of ``unit`` would upload (or find uploaded) and delete. Files the
+    credential screen kept local in the last offload (same size; e.g. resume archives holding session keys)
+    do not count."""
+    unit_dir = Path(runs_root or RUNS) / unit
+    screened = {}
+    if (unit_dir / 'OFFLOADED.json').is_file():
+        try:
+            manifest = json.loads((unit_dir / 'OFFLOADED.json').read_text())
+            screened = {r['path']: r.get('bytes') for r in manifest.get('excluded_by_screen', [])}
+        except (OSError, ValueError, KeyError, TypeError):
+            screened = {}
+    total = 0
+    for relative, size in unit_files(unit_dir):
+        if size is None or relative == 'OFFLOADED.json' or local_only(relative) or screened.get(relative) == size:
+            continue
+        if not keep_locally(unit, relative, size):
+            total += size
+    return total
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def live_leases(unit_dir, exclude=None):
+    """Labels of live leases on a unit (other processes using its files); stale leases are removed."""
+    folder = Path(unit_dir) / LEASE_DIR
+    live = []
+    for path in sorted(folder.glob('*.json')) if folder.is_dir() else []:
+        if exclude is not None and path == exclude:
+            continue
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if record.get('host') == socket.gethostname() and not _alive(int(record.get('pid', 0))):
+            path.unlink(missing_ok=True)
+            continue
+        live.append(f"{record.get('label')} (pid {record.get('pid')})")
+    return live
+
+
+@contextlib.contextmanager
+def _offload_lock(unit_dir, exclusive, blocking=True):
+    with open(Path(unit_dir) / LOCK_NAME, 'a') as handle:
+        flags = (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | (0 if blocking else fcntl.LOCK_NB)
+        try:
+            fcntl.flock(handle, flags)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
+def lease(unit_dir, label):
+    """Mark ``unit_dir`` as in use by this process for the duration (waits for a running offload first)."""
+    unit_dir = Path(unit_dir)
+    folder = unit_dir / LEASE_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f'{os.getpid()}-{time.time_ns()}.json'
+    with _offload_lock(unit_dir, exclusive=False):
+        path.write_text(json.dumps({'label': label, 'pid': os.getpid(), 'host': socket.gethostname(),
+                                    'started': now()}) + '\n')
+    try:
+        yield path
+    finally:
+        path.unlink(missing_ok=True)
+        try:
+            folder.rmdir()
+        except OSError:
+            pass
+
+
+def auto_offload(run_dir, *, label, skip=False, log=print, runs_root=None, offload=None, work=None):
+    """The default last step of a local analysis: offload the run so only its core stays local. Never raises;
+    returns a status record. Deferred while another step holds a lease on the run (the last one offloads)."""
+    if skip:
+        log(f'{label}: offload skipped (--no-offload); later: python scripts/offload_runs.py offload --unit UNIT')
+        return {'status': 'skipped'}
+    unit = unit_of(run_dir, runs_root)
+    if unit is None:
+        log(f'{label}: {run_dir} is not a run folder under runs/; nothing offloaded')
+        return {'status': 'not_a_unit'}
+    repo = dataset_repo()
+    if repo is None:
+        log(f'{label}: GDM_LOGS_DATASET is not set (HANDOFF.local.md); {unit} not offloaded. Later: '
+            f'python scripts/offload_runs.py offload --unit {unit}')
+        return {'status': 'no_dataset', 'unit': unit}
+    unit_dir = Path(runs_root or RUNS) / unit
+    with _offload_lock(unit_dir, exclusive=True, blocking=False) as locked:
+        if not locked:
+            log(f'{label}: another offload of {unit} is running; it covers this step')
+            return {'status': 'already_running', 'unit': unit}
+        others = live_leases(unit_dir)
+        if others:
+            log(f'{label}: {unit} is still in use by {", ".join(others)}; the last of them offloads it')
+            return {'status': 'deferred', 'unit': unit, 'in_use_by': others}
+        if (unit_dir / 'OFFLOADED.json').is_file() and not pending_bytes(unit, runs_root):
+            log(f'{label}: {unit} holds only its core; nothing to offload')
+            return {'status': 'nothing_to_offload', 'unit': unit}
+        scratch = Path(work or tempfile.mkdtemp(prefix='offload-work-'))
+        try:
+            result = (offload or offload_unit)(unit, repo=repo, work=scratch, runs_root=runs_root,
+                                               log=lambda m: log(f'offload: {m}'))
+        except Exception as error:  # the analysis itself succeeded; the run stays complete locally
+            log(f'{label}: offload of {unit} failed ({type(error).__name__}: {error}); the run is unchanged '
+                f'locally. Retry: python scripts/offload_runs.py offload --unit {unit}')
+            return {'status': 'failed', 'unit': unit, 'error': f'{type(error).__name__}: {error}'}
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+    return {'status': 'offloaded', **{k: result.get(k) for k in ('unit', 'commit', 'freed_bytes', 'offloaded')}}
+
+
+def add_offload_flag(parser):
+    parser.add_argument('--no-offload', action='store_true',
+                        help='keep the run\'s files local afterwards (default: offload the run to the private logs '
+                             'dataset so only its core stays local; docs/plan.md, November 3, 2026)')
 
 
 def _prepare(args):
@@ -664,6 +858,33 @@ def restore(unit, prefix='', force=False, cache=None, dest=None):
     return restored
 
 
+def restore_and_run(args, runner=subprocess.call):
+    """``restore`` from the command line. With ``-- CMD``: restore, run CMD while holding a lease on the run,
+    then offload the run again (in place) or delete the --dest folder (default; --no-offload keeps the files)."""
+    command = list(args.run or [])
+    if command[:1] == ['--']:
+        command = command[1:]
+    unit_dir = RUNS / args.unit
+    if not command:
+        restore(args.unit, args.prefix, args.force, args.cache, args.dest)
+        if not args.dest:
+            print(f'{args.unit}: restored in place; the next judge or story map on this run, or '
+                  f'`offload_runs.py offload --all`, offloads it again (prefer --dest, or restore ... -- CMD)')
+        return 0
+    with lease(unit_dir, 'restore: ' + ' '.join(command)[:120]):
+        restore(args.unit, args.prefix, args.force, args.cache, args.dest)
+        code = runner(command)
+    if args.dest:
+        if args.no_offload:
+            print(f'kept {args.dest} (--no-offload)')
+        else:
+            shutil.rmtree(args.dest, ignore_errors=True)
+            print(f'deleted the scratch restore {args.dest}')
+    else:
+        auto_offload(unit_dir, label='restore', skip=args.no_offload, log=lambda m: print(m, flush=True))
+    return code
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -681,13 +902,16 @@ def main():
     res.add_argument('--prefix', default='')
     res.add_argument('--force', action='store_true')
     res.add_argument('--cache', default=None)
-    res.add_argument('--dest', default=None, help='write into this folder instead of runs/UNIT')
+    res.add_argument('--dest', default=None, help='write into this folder instead of runs/UNIT (preferred)')
+    add_offload_flag(res)
+    res.add_argument('run', nargs=argparse.REMAINDER,
+                     help='-- CMD ARGS: run CMD on the restored files, then offload the run again (in place) or '
+                          'delete --dest; the exit code is CMD\'s')
     args = parser.parse_args()
     if hf_visibility.DATASET_REPO == 'HF-ORG/LOGS-DATASET':
         parser.error('Set GDM_LOGS_DATASET (HANDOFF.local.md)')
     if args.command == 'restore':
-        restore(args.unit, args.prefix, args.force, args.cache, args.dest)
-        return
+        sys.exit(restore_and_run(args))
     units = all_units() if args.all else args.unit
     work = args.work or tempfile.mkdtemp(prefix='offload-work-')
     if args.batch and not args.dry_run:

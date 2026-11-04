@@ -1614,6 +1614,33 @@ during the Cloudflare migration. Rules of the approval:
   never uploaded. Anything not confidently classified is uploaded rather than deleted-only.
 - Not touched: `.venv*`, `.git`, `private/`, `data/`, other repositories, the HF Space, existing dataset files.
 
+### Always offload to the logs dataset (November 3, 2026)
+
+**Owner decision (2026-11-03, chat): "always offload to the HF dataset if possible".** Extends the October 29 offload:
+local disk on the owner's Mac is freed, and offloading becomes the automatic default after local analysis, not a
+separate manual step. The October 29 rules apply unchanged: add-only, private visibility checked before every
+commit, SHA-256 verified before any local delete, budget ledgers and credential or host-only files never uploaded,
+few commits (HF: 128 per hour per repository, so units are batched), the core-only local layout.
+
+Implementation (operator choices within this decision; `scripts/offload_runs.py`):
+
+- **Default last step.** The behavior judge (`scripts/run_simple_judge.py`), the story map
+  (`scripts/run_storymap.py`, which wraps stage 0, the pipeline, validation and the pages, restoring stage-0 inputs
+  of a core-only run first) and `offload_runs.py restore --unit RUN ... -- CMD` (restore, run CMD, then offload)
+  offload their run when they succeed (`auto_offload`). `--no-offload` skips it. A missing `GDM_LOGS_DATASET` or a
+  failed upload is reported with the command to retry and never fails the analysis itself; a stopped or failed
+  step is not offloaded.
+- **Runs in use.** While a step uses a run it holds a lease (`RUN/.inuse/`, a dot-folder, never uploaded); the
+  offload waits for the last holder (it is deferred while other leases are live, stale leases of dead processes are
+  dropped), and an offload holds `RUN/.offload.lock`, which a new lease waits for.
+- **Scratch restores preferred.** `restore --dest DIR` (deleted afterwards when given `-- CMD`) is preferred over
+  restoring in place. A plain in-place restore is offloaded again by the next judge or story map on the run or by
+  `offload --all`, which now takes every unit with files outside its core (restored, or analysis outputs added
+  later), not only units never offloaded; it skips runs in use and the Cloudflare caches (`phase-b/cloudflare*`,
+  rebuildable, deleted after `verify` without upload, as on October 29).
+- A re-offload reuses the earlier repacked upload of a resume archive whose bytes are unchanged (a repack today can
+  differ in its gzip bytes, and dataset files are never overwritten).
+
 ## Runs go from the VM to the logs dataset, never to the owner's computer (October 29, 2026)
 
 **Owner decision (2026-10-29, chat): "make sure new runs never go to my computer, but automatically upload to hf".**

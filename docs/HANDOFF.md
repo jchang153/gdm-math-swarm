@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-03 PT by Claude (Opus 5.5) subagent (item 25: story-map GUI redesign, not published).
+Last updated: 2026-11-03 PT by Claude (Opus 5.5) subagent (item 27: always offload to the logs dataset).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -135,6 +135,10 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
   private logs dataset (`runs/<run-id>/OFFLOADED.json`, restore with `scripts/offload_runs.py restore`, item 15).
   **New runs (since 2026-10-29, item 16) never come to this computer in full:** the supervisor uploads them from the
   VM to the dataset and `scripts/fetch_run.py` fetches only the core and phase records.
+  **Always offload (owner, 2026-11-03, item 27):** the simple judge, `scripts/run_storymap.py` and
+  `offload_runs.py restore ... -- CMD` offload the run again by default (`--no-offload` skips); prefer
+  `restore --dest SCRATCH`; `offload_runs.py offload --all --batch --workers <=4` sweeps every run with files outside
+  its core.
 - **VMs:** see "Hosts and access" and "Operating a VM" below. Always stop VMs after work and verify they're stopped. Do not
   touch collaborator Amelie's VM, files or branches.
 - **Credentials:** host-only `.env`, Git-ignored. It holds the owner's OpenRouter
@@ -1260,6 +1264,17 @@ is being merged into main via `collab-env`.
      `publish_cloudflare.py judge-labels`. gdm 54 runs (results + judge report) deployment 084d3688, catalogue 061cd391;
      ib 390e6ac8, catalogue 36384df4; receipts `judge-labels-20261103.json`, `catalogue-judge-labels-20261103.json`
      in both receipt folders. `verify` ok on both sites.
+
+27. **IN FLIGHT 2026-11-03 (~20:30 PT, operator subagent): always offload to the logs dataset** (owner decision,
+   docs/plan.md "Always offload to the logs dataset (November 3, 2026)", extending item 15). Code: `scripts/offload_runs.py`
+   (`auto_offload`, run leases `RUN/.inuse/`, `offload --all` now takes every unit with files outside its core,
+   `restore ... -- CMD`, reuse of earlier repacked resume archives), `scripts/run_storymap.py` (new: stage 0, pipeline,
+   validate, view, offload; restores stage-0 inputs of a core-only run), `scripts/run_simple_judge.py` (offload after
+   a successful judgment; `--no-offload`), `scripts/supervise_run.py` (passes `--no-offload` on the VM: the supervisor
+   uploads the run itself); tests `tests/test_offload_runs.py`, `tests/test_supervise_run.py`. Cleanup: 8 older
+   180-minute runs and 18 commsonly/enforceonly phase-b folders re-offloaded (one batch commit; 3.8 GB freed). The
+   story-map runs in use by the publisher, the IB runs and `phase-b/cloudflare*` are offloaded at the end once their
+   agents are done (sizes in `HANDOFF.local.md`).
 
 ## Next steps / open items
 

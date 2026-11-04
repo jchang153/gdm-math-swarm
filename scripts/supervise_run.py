@@ -656,9 +656,10 @@ class Supervisor:
 
     def simple_judge_command(self, amount):
         """The simplified judge (scripts/run_simple_judge.py) with its one per-run budget, into its
-        default output directory RUN/analysis/simple_judge/."""
+        default output directory RUN/analysis/simple_judge/. ``--no-offload``: on the VM the supervisor uploads the
+        whole run itself afterwards (scripts/upload_run.py), so the judge's default offload is skipped."""
         return ["scripts/run_simple_judge.py", "--run-dir", str(self.run), "--run-limit", str(amount),
-                "--ledger", str(self.judge_ledger), "--credentials-root", str(self.root)]
+                "--ledger", str(self.judge_ledger), "--credentials-root", str(self.root), "--no-offload"]
 
     def behavior_judge(self, worker_code):
         """The paid behavior judge CONFIG selects (``behavior_judge``: "simple", the default, or "full")

@@ -24,11 +24,16 @@ planted source, not a model agent. It is never judged (no case file, no call; --
 report.json records it under "seeded" (with the injection minute); a likely source naming it counts as "seeded",
 never "independent". Non-solver agents that are judged (every overseer) carry their role in agents.jsonl and on the
 page.
+
+Offload (owner, November 3, 2026; docs/plan.md "Always offload to the logs dataset"): when the run folder is under
+runs/, the judge holds a lease on it and, after a successful judgment, offloads the run to the private logs dataset
+(scripts/offload_runs.py auto_offload) so only its core stays local; --no-offload keeps the files.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import fcntl
 import json
 import sys
@@ -40,6 +45,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "src"), str(ROOT / "scripts")]
 
 from research.analysis.simple_judge import route as sroute  # noqa: E402
+import offload_runs  # noqa: E402
 
 ROUTE_DIR = ROOT / "data" / "validation"
 
@@ -61,6 +67,7 @@ def parse_args(argv=None):
     parser.add_argument("--route-record", type=Path, help="simple-judge route record (default: newest, refreshed)")
     parser.add_argument("--history-workers", type=int, default=3)
     parser.add_argument("--mock", action="store_true", help="offline deterministic model; no network, no key")
+    offload_runs.add_offload_flag(parser)
     return parser.parse_args(argv)
 
 
@@ -116,13 +123,20 @@ def main(argv=None):
         log("refused: --mock writes outside the run directory (pass --output-dir)")
         return 2
     out_dir.mkdir(parents=True, exist_ok=True)
-    with open(out_dir / ".simple-judge.lock", "w") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            log(f"refused: another invocation holds {out_dir / '.simple-judge.lock'}")
-            return 2
-        return _run(args, run_dir, out_dir, log)
+    unit = None if args.mock else offload_runs.unit_of(run_dir)
+    with contextlib.ExitStack() as stack:
+        if unit is not None:   # the run is in use until the judge ends (offload_runs.lease)
+            stack.enter_context(offload_runs.lease(run_dir, "simple judge"))
+        with open(out_dir / ".simple-judge.lock", "w") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                log(f"refused: another invocation holds {out_dir / '.simple-judge.lock'}")
+                return 2
+            code = _run(args, run_dir, out_dir, log)
+    if code == 0 and unit is not None:   # owner, November 3, 2026: always offload after local analysis
+        offload_runs.auto_offload(run_dir, label="simple judge", skip=args.no_offload, log=log)
+    return code
 
 
 def _run(args, run_dir, out_dir, log):
