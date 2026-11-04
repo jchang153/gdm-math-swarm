@@ -1282,7 +1282,7 @@ is being merged into main via `collab-env`.
      ib 390e6ac8, catalogue 36384df4; receipts `judge-labels-20261103.json`, `catalogue-judge-labels-20261103.json`
      in both receipt folders. `verify` ok on both sites.
 
-27. **IN FLIGHT 2026-11-03 (~20:30 PT, operator subagent): always offload to the logs dataset** (owner decision,
+27. **DONE 2026-11-04 (~06:00 PT): always offload to the logs dataset** (owner decision,
    docs/plan.md "Always offload to the logs dataset (November 3, 2026)", extending item 15). Code: `scripts/offload_runs.py`
    (`auto_offload`, run leases `RUN/.inuse/`, `offload --all` now takes every unit with files outside its core,
    `restore ... -- CMD`, reuse of earlier repacked resume archives), `scripts/run_storymap.py` (new: stage 0, pipeline,
@@ -1292,6 +1292,12 @@ is being merged into main via `collab-env`.
    180-minute runs and 18 commsonly/enforceonly phase-b folders re-offloaded (one batch commit; 3.8 GB freed). The
    story-map runs in use by the publisher, the IB runs and `phase-b/cloudflare*` are offloaded at the end once their
    agents are done (sizes in `HANDOFF.local.md`).
+   - **Final cleanup 2026-11-04 (packing agent, after item 30's verify):** `offload_runs.py offload --batch --workers 3`
+     of the 7 math story-map runs (control/1ov/2ov/10ov 180m-notices r3/r2/r3/r3, reminder5m-60m r1-r3), the 2 IB
+     runs and the 6 `phase-b` folders of the 20261030T06 runs: 15 units done, 0 failed, dataset commit `47c13294`,
+     9.5 GB freed. Deleted `runs/phase-b/cloudflare/cache` (4.6 GB) and `runs/phase-b/cloudflare-ib/cache` (91 MB)
+     and the approved dead scratch folders (rem-pub, ibruns, ibview, ibbundle-*, ib-storymap-public,
+     storymap-public-reminder, rem/public, pub1103). Free disk 57.5 -> 78.7 GiB.
 
 28. **DONE 2026-11-03 (~21:40 PT): redesigned story maps with the full reasoning chain published on both sites**
    (owner decision, docs/plan.md "Story maps with the full reasoning chain (November 3, 2026)"; items 24-26).
@@ -1337,6 +1343,34 @@ is being merged into main via `collab-env`.
    - The site-wide `verify` fails only on `no_broken_links` for 2ov r1 (`conference-view` -> `analysis/timeline.jsonl`,
      `results.html` -> `analysis/timeline.md`; its VM supervisor crashed). The run agent republishes 2ov r1 with
      `--replace-pages`.
+
+30. **DONE 2026-11-04 (05:34 PT): more files packed per run on both Pages sites** (owner decision "option 1",
+   docs/plan.md "Pack more files per run (November 3, 2026)"; `scripts/publish_cloudflare.py`, docs/experiment-library.md).
+   - Pack groups now also `evaluations/sources/`, `analysis/storymap/agents/`, `analysis/judge/{agents,packages}/`
+     and `analysis/judge/review/agents/` (before: `instructions/`, `prompts/`), into `RUN/packed/<group>-NN.json`
+     (page groups in 6 MiB parts). Every old URL keeps working: `RUN/<group>/404.html` is the viewer, which Pages
+     serves (HTTP 404, URL unchanged) for a missing file in that folder; it renders a packed page in place (story-map
+     agent pages, `#sel=` anchors, judge review pages) or shows a packed file with its exact bytes. **Every
+     deployment now unpacks the served site, applies the plan and packs again** (lossless check), so all subcommands
+     (publish, storymap, heatmap, judge-labels, restyle) work as before on the original paths. Byte-for-byte live
+     checks must read packed files through `RUN/packed/index.json` and the packs (an agent page URL now answers 404
+     with the viewer), e.g. `verify --full` (`packed_members`) or the scratch `pack/tools/oldurls_check.py`.
+   - **Link guard:** every deployment repoints links to unserved private files (timelines, JSONL...) to
+     `private-records.html`; `publish` refuses a bundle whose pages link a file the site would not serve.
+   - **gdm:** deployment `6d76d9f9` (base `d1c3f8c8`, under `cf-deploy.lock`, after the 15 push runs were on the site):
+     heatmap caption refresh (answer-echo-v2 wording) on the 68 older runs (only results.html changed; PNGs
+     unchanged; push runs already had it) plus the full repack. **11,732 -> 5,156 files** (3.27 GB); per run max
+     532 -> 82, median 100 -> 57; story-map runs ~300 -> ~80; push runs 72-248 -> 55-78; `live/` area 134 (not
+     packed). Receipt `runs/phase-b/cloudflare/receipts/repack-groups-heatmap-caption-20261104.json`. `verify --full`
+     ok on every check (5,156 files, 28,715 packed files, 299 old-URL groups); all 11,731 files of the pre-repack
+     manifest reachable at their old URLs with their exact bytes (4,237 unchanged, 6,996 packed); all 418 catalogue
+     links 200; 12 story-map runs: results tab -> index -> 100 agent links, all in the packs.
+   - **ib:** deployment `b8cb8e05` (repack only; the coding caption did not change): 252 -> 129 files; `verify --full`
+     ok; 251/251 old files reachable byte for byte; live agent page renders with its reasoning chain.
+   - Push-run state seen at 05:30 PT (item 29): story map on the site for control r3 (complete) and 1ov r1, 2ov r1,
+     reminder r1, r2 (incomplete: OpenRouter 402); none for the other 10. 2ov r1 (republished with
+     `--replace-pages` by the run agent) has no Story map tab and no heatmap section in results.html although the
+     catalogue links its story map and faking-heatmap.png is served.
 
 ## Next steps / open items
 
