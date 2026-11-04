@@ -1307,6 +1307,22 @@ is being merged into main via `collab-env`.
      or through its own definitions, reflexivity-only proofs, a term related to itself). Published heatmaps keep
      the old wording until republished (`publish_cloudflare.py heatmap`).
 
+29. **IN FLIGHT 2026-11-04 (from ~00:10 PT, story-map publisher subagent): story maps, heatmaps and catalogue for the 15
+   push runs** (item 23; owner deadline 09:00 PT). The run agent owns fetching, the VMs and the story-map pipeline
+   reruns. The publisher owns the story-map, heatmap and catalogue deploys and the final verify.
+   - Bug found: the post-processor called `indscan.py ROOT`, but the usage is `indscan.py RUN_DIR... TAG` (the tag is
+     the last argument). It therefore scanned 0 files and blocked every story map. Offload order was not the cause:
+     the public renders in the operator scratch `push/sm/<RUN>` were intact. `.venv` lacked matplotlib, so
+     `faking_heatmap.py` failed. Fixed by installing `matplotlib>=3.8` (the `publication` extra).
+   - **OpenRouter returned HTTP 402 (out of credit) during the story-map pipelines.** A story map is published only
+     when its pipeline spent money (`invocation_settled_usd` > 0) and its `validation.md` has no "stage N failed:"
+     units. Only control r3 ($24.71) is complete. Live but incomplete, to be replaced after the `--retry-failed`
+     reruns: 2ov r1 and reminder r2 (empty, $0), 1ov r1 (70 of 100 agents stage-3 http_402, $10.90), reminder r1
+     (4 agents http_402, $74.62). 10ov r1 and 1ov r2 rendered at $0 and were not published.
+   - The site-wide `verify` fails only on `no_broken_links` for 2ov r1 (`conference-view` -> `analysis/timeline.jsonl`,
+     `results.html` -> `analysis/timeline.md`; its VM supervisor crashed). The run agent republishes 2ov r1 with
+     `--replace-pages`.
+
 ## Next steps / open items
 
 - **VM HF upload token (item 16):** confirmed working on the owner's first VM (item 17). `vm_hf_setup.py` failed on
