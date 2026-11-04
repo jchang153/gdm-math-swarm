@@ -139,10 +139,11 @@ class BundleTests(unittest.TestCase):
             root, loaded = self.bundle(tmp, {f'{RUN}/results.html': b'<html>new</html>',
                                              f'{RUN}/inspect-view/index.html': HF_INSPECT.replace(
                                                  COMMIT, dataset_logs.COMMIT_PLACEHOLDER).encode(),
+                                             f'{RUN}/inspect-view/assets/index.js': b'js',
                                              'index.html': b'ignored'})
             with patch.object(cf, 'load_bundle', return_value=loaded):
                 files, plan = cf.plan_bundle(site(OTHER), root, unlisted=())
-            self.assertEqual(plan['added_files'], 2)
+            self.assertEqual(plan['added_files'], 3)
             self.assertIn(b'data-records=""', files[f'{RUN}/inspect-view/index.html'])
             self.assertEqual({e['run'] for e in json.loads(files['experiments.json'])['experiments']}, {OTHER, RUN})
             with patch.object(cf, 'load_bundle', return_value=loaded):
@@ -353,6 +354,43 @@ class PackTests(unittest.TestCase):
         name = next(iter(agent_files(RUN)))
         with self.assertRaises(ValueError):
             cf.unpack_site({**out, name: b'different'})
+
+
+class LinkGuardTests(unittest.TestCase):
+    """Owner, November 3, 2026: a push run's pages linked analysis/timeline.md and ../analysis/timeline.jsonl, files
+    the run never produced (its supervisor died before the timeline step)."""
+    PAGE = (b'<html><a href="analysis/timeline.md">timeline</a> <a href="results.json">r</a> '
+            b'<a href="https://example.org/x">x</a> <a href="#top">t</a></html>')
+
+    def test_private_links_repointed_to_the_notice(self):
+        files = {**site(RUN), f'{RUN}/results.html': self.PAGE,
+                 f'{RUN}/conference-view/index.html': b'<a href="../analysis/timeline.jsonl">t</a>'}
+        self.assertEqual({(p, u) for p, u, _ in cf.broken_links(files)},
+                         {(f'{RUN}/results.html', 'analysis/timeline.md'),
+                          (f'{RUN}/conference-view/index.html', '../analysis/timeline.jsonl')})
+        fixed, changed = cf.repoint_private_links(files)
+        self.assertEqual(len(changed), 2)
+        self.assertIn(b'href="../private-records.html"', fixed[f'{RUN}/results.html'])
+        self.assertIn(b'href="../../private-records.html"', fixed[f'{RUN}/conference-view/index.html'])
+        self.assertEqual(cf.broken_links(fixed), [])
+        out, _ = cf.finish(files, {}, {'source': {}})  # every deployment repoints them
+        self.assertEqual(cf.broken_links(cf.unpack_site(out)), [])
+
+    @patch.object(cf, 'render_catalogue', side_effect=fake_catalogue)
+    def test_bundle_with_a_broken_link_is_refused(self, _):
+        for page, refused in ((self.PAGE, False), (b'<html><a href="analysis/missing.html">m</a></html>', True)):
+            with tempfile.TemporaryDirectory() as tmp, self.subTest(refused=refused):
+                root, loaded = BundleTests.bundle(None, tmp, {f'{RUN}/results.html': page,
+                                                              f'{RUN}/results.json': b'{}'})
+                with patch.object(cf, 'load_bundle', return_value=loaded):
+                    if refused:
+                        with self.assertRaises(ValueError):
+                            cf.plan_bundle(site(OTHER), root, unlisted=())
+                    else:
+                        files, plan = cf.plan_bundle(site(OTHER), root, unlisted=())
+                        self.assertEqual([x['target'] for x in plan['repointed_private_links']],
+                                         [f'{RUN}/analysis/timeline.md'])
+                        self.assertIn(b'../private-records.html', files[f'{RUN}/results.html'])
 
 
 class FakeWrangler:

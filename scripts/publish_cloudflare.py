@@ -521,6 +521,64 @@ def private_links(document, page):
     return DATASET_LINK.sub(f'href="{target}"', document)
 
 
+LINK_ATTR = re.compile(r'''(\b(?:href|src)=)(["'])([^"'#?]*)([^"']*)\2''', re.I)
+
+
+def link_target(page, url):
+    """The site path a same-site relative link of ``page`` names; '' for links not checked (absolute, external,
+    templated, empty); None for a link that leaves the site root."""
+    if not url or re.match(r'[a-z][a-z0-9+.-]*:|//', url, re.I) or url.startswith(('/', '${', "'")):
+        return ''
+    return dataset_logs._normalise(PurePosixPath(page).parent / urllib.parse.unquote(url))
+
+
+def link_ok(target, url, names):
+    """True when a link target is served (``names``: every file of the site, packed files unpacked)."""
+    return (target == '' or target in names or target + '/index.html' in names or target == SITE_MANIFEST
+            or target + '.html' in names)
+
+
+def broken_links(files, pages=None):
+    """[(page, url, target)] of same-site links that name no file of ``files`` (an unpacked site), for every
+    .html page (or ``pages``)."""
+    names = set(files) | GENERATED
+    out = []
+    for page in sorted(pages if pages is not None else (n for n in files if n.endswith('.html'))):
+        text = files[page].decode('utf-8', 'replace')
+        for match in LINK_ATTR.finditer(text):
+            url = match.group(3)
+            target = link_target(page, url)
+            if target is None or not link_ok(target, url, names):
+                out.append((page, url + match.group(4), target))
+    return out
+
+
+def repoint_private_links(files, pages=None):
+    """Links of pages to private files the site never serves (``private_category``: Inspect logs, raw JSONL,
+    timelines, databases...) repointed to the site's private-records notice, as for an unpinned bundle (owner,
+    November 3, 2026: a run page linked analysis/timeline.md, a file that was never produced). Pages that link to
+    the logs dataset keep those links. Returns (files, [{page, url, target}]); other broken links are left alone
+    (``broken_links``)."""
+    files = dict(files)
+    names = set(files) | GENERATED
+    changed = []
+    for page in sorted(pages if pages is not None else (n for n in files if n.endswith('.html'))):
+        text = files[page].decode('utf-8', 'replace')
+
+        def swap(match):
+            url = match.group(3)
+            target = link_target(page, url)
+            if not target or link_ok(target, url, names) or private_category(target) is None:
+                return match.group(0)
+            changed.append({'page': page, 'url': url, 'target': target})
+            notice = '../' * page.count('/') + PRIVATE_PAGE
+            return f'{match.group(1)}{match.group(2)}{notice}{match.group(2)}'
+        new = LINK_ATTR.sub(swap, text)
+        if new != text:
+            files[page] = new.encode('utf-8')
+    return files, changed
+
+
 def private_page():
     from site_style import themed
     body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
@@ -788,6 +846,12 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
             new = {n: d for n, d in pack_run(run, originals).items() if not n.endswith('.html')}
             if new != old:
                 raise ValueError('Immutable site run file differs: ' + run + '/' + PACK_FOLDER)
+    pages = [n for n in files if run_of(n) in selected and n.endswith('.html')]
+    files, repointed = repoint_private_links(files, pages)
+    broken = broken_links(files, pages)
+    if broken:  # a page of the bundle links a file the site would not serve
+        raise ValueError(f'{len(broken)} broken link(s) in the bundle\'s pages, e.g. '
+                         + '; '.join(f'{p} -> {u}' for p, u, _ in broken[:5]))
     entries = merge_entries(catalogue(base_files), incoming)
     check_domains({n: d for n, d in files.items() if run_of(n) in selected}, site)
     files.update(render_catalogue(entries, unlisted, files, site=site))
@@ -795,7 +859,7 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
         files['archive-manifest.json'] = base_files['archive-manifest.json']
     return files, {'source': {'kind': 'bundle', 'runs': sorted(selected),
                               **({'dataset_commit': dataset_commit} if dataset_commit else {})},
-                   'added_files': len(added), 'replaced_pages': replaced,
+                   'added_files': len(added), 'replaced_pages': replaced, 'repointed_private_links': repointed,
                    'private_files_not_deployed': {'files': len(private),
                                                   'bytes': sum(x['bytes'] for x in private.values())}}
 
@@ -1020,6 +1084,9 @@ def finish(files, base_manifest, plan, project=None, site=None):
         raise ValueError(f'Project {project} is not the {site.key} site\'s ({site.project})')
     files = {n: d for n, d in files.items() if n not in GENERATED}
     check_domains(files, site)
+    files, repointed = repoint_private_links(unpack_site(files))
+    if repointed:
+        plan['repointed_private_links'] = repointed
     files, packed = pack_site(files)
     if packed:
         plan['packed_runs'] = packed

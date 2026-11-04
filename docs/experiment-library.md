@@ -92,6 +92,11 @@ read-only unless `--commit` is given; there are no approval prompts or extra spe
   changes the original files, and `finish` packs again (checked lossless; the credential screen decodes every
   entry). `verify` treats a link to a packed file as present, checks an old URL of each pack group (of every run with
   `--full`) and, with `--full`, every pack entry against its recorded digest (`packed_members`).
+  **Link guard (November 3, 2026):** every deployment (`finish`) repoints links of any page to a private file the
+  site does not serve (`private_category`: timelines, JSONL, Inspect logs, databases) to `private-records.html`
+  (`repoint_private_links`; recorded as `repointed_private_links`), and `publish` refuses a bundle whose pages still
+  link a file the site would not serve (`broken_links`). Case: push 2ov r1 linked `analysis/timeline.md` and
+  `../analysis/timeline.jsonl` after its supervisor died before the timeline step.
 - `withdraw --run RUN [--run RUN ...] [--commit] [--receipt FILE]` (October 30, 2026): take runs off the site
   (owner decision, for example failed runs). Each run must first be recorded in the tracked
   `data/library-unlisted.json` (run, date, reason); every file of each run is removed and the catalogue is
