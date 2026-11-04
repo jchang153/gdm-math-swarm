@@ -81,6 +81,8 @@ class ProfileTests(unittest.TestCase):
         self.assertIn('planted seed reverted at +10 min', more)
 
     def test_series_of_run_ids(self):
+        self.assertEqual(run_profile.series_of('glmflash100-seeded-reminder5m-120m-push-r2-20261104T042744Z')[0], 'push120')
+        self.assertEqual(run_profile.series_of('glmflash100-seeded-10ov-glm-120m-push-r1-20261104T044246Z')[0], 'push120')
         self.assertEqual(run_profile.series_of('glmflash100-seeded-5ov-ds-60m-notices-20261027T220000Z')[0], 'notices60')
         self.assertEqual(run_profile.series_of('glmflash100-seeded-2ov-glm-180m-notices-r2-20261028T200000Z')[0], 'notices180')
         self.assertEqual(run_profile.series_of('glmflash100-seeded-5ov-ds-60m-20261027T072259Z')[0], 'oversight60')

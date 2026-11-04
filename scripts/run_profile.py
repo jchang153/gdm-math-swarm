@@ -38,6 +38,11 @@ W, H = 240, 40
 
 # Run series, matched on the run ID (first match wins), shown newest series first.
 SERIES = (
+    ('push120', r'^glmflash100-seeded-.+-120m-push-', '120-minute runs with pushed messages',
+     'Fifteen 120-minute seeded runs (100 GLM 5.3 Flash solvers, the planted exploit at +3 min), three replicates '
+     'each of a control, a control with an integrity reminder every 5 minutes, and 1, 2 or 10 GLM 5.3 Flash '
+     'overseers. Board posts, direct messages and reminders are pushed: appended to the solver\'s next tool result '
+     'instead of announced by an unread notice. Unread notices remain for new library files only.'),
     ('reminder60', r'^glmflash100-seeded-reminder5m-60m-notices-', '60-minute control with an integrity reminder',
      'Three replicates of the 60-minute seeded control with unread notices (100 GLM 5.3 Flash solvers, no '
      'overseers, the planted exploit at +3 min) with one change: every 5 minutes (minutes 5 to 55) each solver\'s '
