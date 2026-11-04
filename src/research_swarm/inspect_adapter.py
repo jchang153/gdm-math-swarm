@@ -49,6 +49,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import copy
+import dataclasses
 import functools
 import hashlib
 import json
@@ -850,8 +851,90 @@ def _settle_unbilled(ledger, request_id, record, agent_id):
         return "uncertain"
 
 
+# ---------------------------------------------------------------------------
+# Push delivery (docs/plan.md, "Push delivery of board posts and DMs (November 3, 2026)")
+
+# Between a tool result's own text and the appended block.
+PUSH_SEPARATOR = "\n\n"
+
+
+def push_anchor(messages, sent=frozenset()):
+    """tool_call_id of the request's most recent tool result after its last assistant message, else None.
+
+    Only a tool result in the trailing (newest, never cached) part of the request may receive a new
+    block, so a delivery never changes a prefix the provider has already cached: a tool result already
+    sent in an earlier request of this agent (``sent``) is never an anchor (e.g. a trailing continuation
+    message after it). User text after the tool result (Claude Code's own reminders, token counters) is
+    allowed; the block goes in the tool result itself."""
+    from inspect_ai.model import ChatMessageAssistant, ChatMessageTool
+    for message in reversed(messages):
+        if isinstance(message, ChatMessageAssistant):
+            return None
+        if isinstance(message, ChatMessageTool) and message.tool_call_id:
+            return None if message.tool_call_id in sent else message.tool_call_id
+    return None
+
+
+def tool_call_ids(messages):
+    """Every tool result id in ``messages``."""
+    from inspect_ai.model import ChatMessageTool
+    return {m.tool_call_id for m in messages if isinstance(m, ChatMessageTool) and m.tool_call_id}
+
+
+def with_push_block(message, block):
+    """A copy of tool message ``message`` with ``block`` appended (the scaffold's message is unchanged).
+
+    String content gains PUSH_SEPARATOR + block; list content gains one ContentText. An error result's
+    ``error.message`` (what OpenAI-compatible providers send instead of the content) gains it too."""
+    from inspect_ai.model import ContentText
+    content = message.content
+    if isinstance(content, str):
+        content = content + PUSH_SEPARATOR + block if content else block
+    else:
+        content = list(content) + [ContentText(text=block)]
+    update = {"content": content}
+    if message.error is not None:
+        text = message.error.message or ""
+        # ToolCallError is a dataclass in the pinned inspect_ai (no model_copy).
+        update["error"] = dataclasses.replace(message.error,
+                                              message=text + PUSH_SEPARATOR + block if text else block)
+    return message.model_copy(update=update)
+
+
+def apply_push_pins(messages, pins):
+    """(messages, count): every tool result whose tool_call_id is pinned gets its block, identically on
+    every request. Never mutates ``messages``; an unchanged request returns the original list."""
+    if not pins:
+        return messages, 0
+    from inspect_ai.model import ChatMessageTool
+    effective, count = None, 0
+    for index, message in enumerate(messages):
+        if isinstance(message, ChatMessageTool) and message.tool_call_id in pins:
+            if effective is None:
+                effective = list(messages)
+            effective[index] = with_push_block(message, pins[message.tool_call_id])
+            count += 1
+    return (messages if effective is None else effective), count
+
+
+async def push_request(push, agent_id, messages, request_seq, sent=None):
+    """Deliver what is new for ``agent_id`` (pinned to the trailing tool result) and apply every pin.
+
+    ``sent`` (a set, updated here): tool result ids already sent in this agent's earlier requests.
+    Returns (messages, info) with info {"anchor", "delivered", "pins_applied"}; a fault in the
+    conference leaves the request unchanged apart from the pins already known."""
+    sent = set() if sent is None else sent
+    anchor = push_anchor(messages, sent)
+    sent.update(tool_call_ids(messages))
+    delivered = False
+    if anchor is not None:
+        delivered = await _in_thread(push.deliver_push, agent_id, anchor, request_seq) is not None
+    messages, applied = apply_push_pins(messages, push.push_pins(agent_id))
+    return messages, {"anchor": anchor, "delivered": delivered, "pins_applied": applied}
+
+
 def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", archive=None, stop=None,
-                  neutral=False, model_override=None):
+                  neutral=False, model_override=None, push=None):
     """Bridge GenerateFilter: barrier, admission, frozen settings, settlement.
 
     The returned coroutine function carries ``.state`` which the solver reads at
@@ -871,6 +954,11 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     ``model_override`` (per-role model, research_swarm.oversight ``overseer.model``): the Model this
     agent's requests are generated with instead of the bridge's task model; ``settings`` must then
     be that model's ProviderSettings (reservation, frozen request options and settlement).
+
+    ``push`` (a ConferenceService with push delivery enabled, or None): after the barrier, new board
+    posts, direct messages and the due integrity reminder are delivered in one block appended to the
+    request's trailing tool result, and every earlier block is re-applied to its own tool result
+    (``push_request``; docs/plan.md, "Push delivery of board posts and DMs (November 3, 2026)").
     """
     from inspect_ai.model import Model
     from inspect_ai.util import LimitExceededError
@@ -882,6 +970,8 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     state = {"requests": 0, "finished": 0, "last_stop_reason": None, "consecutive_truncations": 0,
              "truncated_responses": 0, "unbilled_errors": 0, "uncertain": 0, "in_flight": 0,
              "last_request_outcome": None, "last_denial": None, "last_error": None, "last_output_kind": None}
+
+    sent_tool_ids: set = set()  # push delivery: tool results already sent (never a new anchor)
 
     def deny(reason, payload=None):
         state["last_request_outcome"], state["last_denial"] = "not_admitted", reason
@@ -903,6 +993,9 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
         if stop is not None and stop.is_set():
             deny("run_stopped")
             raise LimitExceededError("time", value=0, limit=0, message=ended)
+        pushed = None
+        if push is not None:
+            messages, pushed = await push_request(push, agent_id, messages, state["requests"] + 1, sent_tool_ids)
         request = json.dumps({"messages": [m.model_dump(mode="json") for m in messages],
                               "tools": [t.model_dump(mode="json") for t in tools]}, ensure_ascii=False)
         reservation = settings.reservation(request)
@@ -931,12 +1024,12 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
         state["in_flight"] += 1
         try:
             return await _generate(model_override or model, messages, tools, tool_choice, config, request, request_id, reservation,
-                                   normalized_counters, neutralized)
+                                   normalized_counters, neutralized, pushed)
         finally:
             state["in_flight"] -= 1
 
     async def _generate(model, messages, tools, tool_choice, config, request, request_id, reservation,
-                        normalized_counters, neutralized=None):
+                        normalized_counters, neutralized=None, pushed=None):
         record("inference_admitted", agent_id, {"request_id": request_id, "reserved_usd": str(reservation),
                                                 "request_bytes": len(request.encode("utf-8")),
                                                 "replayed_reasoning_blocks": replayed_reasoning_blocks(messages),
@@ -945,7 +1038,11 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
                                                     "normalized_token_counters": normalized_counters}
                                                    if normalized_counters else {}),
                                                 **({"neutral_environment": NEUTRAL_ENVIRONMENT_VERSION,
-                                                    "neutralized": neutralized} if neutralized is not None else {})})
+                                                    "neutralized": neutralized} if neutralized is not None else {}),
+                                                **({"request_seq": state["requests"], "push_anchor": pushed["anchor"],
+                                                    "push_delivered": pushed["delivered"],
+                                                    "push_pins_applied": pushed["pins_applied"]}
+                                                   if pushed is not None else {})})
         # num_choices stays unset: `n` is not in the route's supported parameters
         # and require_parameters would make the provider refuse it.
         frozen = config.model_copy(update={"max_tokens": settings.max_tokens, "max_retries": 0,

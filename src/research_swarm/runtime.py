@@ -561,6 +561,16 @@ NEUTRAL_CONTINUE_MESSAGE = ("The collaboration is still in session and the run's
 RESTART_BASE_DELAY, RESTART_MAX_DELAY, RESTART_QUICK_REQUESTS = 15, 600, 3
 
 
+def _continue_for(agent_id, overseer, neutral, push):
+    """The agent's continuation message; in a push run with the push wording (prompts.push_wording)."""
+    from . import oversight
+    message = oversight.continue_message_for(agent_id, overseer)
+    if not push:
+        return message
+    from .prompts import push_wording
+    return push_wording(message or (NEUTRAL_CONTINUE_MESSAGE if neutral else CONTINUE_MESSAGE))
+
+
 def restart_delay(consecutive_quick):
     """Seconds to wait before a restart: 0 after a productive session, then 15, 30, 60...
     (capped) for consecutive sessions that errored or made at most RESTART_QUICK_REQUESTS requests."""
@@ -1164,6 +1174,31 @@ def unread_notices_enabled(config):
     return config.get("unread_notices", True) is not False
 
 
+def unread_notice_channels(config):
+    """None (every channel) or ("library",) for ``"unread_notices": "library"`` (docs/plan.md, "Push
+    delivery of board posts and DMs (November 3, 2026)": counts remain only for shared library files)."""
+    return ("library",) if config.get("unread_notices") == "library" else None
+
+
+def push_delivery_enabled(config):
+    """Config ``push_delivery`` (bool, default false): board posts, direct messages and the integrity
+    reminder are pushed into the agents' tool results (docs/plan.md, "Push delivery of board posts and
+    DMs (November 3, 2026)")."""
+    return config.get("push_delivery") is True
+
+
+def push_delivery_problems(config):
+    problems = []
+    if "unread_notices" in config and not (isinstance(config["unread_notices"], bool)
+                                           or config["unread_notices"] == "library"):
+        problems.append('unread_notices must be true, false or "library"')
+    if "push_delivery" in config and not isinstance(config["push_delivery"], bool):
+        problems.append("push_delivery must be true or false")
+    if config.get("push_delivery") is True and config.get("unread_notices") not in ("library", False):
+        problems.append('push_delivery needs unread_notices "library" (or false): pushed channels keep no counts')
+    return problems
+
+
 def integrity_reminder_settings(config):
     """Config ``integrity_reminder``: {"interval_seconds": N, "text": "..."}; absent or null means off.
 
@@ -1281,8 +1316,7 @@ def preflight(config, repo_root):
     blockers.extend(persona_reviewing_problems(config))  # docs/prompts.md, "Persona reviewing lines"
     from .oversight import overseer_problems
     blockers.extend(overseer_problems(config))  # docs/prompts.md, "Overseer role"
-    if "unread_notices" in config and not isinstance(config["unread_notices"], bool):
-        blockers.append("unread_notices must be true or false")  # docs/plan.md, "Unread notices"
+    blockers.extend(push_delivery_problems(config))  # docs/plan.md, "Unread notices", "Push delivery"
     blockers.extend(integrity_reminder_problems(config))  # docs/plan.md, "periodic integrity reminder"
     allocation = None
     try:
@@ -1885,8 +1919,12 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                           checker_factory=oversight.make_code_proof_checker(compiler))
                          if code else oversight.enable(conference, overseer, record))
         unread_notices = unread_notices_enabled(config)  # default on; explicit false turns it off
+        notice_channels = unread_notice_channels(config)
         if unread_notices:  # docs/plan.md, "Unread notices (October 27, 2026)"
-            conference.enable_unread_notices()
+            conference.enable_unread_notices(*((notice_channels,) if notice_channels else ()))
+        push = push_delivery_enabled(config)
+        if push:  # docs/plan.md, "Push delivery of board posts and DMs (November 3, 2026)"
+            conference.enable_push_delivery()
         integrity_reminder = integrity_reminder_settings(config)  # off unless configured
         if integrity_reminder is not None:  # docs/plan.md, "Baseline with periodic integrity reminder"
             max_seconds = config.get("max_run_seconds")
@@ -1935,6 +1973,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "max_connections": connections, "track": getattr(conference, "track", config.get("track")),
             "auto_restart": config.get("auto_restart") is True,
             "unread_notices": unread_notices,
+            **({"unread_notice_channels": list(notice_channels)} if notice_channels else {}),
+            **({"push_delivery": True} if push else {}),
             "integrity_reminder": None if integrity_reminder is None else {
                 "interval_seconds": integrity_reminder[0], "text": integrity_reminder[1],
                 "last_boundary": last_boundary},
@@ -1969,6 +2009,13 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                              run_info=_safe_resume_run_info(config, effective, settings, repo_root,
                                                                             agent_ids, listing, record))
         def prompt_for(agent, persona):
+            text = _prompt_for(agent, persona)
+            if push:  # docs/plan.md, "Push delivery of board posts and DMs": accurate delivery wording
+                from .prompts import push_wording
+                text = push_wording(text)
+            return text
+
+        def _prompt_for(agent, persona):
             if oversight.is_overseer(agent, overseer):
                 # The seed is one more "other agent" to the overseer, like to everyone else.
                 return oversight.prompt_for(agent, overseer, solver_ids + ([seed] if seed else []), listing, variant,
@@ -1984,13 +2031,14 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             # Overseers with their own model reserve, request and settle with its settings.
             own = overseer_settings is not None and oversight.is_overseer(agent, overseer)
             return budget_filter(agent, ledger, overseer_settings if own else settings, barrier, record, "pilot",
-                                 archive, clock.stop, **neutral_args, model_override=overseer_model if own else None)
+                                 archive, clock.stop, **neutral_args, model_override=overseer_model if own else None,
+                                 push=conference if push else None)
 
         solver = peer_solver(conference=conference, definitions=definitions, personas=personas,
                              prompt_for=prompt_for, roles=({a: r for a, r in roles.items() if a in agent_ids}
                                                            if overseer else None),
                              definitions_for=lambda a: oversight.definitions_for(a, overseer, definitions, domain=domain),
-                             continue_for=lambda a: oversight.continue_message_for(a, overseer),
+                             continue_for=lambda a: _continue_for(a, overseer, neutral, push),
                              env_for=lambda a: oversight.claude_code_env_for(a, overseer),
                              filter_for=filter_for,
                              run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,

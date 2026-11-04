@@ -670,9 +670,9 @@ class PreflightTests(unittest.TestCase):
         ok = lambda c, r: {"ready": True, "blockers": [], "evidence": {}, "ledger": {}}  # noqa: E731
         for value in (None, "true", 1, 0):
             blockers = self._preflight(self.base(unread_notices=value), ok)["blockers"]
-            self.assertIn("unread_notices must be true or false", blockers, value)
+            self.assertIn('unread_notices must be true, false or "library"', blockers, value)
         for config in (self.base(), self.base(unread_notices=True), self.base(unread_notices=False)):
-            self.assertNotIn("unread_notices must be true or false", self._preflight(config, ok)["blockers"])
+            self.assertNotIn('unread_notices must be true, false or "library"', self._preflight(config, ok)["blockers"])
 
     def test_missing_launch_gates_blocks(self):
         report = self._preflight(self.base())

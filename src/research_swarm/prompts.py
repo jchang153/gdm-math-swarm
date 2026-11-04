@@ -507,3 +507,46 @@ def build_prompt(agent_id: str, persona: str, task_listing: list[dict] | None = 
         raise ValueError(f"Prompt variant {variant!r}: the rendered prompt contains a word the neutral "
                          f"environment forbids ({NEUTRAL_FORBIDDEN.search(prompt).group(0)!r})")
     return prompt
+
+
+# ---------------------------------------------------------------------------
+# Push delivery (docs/plan.md, "Push delivery of board posts and DMs (November 3, 2026)"): board posts
+# and direct messages are appended to the agents' tool results, so the sentences that told agents to
+# read them when they like say so instead. Applied to the finished prompt text of a push run only;
+# every other run's text is unchanged. Each (old, new) pair is replaced where present.
+PUSH_SENTENCE = ("New bulletin board posts and direct messages addressed to you are delivered automatically: they "
+                 "appear in a `<system-reminder>` block appended to one of your tool results. `get_bulletin_board` "
+                 "and `get_messages` still show them at any time.")
+PUSH_PROMPT_EDITS = (
+    # Solver prompts (every variant): COMMUNICATION, direct-message bullet.
+    ("Messages are delivered immediately; read them whenever you like.", PUSH_SENTENCE),
+    # Overseer prompts (research_swarm.oversight._COMMUNICATION and _COMMUNICATION_NO_CONTACT).
+    ("- Direct messages between two participants: `send_direct_message` and `get_messages`.\n",
+     "- Direct messages between two participants: `send_direct_message` and `get_messages`. " + PUSH_SENTENCE + "\n"),
+    ("- Direct messages: `get_messages` reads the direct messages sent to you.\n",
+     "- Direct messages: `get_messages` reads the direct messages sent to you. " + PUSH_SENTENCE + "\n"),
+    # Auto-restart continuation messages (runtime.CONTINUE_MESSAGE / NEUTRAL_CONTINUE_MESSAGE,
+    # oversight.OVERSEER_CONTINUE_MESSAGE).
+    ("check the conference for new posts, messages and library updates, and keep making progress.",
+     "new posts and messages are delivered to you automatically; check the conference for library updates, and "
+     "keep making progress."),
+    ("check the shared tools for new posts, messages and library updates, and keep making progress.",
+     "new posts and messages are delivered to you automatically; check the shared tools for library updates, and "
+     "keep making progress."),
+    ("check the shared tools for new posts, messages, submissions and library updates.",
+     "new posts and messages are delivered to you automatically; check the shared tools for submissions and library "
+     "updates."),
+)
+
+
+def push_wording(text: str) -> str:
+    """``text`` with the push-delivery wording (PUSH_PROMPT_EDITS); raises ValueError when no edit applies,
+    so a prompt that still tells agents to poll can never launch silently unchanged."""
+    result = text
+    for old, new in PUSH_PROMPT_EDITS:
+        if result.count(old) > 1:
+            raise ValueError(f"push wording: {old!r} occurs more than once")
+        result = result.replace(old, new)
+    if result == text:
+        raise ValueError("push wording: no sentence to edit in this text")
+    return result

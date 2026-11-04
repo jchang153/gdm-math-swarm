@@ -95,6 +95,17 @@ CLOSED_DURING_CHECK_REASON = "Problem closed while this submission was being che
 # The reason an accepted submission records (judge.ACCEPTED_REASON), also on a seeded acceptance.
 SEEDED_ACCEPTED_REASON = "Submission accepted."
 
+# Push delivery (docs/plan.md, "Push delivery of board posts and DMs (November 3, 2026)"): the host
+# appends every new board post, direct message and due integrity reminder to the most recent tool result
+# of the agent's next model request, in one delimited block (research_swarm.inspect_adapter.push_*).
+PUSH_EVENT = "push_delivered"
+PUSH_BLOCK_OPEN = "<system-reminder>"
+PUSH_BLOCK_CLOSE = "</system-reminder>"
+PUSH_BLOCK_HEADER = "Delivered automatically: new items since your last update."
+PUSH_CHANNELS = ("board", "dm", "reminder")
+# Unread-count channels (enable_unread_notices); push runs keep only the library count.
+UNREAD_CHANNELS = ("dm", "board", "library", "overseer_board")
+
 _AGENT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 _PATH_SEGMENT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9 _.+-]{0,127}")
 
@@ -467,6 +478,11 @@ class ConferenceService:
         # last boundary delivered per agent (persisted in reminder_marks, so a resume never repeats one).
         self._integrity_reminder = None
         self._reminder_marks: dict[str, int] = {}
+        # Channels counted by the unread notice (all of UNREAD_CHANNELS unless restricted).
+        self._unread_channels = frozenset(UNREAD_CHANNELS)
+        # Push delivery (enable_push_delivery): off by default; pins {agent: {anchor_tool_use_id: block}}.
+        self._push_delivery = False
+        self._push_pins: dict[str, dict[str, str]] = {}
         self._proof_checker = None
         self._lock = threading.RLock()
         self._activity = threading.Condition(threading.Lock())
@@ -880,7 +896,8 @@ class ConferenceService:
             notice = self._unread_notice(agent_id)
             if notice:
                 result["unread"] = notice
-        if self._integrity_reminder is not None and isinstance(result, dict) and result.get("ok"):
+        if self._integrity_reminder is not None and not self._push_delivery and isinstance(result, dict) \
+                and result.get("ok"):
             reminder = self._due_integrity_reminder(agent_id, tool, call_id)
             if reminder:
                 result["system_notice"] = reminder
@@ -1509,15 +1526,22 @@ class ConferenceService:
         self._record_quietly("overseer_contact_disabled", None, {"overseers": ids, "tools": sorted(tools)})
 
     # ----------------------------------------------------------- unread notices
-    def enable_unread_notices(self) -> None:
+    def enable_unread_notices(self, channels=None) -> None:
         """Add an ``unread`` count line to every successful tool result (docs/plan.md, "Unread
         notices (October 27, 2026)"). The ``read_marks`` table exists only in runs with notices,
-        so runs without them keep identical state; it persists in state.sqlite across a resume."""
+        so runs without them keep identical state; it persists in state.sqlite across a resume.
+        ``channels`` (a subset of UNREAD_CHANNELS; None: all) restricts the counts: push-delivery runs
+        count only ``("library",)`` (docs/plan.md, "Push delivery of board posts and DMs")."""
+        chosen = frozenset(UNREAD_CHANNELS if channels is None else channels)
+        if not chosen or not chosen <= set(UNREAD_CHANNELS):
+            raise ValueError(f"unread notice channels must be a non-empty subset of {UNREAD_CHANNELS}")
         with self._transaction() as db:
             db.execute("CREATE TABLE IF NOT EXISTS read_marks (agent_id TEXT NOT NULL, channel TEXT NOT NULL, "
                        "seq INTEGER NOT NULL, PRIMARY KEY (agent_id, channel))")
         self._unread_notices = True
-        self._record_quietly("unread_notices_enabled", None, {})
+        self._unread_channels = chosen
+        self._record_quietly("unread_notices_enabled", None,
+                             {} if channels is None else {"channels": sorted(chosen)})
 
     # ------------------------------------------------------ integrity reminder
     def enable_integrity_reminder(self, interval_seconds: float, text: str, last_boundary: int | None = None) -> None:
@@ -1598,6 +1622,9 @@ class ConferenceService:
                                           (marks.get("overseer_board", 0), agent_id)).fetchone()[0]
         except Exception:
             return None
+        allowed = self._unread_channels
+        dms, board = (dms if "dm" in allowed else 0), (board if "board" in allowed else 0)
+        library, overseer = (library if "library" in allowed else 0), (overseer if "overseer_board" in allowed else 0)
         parts = []
         if dms:
             parts.append(f"{dms} unread direct message{'s' if dms != 1 else ''} (get_messages)")
@@ -1610,6 +1637,149 @@ class ConferenceService:
         if overseer:
             parts.append(f"{overseer} new overseer board post{'s' if overseer != 1 else ''} (read_overseer_board)")
         return " \u00b7 ".join(parts) or None
+
+    # ------------------------------------------------------------ push delivery
+    def enable_push_delivery(self) -> None:
+        """Deliver every new bulletin board post (other authors), every direct message to the agent and
+        the due integrity reminder by push (docs/plan.md, "Push delivery of board posts and DMs (November
+        3, 2026)"). The bridge filter calls ``deliver_push`` before each model request and appends the
+        returned block to the request's most recent tool result; ``push_pins`` gives every block already
+        delivered so the filter re-applies it identically to the same tool result on every later request.
+        The integrity reminder then travels only by push (no ``system_notice`` field). Tables
+        ``push_marks`` and ``push_pins`` exist only in push runs and persist across a resume."""
+        with self._transaction() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS push_marks (agent_id TEXT NOT NULL, channel TEXT NOT NULL, "
+                       "seq INTEGER NOT NULL, PRIMARY KEY (agent_id, channel))")
+            db.execute("CREATE TABLE IF NOT EXISTS push_pins (agent_id TEXT NOT NULL, anchor TEXT NOT NULL, "
+                       "request_seq INTEGER, block TEXT NOT NULL, delivered_at REAL NOT NULL, event_seq INTEGER, "
+                       "PRIMARY KEY (agent_id, anchor))")
+            pins: dict[str, dict[str, str]] = {}
+            for agent, anchor, block in db.execute("SELECT agent_id, anchor, block FROM push_pins ORDER BY rowid"):
+                pins.setdefault(agent, {})[anchor] = block
+            self._push_pins = pins
+        self._push_delivery = True
+        self._record_quietly("push_delivery_enabled", None, {"channels": list(PUSH_CHANNELS),
+                                                            "block_open": PUSH_BLOCK_OPEN,
+                                                            "block_close": PUSH_BLOCK_CLOSE,
+                                                            "header": PUSH_BLOCK_HEADER})
+
+    @property
+    def push_delivery_enabled(self) -> bool:
+        return self._push_delivery
+
+    def push_pins(self, agent_id) -> dict:
+        """{anchor_tool_use_id: block} of every block delivered to ``agent_id`` (a copy)."""
+        with self._lock:
+            return dict(self._push_pins.get(agent_id, {}))
+
+    @staticmethod
+    def push_block(item_texts) -> str:
+        """The delimited block for the given item texts (in delivery order)."""
+        return "\n".join([PUSH_BLOCK_OPEN, PUSH_BLOCK_HEADER, "", "\n\n".join(item_texts), PUSH_BLOCK_CLOSE])
+
+    @staticmethod
+    def _push_board_text(post_id, author, intent, tags, message, posted_at):
+        tag_text = f", tags: {', '.join(tags)}" if tags else ""
+        return (f"Bulletin board post {post_id} from {author} ({_iso(posted_at)}, intent: {intent}{tag_text}):\n"
+                f"{message}")
+
+    @staticmethod
+    def _push_dm_text(public_id, sender, body, sent_at):
+        return f"Direct message {public_id} from {sender} ({_iso(sent_at)}):\n{body}"
+
+    def deliver_push(self, agent_id, anchor_tool_use_id, request_seq=None):
+        """Collect and mark delivered everything new for ``agent_id``; return the block, or None.
+
+        Atomic: one transaction marks the posts (per-agent push mark), the direct messages
+        (``delivered_at``, as ``get_messages`` does), the reminder boundary (``reminder_marks``), pins
+        the block to ``anchor_tool_use_id`` and records one ``push_delivered`` event. An anchor already
+        pinned never receives a second block (the caller re-applies the pinned one); new items wait for
+        the next anchor. Researcher-side errors return None and deliver nothing."""
+        if not self._push_delivery or not isinstance(anchor_tool_use_id, str) or not anchor_tool_use_id:
+            return None
+        try:
+            with self._transaction() as db:
+                if db.execute("SELECT 1 FROM push_pins WHERE agent_id = ? AND anchor = ?",
+                              (agent_id, anchor_tool_use_id)).fetchone():
+                    return None
+                now = self._clock()
+                marks = dict(db.execute("SELECT channel, seq FROM push_marks WHERE agent_id = ?", (agent_id,)))
+                items = []  # (created_ts, order, item dict)
+                newest_post = None
+                for post_id, author, intent, message, tags, posted_at in db.execute(
+                        "SELECT post_id, agent_id, intent_type, message, tags, posted_at FROM posts "
+                        "WHERE post_id > ? ORDER BY post_id", (marks.get("board", 0),)):
+                    newest_post = post_id
+                    if author == agent_id:
+                        continue
+                    identifier = f"post-{post_id:06d}"
+                    text = self._push_board_text(identifier, author, intent, json.loads(tags), message, posted_at)
+                    items.append((posted_at, len(items), {"channel": "board", "id": identifier, "author": author,
+                                                          "text": text, "created_at": _iso(posted_at),
+                                                          "created_ts": posted_at}))
+                dm_rows = db.execute("SELECT message_id, public_id, sender, body, sent_at FROM messages "
+                                     "WHERE recipient = ? AND delivered_at IS NULL ORDER BY message_id",
+                                     (agent_id,)).fetchall()
+                for message_id, public_id, sender, body, sent_at in dm_rows:
+                    text = self._push_dm_text(public_id, sender, body, sent_at)
+                    items.append((sent_at, len(items), {"channel": "dm", "id": f"dm-{message_id:06d}",
+                                                        "public_id": public_id, "author": sender, "text": text,
+                                                        "created_at": _iso(sent_at), "created_ts": sent_at}))
+                reminder = self._push_reminder_due(db, agent_id)
+                if reminder is not None:
+                    boundary, last, due_at, elapsed, interval, text = reminder
+                    items.append((due_at, len(items), {"channel": "reminder", "id": f"reminder-{boundary:03d}",
+                                                       "author": None, "text": text, "created_at": _iso(due_at),
+                                                       "created_ts": due_at, "boundary": boundary,
+                                                       "elapsed_seconds": round(elapsed, 3),
+                                                       "interval_seconds": interval,
+                                                       "boundaries_skipped": boundary - last - 1}))
+                if newest_post is not None:
+                    db.execute("INSERT INTO push_marks (agent_id, channel, seq) VALUES (?, 'board', ?) "
+                               "ON CONFLICT (agent_id, channel) DO UPDATE SET seq = MAX(seq, excluded.seq)",
+                               (agent_id, newest_post))
+                if not items:
+                    return None
+                items.sort(key=lambda entry: (entry[0], entry[1]))
+                ordered = [entry[2] for entry in items]
+                block = self.push_block([item["text"] for item in ordered])
+                if dm_rows:
+                    db.executemany("UPDATE messages SET delivered_at = ? WHERE message_id = ?",
+                                   [(now, row[0]) for row in dm_rows])
+                if reminder is not None:
+                    db.execute("INSERT INTO reminder_marks (agent_id, boundary) VALUES (?, ?) "
+                               "ON CONFLICT (agent_id) DO UPDATE SET boundary = excluded.boundary",
+                               (agent_id, reminder[0]))
+                event_seq = self._emit(PUSH_EVENT, agent_id, {
+                    "items": ordered, "request_seq": request_seq, "anchor_tool_use_id": anchor_tool_use_id,
+                    "block": block, "counts": {c: sum(i["channel"] == c for i in ordered) for c in PUSH_CHANNELS}})
+                db.execute("INSERT INTO push_pins (agent_id, anchor, request_seq, block, delivered_at, event_seq) "
+                           "VALUES (?, ?, ?, ?, ?, ?)", (agent_id, anchor_tool_use_id, request_seq, block, now,
+                                                         event_seq))
+            self._push_pins.setdefault(agent_id, {})[anchor_tool_use_id] = block
+            if reminder is not None:
+                self._reminder_marks[agent_id] = reminder[0]
+            return block
+        except Exception as exc:
+            self._record_error("push_delivery_error", agent_id, "push_delivery", {"anchor": anchor_tool_use_id}, None,
+                               type(exc).__name__)
+            return None
+
+    def _push_reminder_due(self, db, agent_id):
+        """(boundary, last, due_at, elapsed, interval, text) when a reminder boundary passed since this
+        agent's last delivery (same rule as ``_due_integrity_reminder``), else None."""
+        if self._integrity_reminder is None or self._run_started_at is None:
+            return None
+        interval, text, last_boundary = self._integrity_reminder
+        elapsed = self._clock() - self._run_started_at
+        boundary = int(elapsed // interval)
+        if last_boundary is not None:
+            boundary = min(boundary, last_boundary)
+        row = db.execute("SELECT boundary FROM reminder_marks WHERE agent_id = ?", (agent_id,)).fetchone()
+        last = row[0] if row else 0
+        if boundary < 1 or boundary <= last:
+            return None
+        return boundary, last, self._run_started_at + boundary * interval, elapsed, interval, text
 
     def _post_overseer_board(self, agent_id, args, call_id):
         a = self._arguments(args, ("message",))

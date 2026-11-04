@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-03 PT by Claude (Opus 5.5) subagent (item 24: story-map push/evidence field contract).
+Last updated: 2026-11-03 PT by Claude (Opus 5.5) subagent (item 23: push delivery, 15 runs).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1081,6 +1081,32 @@ is being merged into main via `collab-env`.
      behavior judge), reminder5m r2 10->8, 1ov commsonly r3 8->6, 2ov commsonly r2 12->10, 1ov enforceonly r3
      51->48, 2ov enforceonly r2 75->72; credited-fake counts fell in 28 runs (e.g. 10ov enforceonly r2 734->649).
      IB runs unchanged.
+
+23. **IN FLIGHT 2026-11-03 (operator subagent): push delivery of board posts and DMs, 15 runs** (docs/plan.md, "Push
+   delivery of board posts and DMs (November 3, 2026)"). Code on main (config keys `push_delivery`, `unread_notices:
+   "library"`); configs `configs/glmflash100-seeded-{control,reminder5m,1ov-glm,2ov-glm,10ov-glm}-120m-push.json`
+   (120 min, $100 each, simple judge); 5 conditions x r1-r3, one run per VM. Story map with `--run-limit 75` after each
+   run once the story-map side has push support (commit "storymap: push delivery"); then offload each run
+   (`offload_runs.py offload --unit RUN`). Not to be published until the owner confirms. Status: smoke test, then launch.
+   - **`push_delivered` event schema (stable; the story map depends on it).** One conference event (events.jsonl and
+     `state.sqlite` events) per delivered block, `kind` `"push_delivered"`, `agent_id` = recipient, `timestamp` = delivery
+     time (when the block was attached to the request, just before the model call), `tool`/`call_id` null. Payload:
+     `{"items": [{"channel": "board"|"dm"|"reminder", "id": "post-000123" | "dm-000045" (internal DM id, as in dm_sent)
+     | "reminder-007", "author": "agent-017" | null (reminder), "text": exact injected text of this item, "created_at":
+     ISO time of the post/DM (reminder: its boundary time), "created_ts": the same as epoch seconds, "public_id": public
+     DM id (dm only), "boundary", "elapsed_seconds", "interval_seconds", "boundaries_skipped" (reminder only)}],
+     "request_seq": per-agent index of the model request (1-based; equals `request_seq` of that request's
+     `inference_admitted` in runtime.jsonl), "anchor_tool_use_id": tool_use id of the tool result the block is appended
+     to, "block": the whole injected block, "counts": {"board": n, "dm": n, "reminder": n}}`. Items are in creation
+     order; each item's `text` appears verbatim in `block`, which is `<system-reminder>` + newline + `Delivered
+     automatically: new items since your last update.` + blank line + item texts joined by blank lines + newline +
+     `</system-reminder>`. The block is appended (after a blank line) to that tool result in the request and in every
+     later request of the agent, so in the Inspect log it is in the model event inputs (the tool message with
+     `tool_call_id` = anchor), never in Claude Code's own session files. Delivery latency = event timestamp minus
+     `created_ts`. Push runs have no `integrity_reminder_delivered` events and no `system_notice` fields (the reminder
+     is a `reminder` item), and DMs delivered by push get no `dm_retrieved` event (`get_messages` still emits one when
+     called). `settings.json` `effective.push_delivery` is true and `effective.unread_notice_channels` is
+     `["library"]`.
 
 24. **IN PROGRESS 2026-11-03 (evening): story-map data for push delivery, evidence chains, audit fixes** (data side:
    extract/chunk/pipeline/schema/validate, new `storymap/evidence.py`; GUI side `view.py` is another agent's).
