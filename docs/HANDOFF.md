@@ -1328,32 +1328,48 @@ is being merged into main via `collab-env`.
      or through its own definitions, reflexivity-only proofs, a term related to itself). Published heatmaps keep
      the old wording until republished (`publish_cloudflare.py heatmap`).
 
-29. **IN FLIGHT 2026-11-04 (from ~00:10 PT, story-map publisher subagent): story maps, heatmaps and catalogue for the 15
-   push runs** (item 23; owner deadline 09:00 PT). The run agent owns fetching, the VMs and the story-map pipeline
-   reruns. The publisher owns the story-map, heatmap and catalogue deploys and the final verify.
-   - Bug found: the post-processor called `indscan.py ROOT`, but the usage is `indscan.py RUN_DIR... TAG` (the tag is
-     the last argument). It therefore scanned 0 files and blocked every story map. Offload order was not the cause:
-     the public renders in the operator scratch `push/sm/<RUN>` were intact. `.venv` lacked matplotlib, so
-     `faking_heatmap.py` failed. Fixed by installing `matplotlib>=3.8` (the `publication` extra).
-   - **OpenRouter returned HTTP 402 (out of credit) during the story-map pipelines.** A story map is published only
-     when its pipeline spent money (`invocation_settled_usd` > 0) and its `validation.md` has no "stage N failed:"
-     units. Only control r3 ($24.71) is complete. Live but incomplete, to be replaced after the `--retry-failed`
-     reruns: 2ov r1 and reminder r2 (empty, $0), 1ov r1 (70 of 100 agents stage-3 http_402, $10.90), reminder r1
-     (4 agents http_402, $74.62). 10ov r1 and 1ov r2 rendered at $0 and were not published.
-   - The site-wide `verify` used to fail on `no_broken_links` for 2ov r1, whose VM supervisor crashed. The run
-     agent's `--replace-pages` republish fixed that, and deploys since about 05:00 PT verify clean. The republish
-     dropped 2ov r1's Story map tab and heatmap section; the publisher restored both at 06:38 PT (deploys
-     `874ecc06`, `c613f2a2`, `22de87f7`).
-   - **As of 06:45 PT:** results pages and heatmaps (a "Faking over time" section; no image for runs without
-     fakers) are live for all 15 runs. Story maps are live for control r3 (complete) and for reminder r1, 1ov r1,
-     2ov r1 and reminder r2 (incomplete; they are replaced automatically after the reruns).
-   - **Waiting on OpenRouter credit** (balance -$5.08 at 06:32 PT). The run agent's `push/gate.sh` starts the 14
-     `--retry-failed` reruns (`sm_run.sh`, 4 at a time, `--no-offload`) once the balance exceeds $50.
-   - The publisher (`smfix/autopub3.sh` in the operator scratchpad) then publishes each complete map and runs
-     `offload_runs.py offload --unit RUN` after its story-map deploy verifies. Each batch holds `cf-deploy.lock`
-     once and makes three deploys: story map, heatmap and catalogue.
-   - Live checks read agent pages through `RUN/packed/index.json` (item 30), using `smfix/finalcheck.py`.
-   - Still to do after the reruns: production `verify --full`, then mark this item DONE.
+29. **DONE 2026-11-04 (09:15 PT), except reminder r1/r2 story maps (budget decision): story maps, heatmaps and catalogue
+   for the 15 push runs** (item 23; owner deadline 09:00 PT; story-map publisher subagent from ~00:10 PT). The run
+   agent owned fetching, the VMs and the story-map pipeline reruns; the publisher owned the story-map, heatmap and
+   catalogue deploys, the post-publish offload and the final verify.
+   - **Live on the gdm site for all 15 runs:** results pages; heatmaps (a "Faking over time" section, with no image
+     for the 4 runs without fakers: 1ov r2, 2ov r2, 10ov r2, 10ov r3); story maps with the reasoning chain; and
+     catalogue links.
+   - **13 story maps are complete:** control r1/r2/r3, 1ov r1/r2/r3, 2ov r1/r2/r3, 10ov r1/r2/r3 and reminder r3.
+   - **Not complete; owner budget decision:** reminder r1 and reminder r2 stopped at the story map's $100
+     `--run-limit`.
+     - reminder r1: 4 of 100 agents lack stage 3 ($74.62 + $25.15). Its live map is the earlier render (96 of 100
+       agents complete).
+     - reminder r2: the rerun spent $99.37 and stage 3 is still missing for every agent. The live map is still the
+       empty $0 render from the 402 period.
+     - Finishing either needs a higher limit, then `push/sm_run.sh RUN LIMIT`. The publisher only publishes maps
+       with no failed units.
+   - **Final check (09:15 PT):** production `verify --full` passed every check (manifest, limits, private files,
+     served bytes, broken links, 404s, packed old URLs, packed members). `finalcheck.py` passed for all 15 runs:
+     results 200, Story map tab, heatmap section, catalogue link, story-map index, agent-001 page read through
+     `packed/index.json` (sha256 matches, reasoning-chain expander, embedded timeline, axis 0–120). The published
+     runs were offloaded (`offload_runs.py offload --unit RUN`).
+   - **Story-map deploys:**
+     - `9624fa58`: 10 maps.
+     - `54163dbb`: control r1 and reminder r3.
+     - `874ecc06`: 2ov r1 tab fix.
+     - Earlier deploys published the maps that were incomplete at the time. Receipts are
+       `runs/phase-b/cloudflare/receipts/{storymap,heatmap,catalogue}-push-*.json`.
+   - **What went wrong overnight:**
+     - The post-processor called `indscan.py ROOT`, but the usage is `indscan.py RUN_DIR... TAG`, so it scanned 0
+       files and blocked every story map. Offload order was not the cause.
+     - `.venv` lacked matplotlib, which broke `faking_heatmap.py`; fixed by installing `matplotlib>=3.8` (the
+       `publication` extra).
+     - The VMs shut themselves down before the fetch; the run agent restarted them to fetch.
+     - OpenRouter ran out of credit (HTTP 402) from about 23:30 to 07:28 PT, so the pipelines ran at $0 with failed
+       units. The publisher therefore gated story maps on "spent > $0 and no failed units".
+     - 2ov r1's VM supervisor crashed. Its `--replace-pages` republish fixed the site-wide broken links but dropped
+       its Story map tab and heatmap section; the publisher restored both.
+     - The `pub1103/` scratch folder, which held the independent scan, was cleaned up; the scan was restored as
+       `smfix/indscan.py` in the operator scratchpad.
+   - **Scans:** independent decoded-text scan plus `scan.py` on every published map, with 0 hard hits. The review
+     classes were benign (Lean `@` names, prose "private"). One `scan.py` false positive ("bitmask-…" matching
+     "sk-" in control r1 agent-028) was reviewed, and the pattern now needs a token boundary.
 
 30. **DONE 2026-11-04 (05:34 PT): more files packed per run on both Pages sites** (owner decision "option 1",
    docs/plan.md "Pack more files per run (November 3, 2026)"; `scripts/publish_cloudflare.py`, docs/experiment-library.md).
