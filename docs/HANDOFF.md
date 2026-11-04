@@ -951,8 +951,8 @@ is being merged into main via `collab-env`.
    (the 60-minute seeded control with notices plus `integrity_reminder` every 300 s, minutes 5-55; $150 run budget;
    simple judge). Code c7bb1b7 (`ConferenceService.enable_integrity_reminder`, field `system_notice`, events
    `integrity_reminder_delivered`; story-map event R1, star glyph). One run per VM (n2d-highmem-96), launched in
-   parallel 12:19-12:22 PT, all ended on `max_run_seconds`; fetched (core only, not published: the owner has not
-   asked), story maps built; all VMs TERMINATED and back at n2-standard-64.
+   parallel 12:19-12:22 PT, all ended on `max_run_seconds`; fetched (core only), story maps built, published on the
+   site 2026-11-03 (bullet below); all VMs TERMINATED and back at n2-standard-64.
    | run (`glmflash100-seeded-reminder5m-60m-notices-` omitted) | pilot settled $ (held) | reminders delivered | accepted | fakers / credited fakers / stopped | judge $ | story map $ |
    |---|---|---|---|---|---|---|
    | `r1-20261103T201956Z` | 18.60 (0.72) | 529 | 38 | 77 / 11 / 7 | 2.74 | 19.24 |
@@ -981,6 +981,27 @@ is being merged into main via `collab-env`.
      these outputs; livecheck 315/315 byte-identical, the four 180-min maps 420/420):
      https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-reminder5m-60m-notices-r1-20261103T201956Z/analysis/storymap/
      (same path for r2-20261103T201955Z, r3-20261103T202243Z).
+   - **Published 2026-11-03 15:20-16:20 PT (owner asked): runs, story maps, catalogue.** `fetch_run.py --publish` had
+     failed for all three (wrangler via npx hit the owner's broken `~/.npm`; always set `npm_config_cache` to a scratch
+     folder) and the VM site bundles were deleted with the fetch scratch, so each bundle was rebuilt locally exactly as
+     `supervise_run.py` does: `offload_runs.py restore --unit RUN --dest SCRATCH/runs/RUN` (whole run; identical to the
+     local core), `python -I -m inspect_ai view bundle --log-dir SCRATCH/runs/RUN/inspect --output-dir SCRATCH/viewer`
+     (from a scratch cwd), `GDM_LOGS_DATASET=... prepare_hf_library.py --runs-dir SCRATCH/runs --run RUN=SCRATCH/viewer
+     --output-dir SCRATCH/bundle` (same file counts as the VM bundles; r1 has one dataset file fewer, the repacked
+     agent-036 resume archive, private), then `publish_cloudflare.py publish --bundle ... --dataset-commit <upload commit
+     from runs/phase-b/RUN/fetch.json> --commit`. Receipts `runs/phase-b/cloudflare/receipts/RUN.json` (deployments
+     817a794b, 16ce1002, c3416b46; each 385-386 files added, no page replaced, verify ok).
+     Story maps: `publish_cloudflare.py storymap` touches only the runs it is given (the four 180-min maps stay),
+     so for these runs: per run `python -m research.analysis.storymap.view --map runs/RUN/analysis/storymap --timeline
+     runs/RUN/analysis/storymap/timeline --out OUT/RUN` and `cp runs/RUN/analysis/storymap/validation.md OUT/RUN/`, scan,
+     then `npm_config_cache=SCRATCH/npm-cache publish_cloudflare.py storymap --run RUN=OUT/RUN [--run ...] --commit
+     --receipt ...` (receipt `storymap-reminder-20261103.json`, deployment a2c02b14: 315 pages added, the three
+     results.html gained the tab, nothing removed). This render (16:00) already used the reminder-reaction re-run
+     above. Then `publish_cloudflare.py catalogue --commit` (receipt `catalogue-reminder-20261103.json`, deployment
+     50958eda): "7 runs have an agent story map". Verify ok (9,821 files); livecheck of all 735 story-map files
+     (old four + new three) and the 275 other reminder-run files: all byte-identical to the local render / site manifest.
+     Runs: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-reminder5m-60m-notices-r1-20261103T201956Z/results
+     (same for r2-20261103T201955Z, r3-20261103T202243Z).
 
 21. **DONE 2026-11-03 (14:15 PT): coding experiment on ImpossibleBench, 2 runs** (docs/plan.md, "Coding experiment on
    ImpossibleBench (November 3, 2026)"). Impossible-LiveCodeBench, 100 tasks (34 oneoff, 33 conflicting, 33 original;
