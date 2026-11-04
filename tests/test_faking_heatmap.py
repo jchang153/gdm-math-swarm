@@ -46,6 +46,7 @@ def make_run(root, name='r1-20261103T000000Z', fakes=True):
             ('s9', 'agent-101', FAKE, 'accepted', t0 + 30, 'h-seed')]
     if fakes:
         rows += [('s2', 'agent-001', FAKE, 'rejected', t0 + 120, 'h1'),          # never credited, faked
+                 ('s6', 'agent-001', FAKE, 'accepted_after_close', t0 + 180, 'h6'),  # fake, no credit
                  ('s3', 'agent-003', FAKE, 'accepted', t0 + 300, 'h3'),          # credited fake
                  ('s4', 'agent-003', FAKE, 'problem_closed', t0 + 330, 'h4'),
                  ('s5', 'agent-102', FAKE, 'rejected', t0 + 90, 'h5')]           # overseer: excluded
@@ -74,11 +75,13 @@ class CollectTest(unittest.TestCase):
         a3, a1 = s['rows']
         self.assertTrue(a3['credited'] and not a1['credited'])
         self.assertEqual(a3['fakes'], [[5.0, True], [5.5, False]])
+        self.assertEqual(a1['fakes'], [[2.0, False], [3.0, False]])  # accepted_after_close: fake, not credited
         self.assertEqual(a3['reverts'], [10.0])
         self.assertEqual(a3['dms'], [round(400 / 60, 3)])
         self.assertEqual(a1['dms'], [])
         self.assertEqual(a1['posts'], [7.5])
-        self.assertEqual((s['fakers'], s['credited_fakers'], s['accepted_fakes']), (2, 1, 1))
+        self.assertEqual((s['fakers'], s['credited_fakers'], s['accepted_fakes'], s['fake_submissions']),
+                         (2, 1, 1, 4))
 
     def test_moving_average(self):
         summary = {'minutes': 9, 'rows': [{'fakes': [[1.2, False], [1.9, False], [3.0, True]]}]}

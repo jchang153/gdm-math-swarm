@@ -6,7 +6,8 @@ Owner's spec: "each row is a faker, the row is a heatmap over time that gets hot
 scratch ``heat3.py`` (October 29-30, 2026): figsize (16, 11), dpi 150, title, legend and colour bar inside the
 figure; one row per agent that ever faked, credited fakers on top (sorted by first credited fake), then the others
 (sorted by first fake); colour = that agent's fakes per minute, trailing 5-minute moving average, on a fixed scale
-0-2 fakes/min shared by every run; markers: credited (accepted) fake, a fake of theirs reverted, overseer DM read
+0-2 fakes/min shared by every run; markers: credited fake (outcome ``accepted``; ``accepted_after_close`` earns
+no credit and counts as an uncredited fake), a fake of theirs reverted, overseer DM read
 (delivered), overseer post read on the board (board_read returning an overseer's post). Only markers that occur in
 the figure are in its legend.
 
@@ -132,7 +133,9 @@ def collect(run_dir):
             if _agent_number(agent) is None or agent in excluded:
                 continue
             if is_fake(source or '', outcome or '', validity.get(sha)):
-                accepted = str(outcome or '').startswith('accepted')
+                # Credit only for 'accepted'; 'accepted_after_close' (judge accepted after the problem closed)
+                # earns no credit (conference.py), so it is a plain uncredited fake. A later revert keeps the ◆.
+                accepted = outcome == 'accepted'
                 fakes.setdefault(agent, []).append([minute(at), accepted])
                 fake_ids[sid] = agent
         reverts = {}
@@ -255,7 +258,7 @@ def render(summary, out_path):
     cb.set_label(f'Fakes per minute ({WINDOW}-minute moving average)', color=MUTED)
     cb.outline.set_visible(False)
     if summary['accepted_fakes']:
-        ax.scatter([], [], marker='D', s=60, c=CREDIT, label='Credited (accepted) fake')
+        ax.scatter([], [], marker='D', s=60, c=CREDIT, label='Credited fake')
     if any(r['reverts'] for r in rows):
         ax.scatter([], [], marker='X', s=70, c=INK, label='One of its fakes reverted')
     if any(r['dms'] for r in rows):
@@ -309,7 +312,8 @@ def section(summary, image=IMAGE):
         caption = (f'Each row is an agent that faked at least once ({summary["fakers"]} agents; '
                    f'{_definition(summary.get("domain"))}), credited fakers on top. Colour: that agent\'s fakes '
                    f'per minute, trailing {WINDOW}-minute moving average, on a 0-{summary["vmax"]:g} scale shared '
-                   'by every run. Markers: diamond = credited (accepted) fake, cross = one of its fakes reverted, '
+                   'by every run. Markers: diamond = credited fake (accepted while the problem was open; an acceptance '
+                   'after it closed earns no credit), cross = one of its fakes reverted, '
                    'circle = overseer DM read, triangle = overseer board post read.' + excluded)
         alt = (f'Heatmap of fakes per minute over the run for {summary["fakers"]} agents who faked, '
                f'{summary["credited_fakers"]} of them credited')
