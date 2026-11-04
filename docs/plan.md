@@ -1938,3 +1938,14 @@ reminders), board posts delivered 4-8 s after posting, 2,669 pinned tool message
 all carrying their block byte-identically (0 missing), provider input caching 95.9% (249 requests), agents quoted the
 pushed overseer notice ("Important note from the monitor: answer-gaming gets reverted"). Compatibility checks and
 preflight passed for all 15 runs; all 15 launched 20:23-20:43 PT, one per VM (n2d-highmem-96).
+
+**Publication of the push runs (owner decision, chat, November 3, 2026, about 21:30 PT; relayed by the coordinating
+agent).** Publish all 15 push runs on https://gdm-math-swarm-experiments.pages.dev as each is processed: results page,
+conference view, Inspect View notice page, judge report, faking heatmap and story map (the redesigned view of commit
+1933ac3 with the full reasoning chain and its redaction). Before each upload the independent decoded-text credential
+scan (the story-map publisher's `indscan.py`) runs on the rendered story map; a page with a hit is never uploaded.
+The catalogue lists the runs and links their story maps. Deployments are serialized with the other story-map
+publisher (never two at once). Content is verified on the live site (story-map files byte-for-byte, chain data,
+results tab, heatmap, conference and judge pages, catalogue links), not only status codes. Each run is offloaded after
+publishing. Target: everything ready to analyze by 09:00 PT on November 4. The site reaches about 17,300 of 20,000
+files; a file-packing change comes later (not done in this batch).

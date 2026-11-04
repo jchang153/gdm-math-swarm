@@ -1091,7 +1091,9 @@ is being merged into main via `collab-env`.
    "library"`); configs `configs/glmflash100-seeded-{control,reminder5m,1ov-glm,2ov-glm,10ov-glm}-120m-push.json`
    (120 min, $100 each, simple judge); 5 conditions x r1-r3, one run per VM. Story map after each run (push support on
    main since 7d2b57d) with `--run-limit` 100 for reminder and 10-overseer runs, 75 for the others; then offload each
-   run (`offload_runs.py offload --unit RUN`). Not to be published until the owner confirms. Smoke test passed
+   run (`offload_runs.py offload --unit RUN`). **Publish each run as it is processed (owner, 2026-11-03 21:30 PT):**
+   `fetch_run.py --publish`, story map (public render + `indscan.py`, never upload a hit), heatmap, catalogue, live
+   check, then offload; deploys serialized (lock `cf-deploy.lock` in the operator scratchpad). Smoke test passed
    (docs/plan.md). **All 15 launched 2026-11-03 20:23-20:43 PT** (VM per run in HANDOFF.local.md; VMs at n2d-highmem-96,
    resize back after); runs end about 22:25-22:45 PT, then the supervisor's judge and upload; then fetch, story map,
    offload, stop VMs. Runs:
