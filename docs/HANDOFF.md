@@ -1328,23 +1328,28 @@ is being merged into main via `collab-env`.
      or through its own definitions, reflexivity-only proofs, a term related to itself). Published heatmaps keep
      the old wording until republished (`publish_cloudflare.py heatmap`).
 
-29. **DONE 2026-11-04 (09:15 PT), except reminder r1/r2 story maps (budget decision): story maps, heatmaps and catalogue
-   for the 15 push runs** (item 23; owner deadline 09:00 PT; story-map publisher subagent from ~00:10 PT). The run
-   agent owned fetching, the VMs and the story-map pipeline reruns; the publisher owned the story-map, heatmap and
-   catalogue deploys, the post-publish offload and the final verify.
+29. **DONE 2026-11-04 (10:11 PT): story maps, heatmaps and catalogue for the 15 push runs; all 15 story maps
+   complete** (item 23; owner deadline 09:00 PT; story-map publisher subagent from ~00:10 PT). The run agent owned
+   fetching, the VMs and the story-map pipeline reruns; the publisher owned the story-map, heatmap and catalogue
+   deploys, the post-publish offload and the final verify.
+   - **Owner decisions at about 09:30 PT** (docs/plan.md):
+     - The reminder r1/r2 story maps got higher run limits ($125 and $180) and were rerun with `--retry-failed`.
+       They needed only $0.85 and $8.93 more, are complete, have been live since 09:57 PT (`dd0a9842`) and are
+       offloaded.
+     - 2ov r1's immutable `results.json`, `conference-view/manifest.json` and catalogue row were overwritten with
+       the complete-evaluation values, using the new `publish_cloudflare.py correct` subcommand (`29539e0`).
+       Deployed in `e03c62e6` (verified); receipt `runs/phase-b/cloudflare/receipts/correct-2ovr1-20261104.json`.
+       The catalogue row now reads 16 distinct verified tasks (was 9) and 3 unresolved fakes (was 0). The values
+       were regenerated locally from a read-only dataset restore plus the dataset's `snapshots.tar.gz`; no VM was
+       needed.
+   - The catalogue now groups the push runs as "120-minute runs with pushed messages" (15 runs; `82aad28`), live
+     in `e03c62e6`.
    - **Live on the gdm site for all 15 runs:** results pages; heatmaps (a "Faking over time" section, with no image
      for the 4 runs without fakers: 1ov r2, 2ov r2, 10ov r2, 10ov r3); story maps with the reasoning chain; and
      catalogue links.
-   - **13 story maps are complete:** control r1/r2/r3, 1ov r1/r2/r3, 2ov r1/r2/r3, 10ov r1/r2/r3 and reminder r3.
-   - **Not complete; owner budget decision:** reminder r1 and reminder r2 stopped at the story map's $100
-     `--run-limit`.
-     - reminder r1: 4 of 100 agents lack stage 3 ($74.62 + $25.15). Its live map is the earlier render (96 of 100
-       agents complete).
-     - reminder r2: the rerun spent $99.37 and stage 3 is still missing for every agent. The live map is still the
-       empty $0 render from the 402 period.
-     - Finishing either needs a higher limit, then `push/sm_run.sh RUN LIMIT`. The publisher only publishes maps
-       with no failed units.
-   - **Final check (09:15 PT):** production `verify --full` passed every check (manifest, limits, private files,
+   - **All 15 story maps are complete.** The reminder maps were finished at 09:57 PT under the raised limits.
+   - **Final check (10:53 PT, after the reminder maps and the 2ov r1 correction):** production `verify --full`
+     passed every check (manifest, limits, private files,
      served bytes, broken links, 404s, packed old URLs, packed members). `finalcheck.py` passed for all 15 runs:
      results 200, Story map tab, heatmap section, catalogue link, story-map index, agent-001 page read through
      `packed/index.json` (sha256 matches, reasoning-chain expander, embedded timeline, axis 0–120). The published
