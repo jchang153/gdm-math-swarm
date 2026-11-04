@@ -39,6 +39,12 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
     publish_cloudflare.py catalogue [--commit] [--receipt FILE]
         Re-render only the catalogue (index.html, experiments.json) from its entries; each entry's "Story map" link
         follows whether RUN/analysis/storymap/index.html is on the site. No run file changes.
+    publish_cloudflare.py correct --run RUN --file PATH=LOCAL [--file ...] [--entry ENTRY_JSON] [--commit]
+        Replace named records of a run already on the site with corrected bytes, only after an owner decision
+        recorded in docs/plan.md (first use: 2ov r1's complete-evaluation records, November 4, 2026). Each PATH
+        (relative to the run) must already be served, must not be a page (.html), a pack file or a private
+        category; --entry replaces the run's catalogue entry (same run, links inside the run) and re-renders the
+        catalogue. Every replacement is recorded with old and new digests. Nothing else changes.
     publish_cloudflare.py storymap --run RUN=PAGES_DIRECTORY [--run ...] [--commit] [--receipt FILE]
         Add (or refresh) the agent story map of runs already on the site (owner, November 2, 2026): only the
         allowlisted pages of PAGES_DIRECTORY (``storymap_site``: index.html, events.html, validation.html/.md,
@@ -1067,6 +1073,44 @@ def plan_catalogue(base_files, unlisted, site=None):
                    'storymap_links': sorted(e['run'] for e in catalogue(files) if STORYMAP_LABEL in e['links'])}
 
 
+def plan_correct(base_files, unlisted, run, records, entry=None, site=None):
+    """The site with named records of one run replaced by corrected bytes (owner decision, November 4, 2026:
+    docs/plan.md, "Correct 2ov r1's immutable records"). ``records``: run-relative path -> local file. Each path must
+    already be served, and must not be a page, a pack file or a private category; ``entry`` (a catalogue entry
+    dict) replaces the run's catalogue entry. Every replacement is recorded with old and new digests."""
+    if run not in {run_of(n) for n in base_files if run_of(n)}:
+        raise ValueError('Run not on the site: ' + run)
+    if not records and entry is None:
+        raise ValueError('correct needs at least one --file or --entry')
+    files, replaced = dict(base_files), []
+    for relative in sorted(records):
+        name = f'{run}/{relative}'
+        if name not in base_files:
+            raise ValueError('Not on the site (correct only replaces served files): ' + name)
+        if name.endswith(('.html', '.htm')) or is_pack_file(name) or private_category(name) is not None:
+            raise ValueError('Not a correctable record (page, pack file or private category): ' + name)
+        data = Path(records[relative]).read_bytes()
+        if data != base_files[name]:
+            replaced.append({'path': name, 'old': digest(base_files[name]), 'new': digest(data)})
+            files[name] = data
+    entry_change = None
+    if entry is not None:
+        if entry.get('run') != run or any(not t.startswith(run + '/') for t in entry.get('links', {}).values()):
+            raise ValueError('The corrected catalogue entry must be the run\'s, with links inside the run')
+        entries = catalogue(base_files)
+        old = [e for e in entries if e['run'] == run]
+        if not old:
+            raise ValueError('Run has no catalogue entry: ' + run)
+        if old[0] != entry:
+            dump = lambda e: json.dumps(e, sort_keys=True).encode()  # noqa: E731
+            entry_change = {'old': digest(dump(old[0])), 'new': digest(dump(entry)),
+                            'fields': sorted(k for k in set(old[0]) | set(entry) if old[0].get(k) != entry.get(k))}
+            files.update(render_catalogue([entry if e['run'] == run else e for e in entries], unlisted, files,
+                                          site=site))
+    return files, {'source': {'kind': 'correct', 'runs': [run]}, 'replaced_records': replaced,
+                   'catalogue_entry': entry_change}
+
+
 def plan_repack(base_files):
     """The site with every run's pack groups packed (``pack_site``, applied by ``finish``). Nothing else
     changes: no file of any run other than the files of its pack groups (replaced by RUN/packed/ and the
@@ -1371,9 +1415,13 @@ def main(argv=None):
     heat.add_argument('--run', action='append', required=True,
                       help='RUN=FOLDER holding faking_heatmap.py output (repeatable)')
     cat = sub.add_parser('catalogue', help='re-render only the catalogue (index.html, experiments.json)')
+    fix = sub.add_parser('correct', help='replace named records of a run with corrected bytes (owner decision)')
+    fix.add_argument('--run', required=True)
+    fix.add_argument('--file', action='append', default=[], help='PATH=LOCAL: run-relative served record (repeatable)')
+    fix.add_argument('--entry', type=Path, help='JSON file with the corrected catalogue entry of the run')
     labels = sub.add_parser('judge-labels', help='rewrite the simplified judge\'s level wording on the site')
     labels.add_argument('--run', action='append', help='only this run (repeatable; default every judged run)')
-    for command in (mirror, bundle, restyle, withdraw, repack, story, heat, cat, labels):
+    for command in (mirror, bundle, restyle, withdraw, repack, story, heat, cat, labels, fix):
         command.add_argument('--site', choices=sorted(SITES), default=DEFAULT_SITE,
                              help='which library (default gdm, the math site; ib: the ImpossibleBench site)')
         command.add_argument('--commit', action='store_true', help='deploy; otherwise only plan')
@@ -1436,6 +1484,11 @@ def main(argv=None):
             folders = dict(spec.split('=', 1) for spec in args.run)
             files, plan = plan_heatmap(base_files, unlisted, folders)
             message = f'Faking heatmap for {len(folders)} run(s)'
+        elif args.command == 'correct':
+            records = dict(spec.split('=', 1) for spec in args.file)
+            entry = json.loads(args.entry.read_text()) if args.entry else None
+            files, plan = plan_correct(base_files, unlisted, args.run, records, entry, site=site)
+            message = 'Correct records of ' + args.run
         elif args.command == 'judge-labels':
             files, plan = plan_judge_labels(base_files, args.run)
             message = f'Judge level wording on {len(plan["replaced_pages"])} page(s)'

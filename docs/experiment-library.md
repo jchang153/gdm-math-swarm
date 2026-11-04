@@ -112,6 +112,11 @@ read-only unless `--commit` is given; there are no approval prompts or extra spe
   taxonomy name next to its code or link to an unpublished file refuses the run. Earlier story map pages of the
   run are replaced (stale ones removed) and `results.html` gains a "Story map" tab; nothing else changes.
   `prepare_hf_library.py` applies the same allowlist and screens to a run's `analysis/storymap/`.
+- `correct --run RUN --file PATH=LOCAL [--file ...] [--entry ENTRY_JSON] [--commit] [--receipt FILE]`
+  (November 4, 2026): replace named records of a run already on the site with corrected bytes, only after an
+  owner decision recorded in docs/plan.md (first use: 2ov r1's complete-evaluation records). Each PATH must
+  already be served; pages, pack files and private categories are refused. `--entry` replaces the run's
+  catalogue row (same run, links inside the run). Old and new digests of every replacement go into the receipt.
 - `catalogue [--commit] [--receipt FILE]` (November 2, 2026): re-render only the catalogue (`index.html`,
   `experiments.json`) from its entries. Every catalogue render (this one, `publish`, `restyle`, `withdraw`,
   `mirror-space`) gives an entry a "Story map" link exactly when `RUN/analysis/storymap/index.html` is on the site,

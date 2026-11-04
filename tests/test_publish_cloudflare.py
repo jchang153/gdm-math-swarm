@@ -498,3 +498,41 @@ class LoadAndVerifyTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CorrectTests(unittest.TestCase):
+    """publish_cloudflare.py correct (owner decision, November 4, 2026): named served records of one run replaced."""
+
+    def test_replaces_named_records_and_entry_and_records_digests(self):
+        files = site(RUN, OTHER)
+        files[f'{RUN}/conference-view/manifest.json'] = b'{"old": 1}'
+        with tempfile.TemporaryDirectory() as tmp, patch.object(cf, 'render_catalogue', fake_catalogue):
+            new = Path(tmp) / 'results.json'
+            new.write_bytes(b'{"fixed": 1}')
+            same = Path(tmp) / 'manifest.json'
+            same.write_bytes(b'{"old": 1}')
+            fixed = {**entry(RUN, '2026-10-20T00:00:00Z'), 'distinct_verified_tasks': 16}
+            out, plan = cf.plan_correct(files, (), RUN, {'results.json': new, 'conference-view/manifest.json': same},
+                                        fixed)
+        self.assertEqual(out[f'{RUN}/results.json'], b'{"fixed": 1}')
+        self.assertEqual([r['path'] for r in plan['replaced_records']], [f'{RUN}/results.json'])
+        self.assertEqual(plan['catalogue_entry']['fields'], ['distinct_verified_tasks'])
+        rows = json.loads(out['experiments.json'])['experiments']
+        self.assertEqual([e.get('distinct_verified_tasks') for e in rows if e['run'] == RUN], [16])
+        self.assertEqual({n for n in out if out[n] != files.get(n)},
+                         {f'{RUN}/results.json', 'experiments.json', 'index.html'} - (
+                             {'index.html'} if out['index.html'] == files['index.html'] else set()))
+
+    def test_refuses_pages_unserved_paths_other_runs_and_foreign_entries(self):
+        files = site(RUN)
+        with tempfile.TemporaryDirectory() as tmp:
+            local = Path(tmp) / 'x'
+            local.write_bytes(b'x')
+            for records, fixed in (({'results.html': local}, None), ({'missing.json': local}, None),
+                                   ({}, {**entry(OTHER, '2026-10-20T00:00:00Z')}),
+                                   ({}, {'run': RUN, 'start_utc': '2026-10-20T00:00:00Z',
+                                         'links': {'Report': f'{OTHER}/results.html'}}), ({}, None)):
+                with self.subTest(records=records, fixed=fixed), self.assertRaises(ValueError):
+                    cf.plan_correct(files, (), RUN, records, fixed)
+            with self.assertRaises(ValueError):
+                cf.plan_correct(files, (), OTHER, {'results.json': local})

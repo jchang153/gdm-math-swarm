@@ -1986,3 +1986,42 @@ file, and renders a packed HTML page in place as the page itself (relative links
 The site is packed as served; every plan works on the unpacked tree (`unpack_site`) and every deployment packs again,
 checked lossless. `verify` resolves links into packs, checks an old URL per pack group (every run with `--full`) and,
 with `--full`, every pack entry against its digest. The Inspect View assets stay per run (October 30 reasoning).
+
+## Story-map run limits for the reminder push runs (November 4, 2026)
+
+Owner decision (chat, about 09:30 PT on November 4, 2026, relayed by the coordinating agent): the story maps of
+the two reminder push runs, which stopped at their $100 run limit with units still missing, get higher run limits.
+`glmflash100-seeded-reminder5m-120m-push-r1-20261104T042318Z` goes to $125 and
+`glmflash100-seeded-reminder5m-120m-push-r2-20261104T042744Z` to $180. They are rerun in parallel with
+`push/sm_run.sh RUN LIMIT`, which uses `run_storymap.py --retry-failed` and reuses finished units. They are
+published like the other story maps (only complete maps, after both scans) and then offloaded.
+
+## Correct 2ov r1's immutable records (November 4, 2026)
+
+Owner decision (chat, about 09:30 PT on November 4, 2026, relayed by the coordinating agent): on the site,
+overwrite three things for `glmflash100-seeded-2ov-glm-120m-push-r1-20261104T043228Z` with the corrected
+(complete-evaluation) values:
+- `results.json`
+- `conference-view/manifest.json`
+- its catalogue row
+
+The run's VM supervisor crashed with the evaluation at 17/27. The run agent republished its pages with
+`--replace-pages`, but the site's immutability rule kept the partial-evaluation `results.json`, manifest and
+catalogue row. The logs dataset is add-only and keeps the partial-evaluation file; it is not overwritten.
+
+The override is `publish_cloudflare.py correct --run RUN --file PATH=LOCAL ... [--entry ENTRY_JSON]`, deployed
+under `cf-deploy.lock` and checked with `verify --full`.
+- It replaces only records that are already served.
+- It never replaces pages, pack files or private categories.
+- The replacement entry must belong to the same run, with links inside the run.
+- Every replacement is recorded with its old and new digests.
+
+Each future use needs its own owner decision recorded here.
+
+The corrected values, regenerated locally without the VM:
+- `results.json`: the local core fetched after the fix (27 of 27 evaluated).
+- `manifest.json`: re-exported with `export_conference.export` from a read-only dataset restore plus the dataset's
+  `snapshots.tar.gz`. It differs from the served copy only in the `evaluations/evaluations.jsonl` digest, and its
+  packs are identical.
+- Catalogue entry: the live entry with `distinct_verified_tasks` (9 -> 16) and `profile` (fakes unresolved 0 -> 3)
+  rebuilt by `build_experiment_index` from the corrected results.
