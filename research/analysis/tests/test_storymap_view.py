@@ -69,13 +69,14 @@ class ViewFixtureTest(unittest.TestCase):
 
     def test_agent_page_lanes_and_reaction(self):
         page = self.pages["agent-003"]
-        for lane in ("Position on cheating", "What it saw: library", "What it saw: board, DMs", "What it submitted"):
-            self.assertIn(f">{lane}</text>", page)
-        for letter in view.LETTERS:
-            self.assertIn(f">What it thought: {letter}</text>", page)
-        # Every lane label has a hover hint.
-        self.assertEqual(page.count('<text class="lanetext"'), 1 + len(view.LETTERS) + len(view.LANES))
-        self.assertIn("<title>Position on cheating: What the agent intended about the shortcut", page)
+        for lane in ("Position on cheating", "Saw: library", "Saw: board posts, DMs", "Did: submissions"):
+            self.assertIn(f'<span class="lf">{lane}</span>', page)
+        for letter in view.LETTERS:  # thought lanes carry their group letter (the one code scheme)
+            self.assertIn(f'<b>{letter}</b><span class="lf">thoughts</span>', page)
+        # Every lane label has a hover hint; the reminder lane only when the agent has reminders.
+        self.assertEqual(page.count('<div class="ll"'), 1 + len(view.LETTERS) + len(view.LANES) - 1)
+        self.assertNotIn("Saw: integrity reminders", page)
+        self.assertIn('title="Position on cheating: What the agent intended about the shortcut', page)
         # Events are named in words (never by their type code); thoughts by their code.
         self.assertIn('<span class="badge">board post</span>', page)
         self.assertNotIn("event B1", page)
@@ -87,7 +88,8 @@ class ViewFixtureTest(unittest.TestCase):
         for k in keys:
             self.assertIn(f'id="{k}"', page)
         # The revert event shows its stage-2 reaction (refake signal) and the thought quote.
-        art = re.search(r'<article class="item k-fake" id="ev-\d+"[^>]*><h3>145\.0 min.*?</article>', page, re.S).group(0)
+        art = re.search(r'<article class="item k-fake" id="ev-\d+"[^>]*><h3><svg[^>]*>.*?</svg>145\.0 min.*?</article>',
+                        page, re.S).group(0)
         self.assertIn("reads the revert as a detector to evade", art)
         self.assertIn("refake signal", art)
         self.assertIn("I&#x27;ll weaken it differently.", page)
@@ -129,17 +131,20 @@ class ViewFixtureTest(unittest.TestCase):
 
     def test_legend_groups_on_every_page(self):
         for text in [self.index, self.events, *self.pages.values()]:
-            self.assertRegex(text, r'<details class="legend( inline)?" open>')
+            self.assertIn('<details class="legend" open>', text)  # the same sticky legend bar on every page
+            self.assertIn('<details class="about">', text)
             self.assertIn("<h4>Bar colour = the agent's position on cheating at that moment</h4>", text)
             self.assertIn("<h4>Shape + colour = event</h4>", text)
-            self.assertIn("<b>Read as:</b>", text)
+            self.assertIn("<h4>Read as</h4>", text)
+            self.assertIn(view.CODE_SCHEME, text)
             for stance in view.STANCES:
                 self.assertIn(f"<b>{view.STANCE_LABEL[stance]}</b>", text)
             self.assertIn("interpretations, not ground truth", text)
             self.assertNotIn("Researcher-only", text)
             self.assertNotIn("off the public site", text)
         # Legend swatches and glyphs come from the map's own classes and code, so they cannot drift.
-        legend = re.search(r'<details class="legend inline".*?</details>', self.pages["agent-003"], re.S).group(0)
+        page = self.pages["agent-003"]
+        legend = page[page.index('<details class="about">'):page.index('<details class="terms">')]
         for stance in view.STANCES:
             self.assertIn(f'<rect class="ph-{stance}"', legend)
         self.assertNotIn("style=", legend)  # no inline colours
@@ -164,12 +169,13 @@ class ViewFixtureTest(unittest.TestCase):
             for sel in re.findall(r"([^{}]+)\{[^}]*var\(--" + ev + r"\)", css):
                 self.assertTrue(sel.strip().startswith(".g"), (ev, sel))
         page = self.pages["agent-003"]
-        lanes = page.split('<div class="lanes">', 1)[1].split("</svg>", 1)[0]
+        lanes = page.split('<div class="tl">', 1)[1].split('<p class="tlcap">', 1)[0]
         self.assertNotIn("style=", lanes)
         flags = set()
         for cls in re.findall(r'<g class="g ([^"]*)"', lanes):
             flags |= set(cls.split())
-        self.assertLessEqual(flags, {"g-fill", "g-hollow", "g-other", "g-rem", "ring", "ok", "no", "g-th", "g-th-low"})
+        self.assertLessEqual(flags, {"g-fill", "g-hollow", "g-other", "g-rem", "ring", "ok", "no", "g-th", "g-th-low",
+                                     "push"})
         self.assertIn("ring", flags)  # the overseer DM in the fixture
 
     def test_glyph_flags(self):
@@ -203,14 +209,15 @@ class ViewFixtureTest(unittest.TestCase):
             path.write_text("".join(json.dumps(it) + "\n" for it in items))
             view.build(FIX / "map", tmp / "timeline", tmp / "out", taxonomy=None)
             page = (tmp / "out" / "agents" / "agent-003.html").read_text()
-            lanes = page.split('<div class="lanes">', 1)[1].split("</svg>", 1)[0]
+            lanes = page.split('<div class="tl">', 1)[1].split('<p class="tlcap">', 1)[0]
             self.assertRegex(lanes, r'<g class="g g-rem" data-k="ev-\d+"[^>]*><title>Integrity reminder · 160\.0 min')
-            strip = re.search(r'<details class="legend strip".*?</details>', page, re.S).group(0)
-            full = re.search(r'<details class="legend inline".*?</details>', page, re.S).group(0)
+            self.assertIn('<span class="lf">Saw: integrity reminders</span>', lanes)  # its own lane
+            strip = re.search(r'<details class="legend" open>.*?</details>', page, re.S).group(0)
+            full = page[page.index('<details class="about">'):page.index('<details class="terms">')]
             glyph = view.shape("R1", 8, 8.5, 4.6, "g-rem", None, "")
             for lg in (strip, full):
                 self.assertIn(glyph, lg)
-                self.assertIn("integrity reminder (host notice)", lg)
+                self.assertIn(f"{glyph}</svg>integrity reminder</li>", lg)  # the same name as everywhere else
             self.assertIn("Integrity reminder: System notice", page)
             self.assertNotIn('class="g g-rem"', (tmp / "out" / "index.html").read_text())
             events = (tmp / "out" / "events.html").read_text()   # listed there as its own section, with the star
@@ -263,7 +270,8 @@ class ViewFixtureTest(unittest.TestCase):
         self.assertRegex(page, r'data-k="th-\d+"[^>]*><title>Thought ')
         self.assertRegex(page, r"<title>Turning point · \d+\.\d min")
         self.assertNotRegex(visible_ui(page), r"\bt=\d|\d{4}-\d\d-\d\dT")  # one time format: minutes
-        self.assertRegex(self.index, r'<a href="agents/agent-00\d\.html#sel=ev-\d+"><g class="g [^"]*"><title>')
+        self.assertRegex(self.index, r'<a href="agents/agent-00\d\.html#sel=ev-\d+"><svg x="[\d.]+%" y="[\d.]+">'
+                                     r'<g class="g [^"]*" data-p="[\d.]+"><title>')
 
     def test_agent_page_stepper(self):
         page = self.pages["agent-003"]
@@ -281,8 +289,11 @@ class ViewFixtureTest(unittest.TestCase):
         self.assertIn("th", {k for _, k, _ in items})
         # Every glyph key on the lanes has a steppable article.
         ids = {i for i, _, _ in items}
-        for k in set(re.findall(r'data-k="([^"]+)"', page.split('<div class="lanes">', 1)[1].split("</svg>", 1)[0])):
+        lanes = page.split('<div class="tl">', 1)[1].split('<p class="tlcap">', 1)[0]
+        for k in set(re.findall(r'data-k="([^"]+)"', lanes)):
             self.assertIn(k, ids)
+        for keys in re.findall(r'data-stack="([^"]+)"', lanes):  # every stacked item is steppable too
+            self.assertLessEqual(set(keys.split()), ids)
 
     def test_events_page_keyboard(self):
         ev = self.events
@@ -332,26 +343,28 @@ class ViewFixtureTest(unittest.TestCase):
     def test_panel_is_a_fixed_column(self):
         page = self.pages["agent-003"]
         lay = page.split('<div class="layout">', 1)[1]
-        self.assertLess(lay.index('<div class="lanes">'), lay.index('<aside id="panel">'))
-        self.assertLess(lay.index('<aside id="panel">'), lay.index('<div class="list">'))
+        self.assertTrue(lay.startswith('<div class="main"><div class="tl">'))  # the timeline is the main view
+        self.assertLess(lay.index('<p class="story">'), lay.index('<aside id="panel"'))  # the column beside it
         self.assertIn("Nothing selected.", page)
-        self.assertNotIn("position:fixed", view.CSS)
-        # Timeline and detail column come first (owner, Nov 2, 2026): before the story, the legend and the list.
-        self.assertLess(page.index('<div class="lanes">'), page.index('<p class="story">'))
-        self.assertLess(page.index('<aside id="panel">'), page.index('<details class="legend inline"'))
+        # Sticky beside the timeline on wide screens (owner, Nov 2, 2026); fixed only as the phone bottom sheet.
+        self.assertIn("#panel{position:sticky", view.CSS)
+        wide = re.sub(r"@media \(max-width:900px\)\{.*?\}\}", "", view.CSS, flags=re.S)
+        self.assertNotIn("position:fixed", wide)
+        self.assertLess(page.index('<div class="tl">'), page.index('<p class="story">'))
         self.assertIn('<p class="banner one"', page)
-        # The compact legend sits open directly above the timeline (owner, Nov 2, 2026), with both keys.
-        strip = page.index('<details class="legend strip" open>')
+        # The compact legend sits open directly above the timeline and sticks on scroll, as on every page.
+        strip = page.index('<details class="legend" open>')
         self.assertLess(strip, page.index('<div class="layout">'))
+        self.assertIn("details.legend{position:sticky;top:0", view.CSS)
         block = page[strip:page.index('<div class="layout">')]
         for s in view.STANCES:
             self.assertIn(f'<rect class="ph-{s}"', block)
-        self.assertIn("Shape = event:", block)
+        self.assertIn("Shape:", block)
         self.assertIn(view.shape("D1", 8, 8.5, 4.6, "g-hollow ring", None, ""), block)
 
     def test_large_glyphs_with_hit_areas(self):
         page = self.pages["agent-003"]
-        lanes = page.split('<div class="lanes">', 1)[1].split("</svg>", 1)[0]
+        lanes = page.split('<div class="tl">', 1)[1].split('<p class="tlcap">', 1)[0]
         glyphs = re.findall(r'<g class="g [^"]*" data-k="[^"]+"[^>]*>(?:<title>[^<]*</title>)?(.*?)</g>', lanes, re.S)
         self.assertTrue(glyphs)
         for body in glyphs:  # every selectable glyph has an invisible hit area of radius HIT_R (about 27 px across)
@@ -359,7 +372,7 @@ class ViewFixtureTest(unittest.TestCase):
             self.assertIn(f'r="{view.HIT_R}"', body)
         self.assertGreaterEqual(view.HIT_R, 12)
         self.assertIn("Math.hypot", view.PANEL_JS)  # clicks pick the nearest glyph
-        self.assertIn(".lanes .g:hover .hit", view.CSS)
+        self.assertIn(".tl .g:hover .hit", view.CSS)
 
     def test_selecting_never_scrolls_the_window(self):
         # Selecting or stepping must not move the page: no window or element scrolling and no focus() in the agent
@@ -367,6 +380,7 @@ class ViewFixtureTest(unittest.TestCase):
         for call in ("scrollIntoView", "scrollBy(", "scrollTo(", "window.scroll", ".focus("):
             self.assertNotIn(call, view.PANEL_JS, call)
             self.assertNotIn(call, view.LEGEND_JS, call)
+            self.assertNotIn(call, view.CHAIN_JS, call)
         self.assertIn("body.scrollTop=0", view.PANEL_JS)
 
     def test_model_names(self):
@@ -433,9 +447,10 @@ class NoRawNamesTest(unittest.TestCase):
 
     def check(self, out):
         for path in sorted(out.rglob("*.html")):
-            if path.name == "taxonomy.html":
-                continue  # the taxonomy itself defines the event codes
             ui = visible_ui(path.read_text())
+            if path.name == "taxonomy.html":  # thought codes are its subject; event codes are named in words
+                self.assertIsNone(RAW_EVENT.search(ui), (path.name, RAW_EVENT.search(ui)))
+                continue
             self.assertIsNone(RAW_EVENT.search(ui), (path.name, RAW_EVENT.search(ui)))
             for raw in RAW_FIELDS:
                 self.assertNotIn(raw, ui, (path.name, raw))
@@ -485,7 +500,7 @@ class ViewTaxonomyTest(unittest.TestCase):
 
     def test_names_and_definitions_in_place(self):
         page = self.page
-        self.assertIn(f">Thought C: {self.names['C']}</text>", page)  # lane label with the group name
+        self.assertIn(f"<b>C</b><span class=\"lf\">{self.names['C']}</span>", page)  # lane: group letter and name
         self.assertIn("<h4>What it thought: code groups</h4>", page)
         self.assertIn(f"<b>C6</b> {html.escape(self.names['C6'], quote=False)}", page)
         self.assertIn('href="../taxonomy.html#code-C6"', page)
@@ -538,6 +553,187 @@ class ViewPartialInputTest(unittest.TestCase):
                 view.build(Path(tmp) / "empty-map", tdir, out, taxonomy=None)
                 self.assertTrue((out / "index.html").is_file())
                 self.assertTrue((out / "events.html").is_file())
+
+
+class RedesignTest(unittest.TestCase):
+    """November 3, 2026 redesign: the axis follows the run, stacked items are counted and listed, the reasoning chain
+    behind a thought opens inline, push deliveries have their own mark, and letters are only code groups."""
+
+    @staticmethod
+    def _with_items(tmp, extra, agent="agent-003"):
+        shutil.copytree(FIX / "timeline", tmp / "timeline")
+        path = tmp / "timeline" / "timeline" / f"{agent}.jsonl"
+        items = [json.loads(x) for x in path.read_text().splitlines()]
+        for it in extra:
+            items.append(dict(it, i=len(items)))
+        path.write_text("".join(json.dumps(it) + "\n" for it in items))
+        return items
+
+    def test_axis_follows_the_run(self):
+        a = lambda t: {"x": {"items": [{"t": t}], "thoughts": [], "stage3": None}}  # noqa: E731
+        self.assertEqual(view.axis_max(a(61.8)), 60.0)
+        self.assertEqual(view.axis_max(a(40.0)), 60.0)
+        self.assertEqual(view.axis_max(a(118.0)), 120.0)
+        self.assertEqual(view.axis_max(a(178.0)), 180.0)
+        self.assertEqual(view.axis_max(a(178.0), 120), 120.0)
+        self.assertEqual(view.tick_step(60), 10)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            run = tmp / "RUN"
+            shutil.copytree(FIX / "map", run / "analysis" / "storymap")
+            (run / "settings.json").write_text(json.dumps({"config": {"max_run_seconds": 7200}}))
+            self.assertEqual(view.run_minutes(run / "analysis" / "storymap"), 120.0)
+            view.build(run / "analysis" / "storymap", FIX / "timeline", tmp / "out", taxonomy=None)
+            page = (tmp / "out" / "agents" / "agent-003.html").read_text()
+            self.assertIn("Minutes from run start (0\u2013120)", page)
+            self.assertIn(">120</text>", page)
+            self.assertNotIn(">180</text>", page)
+            self.assertIn("(0\u2013120)", (tmp / "out" / "index.html").read_text())
+
+    def test_stacked_items_are_counted_and_listed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            extra = [{"t": 100.0 + k * 0.1, "ts": None, "turn": 9, "kind": "event", "tool": "get_bulletin_board",
+                      "text": f"Post {k}", "event": {"type": "B1", "id": f"B1:post-0009{k}", "author": "agent-001",
+                                                     "author_role": "solver", "fake": None, "tags": ["warning"],
+                                                     "outcome": None, "detail": {}}} for k in range(3)]
+            items = self._with_items(tmp, extra)
+            view.build(FIX / "map", tmp / "timeline", tmp / "out", taxonomy=None)
+            page = (tmp / "out" / "agents" / "agent-003.html").read_text()
+            keys = " ".join(f"ev-{n}" for n in range(len(items) - 3, len(items)))
+            g = re.search(r'<g class="g [^"]*" data-k="([^"]+)"[^>]*data-stack="%s"[^>]*><title>3 items stacked here'
+                          % keys, page)
+            self.assertIsNotNone(g)
+            self.assertIn('<g class="cnt">', page)
+            self.assertRegex(page, r'<g class="cnt"><circle [^>]*/><text [^>]*>3</text></g>')
+            self.assertIn("items stacked at this spot", view.PANEL_JS)  # the panel lists every stacked item
+            for n in range(len(items) - 3, len(items)):
+                self.assertRegex(page, r'<article class="item[^"]*" id="ev-%d" [^>]*data-label="' % n)
+            index = (tmp / "out" / "index.html").read_text()
+            self.assertRegex(index, r'<a href="agents/agent-003\.html#sel=ev-\d+"><svg[^>]*><g [^>]*><title>4 items stacked')  # with the fixture's library read at 100.0
+
+    def test_reasoning_chain_inline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            view.build(FIX / "map", FIX / "timeline", tmp / "on", taxonomy=None)
+            view.build(FIX / "map", FIX / "timeline", tmp / "off", taxonomy=None, evidence=False)
+            page = (tmp / "on" / "agents" / "agent-003.html").read_text()
+            raw = re.search(r'<script type="application/json" id="tl">(.*?)</script>', page, re.S).group(1)
+            self.assertNotRegex(raw, r"[<>&]")  # inert JSON: no markup characters
+            rows = json.loads(raw)["items"]
+            self.assertTrue(rows)
+            self.assertNotIn("context", {r[3] for r in rows})  # the agent's prompts are never embedded
+            self.assertLessEqual({r[3] for r in rows}, set(view.CHAIN_CAPS))
+            th = re.search(r'<article class="item k-th[^"]*" id="th-0".*?</article>', page, re.S).group(0)
+            box = re.search(r'<div class="chain" data-lo0="(\d+)" data-hi0="(\d+)" data-cite="([\d ]+)" data-q="', th)
+            self.assertIsNotNone(box)
+            self.assertIn("Show the full reasoning chain behind this thought", th)
+            self.assertIn(view.CHAIN_JS, page)
+            off = (tmp / "off" / "agents" / "agent-003.html").read_text()
+            self.assertNotIn('id="tl"', off)
+            self.assertNotIn('class="chain"', off)
+        refs = view.evidence_refs({"evidence": [{"item": 7, "start": 3, "end": 9}, {"item_i": "8"}, {"x": 1}]})
+        self.assertEqual(refs, ({7, 8}, [(7, 3, 9)]))
+        self.assertEqual(view.evidence_refs({}), (set(), []))
+
+    def test_chain_text_is_redacted_and_inert(self):
+        key = "sk-ant-" + "x" * 24
+        text = (f"ANTHROPIC_AUTH_TOKEN={key}\nHF_TOKEN=abc\n/Users/someone/repo private/research/notes.md "
+                "private/protected) <a href='u'>/workspace/x</a>")
+        a = {"items": [{"i": 0, "t": 1.0, "turn": 0, "kind": "tool_result", "tool": "Bash", "text": text},
+                       {"i": 1, "t": 0.0, "turn": 0, "kind": "context", "text": "system prompt"}]}
+        raw = view.timeline_json(a)
+        for bad in ("<", ">", "'", "/", "&"):
+            self.assertNotIn(bad, raw.replace("\\/", "").replace("\\u", ""))
+        rows = json.loads(raw)["items"]
+        self.assertEqual(len(rows), 1)  # context items are never embedded
+        shown = rows[0][5]
+        self.assertNotIn(key, shown)
+        self.assertNotIn("abc", shown)
+        self.assertNotIn("/Users/", shown)
+        self.assertNotIn("private/research", shown)
+        self.assertIn("private/protected)", shown)  # ordinary words stay
+        self.assertIn("/workspace/x", shown)
+
+    def test_evidence_file_drives_the_chain(self):
+        # storymap/evidence.py output (HANDOFF item 24): chain_turns sets the chain, quote_span the highlight.
+        self.assertEqual(view.event_label("R1:agent-004:reminder-003"), "integrity reminder no. 3")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            shutil.copytree(FIX / "map", tmp / "map")
+            row = json.loads((tmp / "map" / "stage1" / "agent-003.jsonl").read_text().splitlines()[0])
+            row = view._unwrap(row, "thoughts")
+            th = row["thoughts"][0]
+            items = {json.loads(x)["i"]: json.loads(x)
+                     for x in (FIX / "timeline" / "timeline" / "agent-003.jsonl").read_text().splitlines()}
+            text = items[th["item"]]["text"]
+            start = text.index(th["quote"])
+            cn = row.get("chunk") if isinstance(row.get("chunk"), int) else 0
+            rec = {"key": f"c{cn:03d}-t00", "chunk": cn, "index": 0, "item": th["item"], "turn": th["turn"],
+                   "quote_span": {"item": th["item"], "start": start, "end": start + len(th["quote"])},
+                   "chain_turns": [max(th["turn"] - 2, 0), th["turn"]], "chain_items": [th["item"]]}
+            (tmp / "map" / "evidence").mkdir()
+            (tmp / "map" / "evidence" / "agent-003.json").write_text(json.dumps({"agent": "agent-003",
+                                                                               "thoughts": [rec], "items": {}}))
+            view.build(tmp / "map", FIX / "timeline", tmp / "out", taxonomy=None)
+            page = (tmp / "out" / "agents" / "agent-003.html").read_text()
+            box = re.search(r'<article class="item k-th[^"]*" id="th-\d+"[^>]*data-t="%.1f".*?<div class="chain"([^>]*)>'
+                            % th["t"], page, re.S).group(1)
+            self.assertIn(f'data-lo0="{max(th["turn"] - 2, 0)}" data-hi0="{th["turn"]}"', box)
+            self.assertIn(f'data-spans="{th["item"]}:{start}:{start + len(th["quote"])}"', box)
+
+    def test_push_deliveries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            common = {"delivery": "push", "delivery_id": "push-000004", "delivery_size": 2,
+                      "delivery_items": ["B1:post-000077", "R1:agent-003@120.0"], "anchor_tool_use_id": "toolu_x",
+                      "request_seq": 5, "placement": "anchor", "answered": True}
+            extra = [{"t": 120.0, "ts": None, "turn": 10, "kind": "event", "tool": None, "text": "pushed post",
+                      "event": {"type": "B1", "id": "B1:post-000077", "author": "agent-102",
+                                "author_role": "overseer", "fake": None, "tags": ["warning"], "outcome": None,
+                                "detail": dict(common, position=0)}},
+                     {"t": 120.0, "ts": None, "turn": 10, "kind": "event", "tool": None, "text": "reminder",
+                      "event": {"type": "R1", "id": "R1:agent-003@120.0", "author": None, "author_role": None,
+                                "fake": None, "tags": [], "outcome": None, "detail": dict(common, position=1)}}]
+            items = self._with_items(tmp, extra)
+            view.build(FIX / "map", tmp / "timeline", tmp / "out", taxonomy=None)
+            page = (tmp / "out" / "agents" / "agent-003.html").read_text()
+            self.assertEqual(view.glyph_class({"event": extra[0]["event"]}), "g-hollow ring push")
+            self.assertEqual(view.glyph_class({"event": dict(extra[1]["event"], detail={"delivery": "notice"})}),
+                             "g-rem push")
+            self.assertEqual(view.glyph_class({"event": dict(extra[1]["event"], detail={"delivery": "pull"})}), "g-rem")
+            art = re.search(r'<article class="item[^"]*" id="ev-%d".*?</article>' % (len(items) - 2), page, re.S).group(0)
+            self.assertIn(">delivered unasked</span>", art)
+            self.assertIn(">delivered together: item 1 of 2</span>", art)
+            self.assertIn("<dt>Delivered with</dt><dd>board post post-000077, integrity reminder at 120.0 min</dd>", art)
+            for hidden in ("toolu_x", "push-000004", "Request seq", "Placement"):
+                self.assertNotIn(hidden, art)
+            bar = re.search(r'<details class="legend" open>.*?</details>', page, re.S).group(0)
+            self.assertIn(view.PUSH_MEANING[2], bar)
+            self.assertIn('class="push"', bar)
+            # Without push deliveries the legend bar does not list the mark.
+            plain = (tmp / "out" / "agents" / "agent-001.html").read_text()
+            self.assertNotIn(view.PUSH_MEANING[2], re.search(r'<details class="legend" open>.*?</details>', plain,
+                                                             re.S).group(0))
+
+    def test_one_code_scheme_on_the_codes_page(self):
+        text = view.DEFAULT_TAXONOMY.read_text(encoding="utf-8")
+        shown = view.taxonomy_display(text)
+        self.assertNotRegex(shown, r"\bevents? (?:L1|L2|P1|P2|B1|D1|S1|O1|C1|N1|R1)\b(?! -)")
+        self.assertNotIn("Their type letters", shown.replace("\n", " "))
+        self.assertIn(view.CODE_SCHEME, shown)
+        self.assertIn("(board post or direct message events)", shown)
+        with tempfile.TemporaryDirectory() as tmp:
+            view.build(FIX / "map", FIX / "timeline", Path(tmp), taxonomy=view.DEFAULT_TAXONOMY)
+            tax = (Path(tmp) / "taxonomy.html").read_text()
+            for typ in ("L1", "B1", "D1", "R1"):
+                self.assertRegex(tax, r'<h3 id="event-%s"><svg class="hglyph"[^>]*>.*?</svg>Event: %s</h3>'
+                                 % (typ, re.escape(view.type_name(typ))))
+            self.assertNotIn("event B1 -", tax)
+        # One name per event type: the legend's names are the pages' names.
+        for typ, _, label in view.SHAPE_MEANING:
+            if typ in ("B1", "D1", "S1", "P2", "R1"):
+                self.assertEqual(label, view.type_name(typ))
 
 
 if __name__ == "__main__":

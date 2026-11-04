@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-03 PT by Claude (Opus 5.5) subagent (item 24: story-map push support, evidence, audit fixes).
+Last updated: 2026-11-03 PT by Claude (Opus 5.5) subagent (item 25: story-map GUI redesign, not published).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1167,6 +1167,45 @@ is being merged into main via `collab-env`.
      run with system_notice). The reminder condition may hit $75: a budget stop leaves complete maps for agents in
      order and resumes with a higher limit; or launch it with `--run-limit 100`. More posting under push raises
      the 10ov estimate.
+
+25. **DONE 2026-11-03 (~21:30 PT): story-map GUI redesign and bug fixes** (`research/analysis/storymap/view.py`,
+   tests `research/analysis/tests/test_storymap_view.py`; owner's five complaints plus a QA pass over all 9 maps).
+   Re-rendered locally into the session scratchpad (`after/<run>`), **not published** (awaiting the owner).
+   - **Time axis follows the run**: `max_run_seconds` from `RUN/settings.json` (beside the map or pipeline.json's
+     `run_dir`), else the data rounded to the half hour; ticks every 10/15/30 min (`--minutes` overrides). The 60-min
+     maps were on a 0-180 axis before.
+   - **Same sticky legend on every page** (index, events, agent): a compact bar (position colours, shapes, marks)
+     sticky on wide screens, collapsible; the explanation, code groups and glossary in a collapsed "About" block below.
+   - **One code scheme**: letters are only code groups (A-D, G thoughts; E reactions; F overseer readings); events are
+     never lettered, one name per type everywhere (`TYPE_NAME`: legend, lane labels, tooltips, panel, events table,
+     codes page). The codes page renders the taxonomy's `event X1` headings and prose as names with the glyph
+     (`taxonomy_display`; the committed taxonomy.md is unchanged because prompts insert it). Integrity reminders have
+     their own lane ("Saw: integrity reminders") when present.
+   - **Push deliveries** (item 24 contract): `detail.delivery` push or notice = a small chevron under the glyph
+     ("delivered unasked"), pull = none; badges "delivered unasked" / "notice in its own tool result", "delivered
+     together: item k of n", "Delivered with" list; bookkeeping fields hidden; pushed R1 ids read "integrity reminder
+     no. N". Older maps without the field render as before.
+   - **Stacks**: glyphs are placed in % with real pixel size (no stretched SVG). Items within ~1.8% of the axis chain
+     into one stack drawn as the most telling item with a count badge; tooltip lists them; selecting shows "N items
+     stacked at this spot" with every item clickable; arrow keys still step item by item. code-2ov agent-005: 0
+     overlapping glyphs (was 70%, a hidden pile of 35).
+   - **Reasoning chain inline**: each thought ("Show the full reasoning chain behind this thought") and event ("Show
+     what surrounded it") expands the agent's own reasoning, text, tool calls/results and events of the turns around
+     it, cited item marked, quote highlighted (exact `quote_span` from `evidence/<agent>.json` when present, else quote
+     search), Earlier/Later turn, Collapse; scrolls only the detail column. The agent's timeline is embedded once per
+     page (`<script type="application/json" id="tl">`): reasoning 8,000 chars, text 4,000, tool call 1,500, tool result
+     1,200, event 500; `context` items (the agents' prompts) are never embedded; text is redacted (credential-shaped
+     strings, `*_TOKEN=`/`*_KEY=`-style values, host paths, multi-segment `private/...` paths) and JSON-escaped (no
+     raw `< > & ' /`). `--no-evidence` renders without it. Sizes roughly double (180-min maps ~90-100 MB, 60-min
+     ~52-57 MB, largest agent page 2.3 MB). **Owner decision needed before publishing:** this puts the agents' full
+     reasoning and (capped) tool output on the public site, beyond the quotes shown so far. Without redaction the
+     guards refused 6 of 9 maps (one `env` dump with a token-shaped value in reminder r3 agent-079, Lean prose like
+     "private/protected", code strings with `href=`); with it all 9 pass `storymap_site.public_files`.
+   - **Layout**: timeline is the main view, detail column sticky beside it (no window scrolling on select/step); list
+     of all items, stage-1 table and legend explanation collapsed below (page height ~50,000 px -> a few screens);
+     phones: short lane labels, readable glyphs, detail column becomes a bottom sheet, no sideways scroll (index rows
+     no longer overlap; badges wrap). Events table glyph column fixed (was squeezed to 6 px); `t=24.964` in model
+     prose shown as minutes.
 
 ## Next steps / open items
 

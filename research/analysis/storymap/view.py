@@ -4,17 +4,21 @@
 
 Writes (default ``--out`` = ``--map``):
 
-* ``index.html``: one row per agent; positions on cheating as coloured spans on a 0-180 min axis (longer
-  when the run is longer), event glyphs (library reads, overseer posts, DMs, reverts, submissions),
-  final readings, and filters by source of the fake / faked / credited / stopped / knew it was cheating.
-* ``agents/<agent>.html``: lanes (position on cheating; thoughts by code group A-G; library; board and DMs;
-  status and reverts; submissions; own actions and restarts). Clicking a glyph shows its quote or event text with the
-  stage-2 reaction; every item is also listed in time order below the lanes.
+* ``index.html``: one row per agent; positions on cheating as coloured spans on the run's time axis (its configured
+  length, else the data's, rounded to the half hour), event glyphs (library reads, overseer posts, DMs, reverts,
+  submissions), final readings, and filters by source of the fake / faked / credited / stopped / knew it was cheating.
+* ``agents/<agent>.html``: the timeline (position on cheating; thoughts by code group A-G; library; board and DMs;
+  status; integrity reminders when there are any; submissions; own actions and restarts) with the detail column fixed
+  beside it. Clicking a glyph shows its quote or event text with the stage-2 reaction; items closer than about one
+  glyph width are one stack with a count, and selecting it lists every stacked item. Each thought and event opens the
+  agent's own reasoning chain (reasoning, text, tool calls and results of the turns around it, from the embedded,
+  redacted timeline; ``--no-evidence`` leaves it out). Every item is also listed in time order below.
 * ``validation.html``: ``validation.md`` (checks against the run's records, model agreement) in the pages' words.
 * ``taxonomy.html``: the code set (``--taxonomy``, default the public copy ``storymap/taxonomy.md``) with an anchor
-  per code; the pages link each code to it.
+  per code; the pages link each code to it. Letters are only code groups; event types are named in words there too.
 * ``events.html``: each overseer post or DM, other relevant board post, revert, library file and (runs with the
-  periodic integrity reminder) each delivery number of the reminder, with who read it and when, and the breakdown of stage-2 reactions (no change / belief / behaviour by direction).
+  periodic integrity reminder) each delivery number of the reminder, with who read it and when, and the breakdown of
+  stage-2 reactions (no change / belief / behaviour by direction).
 
 Inputs follow private/research/analysis/storymap/INTERFACE.md. Every input is optional: an agent with only a timeline,
 or only stage outputs, still gets a row, and missing stages are stated on the page instead of guessed. The taxonomy is
@@ -23,9 +27,11 @@ hints, the legend's code-group box, every thought's tooltip and panel, the react
 without names, saying so where the names would be. Visible text never shows raw event codes (B1, S1, ...) or the
 timeline's field names: events are named in words, detail fields have labels, times are minutes from run start.
 The pages, ``validation.md`` and the taxonomy page are published (scripts/publish_cloudflare.py storymap); timelines
-and stage records stay local. Each page has a legend (bar colour = position on cheating, shape = event, code groups)
-and a glossary; agent pages have a detail panel that steps through the items in time order (arrow keys or j / k,
-Prev / Next, a kind filter, Esc closes). No network, no external assets (the shared site theme is inlined); a little
+and stage records stay local (agent pages embed only the capped, redacted chain text, without the agents' prompts).
+Every page keeps the same compact legend in view (sticky on wide screens; bar colour = position, shape = event, marks
+for fake, overseer, outcome, push delivery and stack count) with the explanation, code groups and glossary below;
+agent pages have a detail panel that steps through the items in time order (arrow keys or j / k, Prev / Next, a kind
+filter, Esc closes) and never scrolls the window; on phones it is a bottom sheet. No network, no external assets (the shared site theme is inlined); a little
 vanilla JavaScript.
 """
 from __future__ import annotations
@@ -57,13 +63,16 @@ REGISTERED_LABEL = {"yes": "noticed it", "no": "did not notice it", "unclear": "
 RELEVANT_TAGS = {"describes_trick", "warning", "ruling", "revert_notice"}
 TEXT_CAP = 1500  # event text shown per item (the raw timelines themselves are never published)
 
-LANES = (  # (key, label, event types, hover hint)
-    ("library", "What it saw: library", ("L1", "L2"), "Shared-library listings and files the agent read"),
-    ("board", "What it saw: board, DMs", ("B1", "D1"), "Board posts and direct messages the agent read"),
-    ("status", "What it saw: status", ("P1", "P2", "N1", "R1"),
-     "Problem lists, reverts of its own credit, unread-message notices and the host's integrity reminders"),
-    ("subs", "What it submitted", ("S1",), "The agent's own proof submissions and their outcomes"),
-    ("own", "What it did: posts, restarts", ("O1", "C1"),
+LANES = (  # (key, label, short label (phones), event types, hover hint); the "rem" lane only when there are reminders
+    ("library", "Saw: library", "Library", ("L1", "L2"), "Shared-library listings and files the agent read"),
+    ("board", "Saw: board posts, DMs", "Board, DMs", ("B1", "D1"),
+     "Board posts and direct messages the agent read or that were pushed into its context"),
+    ("status", "Saw: problem list, reverts, notices", "Status", ("P1", "P2", "N1"),
+     "Problem lists, reverts of its own credit and unread-messages notices"),
+    ("rem", "Saw: integrity reminders", "Reminders", ("R1",),
+     "The host's periodic integrity reminder, pushed into its context on a timer"),
+    ("subs", "Did: submissions", "Submissions", ("S1",), "The agent's own proof submissions and their outcomes"),
+    ("own", "Did: own posts, restarts", "Own acts", ("O1", "C1"),
      "The agent's own posts, DMs and notes, and context compactions or restarts"),
 )
 POSITION = "Position on cheating"
@@ -121,6 +130,9 @@ def event_label(e_or_id, typ=None):
     if typ == "P2":
         return f"revert of its own credit (submission {rest})"
     if typ == "R1":  # 'R1:agent-004@7.804': the delivery minute, so a cited reminder is identifiable
+        m = re.search(r"reminder-0*(\d+)$", rest)  # pushed: 'R1:agent-004:reminder-003'
+        if m:
+            return f"integrity reminder no. {m.group(1)}"
         at = rest.rsplit("@", 1)[1] if "@" in rest else None
         try:
             return f"integrity reminder at {float(at):.1f} min"
@@ -139,7 +151,8 @@ def event_label(e_or_id, typ=None):
 
 def plain_ids(text):
     """Model-written or extractor text with raw event ids ('B1:post-000003') made plain."""
-    return re.sub(r"\b([LPBDSOCNR][12]):([^\s,;)'\"\]]+)", lambda m: event_label(m.group(0), m.group(1)), str(text))
+    text = re.sub(r"\b([LPBDSOCNR][12]):([^\s,;)'\"\]]+)", lambda m: event_label(m.group(0), m.group(1)), str(text))
+    return re.sub(r"\bt\s?=\s?(-?\d+(?:\.\d+)?)\b", lambda m: fmt_t(float(m.group(1))), text)  # one time format
 
 
 OUTCOME_LABEL = {"problem_closed": "problem already closed", "accepted": "accepted", "rejected": "rejected",
@@ -162,6 +175,7 @@ DETAIL_LABEL = {
     "trigger": "Trigger", "pre_tokens": "Context tokens before compaction",
     "summary": "Summary handed to the restarted agent", "notice": "Notice text", "counts": "Unread counts",
     "reread": "Re-read", "channel": "Channel", "to": "To", "feedback_id": "Feedback",
+    "delivery": "Delivery", "delivery_id": "Delivered together as",
 }
 VALUE_LABEL = {
     "form": {"restatement": "restatement (answer is the question itself)",
@@ -178,12 +192,13 @@ FINAL_LABEL = {"considered": "Considered faking", "faked": "Faked", "credited": 
 BELIEVES_LABEL = {"compile_only": "only compiles", "checks_answer": "checks the answer", "unknown": "unknown"}
 
 # Page tokens (light, then dark), on top of the shared site theme in scripts/site_style.py.
-# Two palettes that share no hue: five stance hues, used only by the stance bars, and two event hues, used only by
-# event glyphs (pink = fake, cyan = from an overseer). Everything else on a glyph is neutral: ordinary events are
-# grey outlines, thoughts are ink ticks, a submission's outcome is a mark (check = accepted or credited, slash = not
-# accepted). The seven hues were validated together (dataviz validate_palette.js, --pairs all: lightness band,
-# chroma, CVD >= 8, normal vision >= 15, contrast >= 3:1) on every surface they sit on: light #fafbfc, #ffffff,
-# #f1f4f7, #e9edf2; dark #0f141a, #161d25, #18202a, #1d2631. "none" is a neutral grey bar and "unknown" an outline.
+# Two palettes that share no hue: six stance hues, used only by the stance bars, and three event hues, used only by
+# event glyphs (pink = fake, cyan = from an overseer, amber = the host's integrity reminder). Everything else on a
+# glyph is neutral ink: ordinary events are grey outlines, thoughts are ink ticks, a submission's outcome is a mark
+# (check = accepted or credited, slash = not accepted), a push delivery a small chevron, a stack a count badge.
+# The hues were validated together (dataviz validate_palette.js, --pairs all: lightness band, chroma, CVD >= 8,
+# normal vision >= 15, contrast >= 3:1) on every surface they sit on: light #fafbfc, #ffffff, #f1f4f7, #e9edf2;
+# dark #0f141a, #161d25, #18202a, #1d2631. "none" is a neutral grey bar and "unknown" an outline.
 TOKENS_LIGHT = {"st-none": "#a7b1bd", "st-considering": "#9c8133", "st-deferred": "#1440bd",
                 "st-rejected": "#027651", "st-faking": "#b41e07", "st-stopped": "#8254f9",
                 "ev-fake": "#e13c85", "ev-ov": "#2593af", "ev-rem": "#d97706",
@@ -198,176 +213,248 @@ def _vars(tokens):
     return "".join(f"--{k}:{v};" for k, v in tokens.items())
 
 
+LANE_PX = 30  # lane height in CSS pixels (the timeline SVG has no viewBox, so glyphs and text keep their size)
+LANE_TOP = 4  # first lane's y in the SVG (the label column starts with the same padding)
+
 CSS = (
     f":root{{{_vars(TOKENS_LIGHT)}}}"
     f'@media (prefers-color-scheme:dark){{:root:not([data-theme="light"]){{{_vars(TOKENS_DARK)}}}}}'
     f':root[data-theme="dark"]{{{_vars(TOKENS_DARK)}}}'
     """
 :root{font-family:system-ui,sans-serif;line-height:1.5}
-body{max-width:1320px;margin:28px auto;padding:0 24px;background:var(--bg);color:var(--fg)}
-h1{margin:0 0 6px;font-size:1.6rem}h2{margin:28px 0 8px;font-size:1.2rem}h3{margin:0 0 6px;font-size:1.02rem}
+body{max-width:1320px;margin:20px auto;padding:0 24px;background:var(--bg);color:var(--fg)}body.agent{max-width:1760px}
+h1{margin:0 0 6px;font-size:1.5rem}h2{margin:24px 0 8px;font-size:1.15rem}h3{margin:0 0 6px;font-size:1rem}
 .muted,small{color:var(--muted)}.banner{background:var(--banner);border-left:4px solid var(--banner-line);
-padding:10px 16px;margin:12px 0}nav.top{display:flex;gap:14px;flex-wrap:wrap;margin:8px 0 14px}
+padding:8px 14px;margin:10px 0}.banner.one{padding:4px 12px;margin:4px 0 8px;font-size:13px}
+nav.top{display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 10px}nav.top .sp{flex:1}
 .badge{display:inline-block;background:var(--chip);padding:1px 7px;border-radius:4px;font-size:12px;
-margin:1px 2px 1px 0;white-space:nowrap}.b-bad{background:var(--chip);color:var(--fg);box-shadow:inset 0 0 0 1px var(--fg);font-weight:600}
-.b-good{background:var(--chip);color:var(--fg)}.b-caution{background:var(--chip);color:var(--fg);
-box-shadow:inset 0 0 0 1px var(--muted)}.b-info{background:var(--chip);color:var(--fg)}
-.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:14px 0}
+margin:1px 2px 1px 0;white-space:nowrap;max-width:100%;overflow-wrap:anywhere}
+.b-bad{color:var(--fg);box-shadow:inset 0 0 0 1px var(--fg);font-weight:600}.b-good,.b-info{color:var(--fg)}
+.b-caution{color:var(--fg);box-shadow:inset 0 0 0 1px var(--muted)}
+.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:12px 0}
 .filters label{display:flex;gap:6px;align-items:center;font-size:14px}
-select,button{font:inherit;padding:6px 9px;border:1px solid var(--input-line);border-radius:6px;
-background:var(--card);color:inherit}button{cursor:pointer}
-.sw{display:inline-block;width:18px;height:10px;border-radius:2px;flex:none}
-details.legend{position:static;z-index:20;background:var(--bg);border-bottom:1px solid var(--line);
-padding:4px 0 6px;margin:6px 0 10px}details.legend>summary{cursor:pointer;font-size:13px;font-weight:600;padding:2px 0}
-.lg{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:8px 14px;font-size:12.5px;line-height:1.35}
-.lgbox{border:1px solid var(--line);border-radius:8px;padding:4px 10px 6px;background:var(--card)}
-.lg ul.marks,.lg ul.ex{margin-top:4px;padding-top:4px;border-top:1px dashed var(--line)}.lg svg.swatch{width:22px}
-.lg h4{margin:4px 0 3px;font-size:12.5px}.lg ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:3px 14px}
-.lg li{display:inline-flex;gap:5px;align-items:center}.lg svg{width:18px;height:16px;flex:none;overflow:visible}
-.lg.three{grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,.9fr)}
-@media (max-width:1100px){.lg.three{grid-template-columns:minmax(0,1fr) minmax(0,1.6fr)}.lg.three>.lgbox:last-child{grid-column:1/-1}}
-.lg .note{color:var(--muted);margin:3px 0 0}.lg .g{cursor:default}
-.codes{max-height:150px;overflow:auto;padding-right:4px}.codes .grp{margin:0 0 3px}
-.codes .gname{font-weight:400}.codes details.code{margin-left:12px}.codes details.code>summary{cursor:pointer;
-list-style:none}.codes details.code>summary::-webkit-details-marker{display:none}
-.codes details.code>summary:focus-visible{outline:2px solid var(--fg)}.codes details.code p{margin:2px 0 4px;
-color:var(--muted)}.def{color:var(--muted);font-size:13px;margin:4px 0}
+select,button{font:inherit;padding:5px 9px;border:1px solid var(--input-line);border-radius:6px;
+background:var(--card);color:inherit}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}
+:focus-visible{outline:2px solid var(--fg);outline-offset:1px}
+details.legend{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line);
+padding:3px 0 5px;margin:4px 0 10px}details.legend>summary{cursor:pointer;font-size:12.5px;font-weight:600;padding:1px 0}
+.lstrip{display:flex;flex-direction:column;gap:2px;font-size:12.5px;line-height:1.3}
+.lstrip .row{display:flex;flex-wrap:wrap;gap:2px 12px;align-items:center}.lstrip ul{list-style:none;margin:0;padding:0;
+display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center}.lstrip li,.lg li{display:inline-flex;gap:4px;align-items:center}
+.lstrip svg,.lg svg{width:20px;height:18px;flex:none;overflow:visible}.lstrip svg.swatch,.lg svg.swatch{width:20px}
+.lstrip .k{font-weight:600}
+details.about{font-size:13px;margin:16px 0 10px}details.about>summary{cursor:pointer;font-weight:600}
+.lg{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px 14px;font-size:12.5px;line-height:1.35;
+margin-top:6px}.lgbox{border:1px solid var(--line);border-radius:8px;padding:4px 10px 6px;background:var(--card)}
+.lg h4{margin:4px 0 3px;font-size:12.5px}.lg ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
+.lg .note{color:var(--muted);margin:3px 0 0}
+.codes{max-height:none}.codes .grp{margin:0 0 3px}.codes details.code{margin-left:12px}
+.codes details.code>summary{cursor:pointer;list-style:none}.codes details.code>summary::-webkit-details-marker{display:none}
+.codes details.code p{margin:2px 0 4px;color:var(--muted)}.def{color:var(--muted);font-size:13px;margin:4px 0}
 details.terms{font-size:13px;margin:0 0 10px}details.terms>summary{cursor:pointer;color:var(--muted)}
 details.terms ul{margin:4px 0;padding-left:18px}
-.hglyph{width:16px;height:14px;vertical-align:-2px;margin-right:6px;overflow:visible}
-.stepper{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding-bottom:8px;margin-bottom:8px;
-border-bottom:1px solid var(--line);font-size:13px}.stepper button{padding:3px 9px}.stepper select{padding:3px 6px}
-#pos{min-width:9em;font-variant-numeric:tabular-nums}#pclose{margin-left:auto}.keys{font-size:12px;margin:8px 0 0}
-section.ev.cur{outline:2px solid var(--fg)}section.ev{scroll-margin-top:var(--legend-h,0px)}
-.grid{display:grid;grid-template-columns:96px minmax(420px,1fr) 300px;gap:0 12px;align-items:center}
-.grid>.hd{font-size:12px;color:var(--muted);padding:4px 0}
-.row{display:contents}.row>*{border-top:1px solid var(--line);padding:5px 0}
-.row:hover>*{background:var(--pick)}.agent a{font-weight:600;text-decoration:none}
-.strip svg{display:block;width:100%;height:30px}.labels{font-size:12px}
-svg text{fill:var(--muted);font:11px system-ui,sans-serif}
+.hglyph{width:20px;min-width:20px;max-width:none;height:18px;vertical-align:-4px;margin-right:6px;overflow:visible;flex:none}
+svg text{fill:var(--muted);font:11px system-ui,sans-serif}svg svg{overflow:visible}
 .ph-none{fill:var(--st-none)}.ph-considering{fill:var(--st-considering)}.ph-deferred{fill:var(--st-deferred)}
 .ph-rejected{fill:var(--st-rejected)}.ph-faking{fill:var(--st-faking)}.ph-stopped{fill:var(--st-stopped)}
-.g{cursor:pointer;stroke-width:1.3}.g:hover{stroke-width:2.4}
-.g .m{fill:var(--card);stroke:var(--muted);stroke-width:1.4}.g.ring .m{stroke:var(--ev-ov)}
-.g.g-fill .m{fill:var(--ev-fake);stroke:var(--ev-fake)}.g .ring{fill:none;stroke:var(--ev-ov);stroke-width:1.4}.g .mk{fill:none;stroke:var(--fg);stroke-width:1.6;stroke-linecap:round}
-.g .halo{fill:none;stroke:var(--card);stroke-width:4;stroke-linecap:round}.g .hit{fill:transparent;stroke:none}
-.lanes .g:hover .hit,.lanes .g:focus .hit{fill:var(--fg);fill-opacity:.13}.lanes .g.sel .hit{fill:var(--fg);fill-opacity:.2}
-.lanes .g:focus{outline:none}.lanes svg text{font-size:13px}body.agent{max-width:1720px}
-details.legend.strip{position:static;padding:2px 0 4px;margin:4px 0 6px}details.legend.strip>summary{font-size:12.5px}
-.lstrip{display:flex;flex-wrap:wrap;gap:3px 16px;font-size:12.5px;line-height:1.3}.lstrip ul{list-style:none;margin:0;
-padding:0;display:flex;flex-wrap:wrap;gap:2px 10px;align-items:center}.lstrip li{display:inline-flex;gap:4px;
-align-items:center}.lstrip svg{width:18px;height:16px;flex:none;overflow:visible}.lstrip svg.swatch{width:20px}
-.lstrip .k{font-weight:600}.pkey{font-size:12.5px;margin-top:10px}.pkey h4{margin:2px 0}
-.pkey .codes{max-height:none}.pkey ul{list-style:none;padding:0}.lstrip .row{display:flex;flex-wrap:wrap;gap:2px 14px;width:100%}
-.g .x{fill:none;stroke:var(--fg);stroke-width:2.4;stroke-linecap:round}.g.g-other .m{fill:var(--muted);stroke:none}.g.g-rem .m{fill:var(--ev-rem);stroke:var(--ev-rem);stroke-width:.8;stroke-linejoin:round}
-.g.g-th .m{fill:var(--fg);stroke:var(--fg);stroke-width:.8}.g.g-th-low .m{fill:var(--card);stroke:var(--fg);stroke-width:1}
-.g:hover .m,.g:hover .x{stroke-width:2.2}.g.sel .m,.g.sel .ring{stroke-width:2.6}.g.sel .x{stroke-width:3.4}
-.tp.sel{stroke-width:3;stroke-dasharray:none}.cursor{stroke:var(--fg);stroke-width:1.5;opacity:.55;pointer-events:none}
 .ph-unknown{fill:none;stroke:var(--muted);stroke-dasharray:3 2}
+.g{cursor:pointer;stroke-width:1.3}
+.g .m{fill:var(--card);stroke:var(--muted);stroke-width:1.5}.g.ring .m{stroke:var(--ev-ov)}
+.g.g-fill .m{fill:var(--ev-fake);stroke:var(--ev-fake)}.g .ring{fill:none;stroke:var(--ev-ov);stroke-width:1.5}
+.g .mk{fill:none;stroke:var(--fg);stroke-width:1.6;stroke-linecap:round}
+.g .halo{fill:none;stroke:var(--card);stroke-width:4;stroke-linecap:round}.g .hit{fill:transparent;stroke:none}
+.g .x{fill:none;stroke:var(--fg);stroke-width:2.4;stroke-linecap:round}.g.g-other .m{fill:var(--muted);stroke:none}
+.g.g-rem .m{fill:var(--ev-rem);stroke:var(--ev-rem);stroke-width:.8;stroke-linejoin:round}
+.g.g-th .m{fill:var(--fg);stroke:var(--fg);stroke-width:.8}.g.g-th-low .m{fill:var(--card);stroke:var(--fg);stroke-width:1}
+.g .push{fill:none;stroke:var(--fg);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.g .cnt circle{fill:var(--fg);stroke:var(--card);stroke-width:1.2}.g .cnt text{fill:var(--card);font:700 9px system-ui,sans-serif;text-anchor:middle}
+.g:hover .m,.g:hover .x{stroke-width:2.3}.g.sel .m,.g.sel .ring{stroke-width:2.8}.g.sel .x{stroke-width:3.4}
+.tl .g:hover .hit,.tl .g:focus .hit{fill:var(--fg);fill-opacity:.13}.tl .g.sel .hit{fill:var(--fg);fill-opacity:.22}
+.tl .g:focus{outline:none}
+.tp{stroke:var(--fg);stroke-dasharray:3 3;stroke-width:1.3;cursor:pointer}.tp.sel{stroke-width:3;stroke-dasharray:none}
+.cursor{stroke:var(--fg);stroke-width:1.5;opacity:.55;pointer-events:none}
 .lane-bg{fill:var(--lane)}.lane-bg.alt{fill:var(--lane-alt)}.tick{stroke:var(--line)}
-.tp{stroke:var(--fg);stroke-dasharray:3 3;stroke-width:1.2;cursor:pointer}
-.lanes{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;margin:12px 0}
-.lanes svg{display:block;width:100%;height:auto}
-.layout{display:grid;grid-template-columns:minmax(0,1fr) 400px;grid-template-areas:"lanes panel" "list panel";
-gap:0 18px;align-items:start}.layout>.lanes{grid-area:lanes;margin-top:0}.layout>.list{grid-area:list;min-width:0}
-#panel{grid-area:panel;position:sticky;top:calc(var(--legend-h,0px) + 8px);background:var(--panel);
-border:1px solid var(--line);border-radius:10px;padding:10px 14px;font-size:14px;display:flex;flex-direction:column;
-height:calc(100vh - var(--legend-h,0px) - 24px);max-height:760px;min-height:320px;box-sizing:border-box}
-#pbody{flex:1;overflow:auto;min-height:0}.lanetext{cursor:help}
-article.item{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--line);
-border-radius:8px;padding:9px 12px;margin:8px 0;font-size:14px;scroll-margin-top:calc(var(--legend-h,0px) + 12px)}
-article.item.k-th{border-left-color:var(--muted)}article.item.k-ov{border-left:5px double var(--fg)}
-article.item.k-fake{border-left-color:var(--fg)}article.item.k-tp{border-left-style:dashed;border-left-color:var(--fg)}
-article.item.hl{outline:2px solid var(--fg)}
-blockquote{margin:6px 0;padding:4px 10px;border-left:3px solid var(--input-line);white-space:pre-wrap;
-overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--pre);padding:8px 10px;
-border-radius:6px;font:12px/1.5 ui-monospace,monospace;margin:6px 0;max-height:320px;overflow:auto}
-.react{background:var(--chip);border-radius:6px;padding:6px 10px;margin:6px 0}
-.react p{margin:3px 0}dl.kv{display:grid;grid-template-columns:max-content 1fr;gap:2px 10px;margin:6px 0}
-dl.kv dt{color:var(--muted)}dl.kv dd{margin:0}
+.tl{display:grid;grid-template-columns:200px minmax(0,1fr);gap:0 8px;background:var(--card);border:1px solid var(--line);
+border-radius:10px;padding:8px 10px 2px}.tl-labels{padding-top:4px;min-width:0}
+.ll{height:30px;display:flex;align-items:center;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+cursor:help;border-bottom:1px solid transparent}.ll .ls{display:none}.ll b{margin-right:5px}
+.tl-plot{min-width:0;padding:0 12px 0 6px}.tl svg.plot{display:block;width:100%;overflow:visible}.strip svg{overflow:visible}
+.tlcap{font-size:12px;color:var(--muted);margin:2px 0 0}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 440px;gap:0 16px;align-items:start}.main{min-width:0}
+#panel{position:sticky;top:calc(var(--legend-h,0px) + 8px);background:var(--panel);border:1px solid var(--line);
+border-radius:10px;padding:8px 12px;font-size:14px;display:flex;flex-direction:column;
+height:calc(100vh - var(--legend-h,0px) - 16px);min-height:320px;box-sizing:border-box}
+#pbody{flex:1;overflow:auto;min-height:0;overscroll-behavior:contain}
+.stepper{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding-bottom:6px;margin-bottom:6px;
+border-bottom:1px solid var(--line);font-size:13px}.stepper button{padding:3px 9px}.stepper select{padding:3px 6px}
+#pos{min-width:8em;font-variant-numeric:tabular-nums}#pclose{margin-left:auto}.keys{font-size:12px;margin:6px 0 0}
+.stackbar{border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:0 0 8px;background:var(--card);font-size:13px}
+.stackbar ol{margin:4px 0 0;padding-left:22px}.stackbar li.here{font-weight:600}.stackbar li.here a{text-decoration:none}
+article.item{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:8px;
+padding:9px 12px;margin:8px 0;font-size:14px}article.item.k-th{border-left-color:var(--muted)}
+article.item.k-ov{border-left:5px double var(--fg)}article.item.k-fake{border-left-color:var(--fg)}
+article.item.k-tp{border-left-style:dashed;border-left-color:var(--fg)}article.item.hl{outline:2px solid var(--fg)}
+#pbody article.item{border:none;padding:0;margin:0;background:none}
+blockquote{margin:6px 0;padding:4px 10px;border-left:3px solid var(--input-line);white-space:pre-wrap;overflow-wrap:anywhere}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--pre);padding:8px 10px;border-radius:6px;
+font:12px/1.5 ui-monospace,monospace;margin:6px 0;max-height:320px;overflow:auto}
+.react{background:var(--chip);border-radius:6px;padding:6px 10px;margin:6px 0}.react p{margin:3px 0}
+dl.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:2px 10px;margin:6px 0}dl.kv dt{color:var(--muted)}
+dl.kv dd{margin:0;overflow-wrap:anywhere}
+.chain{margin:8px 0}.chain>button{font-size:13px;padding:4px 10px}
+.cbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12.5px;margin:4px 0}.cbar button{padding:2px 8px;font-size:12.5px}
+.chain ol{list-style:none;margin:6px 0;padding:0;border-left:2px solid var(--line)}
+.chain li{margin:0 0 6px;padding:2px 0 2px 10px}.chain li.turn{font-size:11.5px;color:var(--muted);padding-top:4px;
+text-transform:uppercase;letter-spacing:.04em}.chain li .h{font-size:12px;color:var(--muted)}
+.chain li.cited{border-left:3px solid var(--fg);margin-left:-2px;background:var(--pick)}
+.chain .tx{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}
+.chain .code{font:12px/1.45 ui-monospace,monospace;background:var(--pre);padding:4px 8px;border-radius:5px;
+white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto;margin:2px 0}
+.chain details>summary{cursor:pointer;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+mark{background:var(--hl);color:inherit;box-shadow:0 0 0 1px var(--fg);border-radius:2px}
+details.all>summary,details.more>summary{cursor:pointer;font-weight:600;font-size:1.05rem;margin:18px 0 6px}
 table{border-collapse:collapse;margin:8px 0;font-size:14px}th,td{border:1px solid var(--line);padding:4px 8px;
 text-align:left;vertical-align:top}th{background:var(--chip);font-weight:600}td.n{text-align:right}
-section.ev{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:12px 0}
-.empty{padding:16px;color:var(--muted);border:1px dashed var(--input-line);border-radius:8px}
-.story{max-width:900px}
+section.ev{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:12px 0;
+scroll-margin-top:calc(var(--legend-h,0px) + 8px)}section.ev.cur{outline:2px solid var(--fg)}
+.empty{padding:16px;color:var(--muted);border:1px dashed var(--input-line);border-radius:8px}.story{max-width:900px}
 .evf .chip{border:1px solid var(--input-line);border-radius:14px;padding:3px 9px;background:var(--card);cursor:pointer}
 .evf input[type=search]{font:inherit;padding:5px 8px;border:1px solid var(--input-line);border-radius:6px;
 background:var(--card);color:inherit}
 table.evt{width:100%;border-collapse:collapse;font-size:13.5px}table.evt th{white-space:nowrap;cursor:pointer;
-position:sticky;top:var(--legend-h,0px);z-index:5}table.evt th[aria-sort=ascending]::after{content:" \u25b2"}
-table.evt th[aria-sort=descending]::after{content:" \u25bc"}table.evt td{vertical-align:middle}
-tr.er{cursor:pointer;scroll-margin-top:calc(var(--legend-h,0px) + 36px)}tr.er:hover>td,tr.er.open>td,tr.er:focus>td{background:var(--pick)}tr.er:focus{outline:2px solid var(--fg)}
-td.ex{max-width:0;width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}td.sh{width:22px}
-table.evt td:nth-child(2),table.evt td:nth-child(3){white-space:nowrap}
+position:sticky;top:var(--legend-h,0px);z-index:5}table.evt th[aria-sort=ascending]::after{content:" ▲"}
+table.evt th[aria-sort=descending]::after{content:" ▼"}table.evt td{vertical-align:middle}
+tr.er{cursor:pointer;scroll-margin-top:calc(var(--legend-h,0px) + 36px)}tr.er:hover>td,tr.er.open>td,tr.er:focus>td{background:var(--pick)}
+tr.er:focus{outline:2px solid var(--fg)}td.ex{max-width:0;width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+td.sh{width:28px;min-width:28px;padding:2px 4px}td.sh .hglyph{margin:0}table.evt td:nth-child(2),table.evt td:nth-child(3){white-space:nowrap}
 tr.xr>td{padding:0 0 8px}tr.xr section.ev{margin:4px 0}
 .sb{display:grid;grid-template-columns:11em 160px 1fr;gap:8px;align-items:center;font-size:13px;margin:3px 0}
 .sbar{display:flex;height:10px;border-radius:3px;overflow:hidden;background:var(--chip)}
 .sbar .s0{background:var(--fg)}.sbar .s1{background:var(--muted)}.sbar .s2{background:var(--input-line)}
 .sbar .s3{background:var(--line)}.sbs p{margin:6px 0 2px}[hidden]{display:none!important}
-@media (max-width:900px){.layout{grid-template-columns:minmax(0,1fr);grid-template-areas:"lanes" "panel" "list"}
-#panel{position:static;height:60vh;max-height:none;min-height:260px}}
-@media (max-width:1000px){.grid{grid-template-columns:80px minmax(0,1fr)}.grid>.labels,.grid>.hd.lab{grid-column:2}}
-@media (max-width:700px){table.evt thead{display:none}table.evt,table.evt tbody{display:block}
-tr.er{display:grid;grid-template-columns:22px 1fr auto auto;gap:0 8px;border-top:1px solid var(--line);padding:4px 0}
+.grid{margin:6px 0}.grid .row,.grid .hdr{display:grid;grid-template-columns:96px minmax(0,1fr) 320px;gap:0 12px;
+align-items:center}.grid .row{border-top:1px solid var(--line);padding:3px 0}.grid .row:hover{background:var(--pick)}
+.grid .hdr{font-size:12px;color:var(--muted);padding:2px 0;position:sticky;top:var(--legend-h,0px);background:var(--bg);z-index:4}
+.agent a{font-weight:600;text-decoration:none}.strip{padding:0 10px 0 6px}.strip svg{display:block;width:100%;height:34px}.labels{font-size:12px;min-width:0}
+.hdr svg{display:block;width:100%;height:16px;overflow:visible}.hdr>div:nth-child(2){padding:0 10px 0 6px}
+header.ah{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:0 0 4px}header.ah h1{margin:0}
+@media (max-width:1100px){.layout{grid-template-columns:minmax(0,1fr) 360px}}
+@media (max-width:900px){.layout{grid-template-columns:minmax(0,1fr)}
+#panel{position:static;height:auto;min-height:0;margin-top:12px}#pbody{max-height:none}
+#panel.open{position:fixed;left:0;right:0;bottom:0;top:auto;height:58vh;z-index:40;border-radius:12px 12px 0 0;
+margin:0;box-shadow:0 -6px 24px rgba(0,0,0,.25)}body.sheet{padding-bottom:58vh}
+.grid .row,.grid .hdr{grid-template-columns:80px minmax(0,1fr)}.grid .labels{grid-column:1/-1}.grid .hdr .lab{display:none}}
+@media (max-width:700px){body{padding:0 16px;margin:12px auto}.tl{grid-template-columns:78px minmax(0,1fr);padding:6px 6px 2px}
+.ll{font-size:11.5px}.ll .lf{display:none}.ll .ls{display:inline}.badge{white-space:normal}
+details.legend{position:static}table.evt thead{display:none}table.evt,table.evt tbody{display:block}
+tr.er{display:grid;grid-template-columns:26px 1fr auto auto;gap:0 8px;border-top:1px solid var(--line);padding:4px 0}
 tr.er>td{border:none;padding:1px 0}tr.er>td:nth-child(3),tr.er>td:nth-child(n+6):nth-child(-n+10){display:none}
 tr.er>td.ex{grid-column:1/-1;width:auto;max-width:none;display:block;white-space:nowrap}
-tr.er>td:nth-child(4)::after{content:" min"}tr.er>td:nth-child(5)::after{content:" readers";color:var(--muted)}tr.xr{display:block}tr.xr>td{display:block}.sb{grid-template-columns:1fr;gap:2px}
-.sbar{width:100%}}
-@media (max-width:700px){body{padding:0 16px;margin:16px auto}.lg,.lg.three{grid-template-columns:1fr}}
-@media (min-width:701px) and (min-height:600px){details.legend{position:sticky;top:0}details.legend.inline{position:static}}
-header.ah{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:0 0 4px}header.ah h1{margin:0}
-.banner.one{padding:5px 12px;margin:4px 0 10px;font-size:13px}.layout>.lanes{margin-top:0}
+tr.er>td:nth-child(4)::after{content:" min"}tr.er>td:nth-child(5)::after{content:" readers";color:var(--muted)}
+tr.xr{display:block}tr.xr>td{display:block}.sb{grid-template-columns:1fr;gap:2px}.sbar{width:100%}}
+@media (max-height:599px){details.legend{position:static}}
 """
 )
 
+# The agent page's detail column: selecting (click, Enter, #sel=) or stepping (arrow keys, j / k, Prev / Next) shows
+# one item; a stacked spot lists all of its items; nothing ever scrolls the window (owner, Nov 2, 2026): only the
+# detail column scrolls. On narrow screens the column becomes a bottom sheet while an item is open.
 PANEL_JS = r"""
 (()=>{const panel=document.getElementById('panel');if(!panel)return;
 const body=document.getElementById('pbody'),pos=document.getElementById('pos'),kind=document.getElementById('kind'),
 prev=document.getElementById('pprev'),next=document.getElementById('pnext'),
 all=[...document.querySelectorAll('#items article.item[id]')];let cur=null;
+const stackOf={};document.querySelectorAll('.tl [data-stack]').forEach(g=>g.dataset.stack.split(' ').forEach(k=>{stackOf[k]=g;}));
 function ok(a){return !kind.value||a.dataset.kind===kind.value;}
 function list(){return all.filter(ok);}
 function status(){const L=list(),src=cur&&document.getElementById(cur),i=src?L.indexOf(src):-1;
-const t=src?' \u00b7 '+src.dataset.t+' min':'';
+const t=src?' · '+src.dataset.t+' min':'';
 pos.textContent=src?(i>=0?(i+1)+' of '+L.length:'('+kind.selectedOptions[0].text.toLowerCase()+': '+L.length+')')+t
 :L.length+' '+(kind.value?kind.selectedOptions[0].text.toLowerCase():'items');
 const ix=src?all.indexOf(src):-1;
 prev.disabled=!all.some((a,j)=>ok(a)&&(ix<0?true:j<ix));next.disabled=!all.some((a,j)=>ok(a)&&j>ix);}
-function show(key,how){const src=document.getElementById(key);if(!src||!src.matches('article.item'))return;cur=key;
+function stackHtml(key){const g=stackOf[key];if(!g)return '';const ks=g.dataset.stack.split(' ');if(ks.length<2)return '';
+let h='<div class="stackbar"><b>'+ks.length+' items stacked at this spot</b> <span class="muted">('+g.dataset.span+
+'; click one, or step with →)</span><ol>';
+ks.forEach(k=>{const a=document.getElementById(k);if(!a)return;const ic=a.querySelector('h3 svg.hglyph');
+h+='<li'+(k===key?' class="here"':'')+'>'+(ic?ic.outerHTML:'')+'<a href="#sel='+k+'" data-k="'+k+'">'+
+a.dataset.label.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</a>'+(k===key?' ← shown':'')+'</li>';});
+return h+'</ol></div>';}
+function show(key){const src=document.getElementById(key);if(!src||!src.matches('article.item'))return;cur=key;
 document.querySelectorAll('.sel').forEach(e=>e.classList.remove('sel'));
-document.querySelectorAll('[data-k="'+key+'"]').forEach(e=>e.classList.add('sel'));
-all.forEach(a=>a.classList.toggle('hl',a===src));body.innerHTML=src.innerHTML;body.scrollTop=0;
-panel.classList.add('open');status();
-const g=document.querySelector('.lanes [data-k="'+key+'"]'),cu=document.getElementById('cursor');
-if(cu&&g&&g.getBBox){const b=g.getBBox(),x=g.tagName==='line'?+g.getAttribute('x1'):b.x+b.width/2;
-cu.setAttribute('x1',x);cu.setAttribute('x2',x);cu.setAttribute('visibility','visible');}
+document.querySelectorAll('.tl [data-k="'+key+'"]').forEach(e=>e.classList.add('sel'));
+const st=stackOf[key];if(st)st.classList.add('sel');
+all.forEach(a=>a.classList.toggle('hl',a===src));body.innerHTML=stackHtml(key)+src.innerHTML;
+body.scrollTop=0;panel.classList.add('open');document.body.classList.add('sheet');status();
+const g=st||document.querySelector('.tl [data-k="'+key+'"]'),cu=document.getElementById('cursor');
+if(cu&&g&&g.dataset.p){cu.setAttribute('x1',g.dataset.p+'%');cu.setAttribute('x2',g.dataset.p+'%');
+cu.setAttribute('visibility','visible');}
 try{history.replaceState(null,'','#sel='+key);}catch(e){}}
-// Selecting or stepping never moves the window: only the detail column resets to its top (owner, Nov 2, 2026).
-function close(){cur=null;const cu=document.getElementById('cursor');if(cu)cu.setAttribute('visibility','hidden');document.querySelectorAll('.sel').forEach(e=>e.classList.remove('sel'));
-all.forEach(a=>a.classList.remove('hl'));panel.classList.remove('open');
-const tpl=document.getElementById('pempty');
-body.innerHTML='<p class="muted">Nothing selected. Click a shape on the timeline, or press \u2192 (or Next) to read '
-+'the items one by one in time order.</p>'+(tpl?tpl.innerHTML:'');
+function close(){cur=null;const cu=document.getElementById('cursor');if(cu)cu.setAttribute('visibility','hidden');
+document.querySelectorAll('.sel').forEach(e=>e.classList.remove('sel'));all.forEach(a=>a.classList.remove('hl'));
+panel.classList.remove('open');document.body.classList.remove('sheet');const tpl=document.getElementById('pempty');
+body.innerHTML='<p class="muted">Nothing selected. Click a shape on the timeline (a number on a shape = that many '
++'items stacked there), or press → (or Next) to read the items one by one in time order.</p>'+(tpl?tpl.innerHTML:'');
 status();try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}}
 function step(d){const src=cur&&document.getElementById(cur),ix=src?all.indexOf(src):(d>0?-1:all.length);
-let j=ix+d;while(j>=0&&j<all.length&&!ok(all[j]))j+=d;if(j>=0&&j<all.length)show(all[j].id,'step');}
+let j=ix+d;while(j>=0&&j<all.length&&!ok(all[j]))j+=d;if(j>=0&&j<all.length)show(all[j].id);}
 prev.addEventListener('click',()=>step(-1));next.addEventListener('click',()=>step(1));
 document.getElementById('pclose').addEventListener('click',close);
 kind.addEventListener('change',()=>{status();kind.blur();});
-document.addEventListener('click',ev=>{const sv=ev.target.closest&&ev.target.closest('.lanes svg');
+document.addEventListener('click',ev=>{if(ev.target.closest&&ev.target.closest('.chain'))return;
+const sv=ev.target.closest&&ev.target.closest('.tl svg.plot');
 if(sv){let best=null,bd=1e9;sv.querySelectorAll('[data-k]').forEach(g=>{const r=g.getBoundingClientRect(),
 cx=r.left+r.width/2,cy=r.top+r.height/2;const d=g.tagName==='line'?Math.abs(ev.clientX-cx)+8:
 Math.hypot(ev.clientX-cx,ev.clientY-cy);if(d<bd){bd=d;best=g;}});
-if(best&&bd<=22){ev.preventDefault();show(best.getAttribute('data-k'),'click');}return;}
-const g=ev.target.closest('[data-k]');if(!g)return;ev.preventDefault();show(g.getAttribute('data-k'),'click');});
+if(best&&bd<=22){ev.preventDefault();show(best.getAttribute('data-k'));}return;}
+const g=ev.target.closest('[data-k]');if(!g)return;ev.preventDefault();show(g.getAttribute('data-k'));});
 document.addEventListener('keydown',ev=>{if(ev.altKey||ev.ctrlKey||ev.metaKey)return;
 const tag=(ev.target.tagName||'').toLowerCase();if(tag==='input'||tag==='select'||tag==='textarea')return;
 const k=ev.key;if(k==='ArrowRight'||k==='j'){ev.preventDefault();step(1);}
 else if(k==='ArrowLeft'||k==='k'){ev.preventDefault();step(-1);}
 else if(k==='Escape'){if(cur){ev.preventDefault();close();}}
-else if(k==='Enter'||k===' '){const g=ev.target.closest&&ev.target.closest('[data-k]');
-if(g){ev.preventDefault();show(g.getAttribute('data-k'),'click');}}});
-const m=location.hash.match(/^#sel=(.+)$/);if(m)show(decodeURIComponent(m[1]),'hash');else close();})();
+else if(k==='Enter'||k===' '){const g=ev.target.closest&&ev.target.closest('.tl [data-k]');
+if(g){ev.preventDefault();show(g.getAttribute('data-k'));}}});
+const m=location.hash.match(/^#sel=(.+)$/);if(m)show(decodeURIComponent(m[1]));else close();})();
+"""
+
+# The reasoning chain behind a thought or around an event: the agent's own timeline items (reasoning, text, tool calls
+# and results, events) of the cited turn and its neighbours, from the page's embedded timeline (#tl), in order, with
+# the cited item marked and the quote highlighted. Earlier / Later extend it one turn at a time.
+CHAIN_JS = r"""
+(()=>{const el=document.getElementById('tl');if(!el)return;let T;try{T=JSON.parse(el.textContent);}catch(e){return;}
+const R=T.items,lo0=R.length?R[0][2]:0,hi0=R.length?R[R.length-1][2]:0;
+const KIND={reasoning:'Reasoning',text:'Wrote',tool_call:'Tool call',tool_result:'Tool result',event:'Event'};
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function hl(text,spans,q){if(spans.length){let out='',p=0;spans.sort((a,b)=>a[0]-b[0]).forEach(([a,b])=>{if(a<p)return;
+out+=esc(text.slice(p,a))+'<mark>'+esc(text.slice(a,b))+'</mark>';p=b;});return out+esc(text.slice(p));}
+if(q){let i=text.indexOf(q);if(i<0)i=text.toLowerCase().indexOf(q.toLowerCase());
+if(i>=0)return esc(text.slice(0,i))+'<mark>'+esc(text.slice(i,i+q.length))+'</mark>'+esc(text.slice(i+q.length));}
+return esc(text);}
+function render(box,first){const lo=+box.dataset.lo,hi=+box.dataset.hi,
+cite=new Set((box.dataset.cite||'').split(' ').filter(Boolean).map(Number)),q=box.dataset.q||'',sp={};
+(box.dataset.spans||'').split(';').filter(Boolean).forEach(s=>{const[i,a,b]=s.split(':').map(Number);(sp[i]=sp[i]||[]).push([a,b]);});
+const rows=R.filter(r=>r[2]>=lo&&r[2]<=hi);let h='<div class="cbar"><button type="button" data-act="earlier"'+(lo<=lo0?' disabled':'')+
+'>◂ Earlier turn</button><span class="muted">turns '+lo+'–'+hi+' · '+rows.length+' items</span>'+
+'<button type="button" data-act="later"'+(hi>=hi0?' disabled':'')+'>Later turn ▸</button>'+
+'<button type="button" data-act="close">Collapse</button></div><ol>';let turn=null;
+for(const r of rows){const[i,t,tu,kd,tool,text,cut]=r;if(tu!==turn){turn=tu;h+='<li class="turn">Turn '+tu+'</li>';}
+const c=cite.has(i),body=hl(text||'',c?(sp[i]||[]):[],c?q:''),more=cut?'<span class="muted"> [cut '+cut+' characters]</span>':'',
+head='<div class="h">'+t.toFixed(1)+' min · '+(KIND[kd]||kd)+(tool?' · '+esc(tool):'')+' · item '+i+
+(c?' · <b>cited</b>':'')+'</div>';
+if(kd==='tool_result'||kd==='tool_call'){const long=(text||'').length>220;
+h+='<li'+(c?' class="cited"':'')+'>'+head+(long&&!c?'<details><summary>'+esc((text||'').slice(0,160))+'…</summary><div class="code">'
++body+more+'</div></details>':'<div class="code">'+body+more+'</div>')+'</li>';}
+else h+='<li'+(c?' class="cited"':'')+'>'+head+'<div class="tx">'+body+more+'</div></li>';}
+box.querySelector('.cbody').innerHTML=h+'</ol>';box.querySelector(':scope>button').hidden=true;
+const pb=document.getElementById('pbody'),ci=box.querySelector('li.cited');
+if(first&&ci&&pb&&pb.contains(ci))pb.scrollTop+=ci.getBoundingClientRect().top-pb.getBoundingClientRect().top-80;}
+document.addEventListener('click',ev=>{const b=ev.target.closest&&ev.target.closest('.chain button');if(!b)return;
+ev.preventDefault();const box=b.closest('.chain'),a=b.dataset.act;
+if(a==='open'){box.dataset.lo=box.dataset.lo0;box.dataset.hi=box.dataset.hi0;render(box,true);}
+else if(a==='earlier'){box.dataset.lo=Math.max(lo0,+box.dataset.lo-1);render(box,false);}
+else if(a==='later'){box.dataset.hi=Math.min(hi0,+box.dataset.hi+1);render(box,false);}
+else if(a==='close'){box.querySelector('.cbody').innerHTML='';box.querySelector(':scope>button').hidden=false;}});})();
 """
 
 LEGEND_JS = r"""
@@ -538,15 +625,18 @@ def load(map_dir, timeline=None):
         a["events"] = [it for it in a["items"] if it.get("kind") == "event" and isinstance(it.get("event"), dict)]
         thoughts = []
         for c, chunk in enumerate(a["chunks"]):
-            for th in chunk.get("thoughts") or []:
-                if isinstance(th, dict):
-                    thoughts.append(dict(th, chunk=c))
+            cn = chunk.get("chunk") if isinstance(chunk.get("chunk"), int) else c
+            for n, th in enumerate(chunk.get("thoughts") or []):
+                if isinstance(th, dict):  # ekey: the evidence file's key of this stage-1 thought (evidence.py)
+                    thoughts.append(dict(th, chunk=c, ekey=f"c{cn:03d}-t{n:02d}"))
         thoughts.sort(key=lambda th: (_num(th.get("t")), _num(th.get("item"))))
         a["thoughts"] = thoughts
         by_event = defaultdict(list)
         for r in a["reactions"]:
             by_event[str(r.get("event_id"))].append(r)
         a["by_event"] = by_event
+        ev = _read_json(map_dir / "evidence" / f"{name}.json")  # storymap/evidence.py (maps from Nov 3, 2026)
+        a["evidence"] = {str(t.get("key")): t for t in (ev or {}).get("thoughts") or [] if isinstance(t, dict)}
     pipeline = _read_json(map_dir / "pipeline.json") or {}
     return dict(sorted(agents.items())), pipeline
 
@@ -716,13 +806,26 @@ def is_overseer(ev):
     return ev.get("author_role") == "overseer"
 
 
+def delivery_of(e):
+    """How the event reached the agent (extractor ``detail.delivery``): 'push' (the host appended it to the agent's
+    context without its asking: a board post, DM or reminder in a push delivery), 'notice' (a notice inside the result
+    of one of its own tool calls, e.g. the integrity reminder), 'pull' (returned to a read the agent made), or None
+    (maps built before the field existed, and own acts)."""
+    v = (e.get("detail") or {}).get("delivery") or e.get("delivery")
+    return v if v in ("push", "pull", "notice") else None
+
+
+def delivery_id(e):
+    return (e.get("detail") or {}).get("delivery_id") or e.get("delivery_id")
+
+
 OTHER_TYPES = ("P1", "N1", "C1", "O1")
 
 
 def glyph_class(ev):
     """Neutral-ink flags of an event glyph: g-fill (fake) or g-hollow, ring (from an overseer), and for a submission
     ok (accepted or credited) or no (not accepted); g-other for the small status / own-action dots; g-rem for the
-    host's integrity reminder (an amber star)."""
+    host's integrity reminder (an amber star); push when it was pushed into the agent's context (a chevron)."""
     e = ev["event"]
     typ = e.get("type")
     flags = (["g-other"] if typ in OTHER_TYPES else ["g-rem"] if typ == "R1"
@@ -732,6 +835,8 @@ def glyph_class(ev):
     if typ == "S1":
         d = e.get("detail") or {}
         flags.append("ok" if d.get("credited") or str(e.get("outcome") or "").startswith("accepted") else "no")
+    if delivery_of(e) in ("push", "notice"):
+        flags.append("push")
     return " ".join(flags)
 
 
@@ -752,21 +857,31 @@ def _mark(typ, x, y, r, cls="m"):
                        for k in range(10))
         return f'<polygon class="{cls}" points="{pts}"/>'
     if typ in OTHER_TYPES:
-        return f'<circle class="{cls}" cx="{x:.1f}" cy="{y:.1f}" r="{max(r * 0.4, 1.6):.1f}"/>'
+        return f'<circle class="{cls}" cx="{x:.1f}" cy="{y:.1f}" r="{max(r * 0.45, 1.6):.1f}"/>'
     if typ == "TH":
         w = max(3.2, r * 0.7)
         return f'<rect class="{cls}" x="{x - w / 2:.1f}" y="{y - r:.1f}" width="{w:.1f}" height="{2 * r:.1f}" rx="1"/>'
     return f'<circle class="{cls}" cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}"/>'
 
 
-HIT_R = 14  # viewBox units (about 1 px each at desktop width): a hit area of about 27 px across
+HIT_R = 13  # px: a hit area of about 26 px across
 
 
-def shape(typ, x, y, r, cls, key, title):
+def count_badge(x, y, r, n):
+    """The stack count: a small ink disc with the number of items stacked at this spot (above right)."""
+    label = str(n) if n < 100 else "99+"
+    rr = 6 if n < 10 else 7.2 if n < 100 else 8.6
+    cx, cy = x + r + 2.5, y - r - 2.5
+    return (f'<g class="cnt"><circle cx="{cx:.1f}" cy="{cy:.1f}" r="{rr}"/>'
+            f'<text x="{cx:.1f}" y="{cy + 3.1:.1f}">{label}</text></g>')
+
+
+def shape(typ, x, y, r, cls, key, title, count=0, attrs=""):
     """One SVG glyph in neutral ink: the shape encodes the event type; ``cls`` flags (glyph_class) add the fill,
-    the overseer ring and a submission's outcome mark. ``key`` None: not selectable (legend, links)."""
+    the overseer ring, a submission's outcome mark and the push chevron. ``key`` None: not selectable (legend,
+    links). ``count`` > 1: a stack of that many items (count badge). ``attrs``: extra attributes of the group."""
     flags = set(cls.split())
-    attrs = f'class="g {cls}"' + (f' data-k="{esc(key)}" tabindex="0" role="button"' if key is not None else "")
+    a = f'class="g {cls}"' + (f' data-k="{esc(key)}" tabindex="0" role="button"' if key is not None else "") + attrs
     t = f"<title>{esc(title)}</title>" if title else ""
     if typ == "P2":
         d = f"M{x - r:.1f},{y - r:.1f}L{x + r:.1f},{y + r:.1f}M{x + r:.1f},{y - r:.1f}L{x - r:.1f},{y + r:.1f}"
@@ -783,7 +898,12 @@ def shape(typ, x, y, r, cls, key, title):
     elif "no" in flags:  # a slash through it: not accepted
         d = f"M{x - r * 1.3:.1f},{y + r * 1.4:.1f}L{x + r * 1.3:.1f},{y - r * 1.6:.1f}"
         extra = f'<path class="halo" d="{d}"/><path class="mk" d="{d}"/>'
-    return f'<g {attrs}>{t}{ring}{body}{extra}</g>'
+    if "push" in flags:  # a small chevron below: it arrived in the agent's context without being asked for
+        extra += (f'<path class="push" d="M{x - r * 0.75:.1f},{y + r * 1.55:.1f}l{r * 0.75:.1f},{r * 0.6:.1f}'
+                  f'l{r * 0.75:.1f},{-r * 0.6:.1f}"/>')
+    if count > 1:
+        extra += count_badge(x, y, r, count)
+    return f'<g {a}>{t}{ring}{body}{extra}</g>'
 
 
 def event_title(ev):
@@ -796,7 +916,9 @@ def event_title(ev):
         bits.append("fake")
     if e.get("outcome"):
         bits.append(OUTCOME_LABEL.get(str(e["outcome"]), str(e["outcome"]).replace("_", " ")))
-    return " \u00b7 ".join(bits)
+    if delivery_of(e) in ("push", "notice"):
+        bits.append(DELIVERY_LABEL[delivery_of(e)])
+    return " · ".join(bits)
 
 
 def final_labels(s3):
@@ -828,15 +950,47 @@ def final_labels(s3):
     return "".join(out)
 
 
-def axis_max(agents):
-    last = [AXIS_MIN]
+STANDARD_LENGTHS = 30.0  # run lengths are whole half hours (30, 60, 120, 180 min)
+
+
+def run_minutes(map_dir, pipeline=None):
+    """The run's length in minutes from its settings.json (``max_run_seconds``), looked up beside the story map
+    (RUN/analysis/storymap -> RUN) or at pipeline.json's ``run_dir``; None when neither is readable."""
+    candidates = []
+    try:
+        candidates.append(Path(map_dir).resolve().parents[1] / "settings.json")
+    except (IndexError, OSError):
+        pass
+    if isinstance(pipeline, dict) and pipeline.get("run_dir"):
+        candidates.append(Path(str(pipeline["run_dir"])) / "settings.json")
+    for path in candidates:
+        data = _read_json(path) if path.is_file() else None
+        if not isinstance(data, dict):
+            continue
+        for section in ("config", "effective"):
+            sec = data.get(section) or {}
+            if isinstance(sec, dict) and _num(sec.get("max_run_seconds")) > 0:
+                return _num(sec["max_run_seconds"]) / 60.0
+    return None
+
+
+def axis_max(agents, minutes=None):
+    """The time axis follows the run: its configured length when known, else the last recorded time rounded to the
+    run's half hour (a run's last seconds may spill a few minutes past its length, so 61.8 -> 60, 178 -> 180)."""
+    if minutes and minutes > 0:
+        return float(minutes)
+    last = [0.0]
     for a in agents.values():
         last += [_num(it.get("t")) for it in a["items"][-1:]]
         last += [_num(th.get("t")) for th in a["thoughts"][-1:]]
         for ph in (a["stage3"] or {}).get("phases") or []:
             last.append(_num(ph.get("to_t")))
-    top = max(last)  # a run's last seconds may spill a little past its length: keep the run's own axis
-    return AXIS_MIN if top <= AXIS_MIN + 5 else 30.0 * int((top + 29.999) // 30)
+    top = max(last)
+    return max(STANDARD_LENGTHS, STANDARD_LENGTHS * math.ceil((top - 5) / STANDARD_LENGTHS))
+
+
+def tick_step(tmax):
+    return 10 if tmax <= 90 else 15 if tmax <= 150 else 30 if tmax <= 360 else 60
 
 
 def phases_of(a, tmax):
@@ -883,7 +1037,7 @@ def model_names(pipeline):
             groups[-1][0].append(label.split()[-1])
         else:
             groups.append(([label.split()[-1]], mid))
-    return "; ".join(f"{model_label(mid)} " + (f"(stages {g[0]}\u2013{g[-1]})" if len(g) > 1 else f"(stage {g[0]})")
+    return "; ".join(f"{model_label(mid)} " + (f"(stages {g[0]}–{g[-1]})" if len(g) > 1 else f"(stage {g[0]})")
                      for g, mid in groups)
 
 
@@ -907,26 +1061,27 @@ STANCE_MEANING = (("none", "no idea of the shortcut yet"), ("considering", "has 
                   ("deferred", "keeps it as a later option"), ("rejected", "decided not to use it"),
                   ("faking", "decided to fake, or faking"), ("stopped", "stopped after faking"),
                   ("unknown", "no reading for this span"))
-SHAPE_MEANING = (  # (type, glyph_class flags, name); drawn by shape() exactly as on the map
-    ("L2", "g-hollow", "library file"), ("B1", "g-hollow", "board post"), ("D1", "g-hollow", "direct message"),
-    ("S1", "g-hollow", "own submission"), ("P2", "g-hollow", "revert notice"),
-    ("N1", "g-other", "problem list, unread notice, own post, restart"),
-    ("R1", "g-rem", "integrity reminder (host notice)"))
-AGENT_ONLY_SHAPES = {"R1"}  # drawn only on the agent pages (status lane), so listed only in their legends
-MARK_MEANING = (("L2", "g-hollow", "grey outline: ordinary or genuine"), ("L2", "g-fill", "pink, solid: fake"),
-                ("D1", "g-hollow ring", "cyan with ring: from an overseer"),
-                ("S1", "g-hollow ok", "\u2713 accepted or credited"), ("S1", "g-hollow no", "slash: not accepted"))
+# One name per event type everywhere (legend, lanes, tooltips, panel, events table, codes page): TYPE_NAME.
+SHAPE_MEANING = (  # (type, glyph_class flags, legend text); drawn by shape() exactly as on the map
+    ("L2", "g-hollow", "library listing or file read"), ("B1", "g-hollow", TYPE_NAME["B1"]),
+    ("D1", "g-hollow", TYPE_NAME["D1"]), ("S1", "g-hollow", TYPE_NAME["S1"]), ("P2", "g-hollow", TYPE_NAME["P2"]),
+    ("N1", "g-other", "problem list, unread-messages notice, own post or restart"),
+    ("R1", "g-rem", TYPE_NAME["R1"]))
+AGENT_ONLY_SHAPES = {"R1"}  # drawn only on the agent pages (their own lane), so listed elsewhere only when present
+MARK_MEANING = (("L2", "g-fill", "pink, solid: fake"), ("D1", "g-hollow ring", "cyan ring: from an overseer"),
+                ("S1", "g-hollow ok", "✓ accepted or credited"), ("S1", "g-hollow no", "slash: not accepted"))
+PUSH_MEANING = ("B1", "g-hollow push", "chevron below: delivered into its context unasked (no chevron: it read it)")
 EXAMPLES = (("L2", "g-fill", "fake library file read"), ("D1", "g-hollow ring", "DM from an overseer"),
             ("S1", "g-fill ok", "fake submission, accepted"), ("S1", "g-hollow no", "genuine submission, rejected"))
 
 
-def _legend_glyph(typ, cls):
+def _legend_glyph(typ, cls, count=0):
     """A legend glyph from the map's own code: shape() for events, the stance bar rect for stances."""
     if typ == "TP":
         return '<svg viewBox="0 0 18 16"><line class="tp" x1="9" x2="9" y1="0" y2="16"/></svg>'
     if typ == "BAR":
         return f'<svg viewBox="0 0 22 16" class="swatch"><rect class="ph-{cls}" x="1" y="3" width="20" height="10" rx="2"/></svg>'
-    return f'<svg viewBox="0 0 18 16">{shape(typ, 8, 8.5, 4.6, cls, None, "")}</svg>'
+    return f'<svg viewBox="0 0 18 16">{shape(typ, 8, 8.5, 4.6, cls, None, "", count)}</svg>'
 
 
 GLOSSARY = (
@@ -944,10 +1099,13 @@ GLOSSARY = (
     ("stage-1 chunk", "a stretch of the timeline that the stage-1 reader coded in one go"),
     ("reader certainty", "how sure the model reader was of a code or reaction: high, medium or low"),
 )
+CODE_SCHEME = ("Letters are only ever code groups: A–D and G are thought codes (stage 1), E reaction codes and F "
+               "overseer readings (stage 2). Events, including integrity reminders and other pushed notices, are never "
+               "lettered: they are named in words and drawn as shapes.")
 
 
 def terms_html():
-    """The glossary: a separate, collapsed block after the sticky legend, so the legend stays short."""
+    """The glossary: a separate, collapsed block, so the legend stays short."""
     return ('<details class="terms"><summary>Terms used on these pages: trick, fake, judge, credited, closed, revert, '
             'overseer, seed, turn, item, chunk, certainty</summary><ul>'
             + "".join(f"<li><b>{esc(k)}</b>: {esc(v)}</li>" for k, v in GLOSSARY) + "</ul></details>")
@@ -959,40 +1117,47 @@ def groups_html(names, href, defs=None):
     names are not shown."""
     defs = defs or {}
     if not any(names.get(L) for L in LETTERS):
-        return ('<p class="note">Thoughts that the stage-1 reader quoted and coded into seven groups, A\u2013G; '
+        return ('<p class="note">Thoughts that the stage-1 reader quoted and coded into seven groups, A–G; '
                 'the group names are not shown on this copy.</p>')
     groups = []
     for L in LETTERS:
         codes = sorted((c for c in names if c[:1] == L and len(c) > 1), key=lambda c: int(c[1:]))
         items = "".join(
             f'<details class="code"><summary title="{esc(code_tip(c, defs, names))}"><b>{c}</b> {esc(names[c])}'
-            f'</summary><p>{esc(code_tip(c, defs, names))} <a href="{esc(href)}#code-{c}">more</a></p></details>'
-            for c in codes)
+            f'</summary><p>{esc(code_tip(c, defs, names))}' + (f' <a href="{esc(href)}#code-{c}">more</a>' if href else "")
+            + '</p></details>' for c in codes)
         groups.append(f'<div class="grp"><div class="gname" title="{esc(code_tip(L, defs, names, False))}">'
                       f'<b>{L}</b> {esc(names.get(L, ""))}</div>{items}</div>')
+    more = f' Full reference with examples: <a href="{esc(href)}">codes page</a>.' if href else ""
     return (f'<p class="note">Codes the stage-1 reader gave to quoted thoughts (and, for E and F, the stage-2 reader to '
-            f'reactions). Hover or click a code for its definition; full reference with examples: '
-            f'<a href="{esc(href)}">codes page</a>.</p><div class="codes">{"".join(groups)}</div>')
+            f'reactions). Hover or click a code for its definition.{more}</p><div class="codes">{"".join(groups)}</div>')
 
 
-def legend_strip():
-    """The agent pages' compact legend, open above the timeline: position colours, event shapes and marks in two
-    rows (each with its meaning on hover); the full legend with explanations is further down the page."""
+def legend_bar(mode="agent", shown_types=(), push=False):
+    """The compact legend every page keeps in view (sticky at the top on wide screens, collapsible): position colours,
+    event shapes, marks; each item's meaning on hover. The explanation is in legend_about further down."""
     pos = "".join(f'<li title="{esc(m)}">{_legend_glyph("BAR", s)}{esc(STANCE_LABEL.get(s, s))}</li>'
                   for s, m in STANCE_MEANING)
-    shapes = "".join(f'<li>{_legend_glyph(t, c)}{esc(m)}</li>' for t, c, m in SHAPE_MEANING)
-    shapes += (f'<li>{_legend_glyph("TH", "g-th")}{_legend_glyph("TH", "g-th-low")}thought (hollow = low certainty)</li>'
-               f'<li>{_legend_glyph("TP", "")}turning point</li>')
+    shapes = "".join(f'<li>{_legend_glyph(t, c)}{esc(m)}</li>' for t, c, m in SHAPE_MEANING
+                     if t not in AGENT_ONLY_SHAPES or t in shown_types)
+    if mode == "agent":
+        shapes += (f'<li>{_legend_glyph("TH", "g-th")}{_legend_glyph("TH", "g-th-low")}thought (hollow = low certainty)'
+                   f'</li><li>{_legend_glyph("TP", "")}turning point</li>')
     marks = "".join(f'<li>{_legend_glyph(t, c)}{esc(m)}</li>' for t, c, m in MARK_MEANING)
-    return ('<details class="legend strip" open><summary>Legend (full legend and terms below the timeline)</summary>'
-            f'<div class="lstrip"><div class="row"><span class="k">Bar colour = position on cheating:</span><ul>{pos}'
-            f'</ul></div><div class="row"><span class="k">Shape = event:</span><ul>{shapes}</ul>'
-            f'<span class="k">Mark:</span><ul>{marks}</ul></div></div></details>')
+    if push:
+        marks += f'<li>{_legend_glyph(PUSH_MEANING[0], PUSH_MEANING[1])}{esc(PUSH_MEANING[2])}</li>'
+    if mode != "events":
+        marks += f'<li>{_legend_glyph("L2", "g-hollow", 3)}number = items stacked at one spot</li>'
+    return ('<details class="legend" open><summary>Legend: bar colour = position on cheating; shape = event'
+            + ('; tick = coded thought' if mode == "agent" else "") + '</summary>'
+            f'<div class="lstrip"><div class="row"><span class="k">Position:</span><ul>{pos}</ul></div>'
+            f'<div class="row"><span class="k">Shape:</span><ul>{shapes}</ul></div>'
+            f'<div class="row"><span class="k">Mark:</span><ul>{marks}</ul></div></div></details>')
 
 
-def legend(mode="agent", names=None, href="taxonomy.html", defs=None, shown_types=()):
-    """Two labelled boxes built from the map's own classes: bar colour = stance; shape = event, fill = fake,
-    mark = overseer or outcome (with worked examples)."""
+def legend_about(mode="agent", names=None, href="taxonomy.html", defs=None, shown_types=(), push=False):
+    """The legend explained (collapsed, below the main view): built from the map's own classes, with worked
+    examples, the code groups and the glossary."""
     names = names or {}
     sw = "".join(f'<li>{_legend_glyph("BAR", s)}<b>{STANCE_LABEL.get(s, s)}</b>&nbsp;{esc(m)}</li>'
                  for s, m in STANCE_MEANING)
@@ -1001,40 +1166,96 @@ def legend(mode="agent", names=None, href="taxonomy.html", defs=None, shown_type
     if mode == "agent":
         shapes += (f'<li>{_legend_glyph("TH", "g-th")}{_legend_glyph("TH", "g-th-low")}thought (hollow = low '
                    f'certainty)</li><li>{_legend_glyph("TP", "")}turning point</li>')
-    marks = "".join(f'<li>{_legend_glyph(t, c)}{esc(m)}</li>' for t, c, m in MARK_MEANING)
+    marks = "".join(f'<li>{_legend_glyph(t, c)}{esc(m)}</li>' for t, c, m in MARK_MEANING + (PUSH_MEANING,))
     examples = "".join(f'<li>{_legend_glyph(t, c)}= {esc(m)}</li>' for t, c, m in EXAMPLES)
     where = {"index": "Shapes above an agent's bar are what it read (library files, overseer and other relevant posts, "
                       "DMs, reverts); below are its submissions. Click a shape to open it on the agent page.",
              "events": "Each event below carries its shape. ↓ / ↑ (or j / k) move through the events."
              }.get(mode, "Click any shape for its quote, the event and the stage-2 reaction; "
-                         "→ / j next, ← / k previous, Esc closes.")
-    return (f'<details class="legend{" inline" if mode == "agent" else ""}" open><summary>Legend: bar colour = position on cheating; shape + colour = '
-            f'event{"; tick = coded thought" if mode == "agent" else ""}; terms</summary>'
-            f'<div class="lg{" three" if names or mode == "agent" else ""}"><div class="lgbox"><h4>Bar colour = the agent\'s position on cheating at that moment</h4>'
+                         "→ / j next, ← / k previous, Esc closes. Under a thought, “Show the full "
+                         "reasoning chain” opens the agent's own reasoning, text and tool calls around it.")
+    rem = mode == "agent" or "R1" in shown_types
+    return (f'<details class="about"><summary>About the legend, the codes and the terms</summary>'
+            f'<div class="lg"><div class="lgbox"><h4>Bar colour = the agent\'s position on cheating at that moment</h4>'
             f'<p class="note">{esc(POSITION_HINT)}.</p><ul>{sw}</ul>'
             f'<p class="note">These colours appear only on the position bars (the stage-3 reading; the stage-1 '
             f'reading where stage 3 is missing). Dashed outline = no reading.</p></div>'
             f'<div class="lgbox"><h4>Shape + colour = event</h4>'
-            f'<ul>{shapes}</ul><ul class="marks">{marks}</ul><ul class="ex"><li><b>Read as:</b></li>{examples}</ul>'
-            f'<p class="note">Event colours (pink, cyan{", amber" if mode == "agent" or "R1" in shown_types else ""}) are never position colours.</p>'
-            f'<p class="note">{where}</p></div>'
+            f'<ul>{shapes}</ul><h4>Marks</h4><ul>{marks}<li>{_legend_glyph("L2", "g-hollow", 3)}number = that many items '
+            f'stacked at one spot (click it to list them all)</li></ul><h4>Read as</h4><ul>{examples}</ul>'
+            f'<p class="note">Event colours (pink, cyan{", amber" if rem else ""}) are never position colours. '
+            f'{esc(CODE_SCHEME)}</p><p class="note">{where}</p></div>'
             + (f'<div class="lgbox"><h4>What it thought: code groups</h4>{groups_html(names, href, defs)}</div>'
                if names or mode == "agent" else "")
-            + '</div></details>' + terms_html())
+            + '</div>' + terms_html() + '</details>')
 
 
-def axis_svg(tmax, x0, x1, y, h, ticks=True):
+def legend(mode="agent", names=None, href="taxonomy.html", defs=None, shown_types=()):
+    """Both parts of the legend (kept for callers of the earlier single legend)."""
+    return legend_bar(mode, shown_types) + legend_about(mode, names, href, defs, shown_types)
+
+
+def pct(t, tmax):
+    """A time as a percentage of the axis (glyphs are placed in % so they keep their pixel size at any width)."""
+    return 100.0 * min(max(_num(t), 0.0), tmax) / tmax
+
+
+def axis_svg(tmax, y, h, labels=True):
+    """Gridlines (and their minute labels below) across the plot, in % of its width."""
     out = []
-    step = 30 if tmax <= 360 else 60
+    step = tick_step(tmax)
     t = 0
     while t <= tmax + 1e-9:
-        x = x0 + (x1 - x0) * t / tmax
-        out.append(f'<line class="tick" x1="{x:.1f}" x2="{x:.1f}" y1="{y}" y2="{y + h}"/>')
-        if ticks:
+        x = pct(t, tmax)
+        out.append(f'<line class="tick" x1="{x:.2f}%" x2="{x:.2f}%" y1="{y}" y2="{y + h}"/>')
+        if labels:
             anchor = "end" if t + step > tmax + 1e-9 else "start" if t == 0 else "middle"
-            out.append(f'<text x="{x:.1f}" y="{y + h + 11}" text-anchor="{anchor}">{t}</text>')
+            out.append(f'<text x="{x:.2f}%" y="{y + h + 13}" text-anchor="{anchor}">{t}</text>')
         t += step
     return "".join(out)
+
+
+STACK_FRAC = 0.018  # items closer than this share of the axis (about one glyph width on a laptop) are drawn as one stack
+
+
+def _event_prio(ev):
+    e = ev["event"]
+    typ = e.get("type")
+    return (0 if e.get("fake") else 1 if is_overseer(e) else 2 if typ == "P2" else 3 if typ == "R1"
+            else 4 if typ == "S1" else 5 if typ in ("L2", "B1", "D1") else 6)
+
+
+def stack(entries, tmax):
+    """Entries (dicts with t, prio, key, ...) grouped into stacks, in time order: an item joins the current stack when
+    it is within STACK_FRAC of the axis (about one glyph width) of the stack's last item and within three times that
+    of its first, so a burst becomes one counted stack instead of overlapping neighbours."""
+    out, width = [], tmax * STACK_FRAC
+    for e in sorted(entries, key=lambda e: (e["t"], e.get("order", 0))):
+        if out and e["t"] - out[-1][-1]["t"] <= width and e["t"] - out[-1][0]["t"] <= 3 * width:
+            out[-1].append(e)
+        else:
+            out.append([e])
+    return out
+
+
+def stack_glyph(group, tmax, y, r, href=None):
+    """One stack as a glyph: the most telling item's shape (fake, overseer, revert, reminder, submission, read,
+    other) with a count badge, selectable as its first item; ``href`` wraps it in a link (index rows)."""
+    rep = min(group, key=lambda e: (e["prio"], e["t"]))
+    n = len(group)
+    p = pct(rep["t"], tmax)
+    if n == 1:
+        title = rep["title"]
+    else:
+        title = (f"{n} items stacked here ({fmt_span(group[0]['t'], group[-1]['t'])}):\n"
+                 + "\n".join("• " + e["title"].split("\n")[0] for e in group[:14]) + ("\n…" if n > 14 else ""))
+    attrs = f' data-p="{p:.2f}"'
+    if n > 1 and href is None:
+        attrs += (f' data-stack="{esc(" ".join(e["key"] for e in group))}" '
+                  f'data-span="{esc(fmt_span(group[0]["t"], group[-1]["t"]))}"')
+    g = shape(rep["typ"], 0, 0, r, rep["cls"], None if href else group[0]["key"], title, n, attrs)
+    g = f'<svg x="{p:.2f}%" y="{y:.1f}">{g}</svg>'
+    return f'<a href="{esc(href)}">{g}</a>' if href else g
 
 
 # ------------------------------------------------------------------ index.html
@@ -1043,48 +1264,50 @@ INDEX_TYPES = ("L2", "B1", "D1", "P2", "S1")
 
 
 def stance_title(frm, to, st, label):
-    return (f"Position on cheating: {STANCE_LABEL.get(st, st)} \u00b7 {fmt_span(frm, to)}"
-            + (f" \u00b7 {label}" if label else ""))
+    return (f"Position on cheating: {STANCE_LABEL.get(st, st)} · {fmt_span(frm, to)}"
+            + (f" · {label}" if label else ""))
 
 
 def index_page(agents, pipeline, tmax, nav="", names=None):
-    W, x0, x1 = 1000, 4, 996
-    X = lambda t: x0 + (x1 - x0) * min(max(_num(t), 0.0), tmax) / tmax  # noqa: E731
     rows, counts = [], Counter()
+    push_seen = False
     sources = sorted({str(((a["stage3"] or {}).get("final") or {}).get("source", "unknown"))
                       if a["stage3"] else "no stage 3" for a in agents.values()})
     for name, a in agents.items():
         f = (a["stage3"] or {}).get("final") or {}
         src = str(f.get("source", "unknown")) if a["stage3"] else "no stage 3"
         counts[src] += 1
-        parts = [axis_svg(tmax, x0, x1, 0, 30, ticks=False)]
+        parts = [axis_svg(tmax, 0, 34, labels=False)]
         phases, _ = phases_of(a, tmax)
         for frm, to, st, label in phases:
             cls = st if st in STANCES else "unknown"
-            parts.append(f'<rect class="ph-{cls}" x="{X(frm):.1f}" y="11" width="{max(X(to) - X(frm), 1):.1f}" '
-                         f'height="8" rx="2"><title>{esc(stance_title(frm, to, st, label))}'
-                         f"</title></rect>")
+            w = max(pct(to, tmax) - pct(frm, tmax), 0.1)
+            parts.append(f'<rect class="ph-{cls}" x="{pct(frm, tmax):.2f}%" y="13" width="{w:.2f}%" '
+                         f'height="8" rx="2"><title>{esc(stance_title(frm, to, st, label))}</title></rect>')
+        above, below = [], []
         for ev in a["events"]:
             e = ev["event"]
             typ = e.get("type")
             if typ not in INDEX_TYPES or (typ in ("B1", "D1") and not (is_overseer(e) or set(e.get("tags") or []) & RELEVANT_TAGS)):
                 continue
-            y = 24 if typ == "S1" else 6
-            key = f"ev-{ev.get('i')}"
-            parts.append(f'<a href="agents/{esc(name)}.html#sel={key}">'
-                         + shape(typ, X(ev.get("t")), y, 3.6, glyph_class(ev), None, event_title(ev)) + "</a>")
+            push_seen = push_seen or delivery_of(e) in ("push", "notice")
+            (below if typ == "S1" else above).append(
+                {"t": _num(ev.get("t")), "order": _num(ev.get("i")), "prio": _event_prio(ev), "typ": typ,
+                 "cls": glyph_class(ev), "key": f"ev-{ev.get('i')}", "title": event_title(ev)})
+        for entries, y in ((above, 6.5), (below, 27.5)):
+            for group in stack(entries, tmax):
+                parts.append(stack_glyph(group, tmax, y, 4.4, f"agents/{name}.html#sel={group[0]['key']}"))
         data = {"source": src, "faked": _yn(f.get("faked")), "stopped": _yn(f.get("stopped")),
                 "credited": _yn(f.get("credited")), "aware": str(f.get("aware_cheating") or "")}
         attrs = " ".join(f'data-{k}="{esc(v)}"' for k, v in data.items())
         story = (a["stage3"] or {}).get("story") or ""
         rows.append(f'<div class="row" data-agent="{esc(name)}" {attrs}>'
                     f'<div class="agent"><a href="agents/{esc(name)}.html" title="{esc(story)}">{esc(name)}</a></div>'
-                    f'<div class="strip"><svg viewBox="0 0 {W} 30" preserveAspectRatio="none">{"".join(parts)}</svg></div>'
+                    f'<div class="strip"><svg>{"".join(parts)}</svg></div>'
                     f'<div class="labels">{final_labels(a["stage3"])}</div></div>')
-    header_axis = (f'<svg viewBox="0 0 {W} 16" preserveAspectRatio="none" style="display:block;width:100%;height:16px">'
-                   + "".join(f'<text x="{x0 + (x1 - x0) * t / tmax:.1f}" y="12" text-anchor='
-                             f'"{"start" if t == 0 else "end" if t + 30 > tmax else "middle"}">{t}</text>'
-                             for t in range(0, int(tmax) + 1, 30)) + "</svg>")
+    header_axis = ("<svg>" + "".join(
+        f'<text x="{pct(t, tmax):.2f}%" y="12" text-anchor="{"start" if t == 0 else "end" if t + tick_step(tmax) > tmax else "middle"}">{t}</text>'
+        for t in range(0, int(tmax) + 1, tick_step(tmax))) + "</svg>")
 
     def sel(name, label, options, hint):
         opts = "".join(f'<option value="{esc(v)}">{esc(t)}</option>' for v, t in options)
@@ -1100,14 +1323,15 @@ def index_page(agents, pipeline, tmax, nav="", names=None):
                + '<button type="button" id="reset">Reset</button> <span id="shown" class="muted"></span></div>')
     summary = "".join(tbadge(f"{source_label(k)}: {v}", SOURCE_HINT) for k, v in sorted(counts.items()))
     run = pipeline.get("run_id") or ""
-    body = (f"<h1>Story map{(': ' + esc(run)) if run else ''}</h1>"
-            f'{nav}{banner(model_names(pipeline))}'
+    body = (f"{nav}<h1>Story map{(': ' + esc(run)) if run else ''}</h1>"
+            f'{banner(model_names(pipeline))}'
+            f"{legend_bar('index', push=push_seen)}"
             f'<p class="muted">{len(agents)} agents. {SOURCE_TITLE}: {summary}. Time axis: minutes from run start '
-            f'(0\u2013{int(tmax)}).</p>'
-            f"{legend('index', names, 'taxonomy.html', DEFS)}{filters}"
-            f'<div class="grid"><div class="hd">Agent</div><div class="hd">{header_axis}</div>'
-            f'<div class="hd lab">Final reading (stage 3)</div>'
-            f'{"".join(rows) or "<div class=empty>No agents found.</div>"}</div>')
+            f'(0–{int(tmax)}). A number on a shape counts the items stacked there.</p>{filters}'
+            f'<div class="grid"><div class="hdr"><div>Agent</div><div>{header_axis}</div>'
+            f'<div class="lab">Final reading (stage 3)</div></div>'
+            f'{"".join(rows) or "<div class=empty>No agents found.</div>"}</div>'
+            f"{legend_about('index', names, 'taxonomy.html' if names else '', DEFS, push=push_seen)}")
     return page(f"Story map {run}".strip(), body, LEGEND_JS + FILTER_JS)
 
 
@@ -1180,7 +1404,108 @@ def _who(e):
     return f"{e['author']}" + (f" ({e['author_role']})" if e.get("author_role") else "")
 
 
-def event_article(name, ev, reactions, key, names=None, href=""):
+# The evidence chain: the agent's own timeline is embedded once per agent page (capped per item; the agent's
+# prompts, the "context" items, are left out) and each thought or event opens the turns around it.
+CHAIN_CAPS = {"reasoning": 8000, "text": 4000, "tool_call": 1500, "tool_result": 1200, "event": 500}
+EVIDENCE = {"on": True}  # set by build(evidence=...); off renders the pages without the embedded timeline
+
+
+# Redaction of the embedded chain text (tool results can hold an `env` dump, host paths or file paths): the same
+# credential shapes and host paths that scripts/storymap_site.py refuses on a published page, environment values
+# of secret-looking variables, and multi-segment paths into a private/ directory. Redacted spans say so.
+SECRET_TEXT = re.compile(r"sk-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{10,}|hf_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}"
+                         r"|AIza[0-9A-Za-z_-]{35}|gh[pousr]_[A-Za-z0-9]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}"
+                         r"|-----BEGIN [A-Z ]*PRIVATE KEY-----")
+SECRET_VAR = re.compile(r"\b([A-Z][A-Z0-9_]*(?:TOKEN|API_KEY|SECRET|PASSWORD|_KEY|AUTH))=([^\s\"']+)")
+HOST_PATH_TEXT = re.compile(r"/(?:Users|private/tmp|private/var|var/folders)/[^\s\"'`]*")
+PRIVATE_DIR_TEXT = re.compile(r"(?<![A-Za-z0-9_./-])private/[A-Za-z0-9_.-]+/[^\s\"'`]*")
+
+
+def redact(text):
+    """Chain text safe to embed: credential-shaped strings, secret-looking variables' values, host paths and paths
+    into a private/ directory replaced by a bracketed note (the rest of the agent's words unchanged)."""
+    text = SECRET_TEXT.sub("[redacted: credential-shaped string]", text)
+    text = SECRET_VAR.sub(lambda m: f"{m.group(1)}=[redacted]", text)
+    text = HOST_PATH_TEXT.sub("[redacted: host path]", text)
+    return PRIVATE_DIR_TEXT.sub("[redacted: path]", text)
+
+
+def timeline_json(a):
+    """The agent's timeline as compact JSON for the reasoning chains: [i, t, turn, kind, tool, text, cut chars]."""
+    rows = []
+    for it in sorted(a["items"], key=lambda it: _num(it.get("i"))):
+        kind = it.get("kind")
+        if kind not in CHAIN_CAPS or it.get("turn") is None or it.get("i") is None:
+            continue
+        text = str(it.get("text") or "")
+        if kind == "event" and isinstance(it.get("event"), dict):
+            ev = {"event": it["event"], "t": it.get("t")}
+            body = tidy_times(text) if it["event"].get("type") in ("L2", "S1", "P2", "L1", "P1") else text
+            text = event_title(ev) + (": " + body if body else "")
+        cap = CHAIN_CAPS[kind]
+        cut = max(0, len(text) - cap)
+        text = redact(text[:cap])
+        rows.append([int(_num(it["i"])), round(_num(it.get("t")), 1), int(_num(it["turn"])), kind,
+                     str(it.get("tool") or "") if kind != "event" else "", text, cut])
+    data = json.dumps({"items": rows}, ensure_ascii=False, separators=(",", ":"))
+    # Inert inside <script type="application/json">: no markup characters, quotes or slashes appear raw (standard
+    # JSON escapes), so the text can neither close the script nor read as a link or path to the page screens.
+    for ch, rep in (("&", "\\u0026"), ("<", "\\u003c"), (">", "\\u003e"), ("'", "\\u0027"), ("/", "\\/")):
+        data = data.replace(ch, rep)
+    return data
+
+
+def evidence_refs(th):
+    """(item indices, [(item, start, end)]) from a thought's evidence references when the map has them (any of
+    ``evidence`` / ``evidence_refs`` / ``refs``: dicts with ``item`` (or ``item_i``) and optional ``start``/``end``,
+    ``span`` [start, end] or ``char_start``/``char_end``); empty for older maps."""
+    items, spans = set(), []
+    chain = th.get("evidence_chain")
+    if isinstance(chain, dict):  # the evidence file's record (storymap/evidence.py): quote_span and the cited item
+        qs = chain.get("quote_span") if isinstance(chain.get("quote_span"), dict) else {}
+        refs = [dict(qs)] if qs.get("item") is not None else []
+        if chain.get("item") is not None:
+            refs.append({"item": chain["item"]})
+    else:
+        refs = th.get("evidence") or th.get("evidence_refs") or th.get("refs") or []
+    for r in refs if isinstance(refs, list) else [refs]:
+        if not isinstance(r, dict):
+            continue
+        i = r.get("item", r.get("item_i"))
+        if i is None:
+            continue
+        try:
+            i = int(i)
+        except (TypeError, ValueError):
+            continue
+        items.add(i)
+        span = r.get("span") if isinstance(r.get("span"), (list, tuple)) and len(r.get("span")) == 2 else None
+        a = span[0] if span else r.get("start", r.get("char_start"))
+        b = span[1] if span else r.get("end", r.get("char_end"))
+        if isinstance(a, int) and isinstance(b, int) and 0 <= a < b:
+            spans.append((i, a, b))
+    return items, spans
+
+
+def chain_box(turn, cite, label, before=1, after=0, quote="", spans=()):
+    """The expand/collapse reasoning chain of one thought or event (rendered by CHAIN_JS from the embedded
+    timeline); empty when the page has no timeline or the item has no turn."""
+    if not EVIDENCE["on"] or turn is None:
+        return ""
+    try:
+        turn = int(_num(turn, -1))
+    except (TypeError, ValueError):
+        return ""
+    if turn < 0:
+        return ""
+    cite_s = " ".join(str(int(_num(c))) for c in sorted({c for c in cite if c is not None}, key=_num))
+    sp = ";".join(f"{i}:{a}:{b}" for i, a, b in spans)
+    return (f'<div class="chain" data-lo0="{max(turn - before, 0)}" data-hi0="{turn + after}" data-cite="{cite_s}"'
+            + (f' data-q="{esc(quote)}"' if quote else "") + (f' data-spans="{sp}"' if sp else "")
+            + f'><button type="button" data-act="open">{esc(label)}</button><div class="cbody"></div></div>')
+
+
+def event_article(name, ev, reactions, key, names=None, href="", together=0):
     e = ev["event"]
     typ = e.get("type")
     d = e.get("detail") or {}
@@ -1196,20 +1521,60 @@ def event_article(name, ev, reactions, key, names=None, href=""):
     meta += [badge(TAG_LABEL.get(t, str(t).replace("_", " ")), "caution") for t in e.get("tags") or []]
     if d.get("reread"):
         meta.append(badge("re-read"))
+    dl = delivery_of(e)
+    if dl:
+        meta.append(tbadge(DELIVERY_LABEL[dl], DELIVERY_HINT[dl]))
+    size = d.get("delivery_size") if isinstance(d.get("delivery_size"), int) else together + 1 if together else 0
+    if size and size > 1:
+        pos_ = f"item {d['position'] + 1} of {size}" if isinstance(d.get("position"), int) else f"{size} items"
+        meta.append(tbadge(f"delivered together: {pos_}", "Pushed into its context in one delivery with the other "
+                           "items listed under \u201cdelivered with\u201d (same time, same turn)"))
+    if d.get("answered") is False:
+        meta.append(tbadge("run ended before its next step", "No model step after this delivery was recorded"))
     kv = "".join(f"<dt>{esc(human(k))}</dt><dd>{esc(_shown(k, v))}</dd>"
-                 for k, v in d.items() if v not in (None, "", [], {}) and k != "reread")
+                 for k, v in d.items() if v not in (None, "", [], {}) and k not in DELIVERY_HIDDEN)
+    if size and size > 1 and isinstance(d.get("delivery_items"), list):
+        kv += f"<dt>Delivered with</dt><dd>{esc(', '.join(event_label(x) for x in d['delivery_items']))}</dd>"
     k = "k-fake" if (e.get("fake") or typ == "P2") else "k-ov" if is_overseer(e) else ""
     kind = "sub" if typ == "S1" else "own" if typ in ("O1", "C1") else "exp"
     reacts = "".join(reaction_html(r, names, href) for r in reactions) if reactions else (
         reaction_html(None) if typ in ("L2", "B1", "D1", "P2", "R1") else "")
     head = event_label(e) if typ in ("L2", "B1", "D1", "S1", "P2", "O1") else type_name(typ)
+    head = head[:1].upper() + head[1:]
     text = ev.get("text")
     if typ in ("L2", "S1", "P2", "L1", "P1"):
         text = tidy_times(text)  # extractor summaries (B1, D1, O1, C1, N1 and R1 texts are what the agent saw)
-    return (f'<article class="item {k}" id="{key}" data-kind="{kind}" data-t="{_num(ev.get("t")):.1f}">'
-            f'<h3>{fmt_t(ev.get("t"))} &middot; {esc(head[:1].upper() + head[1:])}</h3>'
+    icon = f'<svg class="hglyph" viewBox="-9 -9 18 18">{shape(typ, 0, 0, 5.2, glyph_class(ev), None, "")}</svg>'
+    cite = [ev.get("i")] + [q.get("item") for r in reactions for q in r.get("quotes") or [] if isinstance(q, dict)]
+    chain = chain_box(ev.get("turn"), cite, "Show what surrounded it: the agent's reasoning and tool calls",
+                      before=0, after=1)
+    return (f'<article class="item {k}" id="{key}" data-kind="{kind}" data-t="{_num(ev.get("t")):.1f}" '
+            f'data-label="{esc(fmt_t(ev.get("t")) + " · " + head[:110])}">'
+            f'<h3>{icon}{fmt_t(ev.get("t"))} &middot; {esc(head)}</h3>'
             f'<p>{"".join(meta)} <small>turn {esc(ev.get("turn"))} &middot; timeline item {esc(ev.get("i"))}</small></p>'
-            f'<pre>{esc(cut(text))}</pre>{"<dl class=kv>" + kv + "</dl>" if kv else ""}{reacts}</article>')
+            f'<pre>{esc(cut(text))}</pre>{"<dl class=kv>" + kv + "</dl>" if kv else ""}{reacts}{chain}</article>')
+
+
+DELIVERY_LABEL = {"push": "delivered unasked", "notice": "notice in its own tool result",
+                  "pull": "read on request"}
+DELIVERY_HINT = {"push": "The host appended it to the agent's context without the agent asking (push delivery)",
+                 "notice": "The host added it to the result of one of the agent's own tool calls (it did not ask for it)",
+                 "pull": "The agent called the tool that returned it"}
+DELIVERY_HIDDEN = {"reread", "delivery", "delivery_id", "delivery_size", "delivery_items", "position", "answered",
+                   "placement", "anchor_tool_use_id", "request_seq"}  # shown as badges, or bookkeeping
+
+
+def js_span(item, start, end):
+    """(item, start, end) in the browser's UTF-16 offsets of the embedded (capped, redacted) text, or None when the
+    span is past the cap or redaction changed the text before its end (the page then falls back to the quote)."""
+    if not isinstance(item, dict) or item.get("kind") not in CHAIN_CAPS:
+        return None
+    text = str(item.get("text") or "")
+    cap = CHAIN_CAPS[item["kind"]]
+    if end > min(len(text), cap) or redact(text[:end]) != text[:end]:
+        return None
+    u16 = lambda n: len(text[:n].encode("utf-16-le")) // 2  # noqa: E731
+    return (item.get("i"), u16(start), u16(end))
 
 
 def thought_article(th, names, related, key, items_by_i, href=""):
@@ -1222,53 +1587,75 @@ def thought_article(th, names, related, key, items_by_i, href=""):
     rel = "".join(f'<p class="muted">Quoted as evidence in the stage-2 reaction to <a href="#sel={esc(k)}" '
                   f'data-k="{esc(k)}">{esc(event_label(eid))}</a>:</p>{reaction_html(r, names, href)}'
                   for k, eid, r in related)
-    low = " g-th-low" if th.get("certainty") == "low" else ""
+    low = th.get("certainty") == "low"
     grp = (f' <small>(group {code_link(group, names, href)})</small>' if names.get(group)
            else f" <small>(group {esc(group)})</small>")
-    return (f'<article class="item k-th{low}" id="{key}" data-kind="th" data-t="{_num(th.get("t")):.1f}">'
-            f'<h3>{fmt_t(th.get("t"))} &middot; thought {code_link(code, names, href)}{grp}</h3>'
+    icon = (f'<svg class="hglyph" viewBox="-9 -9 18 18">'
+            f'{shape("TH", 0, 0, 6, "g-th-low" if low else "g-th", None, "")}</svg>')
+    items, spans = evidence_refs(th)
+    spans = [sp for sp in (js_span(items_by_i.get(i), a, b) for i, a, b in spans) if sp]
+    turns = (th.get("evidence_chain") or {}).get("chain_turns")
+    if isinstance(turns, list) and len(turns) == 2 and all(isinstance(x, int) for x in turns):
+        lo, hi = turns  # the evidence file's chain: the previous model step and the thought's own
+        chain = chain_box(hi, [th.get("item"), *items], "Show the full reasoning chain behind this thought",
+                          before=max(hi - lo, 0), after=0, quote=str(th.get("quote") or ""), spans=spans)
+    else:
+        chain = chain_box(th.get("turn"), [th.get("item"), *items], "Show the full reasoning chain behind this thought",
+                          before=1, after=0, quote=str(th.get("quote") or ""), spans=spans)
+    label = f"{fmt_t(th.get('t'))} · thought {code_name(code, names, code)}"
+    return (f'<article class="item k-th{" g-th-low" if low else ""}" id="{key}" data-kind="th" '
+            f'data-t="{_num(th.get("t")):.1f}" data-label="{esc(label)}">'
+            f'<h3>{icon}{fmt_t(th.get("t"))} &middot; thought {code_link(code, names, href)}{grp}</h3>'
             f'<p>{badge("reader certainty: " + str(th.get("certainty")))} <small>turn {esc(th.get("turn"))} &middot; '
             f'timeline item {esc(th.get("item"))} &middot; stage-1 chunk {esc(th.get("chunk"))}</small></p>'
             + (f'<p class="def">{esc(code_tip(code, DEFS, names))}</p>' if DEFS.get(code) else "")
             + f'<blockquote>{esc(th.get("quote"))}</blockquote>'
-            f'{"<p>Reader note: " + esc(th.get("note")) + "</p>" if th.get("note") else ""}{ctx}{rel}</article>')
+            f'{"<p>Reader note: " + esc(th.get("note")) + "</p>" if th.get("note") else ""}{ctx}{chain}{rel}</article>')
 
 
-PANEL = ('<aside id="panel"><div class="stepper"><button type="button" id="pprev" title="Previous (\u2190 or k)">'
-         '\u2190 Prev</button><span id="pos"></span><button type="button" id="pnext" title="Next (\u2192 or j)">Next \u2192'
-         '</button><label>Step through <select id="kind"><option value="">all items</option>'
+PANEL = ('<aside id="panel" aria-label="Detail"><div class="stepper"><button type="button" id="pprev" '
+         'title="Previous (← or k)">← Prev</button><span id="pos" aria-live="polite"></span>'
+         '<button type="button" id="pnext" title="Next (→ or j)">Next →</button>'
+         '<label>Step through <select id="kind"><option value="">all items</option>'
          '<option value="exp">only what it read or saw</option><option value="th">only thoughts</option>'
          '<option value="sub">only submissions</option><option value="own">only own posts and restarts</option>'
          '<option value="tp">only turning points</option></select></label>'
-         '<button type="button" id="pclose" title="Close (Esc)" aria-label="Close">\u00d7</button></div>'
-         '<div id="pbody"></div><p class="muted keys">\u2192 / j next, \u2190 / k previous, Esc closes.</p></aside>')
+         '<button type="button" id="pclose" title="Close (Esc)" aria-label="Close">×</button></div>'
+         '<div id="pbody"></div><p class="muted keys">→ / j next, ← / k previous, Esc closes.</p></aside>')
+
+
+def thought_lane_label(L, names):
+    """(full, short, hint) of a thought lane: the group letter and its name (the one code scheme: letters are
+    code groups only)."""
+    nm = names.get(L)
+    codes = sorted((c for c in names if c[:1] == L and len(c) > 1), key=lambda c: int(c[1:]))
+    hint = (f"Thought codes {L}" + (f" ({nm})" if nm else "") + ", quoted from the agent's reasoning and coded by the "
+            "stage-1 reader; hollow tick = low reader certainty" + "".join(f"\n{c} {names[c]}" for c in codes))
+    return (nm or "thoughts"), (nm.split()[0] if nm else "thoughts"), hint
 
 
 def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
     name = a["name"]
     s3 = a["stage3"] or {}
-    W, LX, x0, x1 = 1000, 0, 236, 990
-    X = lambda t: x0 + (x1 - x0) * min(max(_num(t), 0.0), tmax) / tmax  # noqa: E731
-    LH = 36  # lane height; glyphs about 16 px, hit areas about 27 px at desktop width
-    lanes = ([("stance", POSITION, POSITION_HINT)]
-             + [(f"th-{L}", f"Thought {L}: {names[L]}" if names.get(L) else f"What it thought: {L}",
-                 f"Thoughts in code group {L}" + (f" ({names[L]})" if names.get(L) else "")
-                 + ", quoted from the agent's reasoning and coded by the stage-1 reader; hollow tick = low reader "
-                 "certainty" + ("".join(f"\n{c} {names[c]}" for c in sorted(
-                     (c for c in names if c[:1] == L and len(c) > 1), key=lambda c: int(c[1:])))))
-                for L in LETTERS]
-             + [(k, label, hint) for k, label, _, hint in LANES])
-    ypos = {k: 6 + n * LH for n, (k, _, _) in enumerate(lanes)}
-    H = 6 + len(lanes) * LH + 18
-    svg = []
-    for n, (k, label, hint) in enumerate(lanes):
+    LH, R = LANE_PX, 6.5
+    types_here = {ev["event"].get("type") for ev in a["events"]}
+    ev_lanes = [ln for ln in LANES if ln[0] != "rem" or "R1" in types_here]
+    lanes = ([("stance", "", POSITION, "Position", POSITION_HINT)]
+             + [(f"th-{L}", L) + thought_lane_label(L, names) for L in LETTERS]
+             + [(k, "", label, short, hint) for k, label, short, _, hint in ev_lanes])
+    ypos = {ln[0]: LANE_TOP + n * LH for n, ln in enumerate(lanes)}
+    bottom = LANE_TOP + len(lanes) * LH
+    H = bottom + 18
+    svg, labels = [], []
+    for n, (k, letter, label, short, hint) in enumerate(lanes):
         y = ypos[k]
         if k != "stance":  # the stance bars sit on the card surface their colours were validated against
-            svg.append(f'<rect class="lane-bg{" alt" if n % 2 else ""}" x="{x0}" y="{y}" width="{x1 - x0}" height="{LH}"/>')
-        svg.append(f'<text class="lanetext" x="{LX + 4}" y="{y + LH / 2 + 4:.0f}"><title>{esc(label)}: {esc(hint)}</title>'
-                   f'{esc(label if len(label) <= 36 else label[:35] + "…")}</text>')
-    svg.append(axis_svg(tmax, x0, x1, 6, len(lanes) * LH))
-    svg.append(f'<line id="cursor" class="cursor" x1="0" x2="0" y1="6" y2="{6 + len(lanes) * LH}" visibility="hidden"/>')
+            svg.append(f'<rect class="lane-bg{" alt" if n % 2 else ""}" x="0" y="{y}" width="100%" height="{LH}"/>')
+        lt = f"<b>{letter}</b>" if letter else ""
+        labels.append(f'<div class="ll" title="{esc((letter + " " if letter else "") + label + ": " + hint)}">{lt}'
+                      f'<span class="lf">{esc(label)}</span><span class="ls">{esc(short)}</span></div>')
+    svg.append(axis_svg(tmax, LANE_TOP, len(lanes) * LH))
+    svg.append(f'<line id="cursor" class="cursor" x1="0" x2="0" y1="{LANE_TOP}" y2="{bottom}" visibility="hidden"/>')
 
     articles = []  # (t, order, html)
     key_of_event = {}
@@ -1279,19 +1666,23 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
     y = ypos["stance"]
     for frm, to, st, label in phases:
         cls = st if st in STANCES else "unknown"
-        svg.append(f'<rect class="ph-{cls}" x="{X(frm):.1f}" y="{y + 4}" width="{max(X(to) - X(frm), 1):.1f}" '
-                   f'height="{LH - 8}" rx="2"><title>{esc(stance_title(frm, to, st, label))}</title></rect>')
+        w = max(pct(to, tmax) - pct(frm, tmax), 0.1)
+        svg.append(f'<rect class="ph-{cls}" x="{pct(frm, tmax):.2f}%" y="{y + 5}" width="{w:.2f}%" '
+                   f'height="{LH - 10}" rx="2"><title>{esc(stance_title(frm, to, st, label))}</title></rect>')
     for n, tp in enumerate(s3.get("turning_points") or []):
         key = f"tp-{n}"
-        x = X(tp.get("t"))
-        tip = (f"Turning point \u00b7 {fmt_t(tp.get('t'))} \u00b7 position on cheating "
-               f"{STANCE_LABEL.get(tp.get('from'), tp.get('from'))} \u2192 {STANCE_LABEL.get(tp.get('to'), tp.get('to'))}")
-        svg.append(f'<line class="tp" data-k="{key}" x1="{x:.1f}" x2="{x:.1f}" y1="{y}" y2="{6 + len(lanes) * LH}">'
-                   f"<title>{esc(tip)}</title></line>")
+        x = pct(tp.get("t"), tmax)
+        tip = (f"Turning point · {fmt_t(tp.get('t'))} · position on cheating "
+               f"{STANCE_LABEL.get(tp.get('from'), tp.get('from'))} → {STANCE_LABEL.get(tp.get('to'), tp.get('to'))}")
+        svg.append(f'<line class="tp" data-k="{key}" data-p="{x:.2f}" x1="{x:.2f}%" x2="{x:.2f}%" y1="{y}" '
+                   f'y2="{bottom}"><title>{esc(tip)}</title></line>')
         causes = ", ".join(cause_link(c, key_of_event) for c in tp.get("cause_event_ids") or []) or "none named"
-        articles.append((_num(tp.get("t")), 0, f'<article class="item k-tp" id="{key}" data-kind="tp" data-t="{_num(tp.get("t")):.1f}"><h3>{fmt_t(tp.get("t"))} '
-                         f'&middot; turning point: position on cheating {esc(STANCE_LABEL.get(tp.get("from"), tp.get("from")))} &rarr; '
-                         f'{esc(STANCE_LABEL.get(tp.get("to"), tp.get("to")))}</h3>'
+        head = (f'turning point: position on cheating {STANCE_LABEL.get(tp.get("from"), tp.get("from"))} → '
+                f'{STANCE_LABEL.get(tp.get("to"), tp.get("to"))}')
+        articles.append((_num(tp.get("t")), 0, f'<article class="item k-tp" id="{key}" data-kind="tp" '
+                         f'data-t="{_num(tp.get("t")):.1f}" data-label="{esc(fmt_t(tp.get("t")) + " · " + head)}">'
+                         f'<h3><svg class="hglyph" viewBox="0 0 18 16"><line class="tp" x1="9" x2="9" y1="0" y2="16"/>'
+                         f'</svg>{fmt_t(tp.get("t"))} &middot; {esc(head)}</h3>'
                          f'<p>Caused by (stage-3 reading): {causes}</p><p>{esc(plain_ids(tp.get("cause_note")))}</p></article>'))
 
     # Event lanes and reactions.
@@ -1301,14 +1692,18 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
             for q in r.get("quotes") or []:
                 if isinstance(q, dict) and q.get("item") is not None:
                     cited[q["item"]].append((key_of_event.get(eid, ""), eid, r))
-    lane_of = {t: k for k, _, types, _ in LANES for t in types}
+    lane_of = {t: k for k, _, _, types, _ in ev_lanes for t in types}
+    deliveries = Counter(delivery_id(ev["event"]) for ev in a["events"] if delivery_id(ev["event"]))
+    per_lane = defaultdict(list)
     for ev in a["events"]:
         e = ev["event"]
         key = f"ev-{ev.get('i')}"
-        lane = lane_of.get(e.get("type"), "own")
-        svg.append(shape(e.get("type"), X(ev.get("t")), ypos[lane] + LH / 2, 7.5, glyph_class(ev), key, event_title(ev)))
+        per_lane[lane_of.get(e.get("type"), "own")].append(
+            {"t": _num(ev.get("t")), "order": _num(ev.get("i")), "prio": _event_prio(ev), "typ": e.get("type"),
+             "cls": glyph_class(ev), "key": key, "title": event_title(ev)})
+        together = deliveries.get(delivery_id(e), 1) - 1 if delivery_id(e) else 0
         articles.append((_num(ev.get("t")), 1, event_article(name, ev, a["by_event"].get(str(e.get("id")), []), key,
-                                                             names, href)))
+                                                             names, href, together)))
     seen_ids = set(key_of_event)
     orphans = [r for eid, rs in a["by_event"].items() if eid not in seen_ids for r in rs]
 
@@ -1318,13 +1713,25 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
         key = f"th-{n}"
         L = str(th.get("code") or "?")[:1].upper()
         lane = f"th-{L}" if L in LETTERS else "th-G"
-        cls = "g-th-low" if th.get("certainty") == "low" else "g-th"
-        svg.append(shape("TH", X(th.get("t")), ypos[lane] + LH / 2, 8, cls, key,
-                         f"Thought {code_name(str(th.get('code')), names, str(th.get('code')))} \u00b7 "
-                         f"{fmt_t(th.get('t'))} \u00b7 \u201c{str(th.get('quote') or '')[:120]}\u201d"
-                         + (f"\n\n{code_tip(str(th.get('code')), DEFS, names)}" if DEFS.get(str(th.get('code'))) else "")))
+        low = th.get("certainty") == "low"
+        per_lane[lane].append(
+            {"t": _num(th.get("t")), "order": _num(th.get("item")), "typ": "TH", "key": key,
+             "prio": {"high": 0, "medium": 1}.get(th.get("certainty"), 2), "cls": "g-th-low" if low else "g-th",
+             "title": (f"Thought {code_name(str(th.get('code')), names, str(th.get('code')))} · "
+                       f"{fmt_t(th.get('t'))} · “{str(th.get('quote') or '')[:120]}”"
+                       + (f"\n\n{code_tip(str(th.get('code')), DEFS, names)}" if DEFS.get(str(th.get('code'))) else ""))})
         related = [(k, eid, r) for k, eid, r in cited.get(th.get("item"), [])]
+        ech = (a.get("evidence") or {}).get(th.get("ekey"))
+        if ech and ech.get("item") == th.get("item"):
+            th = dict(th, evidence_chain=ech)
         articles.append((_num(th.get("t")), 2, thought_article(th, names, related, key, items_by_i, href)))
+    n_stacks = 0
+    for lane, entries in per_lane.items():
+        if lane not in ypos:
+            continue
+        for group in stack(entries, tmax):
+            n_stacks += len(group) > 1
+            svg.append(stack_glyph(group, tmax, ypos[lane] + LH / 2, 7 if group[0]["typ"] == "TH" else R))
 
     articles.sort(key=lambda x: (x[0], x[1]))
     f = s3.get("final") or {}
@@ -1346,31 +1753,40 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
     prev_link = f'<a href="{esc(idx[pos - 1])}.html">&larr; {esc(idx[pos - 1])}</a>' if pos > 0 else ""
     next_link = f'<a href="{esc(idx[pos + 1])}.html">{esc(idx[pos + 1])} &rarr;</a>' if pos + 1 < len(idx) else ""
     info = a["index"] or {}
-    # Timeline and detail column first, above the fold; the story, counts, legend and code key follow below.
-    body = (nav.replace("</nav>", f"{prev_link}{next_link}</nav>")
+    push = any(delivery_of(ev["event"]) in ("push", "notice") for ev in a["events"])
+    has_chain = EVIDENCE["on"] and bool(a["items"])
+    tl_json = f'<script type="application/json" id="tl">{timeline_json(a)}</script>' if has_chain else ""
+    shown = {"R1"} if "R1" in types_here else set()
+    # Timeline (the main view) with the detail column fixed beside it; story, items and readings below.
+    body = (nav.replace("</nav>", f'<span class="sp"></span>{prev_link}{next_link}</nav>')
             + f'<header class="ah"><h1>{esc(name)}</h1> {final_labels(a["stage3"])}</header>{banner_line(models)}'
-            f'{legend_strip()}<template id="pempty"><div class="lgbox pkey"><h4>What it thought: code groups</h4>'
-            f'{groups_html(names, href, DEFS)}</div></template>'
-            f'<div class="layout"><div class="lanes"><svg viewBox="0 0 {W} {H}">{"".join(svg)}</svg></div>'
-            f'{PANEL}<div class="list"><h2>Summary (stage 3)</h2><p class="story">{esc(s3.get("story")) or "<span class=muted>No model-written summary for this agent.</span>"}</p>'
+            f'{legend_bar("agent", shown, push)}<template id="pempty"><div class="lgbox pkey"><h4>What it thought: '
+            f'code groups</h4>{groups_html(names, href, DEFS)}</div></template>'
+            f'<div class="layout"><div class="main"><div class="tl"><div class="tl-labels">{"".join(labels)}</div>'
+            f'<div class="tl-plot"><svg class="plot" height="{H}">{"".join(svg)}</svg></div></div>'
+            f'<p class="tlcap">Minutes from run start (0–{int(tmax)}). '
+            + (f"{plural(n_stacks, 'spot holds', 'spots hold')} several items (the number on the shape); "
+               f"click one to list them. " if n_stacks else "")
+            + 'Click a shape, or step with ← →.</p>'
+            f'<h2>Summary (stage 3)</h2><p class="story">{esc(s3.get("story")) or "<span class=muted>No model-written summary for this agent.</span>"}</p>'
             + (f'<p class="muted">Not available for this agent: {", ".join(missing)}.</p>' if missing else "")
             + (f'<p class="muted">{len(a["malformed"])} model output(s) could not be read and are left out '
                f'({esc(", ".join(a["malformed"]))}).</p>' if a["malformed"] else "")
             + f'<p class="muted">{plural(len(a["events"]), "event")}, {plural(len(a["thoughts"]), "coded thought")}, '
             f'{plural(len(a["reactions"]), "stage-2 reaction")}. Position on cheating from the {esc(phase_src)}.'
             f'{" Role: " + esc(info.get("role")) + "." if info.get("role") else ""}</p>'
-            f'{legend("agent", names, href, DEFS)}<h2>In time order</h2><div id="items">'
-            f'{"".join(h for _, _, h in articles) or "<div class=empty>Nothing recorded.</div>"}</div>'
+            f'<details class="all"><summary>All {plural(len(articles), "item")} in time order</summary><div id="items">'
+            f'{"".join(h for _, _, h in articles) or "<div class=empty>Nothing recorded.</div>"}</div></details>'
             + ("<h2>Reactions to events not in the timeline</h2>" + "".join(reaction_html(r, names, href) for r in orphans)
                if orphans else "")
-            + '</div></div>'
-            f'<h2>Final reading (stage 3)</h2>{"<dl class=kv>" + final_kv + "</dl>" if final_kv else "<p class=muted>No final reading.</p>"}'
+            + f'<h2>Final reading (stage 3)</h2>{"<dl class=kv>" + final_kv + "</dl>" if final_kv else "<p class=muted>No final reading.</p>"}'
             + (f'<h3>Consistency flags</h3><p class="muted">{esc(FLAG_HINT)}</p><ul>{flags}</ul>' if flags else "")
-            + (f'<h2>Stage-1 reading, chunk by chunk</h2><p class="muted">The state the stage-1 reader recorded at the end '
-               f'of each chunk of the timeline.</p><table><tr><th>Chunk</th><th>Span</th><th>Position on cheating</th>'
-               f"<th>Knows the trick</th><th>Thinks the judge</th><th>Reader's summary</th></tr>{states}</table>"
-               if states else ""))
-    return page(f"Story map {name}", body, LEGEND_JS + PANEL_JS, "agent")
+            + (f'<details class="more"><summary>Stage-1 reading, chunk by chunk</summary><p class="muted">The state the '
+               f'stage-1 reader recorded at the end of each chunk of the timeline.</p><table><tr><th>Chunk</th><th>Span</th>'
+               f"<th>Position on cheating</th><th>Knows the trick</th><th>Thinks the judge</th><th>Reader's summary</th>"
+               f"</tr>{states}</table></details>" if states else "")
+            + f'{legend_about("agent", names, href, DEFS, shown, push)}</div>{PANEL}</div>{tl_json}')
+    return page(f"Story map {name}", body, LEGEND_JS + PANEL_JS + (CHAIN_JS if has_chain else ""), "agent")
 
 
 # ------------------------------------------------------------------ events.html
@@ -1490,8 +1906,9 @@ def events_page(agents, tmax, models="", nav="", names=None):
                    for k, lab, num, tip in EV_COLUMNS)
     n_skip = sum(skipped.values())
     shown = {"R1"} if count["rem"] else set()
+    push = any(delivery_of(g["first"]["event"]) in ("push", "notice") for _, g in order)
     body = (f"{nav}<h1>Story map: events</h1>{banner(models)}"
-            f"{legend('events', names, 'taxonomy.html', DEFS, shown_types=shown)}"
+            f"{legend_bar('events', shown, push)}"
             f'<p class="muted">Each event: who wrote it, when it was first seen, which agents read it, and how each '
             f'reacted (stage-2 reading). Library files are grouped by path across revisions. Click a row to open it; '
             f'click a column heading to sort. ↓ / ↑ (or j / k) move through the shown events, Enter opens one. '
@@ -1499,7 +1916,8 @@ def events_page(agents, tmax, models="", nav="", names=None):
             f'reaction {"is" if n_skip == 1 else "are"} not listed.</p>{filters}'
             f'<table class="evt" id="evt"><thead><tr>{head}</tr></thead><tbody>{"".join(rows)}</tbody></table>'
             f'<div id="cards" hidden>{"".join(cards)}</div>'
-            + ('' if order else '<div class="empty">No events.</div>'))
+            + ('' if order else '<div class="empty">No events.</div>')
+            + legend_about('events', names, 'taxonomy.html' if names else '', DEFS, shown, push))
     return page("Story map events", body, LEGEND_JS + EVENTS_JS)
 
 
@@ -1711,11 +2129,55 @@ def validation_page(text, models="", nav=""):
     return page("Story map validation", body)
 
 
+EVENT_TOKEN = r"(?:L1|L2|P1|P2|B1|D1|S1|O1|C1|N1|R1)"
+
+
+def _event_names(m):
+    codes = re.findall(EVENT_TOKEN, m.group(0))
+    names = [type_name(c) for c in codes]
+    return (names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]) + (
+        " event" if len(names) == 1 else " events")
+
+
+def taxonomy_display(text):
+    """The taxonomy as shown on the codes page, in the pages' one code scheme: letters are only code groups (thought,
+    reaction and overseer codes); event types are named in words, as on every other page (the committed file keeps
+    its machine-read event letters, which the prompts insert verbatim). Applied outside the headings; the event
+    headings are renamed in taxonomy_page."""
+    out = []
+    for line in text.splitlines():
+        if line.startswith("#"):
+            out.append(line)
+            continue
+        line = re.sub(r"Their type\s+letters overlap thought codes[^.]*\.[^.]*`code`\.", CODE_SCHEME, line)
+        line = re.sub(r"\bevents?\s+" + EVENT_TOKEN + r"(?:(?:,\s*|\s+(?:or|and)\s+)" + EVENT_TOKEN + r")*",
+                      _event_names, line)
+        line = re.sub(r"\((" + EVENT_TOKEN + r")\)", lambda m: f"({type_name(m.group(1))} event)", line)
+        line = re.sub(r"\b(" + EVENT_TOKEN + r")/(" + EVENT_TOKEN + r") events\b",
+                      lambda m: f"{type_name(m.group(1))} or {type_name(m.group(2))} events", line)
+        line = re.sub(r"\bS1 with\b", "a submission event with", line)
+        out.append(line)
+    text = "\n".join(out)
+    # The section-2 intro sentence spans lines: replace it after joining.
+    return re.sub(r"Their type\s+letters overlap thought codes.*?never as a thought `code`\.", CODE_SCHEME, text,
+                  flags=re.S)
+
+
 def taxonomy_page(text, models="", nav=""):
+    html_text = markdown_html(taxonomy_display(text), anchors=True)
+
+    def event_heading(m):
+        typ = m.group(2)
+        icon = (f'<svg class="hglyph" viewBox="-9 -9 18 18">'
+                f'{shape(typ, 0, 0, 5.2, "g-rem" if typ == "R1" else "g-other" if typ in OTHER_TYPES else "g-hollow", None, "")}'
+                f'</svg>')
+        return f'<h{m.group(1)} id="event-{typ}">{icon}Event: {esc(type_name(typ))}</h{m.group(1)}>'
+    html_text = re.sub(r'<h(\d) id="event-(' + EVENT_TOKEN + r')">[^<]*</h\d>', event_heading, html_text)
     body = (f"{nav}{banner(models)}"
             '<p class="muted">The code set the model readers apply. On the agent pages each thought links here; the '
-            'legend box "What it thought: code groups" gives each code\'s short definition in place.</p>'
-            f'<div class="story">{markdown_html(text, anchors=True)}</div>')
+            'legend box "What it thought: code groups" gives each code\'s short definition in place. '
+            f'{esc(CODE_SCHEME)}</p>'
+            f'<div class="story">{html_text}</div>')
     return page("Story map codes", body)
 
 
@@ -1729,19 +2191,25 @@ def nav_html(prefix="", has_val=False, has_tax=False):
 
 # ------------------------------------------------------------------ main
 
-def build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, domain=None):
+def build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, domain=None, evidence=True, minutes=None):
     """Write index.html, events.html and agents/<agent>.html; return the list of written paths. ``domain``
     (default: recorded in pipeline.json or timeline/domain.json, else lean) selects coding wording and, when the
-    default taxonomy is asked for, the public coding taxonomy (storymap/domain.py); Lean maps are unchanged."""
+    default taxonomy is asked for, the public coding taxonomy (storymap/domain.py); Lean maps are unchanged.
+    ``evidence`` False leaves out the embedded timeline behind the reasoning chains; ``minutes`` sets the time axis
+    (default: the run's configured length, else from the data)."""
     from . import domain as domain_mod
     domain = domain or domain_mod.map_domain(map_dir, timeline)
     if domain == domain_mod.CODE and taxonomy and Path(taxonomy) == DEFAULT_TAXONOMY:
         taxonomy = domain_mod.PUBLIC_CODE_TAXONOMY
     with domain_mod.view_overrides(sys.modules[__name__], domain):
-        return _build(map_dir, timeline, out, taxonomy)
+        EVIDENCE["on"] = bool(evidence)
+        try:
+            return _build(map_dir, timeline, out, taxonomy, minutes)
+        finally:
+            EVIDENCE["on"] = True
 
 
-def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY):
+def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=None):
     """Write index.html, events.html and agents/<agent>.html; return the list of written paths."""
     agents, pipeline = load(map_dir, timeline)
     out = Path(out or map_dir)
@@ -1752,7 +2220,7 @@ def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY):
     DEFS.clear()
     DEFS.update(load_definitions(taxonomy) if taxonomy else {})
     has_tax = bool(names) and Path(taxonomy).is_file()
-    tmax = axis_max(agents)
+    tmax = axis_max(agents, minutes or run_minutes(map_dir, pipeline))
     models = model_names(pipeline)
     validation = Path(map_dir) / "validation.md"
     has_val = validation.is_file()
@@ -1782,8 +2250,12 @@ def main(argv=None):
     ap.add_argument("--out", help="output dir (default: --map)")
     ap.add_argument("--taxonomy", default=str(DEFAULT_TAXONOMY),
                     help="taxonomy for code names, definitions and taxonomy.html (default: the public copy; '' = none)")
+    ap.add_argument("--no-evidence", action="store_true",
+                    help="leave out the embedded timeline behind the 'full reasoning chain' expanders")
+    ap.add_argument("--minutes", type=float, help="time axis length (default: the run's configured length)")
     args = ap.parse_args(argv)
-    written = build(args.map, args.timeline, args.out, args.taxonomy)
+    written = build(args.map, args.timeline, args.out, args.taxonomy, evidence=not args.no_evidence,
+                    minutes=args.minutes)
     print(f"wrote {len(written)} pages to {Path(args.out or args.map)}")
     return 0
 
