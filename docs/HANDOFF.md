@@ -1340,9 +1340,20 @@ is being merged into main via `collab-env`.
      units. Only control r3 ($24.71) is complete. Live but incomplete, to be replaced after the `--retry-failed`
      reruns: 2ov r1 and reminder r2 (empty, $0), 1ov r1 (70 of 100 agents stage-3 http_402, $10.90), reminder r1
      (4 agents http_402, $74.62). 10ov r1 and 1ov r2 rendered at $0 and were not published.
-   - The site-wide `verify` fails only on `no_broken_links` for 2ov r1 (`conference-view` -> `analysis/timeline.jsonl`,
-     `results.html` -> `analysis/timeline.md`; its VM supervisor crashed). The run agent republishes 2ov r1 with
-     `--replace-pages`.
+   - The site-wide `verify` used to fail on `no_broken_links` for 2ov r1, whose VM supervisor crashed. The run
+     agent's `--replace-pages` republish fixed that, and deploys since about 05:00 PT verify clean. The republish
+     dropped 2ov r1's Story map tab and heatmap section; the publisher restored both at 06:38 PT (deploys
+     `874ecc06`, `c613f2a2`, `22de87f7`).
+   - **As of 06:45 PT:** results pages and heatmaps (a "Faking over time" section; no image for runs without
+     fakers) are live for all 15 runs. Story maps are live for control r3 (complete) and for reminder r1, 1ov r1,
+     2ov r1 and reminder r2 (incomplete; they are replaced automatically after the reruns).
+   - **Waiting on OpenRouter credit** (balance -$5.08 at 06:32 PT). The run agent's `push/gate.sh` starts the 14
+     `--retry-failed` reruns (`sm_run.sh`, 4 at a time, `--no-offload`) once the balance exceeds $50.
+   - The publisher (`smfix/autopub3.sh` in the operator scratchpad) then publishes each complete map and runs
+     `offload_runs.py offload --unit RUN` after its story-map deploy verifies. Each batch holds `cf-deploy.lock`
+     once and makes three deploys: story map, heatmap and catalogue.
+   - Live checks read agent pages through `RUN/packed/index.json` (item 30), using `smfix/finalcheck.py`.
+   - Still to do after the reruns: production `verify --full`, then mark this item DONE.
 
 30. **DONE 2026-11-04 (05:34 PT): more files packed per run on both Pages sites** (owner decision "option 1",
    docs/plan.md "Pack more files per run (November 3, 2026)"; `scripts/publish_cloudflare.py`, docs/experiment-library.md).
