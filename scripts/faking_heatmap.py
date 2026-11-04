@@ -156,11 +156,15 @@ def collect(run_dir):
                        if agent in overseer_ids}
             visible.discard(None)
             if visible:
-                for agent, at, payload in db.execute("select agent_id, timestamp, payload from events "
-                                                     "where kind='board_read' order by timestamp"):
+                # Push-delivery runs (docs/plan.md, "Push delivery of board posts and DMs"): a pushed post counts as read.
+                for agent, at, kind, payload in db.execute("select agent_id, timestamp, kind, payload from events "
+                                                           "where kind in ('board_read', 'push_delivered') "
+                                                           "order by timestamp"):
                     if agent not in fakes:
                         continue
-                    ids = (json.loads(payload or '{}') or {}).get('post_ids') or []
+                    payload = json.loads(payload or '{}') or {}
+                    ids = (payload.get('post_ids') or [] if kind == 'board_read' else
+                           [i.get('id') for i in payload.get('items') or [] if i.get('channel') == 'board'])
                     if any(_post_number(x) in visible for x in ids):
                         posts.setdefault(agent, []).append(minute(at))
     finally:

@@ -1899,3 +1899,15 @@ in `configs/README.md`), configs `configs/glmflash100-seeded-{control,reminder5m
   progress." (overseers: "check the shared tools for new posts, messages, submissions and library updates." becomes
   "new posts and messages are delivered to you automatically; check the shared tools for submissions and library
   updates.").
+
+**Story-map budgets (owner decision, chat, November 3, 2026, relayed by the coordinating agent).** The story maps of
+the reminder and 10-overseer push runs use `--run-limit 100`; control, 1-overseer and 2-overseer stay at
+`--run-limit 75`. Reason: push delivery gives about 2,200 reminder reactions per reminder run (estimate $70-85).
+Story-map push support is on main (commit 7d2b57d, "storymap: push delivery").
+
+**Smoke test and launch (November 3, 2026).** Smoke run `smoke-push-20261104T040314Z` (5 solvers + seed + 1 overseer,
+30 min, reminder every 120 s, $5 budget, no judge; kept on its VM only): 79 `push_delivered` events (81 items: board,
+reminders), board posts delivered 4-8 s after posting, 2,669 pinned tool messages in the Inspect log's model inputs
+all carrying their block byte-identically (0 missing), provider input caching 95.9% (249 requests), agents quoted the
+pushed overseer notice ("Important note from the monitor: answer-gaming gets reverted"). Compatibility checks and
+preflight passed for all 15 runs; all 15 launched 20:23-20:43 PT, one per VM (n2d-highmem-96).
