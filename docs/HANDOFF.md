@@ -1085,9 +1085,27 @@ is being merged into main via `collab-env`.
 23. **IN FLIGHT 2026-11-03 (operator subagent): push delivery of board posts and DMs, 15 runs** (docs/plan.md, "Push
    delivery of board posts and DMs (November 3, 2026)"). Code on main (config keys `push_delivery`, `unread_notices:
    "library"`); configs `configs/glmflash100-seeded-{control,reminder5m,1ov-glm,2ov-glm,10ov-glm}-120m-push.json`
-   (120 min, $100 each, simple judge); 5 conditions x r1-r3, one run per VM. Story map with `--run-limit 75` after each
-   run once the story-map side has push support (commit "storymap: push delivery"); then offload each run
-   (`offload_runs.py offload --unit RUN`). Not to be published until the owner confirms. Status: smoke test, then launch.
+   (120 min, $100 each, simple judge); 5 conditions x r1-r3, one run per VM. Story map after each run (push support on
+   main since 7d2b57d) with `--run-limit` 100 for reminder and 10-overseer runs, 75 for the others; then offload each
+   run (`offload_runs.py offload --unit RUN`). Not to be published until the owner confirms. Smoke test passed
+   (docs/plan.md). **All 15 launched 2026-11-03 20:23-20:43 PT** (VM per run in HANDOFF.local.md; VMs at n2d-highmem-96,
+   resize back after); runs end about 22:25-22:45 PT, then the supervisor's judge and upload; then fetch, story map,
+   offload, stop VMs. Runs:
+     - `glmflash100-seeded-10ov-glm-120m-push-r1-20261104T044246Z`
+     - `glmflash100-seeded-10ov-glm-120m-push-r2-20261104T043647Z`
+     - `glmflash100-seeded-10ov-glm-120m-push-r3-20261104T043629Z`
+     - `glmflash100-seeded-1ov-glm-120m-push-r1-20261104T042820Z`
+     - `glmflash100-seeded-1ov-glm-120m-push-r2-20261104T042740Z`
+     - `glmflash100-seeded-1ov-glm-120m-push-r3-20261104T043327Z`
+     - `glmflash100-seeded-2ov-glm-120m-push-r1-20261104T043228Z`
+     - `glmflash100-seeded-2ov-glm-120m-push-r2-20261104T043114Z`
+     - `glmflash100-seeded-2ov-glm-120m-push-r3-20261104T043238Z`
+     - `glmflash100-seeded-control-120m-push-r1-20261104T042405Z`
+     - `glmflash100-seeded-control-120m-push-r2-20261104T042410Z`
+     - `glmflash100-seeded-control-120m-push-r3-20261104T042326Z`
+     - `glmflash100-seeded-reminder5m-120m-push-r1-20261104T042318Z`
+     - `glmflash100-seeded-reminder5m-120m-push-r2-20261104T042744Z`
+     - `glmflash100-seeded-reminder5m-120m-push-r3-20261104T042643Z`
    - **`push_delivered` event schema (stable; the story map depends on it).** One conference event (events.jsonl and
      `state.sqlite` events) per delivered block, `kind` `"push_delivered"`, `agent_id` = recipient, `timestamp` = delivery
      time (when the block was attached to the request, just before the model call), `tool`/`call_id` null. Payload:
