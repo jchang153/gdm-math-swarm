@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-03 PT by Claude (Opus 5.5) subagent (item 22: heatmap credited-fake fix, republished on both sites).
+Last updated: 2026-11-03 PT by Claude (Opus 5.5) subagent (item 24: story-map push/evidence field contract).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1081,6 +1081,35 @@ is being merged into main via `collab-env`.
      behavior judge), reminder5m r2 10->8, 1ov commsonly r3 8->6, 2ov commsonly r2 12->10, 1ov enforceonly r3
      51->48, 2ov enforceonly r2 75->72; credited-fake counts fell in 28 runs (e.g. 10ov enforceonly r2 734->649).
      IB runs unchanged.
+
+24. **IN PROGRESS 2026-11-03 (evening): story-map data for push delivery, evidence chains, audit fixes** (data side:
+   extract/chunk/pipeline/schema/validate, new `storymap/evidence.py`; GUI side `view.py` is another agent's).
+   **Field contract for the GUI (stable; old fields unchanged, old timelines still load):**
+   - Timeline items gain `call_id` (tool_use id on `tool_call`/`tool_result`, else null) and `mid` (model message id
+     of the step on `reasoning`/`text`/`tool_call`, else null). Timelines built before 2026-11-03 lack both keys.
+   - B1/D1/R1 `event.detail.delivery`: `"pull"` (read by the agent's own get_bulletin_board/get_messages call),
+     `"notice"` (R1 from the in-result `system_notice` of the 60-min reminder runs) or `"push"` (host-appended block,
+     push-delivery runs). Missing on older timelines = pull/notice. Pushed events also have `delivery_id`
+     (`push-<conference event seq>`, shared by all items of one block), `position` (0-based order in the block),
+     `delivery_size`, `delivery_items` (event ids of the whole block, in order), `anchor_tool_use_id`, `request_seq`,
+     `placement` (`anchor` = after the tool result it was appended to; `time` = by timestamp, anchor not in the
+     transcript), `answered` (false when no model reply follows in the transcript); B1 `post_id`/`posted_at`/
+     `intent_type`/`reread`, D1 `message_id`/`public_id`/`sent_at`/`reread`, R1 `notice`/`boundary`/`due_at`.
+     Pushed event `tool` is `"push"`; ids: `B1:post-000123`, `D1:dm-000045`, `R1:<agent>:reminder-003`. Pushed
+     events sit at the start of the model step that received them (`turn` = that step); text ends "[pushed]".
+   - L2 `detail.continuation` (true for a page read at offset > 0); `reread` now means the same path AND revision.
+   - Stage-2 rows of pushed events: same fields as before (`event_id`, ...); the delivery fields are on the event.
+   - Evidence chains (`storymap/evidence.py`, free, no model calls): `OUT/evidence/<agent>.json` =
+     `{"schema": "gdm-storymap-evidence/1", "agent", "thoughts": [...], "items": {"<i>": item}}`. Each thought:
+     `key` (`c<chunk 3 digits>-t<index in chunk 2 digits>`, stable for a stage-1 row), `chunk`, `index`, `code`,
+     `item`, `turn` (the cited item's turn, authoritative), `t`, `quote_match` (`item`/`chunk`/null),
+     `quote_span` (`{"item", "start", "end"}` character offsets in that item's `text`, or null), `chain_items`
+     (ordered item indices of the chain: the previous model step and the thought's own step with their tool calls,
+     results and events), `chain_turns` `[from, to]`, `tool_calls` (`[{"call_item", "result_item", "call_id",
+     "tool"}]` within the chain). `items` holds each referenced item once: `i, turn, t, kind, tool, call_id, text`
+     (reasoning/text up to 6,000 characters, tool results up to 2,000; `text_cut` true when cut) and for events
+     `event_type, event_id, delivery`. Also callable in memory: `evidence.agent_evidence(items, stage1_rows)`.
+     Status: in progress (this agent); final state goes here when done.
 
 ## Next steps / open items
 
