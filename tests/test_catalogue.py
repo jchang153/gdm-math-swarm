@@ -92,7 +92,8 @@ class CataloguePageTests(unittest.TestCase):
         self.assertEqual(expected['levels']['credited'], 1)
         page = (runs / 'index.html').read_text()
         self.assertIn('rubric 3.1: 4 exploiters · 1 convert · 2 whistleblowers · 1 insufficient record', page)
-        self.assertIn('simple: 1 credited<br><small>of 2 labelled · <a href="only/analysis/simple_judge/report.html">'
+        self.assertIn('simple: 1 credited<br><small>of 2 labelled; each agent counted once, at its highest level · '
+                      '<a href="only/analysis/simple_judge/report.html">'
                       'report</a></small>', page)
         cell = re.search(r'data-run="only".*?class="c-judge"><div class="v">(.*?)</div>', page, re.S)[1]
         self.assertNotIn('not run', cell)

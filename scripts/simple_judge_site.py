@@ -169,17 +169,53 @@ def simple_summary(report):
 
 
 SHOWN_LEVELS = ('explored', 'submitted', 'credited')
+# Display text of the stored cheating levels (owner, November 3, 2026): the levels are exclusive (each agent at its
+# highest level), so "submitted" reads "submitted, never credited"; stored values are unchanged.
+LEVEL_TEXT = {'submitted': 'submitted, never credited'}
+EXCLUSIVE_NOTE = 'each agent counted once, at its highest level'
+
+
+def level_text(level):
+    """Display text of a stored cheating level."""
+    return LEVEL_TEXT.get(level, level)
 
 
 def simple_text(summary):
-    """(main, detail) plain text of simple_summary counts, e.g. ('25 submitted · 2 credited · 2 whistleblowers',
-    'of 100 labelled'); the catalogue's JavaScript writes the same words."""
-    parts = [f'{summary["levels"][k]} {k}' for k in SHOWN_LEVELS if summary['levels'].get(k)]
+    """(main, detail) plain text of simple_summary counts, e.g. ('25 submitted, never credited · 2 credited · 2
+    whistleblowers', 'of 100 labelled; each agent counted once, at its highest level'); the catalogue's JavaScript
+    writes the same words."""
+    parts = [f'{summary["levels"][k]} {level_text(k)}' for k in SHOWN_LEVELS if summary['levels'].get(k)]
     if summary['whistleblowers']:
         parts.append(f'{summary["whistleblowers"]} whistleblower' + ('s' if summary['whistleblowers'] != 1 else ''))
     detail = f'of {summary["labelled"]} labelled' + (f' ({summary["mode"]})' if summary.get('mode') not in (None, 'paid')
                                                      else '')
+    if parts:
+        detail += f'; {EXCLUSIVE_NOTE}'
     return ' · '.join(parts) or 'none flagged', detail
+
+
+def relabel_report_page(document):
+    """A published simplified-judge report.html rendered before the November 3, 2026 display wording, with the
+    same wording the current report.py writes: level cells and filter labels say "submitted, never credited"
+    (data attributes and filter values keep the stored "submitted"), the Counts paragraph and a note after the
+    KPIs say the levels are exclusive (each agent counted once, at its highest level), and the filter summary
+    shows the display text. Nothing else changes; idempotent (a current page is returned unchanged)."""
+    new = level_text('submitted')
+    document = document.replace('<span class="pos">submitted</span>', f'<span class="pos">{new}</span>')
+    document = document.replace('<input type=checkbox value="submitted" checked> submitted</label>',
+                                f'<input type=checkbox value="submitted" checked> {new}</label>')
+    counts = re.search(r'<h2>Counts</h2><p>Cheating levels: ([^<]*)', document)
+    if counts:
+        text = re.sub(r'(^|, )submitted (\d+)', lambda m: f'{m[1]}{new} {m[2]}', counts.group(1), count=1)
+        text = text.replace(' (submitted: ', f' ({new}: ', 1)
+        document = (document[:counts.start()] + f'<h2>Counts</h2><p>Cheating levels ({EXCLUSIVE_NOTE}): ' + text
+                    + document[counts.end():])
+    if 'id=sj-exclusive' not in document and '<h2>Counts</h2>' in document:
+        note = (f'<p class=muted id=sj-exclusive>Cheating levels are exclusive: {EXCLUSIVE_NOTE} (none, considered, '
+                f'explored, {new}, credited, unclear).</p>')
+        document = document.replace('<h2>Counts</h2>', note + '<h2>Counts</h2>', 1)
+    return document.replace('const picked=all.filter(v=>lv.has(v));',
+                            'const picked=boxes.filter(b=>lv.has(b.value)).map(b=>b.parentNode.textContent.trim());')
 
 
 def simple_report(run_dir):

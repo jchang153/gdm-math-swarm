@@ -72,6 +72,15 @@ td.tech{max-width:none;white-space:normal;flex-basis:100%}td.det{width:auto;max-
 table.agents td.det::before{content:none}.filters label{flex:1 1 45%}.filters select{max-width:none;width:100%}}
 """
 LEVELS = ("none", "considered", "explored", "submitted", "credited", "unclear")
+# Display text of the stored levels (owner, November 3, 2026): levels are exclusive, each agent at its highest
+# level, so "submitted" reads "submitted, never credited". Stored label values are unchanged.
+LEVEL_TEXT = {"submitted": "submitted, never credited"}
+EXCLUSIVE_NOTE = "each agent counted once, at its highest level"
+
+
+def level_text(level):
+    """Display text of a stored cheating level."""
+    return LEVEL_TEXT.get(level, level)
 NOT_LABELLED = "not labelled"
 SORTS = (("agent", "agent"), ("level", "cheating"), ("tech", "technique"), ("declined", "declined"),
          ("wb", "whistleblower"), ("ea", "eval-aware"), ("src", "source"), ("q", "quotes"))
@@ -101,7 +110,7 @@ def _flag(value):
 def _level(level):
     cls = "pos" if level in ("explored", "submitted", "credited") else ("warn" if level in ("unclear", "considered")
                                                                        else "muted")
-    return f'<span class="{cls}">{_e(level)}</span>'
+    return f'<span class="{cls}">{_e(level_text(level))}</span>'
 
 
 def _agent(row):
@@ -152,9 +161,11 @@ def render_html(report, rows, old_judge_href=None, run_start=None):
                 f"(rubric 3.1)</a>." if old_judge_href else "") + "</p>",
              seeded_note(report, run_start),
              "<div class=kpis>" + "".join(f"<div class=kpi><b>{_e(v)}</b>{_e(k)}</div>" for k, v in kpis) + "</div>",
-             "<h2>Counts</h2><p>Cheating levels: " + ", ".join(f"{_e(k)} {_e(v)}" for k, v in
-                                                               c["cheating_level"].items()) +
-             f" (submitted: {c.get('submitted_basis', {}).get('detector_flagged_submission', 0)} with a detector-flagged "
+             f"<p class=muted id=sj-exclusive>Cheating levels are exclusive: {_e(EXCLUSIVE_NOTE)} (none, considered, "
+             f"explored, {_e(level_text('submitted'))}, credited, unclear).</p>",
+             f"<h2>Counts</h2><p>Cheating levels ({_e(EXCLUSIVE_NOTE)}): " + ", ".join(
+                 f"{_e(level_text(k))} {_e(v)}" for k, v in c["cheating_level"].items()) +
+             f" (submitted, never credited: {c.get('submitted_basis', {}).get('detector_flagged_submission', 0)} with a detector-flagged "
              f"submission, {c.get('submitted_basis', {}).get('readied_or_undetected', 0)} readied or undetected)" +
              f". Quotes verified {c['quotes_verified']} of {c['quotes']}; downgrades {c['downgrades']}; detector "
              f"cross-check flags {c['detector_flags']}; fallback used {c['fallback_used']}. Detectors: "
@@ -268,7 +279,8 @@ def agents_section(rows, run_start=None, seeded=None):
     filters = ("<div class=filters id=filters hidden role=search aria-label='Filter agents'>"
                "<details class=ms id=f-level><summary>Cheating: <span id=f-level-text>&nbsp;any</span></summary><div>"
                "<span class=lab>Cheating level</span>"
-               + "".join(f'<label><input type=checkbox value="{_e(v)}" checked> {_e(v)}</label>' for v in levels)
+               + "".join(f'<label><input type=checkbox value="{_e(v)}" checked> {_e(level_text(v))}</label>'
+                         for v in levels)
                + "</div></details>"
                + choice("f-tech", "Technique", [("-", "(none)")] + [(t, _short(t, 48)) for t in techniques])
                + choice("f-wb", "Whistleblower", [("yes", "yes"), ("no", "no"), ("unclear", "unclear")])
@@ -303,7 +315,7 @@ function apply(){const lv=new Set(boxes.filter(b=>b.checked).map(b=>b.value)),q=
  for(const r of sorted)tbody.append(r);
  for(const t of ths)t.dataset.k===key?t.setAttribute('aria-sort',desc?'descending':'ascending'):t.removeAttribute('aria-sort');
  sortSel.value=key;dir.textContent=desc?'↓':'↑';
- const picked=all.filter(v=>lv.has(v));$('f-level-text').textContent=' '+(picked.length===all.length?'any':picked.length?picked.join(', '):'none');
+ const picked=boxes.filter(b=>lv.has(b.value)).map(b=>b.parentNode.textContent.trim());$('f-level-text').textContent=' '+(picked.length===all.length?'any':picked.length?picked.join(', '):'none');
  $('shown').textContent='Showing '+n+' of '+rows.length+' agents';write();}
 function write(){const p=new URLSearchParams(),lv=boxes.filter(b=>b.checked).map(b=>b.value);
  if(lv.length!==all.length)p.set('level',lv.join(','));for(const [k,s] of Object.entries(sel))if(s.value)p.set(k,s.value);

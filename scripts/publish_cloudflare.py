@@ -47,6 +47,12 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
         FOLDER holds scripts/faking_heatmap.py's faking-heatmap.json (and faking-heatmap.png when the run has
         fakers); RUN/faking-heatmap.png is added and RUN/results.html gains the section at the top of its main
         report. No other file changes.
+    publish_cloudflare.py judge-labels [--run RUN ...] [--commit] [--receipt FILE]
+        Rewrite the simplified behavior judge's level wording in place on runs already on the site (owner, November
+        3, 2026): "submitted" reads "submitted, never credited" and the counts say each agent is counted once, at
+        its highest level. RUN/results.html (Behavior judge tile, Run table row and line; counts from the served
+        RUN/analysis/simple_judge/report.json) and RUN/analysis/simple_judge/report.html change, only in those
+        words; stored labels, report.json and every other file are unchanged.
     publish_cloudflare.py verify [--url URL] [--full] [--run RUN ...]
         Read-only check of the served site against its site-manifest.json (see ``verify``).
 
@@ -91,6 +97,7 @@ import dataset_logs  # noqa: E402
 import hf_visibility  # noqa: E402
 import site_layout  # noqa: E402
 import site_style  # noqa: E402
+import simple_judge_site  # noqa: E402
 import storymap_site  # noqa: E402
 from publish_hf_library import (SECRET, load_bundle, merge_entries, packed_text,  # noqa: E402
                                 safe_path)
@@ -853,6 +860,60 @@ def plan_heatmap(base_files, unlisted, folders):
                        (Path(folders[r]) / faking_heatmap.SUMMARY).read_text(encoding='utf-8'))['rows'])}
 
 
+JUDGE_WORDS = (simple_judge_site.level_text('submitted'), simple_judge_site.EXCLUSIVE_NOTE,
+               'b.parentNode.textContent.trim()')
+
+
+def _judge_only_changes(old, new):
+    """True when every changed stretch of ``new`` (vs ``old``, split at tags) carries the new judge wording."""
+    import difflib
+    a, b = re.split(r'(?<=>)', old), re.split(r'(?<=>)', new)
+    for tag, _, _, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if tag != 'equal' and not any(w in ''.join(b[j1:j2]) for w in JUDGE_WORDS):
+            return False
+    return True
+
+
+def plan_judge_labels(base_files, runs=None):
+    """The site with the simplified judge's level wording rewritten in place (owner, November 3, 2026): for every
+    run (or ``runs``) with RUN/analysis/simple_judge/report.json on the site, RUN/results.html's judge spots
+    (``simple_judge_site.add_simple_judge_tab`` with the served report.json; only a page that already has the
+    simplified judge's tab) and RUN/analysis/simple_judge/report.html (``relabel_report_page``). Refuses a change
+    outside the judge wording. No other file changes and the catalogue is unchanged."""
+    sj = simple_judge_site.SJ_DIR
+    known = sorted({run_of(n) for n in base_files if n.endswith(f'/{sj}/report.json') and run_of(n)})
+    if runs:
+        missing = sorted(set(runs) - set(known))
+        if missing:
+            raise ValueError('Run(s) without a published simplified judge: ' + ', '.join(missing))
+        known = sorted(runs)
+    files, replaced, skipped = dict(base_files), [], []
+    for run in known:
+        report = json.loads(base_files[f'{run}/{sj}/report.json'])
+        pages = {}
+        page = f'{run}/results.html'
+        if page in base_files:
+            text = base_files[page].decode('utf-8')
+            if simple_judge_site.TAB_MARKER in text and simple_judge_site.simple_summary(report):
+                pages[page] = simple_judge_site.add_simple_judge_tab(text, report)
+            else:
+                skipped.append(page)
+        page = f'{run}/{sj}/report.html'
+        if page in base_files:
+            pages[page] = simple_judge_site.relabel_report_page(base_files[page].decode('utf-8'))
+        for page, text in pages.items():
+            old = base_files[page].decode('utf-8')
+            if text == old:
+                continue
+            if not _judge_only_changes(old, text):
+                raise ValueError(f'{page}: the relabel would change more than the judge wording')
+            data = text.encode('utf-8')
+            replaced.append({'path': page, 'old': digest(base_files[page]), 'new': digest(data)})
+            files[page] = data
+    return files, {'source': {'kind': 'judge-labels', 'runs': known}, 'added_files': 0,
+                   'replaced_pages': replaced, 'skipped_pages': skipped}
+
+
 def plan_catalogue(base_files, unlisted, site=None):
     """The site with only its catalogue re-rendered from its entries (index.html and experiments.json; Story map
     links follow the story map pages on the site). No run file changes."""
@@ -1117,7 +1178,9 @@ def main(argv=None):
     heat.add_argument('--run', action='append', required=True,
                       help='RUN=FOLDER holding faking_heatmap.py output (repeatable)')
     cat = sub.add_parser('catalogue', help='re-render only the catalogue (index.html, experiments.json)')
-    for command in (mirror, bundle, restyle, withdraw, repack, story, heat, cat):
+    labels = sub.add_parser('judge-labels', help='rewrite the simplified judge\'s level wording on the site')
+    labels.add_argument('--run', action='append', help='only this run (repeatable; default every judged run)')
+    for command in (mirror, bundle, restyle, withdraw, repack, story, heat, cat, labels):
         command.add_argument('--site', choices=sorted(SITES), default=DEFAULT_SITE,
                              help='which library (default gdm, the math site; ib: the ImpossibleBench site)')
         command.add_argument('--commit', action='store_true', help='deploy; otherwise only plan')
@@ -1179,6 +1242,9 @@ def main(argv=None):
             folders = dict(spec.split('=', 1) for spec in args.run)
             files, plan = plan_heatmap(base_files, unlisted, folders)
             message = f'Faking heatmap for {len(folders)} run(s)'
+        elif args.command == 'judge-labels':
+            files, plan = plan_judge_labels(base_files, args.run)
+            message = f'Judge level wording on {len(plan["replaced_pages"])} page(s)'
         elif args.command == 'withdraw':
             files, plan = plan_withdraw(base_files, unlisted, args.run, site=site)
             message = 'Withdraw ' + ', '.join(plan['source']['runs'])

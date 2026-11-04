@@ -39,6 +39,10 @@ JUDGED_PAGE = PAGE.replace('<span class="off">Behavior judge · not run</span>',
                                     '<li><strong>Inspect</strong>')
 
 
+def plan_paths(plan):
+    return {r['path'] for r in plan['replaced_pages']}
+
+
 def row(agent, level='credited', aware=True):
     return {'agent_id': agent, 'model': 'google/gemini-3.8-flash', 'fallback_used': False, 'status': 'ok',
             'reason': None, 'calls': [{'model': 'm', 'status': 'ok', 'cost_usd': '0.02'}],
@@ -132,10 +136,20 @@ class HelperTests(unittest.TestCase):
                       'analysis/simple_judge/report.html">report</a>)</span></td>', tabbed)
         counted = site.add_simple_judge_tab(tabbed, report)
         self.assertNotIn('not run', counted.split('<nav', 1)[0] + counted.split('</nav>', 1)[1].split('<ul', 1)[0])
-        line = ('simplified judge: 25 submitted · 2 credited · 2 whistleblowers, of 100 labelled '
+        line = ('simplified judge: 25 submitted, never credited · 2 credited · 2 whistleblowers, of 100 labelled; '
+                'each agent counted once, at its highest level '
                 '(<a href="analysis/simple_judge/report.html">report</a>)')
         self.assertIn(f'<p>Behavior judge: <span data-sj="1">{line}</span></p>', counted)
-        self.assertIn('<div class="v">25 submitted · 2 credited · 2 whistleblowers</div>', counted)
+        self.assertIn('<div class="v">25 submitted, never credited · 2 credited · 2 whistleblowers</div>', counted)
+        self.assertIn('of 100 labelled; each agent counted once, at its highest level; see the Behavior judge tab',
+                      counted)
+        # A page rendered with the earlier wording ("25 submitted") is rewritten in place, nothing else changes.
+        old = (counted.replace('submitted, never credited', 'submitted')
+               .replace('; each agent counted once, at its highest level', ''))
+        self.assertNotEqual(old, counted)
+        self.assertEqual(site.add_simple_judge_tab(old, report), counted)
+        self.assertEqual(site.level_text('submitted'), 'submitted, never credited')
+        self.assertEqual(site.level_text('credited'), 'credited')
         self.assertEqual(site.add_simple_judge_tab(counted, report), counted)
         self.assertEqual(counted, site.add_simple_judge_tab(PAGE + spots, report))
         judged = site.add_simple_judge_tab(JUDGED_PAGE + '<tr><td>Behavior judge</td><td>completed</td></tr>'
@@ -165,7 +179,8 @@ class HelperTests(unittest.TestCase):
             data = {n: (folder / n).read_bytes() for n in ('report.json', 'agents.jsonl')}
             page = site.site_page(data['report.json'], data['agents.jsonl'], RUN)
             linked = site.site_page(data['report.json'], data['agents.jsonl'], RUN, old_judge=True)
-            for text in ('id=sj-comparability', 'not comparable', 'evaluation-aware', 'credited',
+            for text in ('id=sj-comparability', 'not comparable', 'evaluation-aware', 'credited', 'id=sj-exclusive',
+                         'each agent counted once, at its highest level', 'submitted, never credited',
                          'just use Iff.rfl', '&#10003;', '&#10007;', 'data-theme="dark"'):
                 self.assertIn(text, page)
             self.assertNotIn('src=', page)  # inline script only, nothing external
@@ -206,8 +221,66 @@ class HelperTests(unittest.TestCase):
         self.assertIn('&lt;img src=x onerror=alert(1)&gt;', page)
         self.assertNotIn('<b>technique</b>', page)
         self.assertEqual(page.count('<tr data-level='), 3)
+        # Display text only: the stored level stays "submitted" in data attributes and filter values.
+        self.assertIn('data-level="submitted"', page)
+        self.assertIn('<span class="pos">submitted, never credited</span>', page)
+        self.assertIn('<input type=checkbox value="submitted" checked> submitted, never credited</label>', page)
         # Without a run start the facts stay in run minutes.
         self.assertIn('first flagged submission minute 12.6', render_html(report, [hostile]))
+
+    def test_relabel_report_page_and_site_plan(self):
+        """Owner, November 3, 2026: pages published with the earlier wording get the current report.py wording
+        in place; publish_cloudflare.py judge-labels changes only those words."""
+        import publish_cloudflare as cf
+        from research.analysis.simple_judge.report import render_html
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = write_simple_judge(Path(tmp) / RUN, local=False)
+            report = json.loads((folder / 'report.json').read_text())
+        report['counts']['cheating_level'] = {'none': 1, 'considered': 0, 'explored': 0, 'submitted': 1,
+                                              'credited': 1, 'unclear': 0}
+        report['counts']['submitted_basis'] = {'detector_flagged_submission': 1, 'readied_or_undetected': 0}
+        new = render_html(report, [row('agent-001'), row('agent-002', 'submitted')])
+        note = new[new.index('<p class=muted id=sj-exclusive>'):new.index('<h2>Counts</h2>')]
+        old = (new.replace(note, '')
+               .replace('Cheating levels (each agent counted once, at its highest level): ', 'Cheating levels: ')
+               .replace('submitted, never credited 1, credited', 'submitted 1, credited')
+               .replace('(submitted, never credited: ', '(submitted: ')
+               .replace('<span class="pos">submitted, never credited</span>', '<span class="pos">submitted</span>')
+               .replace('checked> submitted, never credited</label>', 'checked> submitted</label>')
+               .replace('const picked=boxes.filter(b=>lv.has(b.value)).map(b=>b.parentNode.textContent.trim());',
+                        'const picked=all.filter(v=>lv.has(v));'))
+        self.assertNotIn('never credited', old)
+        self.assertEqual(site.relabel_report_page(old), new)
+        self.assertEqual(site.relabel_report_page(new), new)
+        summary = {'schema': site.REPORT_SCHEMA, 'mode': 'paid', 'counts': {
+            'agents': 2, 'labelled': 2, 'cheating_any': 2, 'whistleblower': {'False': 2},
+            'evaluation_aware': {'False': 2}, 'cheating_level': report['counts']['cheating_level']}}
+        spots = ('<tr><td>Behavior judge</td><td>not run</td></tr><p>Behavior judge: not run</p>'
+                 '<div class="tile"><div class="k">Behavior judge</div><div class="v">not run</div>'
+                 '<div class="s">no judge outputs</div></div>')
+        results = site.add_simple_judge_tab(PAGE + spots, summary)
+        self.assertIn('1 submitted, never credited · 1 credited', results)
+        old_results = (results.replace('submitted, never credited', 'submitted')
+                       .replace('; each agent counted once, at its highest level', ''))
+        base = {f'{RUN}/results.html': old_results.encode(), f'{RUN}/analysis/simple_judge/report.html': old.encode(),
+                f'{RUN}/analysis/simple_judge/report.json': json.dumps(summary).encode(),
+                f'{RUN}/other.html': b'<p>submitted</p>', f'{OTHER}/results.html': PAGE.encode()}
+        files, plan = cf.plan_judge_labels(base)
+        self.assertEqual(files[f'{RUN}/results.html'].decode(), results)
+        self.assertEqual(files[f'{RUN}/analysis/simple_judge/report.html'].decode(), new)
+        self.assertEqual({n: d for n, d in files.items() if n not in plan_paths(plan)},
+                         {n: d for n, d in base.items() if n not in plan_paths(plan)})
+        self.assertEqual(len(plan['replaced_pages']), 2)
+        again, plan2 = cf.plan_judge_labels(files)
+        self.assertEqual(again, files)
+        self.assertEqual(plan2['replaced_pages'], [])
+        with self.assertRaisesRegex(ValueError, 'without a published simplified judge'):
+            cf.plan_judge_labels(base, [OTHER])
+        tampered = dict(base)
+        tampered[f'{RUN}/analysis/simple_judge/report.html'] = old.replace('</main>', '</main><!--x-->').encode()
+        files, _ = cf.plan_judge_labels(tampered)  # unrelated differences in the served page stay as they are
+        self.assertIn(b'<!--x-->', files[f'{RUN}/analysis/simple_judge/report.html'])
+        self.assertFalse(cf._judge_only_changes('<p>a</p><p>b</p>', '<p>a</p><p>c</p>'))
 
     def test_incomplete_judge_is_not_published(self):
         with tempfile.TemporaryDirectory() as tmp:

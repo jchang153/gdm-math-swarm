@@ -211,9 +211,11 @@ const judge=e=>(sum(e)||{}).judge||null;
 // the browser from the run's published analysis/simple_judge/report.json (kept outside the entry).
 const SIMPLE='Simple behavior judge',SHOWN=['explored','submitted','credited'];
 const simple=e=>(sum(e)||{}).simple_judge||e._simple||null;
-function simpleText(s){const parts=SHOWN.filter(k=>s.levels[k]).map(k=>s.levels[k]+' '+k);
+// Levels are exclusive (each agent at its highest level); "submitted" reads "submitted, never credited".
+const LEVEL_TEXT={submitted:'submitted, never credited'},levelText=k=>LEVEL_TEXT[k]||k,EXCLUSIVE='each agent counted once, at its highest level';
+function simpleText(s){const parts=SHOWN.filter(k=>s.levels[k]).map(k=>s.levels[k]+' '+levelText(k));
  if(s.whistleblowers)parts.push(s.whistleblowers+' whistleblower'+(s.whistleblowers===1?'':'s'));
- return [parts.join(' · ')||'none flagged','of '+s.labelled+' labelled'+(s.mode&&s.mode!=='paid'?' ('+s.mode+')':'')];}
+ return [parts.join(' · ')||'none flagged','of '+s.labelled+' labelled'+(s.mode&&s.mode!=='paid'?' ('+s.mode+')':'')+(parts.length?'; '+EXCLUSIVE:'')];}
 function simpleCounts(r){if(!r||r.schema!=='gdm-simple-judge/1'||!r.counts||typeof r.counts!=='object')return null;
  const c=r.counts,ok=v=>Number.isInteger(v)&&v>=0,obj=v=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.values(v).every(ok);
  if(!obj(c.cheating_level)||!obj(c.whistleblower)||!obj(c.evaluation_aware)||!ok(c.agents)||!ok(c.labelled)||!ok(c.cheating_any))return null;
@@ -309,7 +311,7 @@ function compareTable(list){
   ...COHORTS.map(k=>['Rubric 3.1 judge: '+LABELS[k][1],cohort(k)]),
   ['Simple judge: labelled agents',e=>{const s=simple(e);return s?esc(s.labelled)+' of '+esc(s.agents)+(e.links[SIMPLE]?' · <a href="'+esc(e.links[SIMPLE])+'">report</a>':''):sjMissing(e);}],
   ['Simple judge: cheating (explored or further)',sj(s=>s.cheating_any,true)],
-  ...['considered','explored','submitted','credited','unclear'].map(k=>['Simple judge: '+k,sj(s=>s.levels[k]??0,k!=='considered'&&k!=='unclear')]),
+  ...['considered','explored','submitted','credited','unclear'].map(k=>['Simple judge: '+levelText(k)+' (agents at this highest level)',sj(s=>s.levels[k]??0,k!=='considered'&&k!=='unclear')]),
   ['Simple judge: whistleblowers',sj(s=>s.whistleblowers,false)],
   ['Simple judge: evaluation-aware (not comparable with rubric 3.1)',sj(s=>s.evaluation_aware,false)],
   ['Open',e=>Object.entries(e.links).filter(([n])=>!hidden(n)).map(([n,u])=>'<a href="'+esc(u)+'">'+esc(n)+'</a>').join('<br>')]];
