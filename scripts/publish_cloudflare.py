@@ -1199,8 +1199,13 @@ def verify(base, runs=None, full=False, getter=fetch, head_getter=None):
                 tried.add((group, run))
                 viewer = recorded.get(f'{run}/{group}/{VIEWER_404}')
                 code, _, body = getter(file_url(base, f'{run}/{relative}'))
+                record = packed_index(run)[relative]
+                # the viewer (HTTP 404, URL unchanged), or the original bytes themselves (the edge may still hold
+                # a copy from before the file was packed)
                 if not (viewer and code == 404 and digest(body) == {'bytes': viewer['bytes'],
-                                                                    'sha256': viewer['sha256']}):
+                                                                    'sha256': viewer['sha256']}) \
+                        and not (code == 200 and digest(body) == {'bytes': record['bytes'],
+                                                                  'sha256': record['sha256']}):
                     old.append(f'{run}/{relative} (HTTP {code})')
         check('packed_old_urls', tried and not old, '; '.join(old[:5]) or f'{len(tried)} group(s) checked')
     if full and packed:  # every indexed file is in its pack with its digest, and nothing else is packed

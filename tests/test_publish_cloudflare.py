@@ -280,6 +280,11 @@ class PackTests(unittest.TestCase):
         self.assertIn('7 group(s)', old['detail'])
         result = cf.verify('https://d.p.pages.dev', getter=Served(files))
         self.assertEqual({c['check'] for c in result['checks'] if not c['ok']}, {'packed_old_urls'})
+        originals = {**agent_files(RUN), **more_files(RUN)}  # an edge copy of the original bytes also counts
+        cached = Served(files, {n: (200, {}, d) for n, d in originals.items()})
+        self.assertTrue(cf.verify('https://d.p.pages.dev', getter=cached)['ok'])
+        wrong = Served(files, {n: (200, {}, d + b'x') for n, d in originals.items()})
+        self.assertFalse(cf.verify('https://d.p.pages.dev', getter=wrong)['ok'])
         full = cf.verify('https://d.p.pages.dev', full=True, getter=Served(files, nested_404=True))
         self.assertTrue(full['ok'], full)
         self.assertIn('packed_members', {c['check'] for c in full['checks']})
