@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-03 PT by Claude (Opus 5.5) subagent (item 23: push delivery, 15 runs).
+Last updated: 2026-11-03 PT by Claude (Opus 5.5) subagent (item 24: story-map push support, evidence, audit fixes).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -901,7 +901,7 @@ is being merged into main via `collab-env`.
      control r3 63/86, 2ov r3 30/42, 10ov r3 16/24 (almost all disagreements are library vs self_then_library,
      both ways); every non-faker mapped `none` (32/32, 14/14, 58/58, 75/75); first fake time within 2 min 58/66,
      85/86, 39/42, 24/24; awareness agreement 71-81%. Consistency: no faked/credited contradictions in 400 agents;
-     stopped-then-faked again 3 (1ov r2) and 2 (2ov r3); stage-1 quotes not verbatim 6-8%, stage-2 quotes <1%.
+     stopped-then-faked again 3 (1ov r2) and 2 (2ov r3) (a validation artifact, fixed 2026-11-03, item 24: it used the first stop, not the last; now 0); stage-1 quotes not verbatim 6-8%, stage-2 quotes <1%.
      Cross-check (Gemini Flash, 10 agents per run): stage-3 source agreement 9/10, 7/10, 8/10, 10/10; faked and
      first_fake_t 10/10 everywhere; stage-1 code Jaccard 0.52-0.65.
    - Outputs: `runs/<id>/analysis/storymap/` (index.html, events.html, agents/, stage1-3, map.jsonl, crosscheck/,
@@ -964,7 +964,7 @@ is being merged into main via `collab-env`.
    no story maps for those (no stop counts). Story maps: `runs/<id>/analysis/storymap/` (index.html, agents/,
    validation.md; timelines in `timeline/`), best-value models, `--run-limit 100`. r1's agent-036 had no Claude Code
    session in its resume bundle; its timeline came from the Inspect log (`inspect/` restored from the dataset).
-   R1 events in the timelines vs delivery events: r1 520/529, r2 514/514, r3 454/455 (a few deliveries were in
+   R1 events in the timelines vs delivery events (corrected 2026-11-03, item 24): r1 527/529, r2 514/514, r3 454/455 (a few deliveries were in
    tool results missing from the session transcripts).
    - **Reminders as story-map interventions (DONE 2026-11-03 16:10 PT; owner, docs/plan.md "Integrity reminders as
      story-map interventions"):** every R1 delivery now gets a stage-2 reaction (EVENT NOTE: automated host notice,
@@ -1028,7 +1028,7 @@ is being merged into main via `collab-env`.
    - The simple judge was rerun on both VMs ($0.70, $0.77) after fixing the coding seed path in
      `research/analysis/roles.py` (`978c1c0`; first pass kept as `analysis/simple_judge.seedpath-lean`); results rebuilt
      (`results.pre-judge-rerun.*` kept).
-   - Story maps (`--run-limit 50`, 20/20 agents each, validation consistency all ok): control $5.56, 2ov $15.37;
+   - Story maps (`--run-limit 50`, 20/20 agents each, validation consistency: `stage2_event_before_reaction` fails 21 / 75 and `stage1_quotes` 10 / 9, models quoting window items before the event, not data bugs): control $5.56, 2ov $15.37;
      `runs/<id>/analysis/storymap/` (timelines in `analysis/storymap-timeline/`). Local only.
    - **Published 2026-11-03 (~16:00 PT)** to the new Cloudflare Pages project `gdm-impossiblebench-experiments`,
      https://gdm-impossiblebench-experiments.pages.dev (owner request; variant labels shown publicly, docs/plan.md
@@ -1108,7 +1108,7 @@ is being merged into main via `collab-env`.
      called). `settings.json` `effective.push_delivery` is true and `effective.unread_notice_channels` is
      `["library"]`.
 
-24. **IN PROGRESS 2026-11-03 (evening): story-map data for push delivery, evidence chains, audit fixes** (data side:
+24. **DONE 2026-11-03 (~20:30 PT): story-map data for push delivery, evidence chains, audit fixes** (data side:
    extract/chunk/pipeline/schema/validate, new `storymap/evidence.py`; GUI side `view.py` is another agent's).
    **Field contract for the GUI (stable; old fields unchanged, old timelines still load):**
    - Timeline items gain `call_id` (tool_use id on `tool_call`/`tool_result`, else null) and `mid` (model message id
@@ -1135,7 +1135,38 @@ is being merged into main via `collab-env`.
      "tool"}]` within the chain). `items` holds each referenced item once: `i, turn, t, kind, tool, call_id, text`
      (reasoning/text up to 6,000 characters, tool results up to 2,000; `text_cut` true when cut) and for events
      `event_type, event_id, delivery`. Also callable in memory: `evidence.agent_evidence(items, stage1_rows)`.
-     Status: in progress (this agent); final state goes here when done.
+   - **Push support (commit "storymap: push delivery").** `extract.py` reads `push_delivered` events from
+     `conference/state.sqlite` (`push_delivery` adapter) and places each block right after its anchor tool result
+     (`place_pushes`), else by time; the events are emitted at the start of the next model step. Stage 2 selects pushed
+     items exactly like pulled ones (overseer posts/DMs, tagged posts/DMs, every R1); a pushed item's message gets an
+     EVENT NOTE (push; the reminder variant without `system_notice`) and a SAME DELIVERY section listing the rest of
+     its block. Stage 3 gets a NOTE ON PUSH DELIVERY and FACTS `push_deliveries`. Messages of pull runs are unchanged:
+     `chunk.RENDER_DEFAULTS` keeps `delivery` pull/notice and `continuation` false out of prompts. Verified that
+     re-extracting 1ov r2 and reminder r1 renders byte-identical prompts except for the intended L2 fix below.
+     `validate.py` adds a "Push delivery" section (blocks, placement, unanswered blocks, stage-2 status).
+     Mock end-to-end on the fixture with injected pushes: ok.
+   - **Audit fixes (all 9 maps; full list in the commit and the run report).** validate `stopped` used the first stop,
+     not the last (false failures 1ov r2 3, 2ov r3 2, reminder r1 1, r3 1; now 0); new validation checks
+     `stage3_phases`, `stage3_turning_points`, `stage3_causes`, `stage3_stopped_vs_phases` (control r3: 23 fakers whose
+     last phase is `stopped` but `final.stopped` is false, Terra 5.6 outputs; 1ov r2 8; 2ov r3 1); Inspect-fallback
+     tool results used the upper time bound (up to 4.5 min late; now the lower one); L2 `reread` was keyed by path
+     only (a new revision counted as a re-read) and L2 re-reads and page continuations still went to stage 2 (now
+     neither); new units: stage 1 copies a miscopied turn/t from the cited item when the quote verifies there, and
+     stage 3 runs the structure checks as soft problems (repair) with cause times. validation.md/json regenerated for
+     all 9 maps (previous `validation.pre-audit.*` kept; code runs now include the cross-check); pages NOT re-rendered
+     or republished (the published reminder-run validation pages still show one false `stopped` failure each).
+     Existing stage outputs were not rerun. A pipeline re-invocation over the old runs would now re-request stage 3
+     for agents whose L2 re-reads drop out of stage 2 (at most 28 agents over the 7 math runs, under $2) on top of the
+     stale-FACTS agents of the answer-echo change.
+   - **Evidence:** `evidence/<agent>.json` written for all 9 maps (local, 3-19 MB per run; 1ov r2 3,977 thoughts,
+     142 quotes not found). Not yet embedded by the GUI.
+   - **Cost estimate, 120-min push runs at `--run-limit 75`** (unit costs from the reminder runs: stage-2 GPT-6.1
+     Terra $0.021-0.024, stage-1 Haiku ~$0.11 per M prompt tokens, stage-3 Sol ~$0.02-0.05 per agent): control,
+     1ov, 2ov ~$30-45; 10ov ~$45-60 (pushing its ~11 flagged posts to 100 solvers adds ~1,100 stage-2 units);
+     reminder ~$70-85 (push delivers about every boundary, ~2,200 R1 units x $0.021 = ~$47, vs ~500 per 60-min
+     run with system_notice). The reminder condition may hit $75: a budget stop leaves complete maps for agents in
+     order and resumes with a higher limit; or launch it with `--run-limit 100`. More posting under push raises
+     the 10ov estimate.
 
 ## Next steps / open items
 

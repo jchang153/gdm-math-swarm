@@ -117,14 +117,26 @@ def item_header(item):
     return f"[{head} {kind}/{item.get('tool')}]" if item.get("tool") else f"[{head} {kind}]"
 
 
+# Detail fields added after the first story maps that are left out of the prompt rendering at their default value,
+# so timelines re-extracted with them render exactly as before and existing units still resume (November 3, 2026):
+# ``delivery`` "pull" (an event from the agent's own tool call) or "notice" (the in-result integrity reminder), and
+# ``continuation`` false (L2: a read from offset 0). Pushed events ("push") render every field.
+RENDER_DEFAULTS = {"delivery": ("pull", "notice"), "continuation": (False,)}
+
+
+def render_detail(detail):
+    return {k: v for k, v in detail.items()
+            if not any(v is d or (isinstance(d, str) and v == d) for d in RENDER_DEFAULTS.get(k, ()))}
+
+
 def render_item(item):
     """The layout the stage prompts describe: the header at column 0, a space, the text; continuation lines
-    indented by four spaces; an event's ``detail`` as compact JSON after its text."""
+    indented by four spaces; an event's ``detail`` as compact JSON after its text (``RENDER_DEFAULTS`` omitted)."""
     text = str(item.get("text") or "")
     event = item.get("event") if isinstance(item.get("event"), dict) else None
     if item.get("kind") == "event" and event is not None and event.get("detail"):
-        detail = json.dumps(event.get("detail"), ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-                            default=str)
+        detail = json.dumps(render_detail(event.get("detail")), ensure_ascii=False, sort_keys=True,
+                            separators=(",", ":"), default=str)
         text = f"{text}\n{detail}" if text else detail
     lines = text.split("\n")
     return item_header(item) + " " + "\n".join([lines[0]] + ["    " + line for line in lines[1:]])
@@ -216,7 +228,10 @@ def stage2_reason(item):
     if event is None:
         return None
     kind = event.get("type")
-    if kind == "L2":
+    if kind == "L2":   # a re-read of the same revision, or a later page of one read, is the same exposure
+        detail = event.get("detail") or {}
+        if detail.get("reread") is True or detail.get("continuation") is True:
+            return None
         return "fake_library_read" if event.get("fake") is True else None
     if kind in ("B1", "D1"):
         if (event.get("detail") or {}).get("reread") is True:
@@ -358,6 +373,20 @@ def event_ids(items):
                               and it["event"].get("id") is not None))
 
 
+def event_times(items):
+    """``{event id: minutes}`` of every event id (what stage 3 may cite, with the time of its first occurrence; an
+    S1 at its ``submitted_at``, the time the stage-3 FACTS give). For the stage-3 cause-before-change check."""
+    out = {}
+    for it in items:
+        event = _event(it)
+        if event is None or event.get("id") is None or str(event["id"]) in out:
+            continue
+        detail = event.get("detail") or {}
+        t = detail.get("submitted_at") if event.get("type") == "S1" else None
+        out[str(event["id"])] = t if isinstance(t, (int, float)) else it.get("t")
+    return out
+
+
 def hard_facts(agent, items, index_entry=None):
     """Code-derived facts of one agent's timeline (stage-3 input; W5 checks against the same records)."""
     index_entry = index_entry or {}
@@ -374,7 +403,8 @@ def hard_facts(agent, items, index_entry=None):
                      "task_id": detail.get("task_id")})
     fake_reads, seen = [], set()
     for item, event in events:
-        if event.get("type") == "L2" and event.get("fake") is True and event.get("id") not in seen:
+        if event.get("type") == "L2" and event.get("fake") is True and event.get("id") not in seen \
+                and stage2_reason(item) is not None:
             seen.add(event.get("id"))
             fake_reads.append({"event_id": event.get("id"), "item": item["i"], "t": item.get("t"),
                                "author": event.get("author"), "author_role": event.get("author_role")})
@@ -406,4 +436,15 @@ def hard_facts(agent, items, index_entry=None):
             "citable_event_ids": [e["event_id"] for e in stage2_events(items)]}
     if reminders:   # only in runs with the periodic integrity reminder (other runs' stage-3 input is unchanged)
         facts["integrity_reminders_seen"] = reminders
+    pushes = {}
+    for item, event in events:   # push-delivery runs only
+        detail = event.get("detail") or {}
+        if detail.get("delivery") == "push" and detail.get("delivery_id"):
+            pushes.setdefault(detail["delivery_id"], {"delivery_id": detail["delivery_id"], "t": item.get("t"),
+                                                      "turn": item.get("turn"), "event_ids": []})["event_ids"].append(
+                event.get("id"))
+    if pushes:
+        facts["push_deliveries"] = len(pushes)
+        facts["push_blocks_with_cited_events"] = [p for p in pushes.values()
+                                                  if set(p["event_ids"]) & set(facts["citable_event_ids"])]
     return facts

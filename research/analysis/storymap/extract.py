@@ -43,6 +43,54 @@ RULING = re.compile(r"revert|not genuine|credit (?:withdrawn|removed)|ruling|ver
 REVERT = re.compile(r"revert|reopened|credit (?:withdrawn|removed)|withdrawn", re.I)
 REMINDER_SUMMARY = 300  # characters of an integrity reminder kept in the event text (full text in detail)
 UNREAD = re.compile(r"(\d+) new ([a-z ]+?)(?: since| \(|$)")
+PUSH_EVENT = "push_delivered"   # research_swarm.conference.PUSH_EVENT
+PUSH_CHANNEL_TYPE = {"board": "B1", "dm": "D1", "reminder": "R1"}
+
+
+def push_delivery(seq, timestamp, payload):
+    """Adapter for one ``push_delivered`` conference event (research_swarm.conference.deliver_push): payload
+    ``{"items": [{"channel": "board"|"dm"|"reminder", "id", "author", "text", "created_ts", "public_id"?,
+    "boundary"?}], "request_seq", "anchor_tool_use_id", "block", "counts"}``. Returns ``{"delivery_id", "ts",
+    "anchor", "request_seq", "items"}`` (items in delivery order, unknown channels dropped) or None."""
+    try:
+        data = json.loads(payload) if isinstance(payload, str) else dict(payload or {})
+    except (ValueError, TypeError):
+        return None
+    items = [it for it in data.get("items") or [] if isinstance(it, dict) and it.get("channel") in PUSH_CHANNEL_TYPE]
+    if not items:
+        return None
+    return {"delivery_id": f"push-{int(seq):06d}", "ts": float(timestamp),
+            "anchor": data.get("anchor_tool_use_id") or None,
+            "request_seq": data.get("request_seq", data.get("model_call")), "items": items}
+
+
+def place_pushes(stream, pushes):
+    """The stream with one ``("push", ts, delivery)`` record per push delivery: right after the tool result it was
+    appended to (``anchor_tool_use_id``; ``placement`` "anchor"), else, when that result is not in the transcript,
+    before the first record later than the delivery (``placement`` "time"; at the end when none is). The Builder
+    holds a push until the next model step starts: that step is the one that received it."""
+    if not pushes:
+        return stream
+    ids = {p.get("id"): k for k, (kind, _, p) in enumerate(stream) if kind == "tool_result" and p.get("id")}
+    after, unanchored = {}, []
+    for push in pushes:
+        k = ids.get(push["anchor"]) if push["anchor"] else None
+        if k is None:
+            unanchored.append(dict(push, placement="time"))
+        else:
+            after.setdefault(k, []).append(dict(push, placement="anchor"))
+    unanchored.sort(key=lambda p: p["ts"])
+    out, u = [], 0
+    for k, rec in enumerate(stream):
+        ts = rec[1]
+        while u < len(unanchored) and ts is not None and ts > unanchored[u]["ts"] and rec[0] != "tool_result":
+            out.append(("push", unanchored[u]["ts"], unanchored[u]))
+            u += 1
+        out.append(rec)
+        for push in after.get(k, ()):
+            out.append(("push", push["ts"], push))
+    out.extend(("push", p["ts"], p) for p in unanchored[u:])
+    return out
 
 
 def _epoch(value):
@@ -143,6 +191,14 @@ class RunContext:
             if d.get("public_id"):
                 self.msg_by_public[d["public_id"]] = d
         self.agents = [r["agent_id"] for r in db.execute("select agent_id from agents order by agent_id")]
+        self.pushes = {}   # agent -> [push delivery] (push-delivery runs only; docs/plan.md, November 3, 2026)
+        has_events = db.execute("select 1 from sqlite_master where type='table' and name='events'").fetchone()
+        if has_events:
+            for r in db.execute("select seq, timestamp, agent_id, payload from events where kind = ? order by seq",
+                                (PUSH_EVENT,)):
+                push = push_delivery(r["seq"], r["timestamp"], r["payload"])
+                if push is not None:
+                    self.pushes.setdefault(r["agent_id"], []).append(push)
         db.close()
         if self.start is None:
             clock = (self.settings.get("effective") or {}).get("common_start_utc")
@@ -290,7 +346,8 @@ def inspect_stream(run_dir, agent):
     for it in history.items:
         kind, ts, turn = it["kind"], _epoch(it.get("time")), it.get("turn")
         if ts is None and it.get("time_bounds"):
-            ts = _epoch(it["time_bounds"][1])
+            # the lower bound: the upper one (the next model call) put tool results up to minutes late, out of order
+            ts = _epoch(it["time_bounds"][0])
         mid = f"turn-{turn}"
         if turn != last_turn and turn in restarts and last_turn is not None:
             out.append(("restart", ts, {"session": None}))
@@ -376,15 +433,18 @@ class Builder:
         self.calls = {}
         self.seen_posts, self.seen_dms, self.seen_lib = set(), set(), set()
         self.p2_seen = set()
+        self.pending_push = []   # push deliveries waiting for the model step that received them
 
     # -- helpers
     def t(self, ts):
         return mins(ts, self.ctx.start)
 
-    def add(self, ts, kind, text, tool=None, event=None, turn=None):
+    def add(self, ts, kind, text, tool=None, event=None, turn=None, call_id=None, mid=None):
+        """One item. ``call_id`` (the tool_use id of a tool_call / tool_result) and ``mid`` (the model step's
+        message id on reasoning / text / tool_call) are evidence references, never rendered into a prompt."""
         self.items.append({"i": len(self.items), "t": self.t(ts), "ts": _iso(ts),
                            "turn": max(self.turn, 0) if turn is None else turn, "kind": kind, "tool": tool,
-                           "text": text, "event": event})
+                           "text": text, "event": event, "call_id": call_id, "mid": mid})
 
     def event(self, ts, etype, eid, text, tool=None, author=None, fake=None, tags=(), outcome=None, detail=None,
               turn=None):
@@ -400,18 +460,22 @@ class Builder:
                 if mid not in self.mid_turn:
                     self.turn += 1
                     self.mid_turn[mid] = self.turn
+                    self.flush_push(self.turn)
                 turn = self.mid_turn[mid]
                 if kind == "tool_call":
                     name = p.get("name")
                     self.calls[p.get("id")] = (name, turn, p.get("input"), ts)
                     body = p.get("input")
                     text = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False)
-                    self.add(ts, kind, text, tool=short_tool(name), turn=turn)
+                    self.add(ts, kind, text, tool=short_tool(name), turn=turn, call_id=p.get("id"), mid=mid)
                 else:
-                    self.add(ts, kind, p["text"], turn=turn)
+                    self.add(ts, kind, p["text"], turn=turn, mid=mid)
+            elif kind == "push":
+                self.pending_push.append(p)
             elif kind == "tool_result":
                 name, turn, args, _ = self.calls.get(p.get("id"), (None, max(self.turn, 0), None, ts))
-                self.add(ts, "tool_result", trim_result(name, p["text"]), tool=short_tool(name), turn=turn)
+                self.add(ts, "tool_result", trim_result(name, p["text"]), tool=short_tool(name), turn=turn,
+                         call_id=p.get("id"))
                 if is_collab(name):
                     self.derive(ts, short_tool(name), args, p["text"], turn)
             elif kind == "context":
@@ -425,7 +489,70 @@ class Builder:
                 self.event(ts, "C1", f"C1:{self.agent}@{self.t(ts)}",
                            "Restart: a new session begins without the earlier conversation",
                            detail={"trigger": "restart", "session": p.get("session"), "summary": None})
+        self.flush_push(None)
         return self.items
+
+    # -- push delivery (host-appended board posts, DMs and reminders)
+    def flush_push(self, turn):
+        """Emit the held push deliveries at the start of model step ``turn`` (the step that received them);
+        ``None`` at the end of the transcript (no reply recorded: the last turn, ``answered`` false)."""
+        pending, self.pending_push = self.pending_push, []
+        for push in pending:
+            self.on_push(push, max(self.turn, 0) if turn is None else turn, answered=turn is not None)
+
+    def on_push(self, push, turn, answered=True):
+        """One event per pushed item (B1 board post, D1 direct message, R1 integrity reminder), all at the
+        delivery's time and turn, sharing ``delivery_id`` with ``position`` / ``delivery_size`` in ``detail``."""
+        ts, items = push["ts"], push["items"]
+        common = {"delivery": "push", "delivery_id": push["delivery_id"], "delivery_size": len(items),
+                  "delivery_items": [self.push_event_id(it) for it in items],
+                  "anchor_tool_use_id": push["anchor"], "request_seq": push["request_seq"],
+                  "placement": push["placement"], "answered": answered}
+        for position, it in enumerate(items):
+            detail = dict(common, position=position)
+            channel, author = it["channel"], it.get("author")
+            if channel == "board":
+                pid = it.get("id")
+                row = self.ctx.posts.get(pid) or {}
+                msg = row.get("message") or it.get("text") or ""
+                reread = pid in self.seen_posts
+                self.seen_posts.add(pid)
+                role = self.ctx.role(author)
+                self.event(ts, "B1", f"B1:{pid}", f"{pid} by {author} ({role})"
+                           + (" [re-read]" if reread else ": " + msg[:POST_TEXT]) + " [pushed]", tool="push",
+                           author=author, tags=text_tags(msg, role, self.ctx.trick),
+                           detail=dict(detail, post_id=pid, posted_at=self.t(_epoch(it.get("created_ts"))
+                                                                              or row.get("posted_at")),
+                                       intent_type=row.get("intent_type"), reread=reread), turn=turn)
+            elif channel == "dm":
+                mid = self.push_item_key(it)
+                row = self.ctx.msg_by_public.get(it.get("public_id")) or {}
+                msg = row.get("body") or it.get("text") or ""
+                reread = mid in self.seen_dms
+                self.seen_dms.add(mid)
+                role = self.ctx.role(author)
+                self.event(ts, "D1", f"D1:{mid}", f"{mid} from {author} ({role})"
+                           + (" [re-read]" if reread else ": " + msg[:POST_TEXT]) + " [pushed]", tool="push",
+                           author=author, tags=text_tags(msg, role, self.ctx.trick),
+                           detail=dict(detail, message_id=mid, public_id=it.get("public_id"),
+                                       sent_at=self.t(_epoch(it.get("created_ts")) or row.get("sent_at")),
+                                       reread=reread), turn=turn)
+            else:
+                notice = str(it.get("text") or "").strip()
+                short = notice if len(notice) <= REMINDER_SUMMARY else notice[:REMINDER_SUMMARY].rstrip() + " ..."
+                self.event(ts, "R1", self.push_event_id(it), "Integrity reminder (pushed): " + short,
+                           tool="push", detail=dict(detail, notice=notice, boundary=it.get("boundary"),
+                                                    due_at=self.t(_epoch(it.get("created_ts")))), turn=turn)
+
+    def push_event_id(self, it):
+        """The event id of a pushed item: ``B1:post-000123``, ``D1:dm-000045``, ``R1:<agent>:reminder-003``."""
+        typ = PUSH_CHANNEL_TYPE[it["channel"]]
+        return f"R1:{self.agent}:{self.push_item_key(it)}" if typ == "R1" else f"{typ}:{self.push_item_key(it)}"
+
+    @staticmethod
+    def push_item_key(it):
+        """The pushed item's id as the pull events name it: ``post-000123``, ``dm-000045``, ``reminder-003``."""
+        return str(it.get("id") or (f"reminder-{int(it['boundary']):03d}" if it.get("boundary") is not None else "?"))
 
     # -- derived conference events
     def derive(self, ts, tool, args, text, turn):
@@ -449,7 +576,7 @@ class Builder:
             notice = r["system_notice"].strip()
             short = notice if len(notice) <= REMINDER_SUMMARY else notice[:REMINDER_SUMMARY].rstrip() + " ..."
             self.event(ts, "R1", f"R1:{self.agent}@{self.t(ts)}", "Integrity reminder: " + short, tool=tool,
-                       detail={"notice": notice}, turn=turn)
+                       detail={"notice": notice, "delivery": "notice"}, turn=turn)
 
     def on_list_library(self, ts, r, args, turn):
         files = r.get("files") or []
@@ -467,8 +594,12 @@ class Builder:
         sub_id = (row or {}).get("submission_id")
         rev = self.ctx.reversions.get(sub_id) if sub_id is not None else None
         reverted_at = rev["reverted_at"] if rev else None
-        reread = path in self.seen_lib
-        self.seen_lib.add(path)
+        # a re-read is the same revision again (a new revision of the path is new content); a later page
+        # (offset > 0) of the same read is a continuation, not a re-read
+        key = (path, r.get("revision"))
+        continuation = bool(r.get("offset") or 0)
+        reread = key in self.seen_lib and not continuation
+        self.seen_lib.add(key)
         fake = (row or {}).get("fake") if row else bool(self.ctx.classify(r.get("content") or ""))
         state = ("reverted before this read" if reverted_at is not None and reverted_at <= ts else
                  (f"reverted later at {self.t(reverted_at)}" if reverted_at else "not reverted"))
@@ -482,6 +613,7 @@ class Builder:
                            "validity": (row or {}).get("validity"), "reverted_at": self.t(reverted_at),
                            "reverted_before_read": bool(reverted_at is not None and reverted_at <= ts),
                            "offset": r.get("offset"), "has_more": r.get("has_more"), "reread": reread,
+                           "continuation": continuation,
                            "own": author == self.agent}, turn=turn)
 
     def _listing(self, ts, r, tool, turn):
@@ -531,7 +663,8 @@ class Builder:
             self.event(ts, "B1", f"B1:{pid}", head + (" [re-read]" if reread else ": " + msg[:POST_TEXT]),
                        tool="get_bulletin_board", author=author, tags=text_tags(msg, role, self.ctx.trick),
                        detail={"post_id": pid, "posted_at": self.t(_epoch(post.get("posted_at"))),
-                               "intent_type": post.get("intent_type"), "reread": reread}, turn=turn)
+                               "intent_type": post.get("intent_type"), "reread": reread, "delivery": "pull"},
+                       turn=turn)
 
     def on_get_messages(self, ts, r, args, turn):
         for m in r.get("messages") or []:
@@ -548,7 +681,8 @@ class Builder:
             self.event(ts, "D1", f"D1:{mid}", head + (" [re-read]" if reread else ": " + msg[:POST_TEXT]),
                        tool="get_messages", author=author, tags=text_tags(msg, role, self.ctx.trick),
                        detail={"message_id": mid, "public_id": m.get("message_id"),
-                               "sent_at": self.t(_epoch(m.get("sent_at"))), "reread": reread}, turn=turn)
+                               "sent_at": self.t(_epoch(m.get("sent_at"))), "reread": reread, "delivery": "pull"},
+                       turn=turn)
 
     def on_submit_solution(self, ts, r, args, turn):
         row = self.ctx.sub_by_public.get(r.get("submission_id"))
@@ -607,9 +741,10 @@ class Builder:
 
 
 def item_tokens(item):
+    from research.analysis.storymap.chunk import render_detail
     n = estimate_tokens(item["text"])
     if item["event"]:
-        n += estimate_tokens(json.dumps(item["event"]["detail"], ensure_ascii=False))
+        n += estimate_tokens(json.dumps(render_detail(item["event"]["detail"]), ensure_ascii=False))
     return n
 
 
@@ -618,7 +753,7 @@ def build_agent(run_dir, agent, ctx=None):
     stream, source = session_stream(run_dir, agent), "session_jsonl"
     if stream is None:
         stream, source = inspect_stream(run_dir, agent), "inspect"
-    items = Builder(ctx, agent).feed(stream)
+    items = Builder(ctx, agent).feed(place_pushes(stream, ctx.pushes.get(agent)))
     times = [it["t"] for it in items if it["t"] is not None]
     return items, {"items": len(items), "est_tokens": sum(item_tokens(it) for it in items),
                    "first_min": min(times) if times else None, "last_min": max(times) if times else None,

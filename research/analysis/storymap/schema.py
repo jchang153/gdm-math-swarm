@@ -54,6 +54,7 @@ EVENT_TYPES = ("L1", "L2", "P1", "P2", "B1", "D1", "S1", "O1", "C1", "N1", "R1")
 # Taxonomy groups whose codes Stage 1 may record as thoughts (E codes are Stage 2 fields).
 THOUGHT_GROUPS = ("A", "B", "C", "D", "F", "G")
 TIME_TOLERANCE = 1e-6
+BOUNDARY_TOLERANCE = 0.01   # minutes: a turning point and its phase boundary, consecutive phases
 
 _AGENT_ID = re.compile(r"^agent-\d{3}$")
 _CODE_HEADING = re.compile(r"^### ([A-Z]\d+) - (.+?)\s*$", re.M)
@@ -319,7 +320,7 @@ def _summary(c, value, truncated):
     return summary
 
 
-def validate_stage1(raw, *, codes=None, items=None, warnings=None, soft=None, truncated=None):
+def validate_stage1(raw, *, codes=None, items=None, warnings=None, soft=None, truncated=None, fix_item_fields=False):
     """Normalized Stage 1 output of one chunk, or ``SchemaError``.
 
     ``codes``: the allowed thought codes (default: the taxonomy's groups A, B, C, D, F, G, read
@@ -330,7 +331,11 @@ def validate_stage1(raw, *, codes=None, items=None, warnings=None, soft=None, tr
     ``state.summary`` over SUMMARY_MAX_CHARS is cut deterministically to its first SUMMARY_MAX_CHARS characters
     and is never a problem (owner decision, November 2, 2026: about 90 % of the control run's stage-1 repairs
     resent a ~57k-token prompt only for this); ``truncated``: a list that receives
-    ``{"field": "state.summary", "from_chars": n, "to_chars": SUMMARY_MAX_CHARS}``."""
+    ``{"field": "state.summary", "from_chars": n, "to_chars": SUMMARY_MAX_CHARS}``.
+
+    ``fix_item_fields``: when a thought's quote verifies in the item it cites, a miscopied ``turn`` or ``t`` is
+    replaced by the item's (a warning, no problem, so no paid repair); without it (the default) the mismatch is a
+    record check as before. Only the output changes, never a prompt."""
     obj = _load(raw)
     allowed = set(_default_codes() if codes is None else codes)
     texts = _item_texts(items)
@@ -359,10 +364,22 @@ def validate_stage1(raw, *, codes=None, items=None, warnings=None, soft=None, tr
             note = c.string(raw_thought.get("note"), f"{where}.note", allow_none=True)
             source = meta.get(item)
             if source is not None:
+                # The quote verifies in the cited item: the item is right, so a miscopied turn or t is taken from
+                # the item (deterministic, recorded as a warning, no paid repair). Otherwise it stays a soft problem.
+                verified = (fix_item_fields and quote is not None and texts is not None and item in texts
+                            and normalize_text(quote) in normalize_text(texts[item]))
                 if turn is not None and source.get("turn") is not None and turn != source["turn"]:
-                    c.soft(f"{where}.turn", f"item {item} is in turn {source['turn']}, not {turn}")
+                    if verified:
+                        c.warn(f"{where}.turn", f"set to item {item}'s turn {source['turn']} (was {turn})")
+                        turn = source["turn"]
+                    else:
+                        c.soft(f"{where}.turn", f"item {item} is in turn {source['turn']}, not {turn}")
                 if t is not None and source.get("t") is not None and abs(t - float(source["t"])) > 0.005:
-                    c.soft(f"{where}.t", f"item {item} is at t={source['t']}, not {t} (copy t from the header)")
+                    if verified:
+                        c.warn(f"{where}.t", f"set to item {item}'s t={source['t']} (was {t})")
+                        t = float(source["t"])
+                    else:
+                        c.soft(f"{where}.t", f"item {item} is at t={source['t']}, not {t} (copy t from the header)")
             out["thoughts"].append({"code": code, "turn": turn, "item": item, "t": t, "quote": quote,
                                     "certainty": certainty, "note": note})
         state = obj.get("state")
@@ -458,13 +475,24 @@ def _overseer(c, value, expected):
 # Stage 3
 
 
-def validate_stage3(raw, *, agent=None, event_ids=None, warnings=None, soft=None):
+def validate_stage3(raw, *, agent=None, event_ids=None, warnings=None, soft=None, structure=False):
     """Normalized Stage 3 output of one agent, or ``SchemaError``.
 
     ``agent``: the expected agent id. ``event_ids``: the ids of the agent's events (every cited
-    cause must be one of them)."""
+    cause must be one of them); a mapping ``{id: t}`` (minutes, first occurrence) is accepted too and,
+    with ``structure``, also checks that no turning point cites an event after its own time.
+
+    ``structure``: also run the record checks of the story's own structure (``_structure``; soft: named
+    in the one repair, else kept as check problems; off by default, as the prompt's shape example is
+    partial): phases contiguous (no gap) and of non-zero length (unless there is a single phase); each
+    turning point at a phase boundary whose stances it names, the turning points chained (each ``from``
+    is the previous ``to``, the first the first phase's stance); a faker whose last phase is ``stopped``
+    has ``final.stopped`` true, and ``final.stopped`` is never true while the last phase is ``faking``.
+    Only the checks change, never a prompt (unit hashes stay)."""
     obj = _load(raw)
     known = set(event_ids) if event_ids is not None else None
+    times = ({str(k): float(v) for k, v in event_ids.items() if isinstance(v, (int, float))}
+             if isinstance(event_ids, dict) else None)
     c = _Checker(soft)
     keys = ("agent", "phases", "turning_points", "story", "final", "consistency_flags")
     out = {}
@@ -479,6 +507,8 @@ def validate_stage3(raw, *, agent=None, event_ids=None, warnings=None, soft=None
         out["turning_points"] = _turning_points(c, obj.get("turning_points"), known)
         out["story"] = c.string(obj.get("story"), "story", max_chars=STORY_MAX_CHARS)
         out["final"] = _final(c, obj.get("final"), known)
+        if structure:
+            _structure(c, out["phases"], out["turning_points"], out["final"], times)
         flags = obj.get("consistency_flags")
         out["consistency_flags"] = c.str_list(flags, "consistency_flags") if flags is not None else \
             (c.add("consistency_flags", "must be a list ([] when none)") or [])
@@ -569,3 +599,50 @@ def _final(c, value, known):
     if out["stopped"] is False and out["stop_cause_event_ids"]:
         c.add("final.stop_cause_event_ids", "must be [] when stopped is false")
     return {key: out[key] for key in keys}
+
+
+def _structure(c, phases, points, final, times):
+    """Soft record checks between phases, turning points and ``final`` (see ``validate_stage3``). Entries that
+    already failed a shape check (None fields) are skipped; nothing here changes the output."""
+    tol = BOUNDARY_TOLERANCE
+    ok = [p for p in phases if p.get("from_t") is not None and p.get("to_t") is not None and p.get("stance")]
+    if len(ok) == len(phases):
+        for n, phase in enumerate(phases):
+            if len(phases) > 1 and abs(phase["to_t"] - phase["from_t"]) <= TIME_TOLERANCE:
+                c.soft(f"phases[{n}]", f"has zero length (from_t = to_t = {phase['from_t']}); give it its real span "
+                       "or drop it (a turning point then goes straight to the next stance)")
+            if n and phase["from_t"] > phases[n - 1]["to_t"] + tol:
+                c.soft(f"phases[{n}]", f"leaves a gap after the previous phase (previous to_t {phases[n - 1]['to_t']}, "
+                       f"from_t {phase['from_t']}); phases must be consecutive")
+    bounds = [(phases[n - 1]["to_t"], phases[n]["from_t"], phases[n - 1]["stance"], phases[n]["stance"])
+              for n in range(1, len(phases)) if len(ok) == len(phases)]
+    previous = phases[0]["stance"] if phases and len(ok) == len(phases) else None
+    for n, point in enumerate(points):
+        where = f"turning_points[{n}]"
+        if point.get("t") is None or point.get("from") is None or point.get("to") is None:
+            previous = None
+            continue
+        if previous is not None and point["from"] != previous:
+            c.soft(f"{where}.from", f"is {point['from']!r}, but the stance before it is {previous!r} "
+                   + ("(the first phase's stance)" if n == 0 else "(the previous turning point's 'to')"))
+        previous = point["to"]
+        if len(ok) == len(phases) and phases:
+            near = [b for b in bounds if abs(b[1] - point["t"]) <= tol or abs(b[0] - point["t"]) <= tol]
+            if not near:
+                c.soft(f"{where}.t", f"{point['t']} is not a phase boundary; each turning point starts the phase of "
+                       "its 'to' stance")
+            elif not any(b[2] == point["from"] and b[3] == point["to"] for b in near):
+                c.soft(where, f"{point['from']} -> {point['to']} at t={point['t']}, but the phases change "
+                       + ", ".join(f"{b[2]} -> {b[3]}" for b in near) + " there")
+        if times is not None:
+            for event in point.get("cause_event_ids") or []:
+                at = times.get(event)
+                if at is not None and at > point["t"] + tol:
+                    c.soft(f"{where}.cause_event_ids", f"{event!r} is at t={at}, after the turning point "
+                           f"(t={point['t']}); a cause must come before the change")
+    if final and final.get("faked") is True and len(ok) == len(phases) and phases:
+        last = phases[-1]["stance"]
+        if final.get("stopped") is False and last == "stopped":
+            c.soft("final.stopped", "is false, but the last phase is 'stopped'; make them agree")
+        if final.get("stopped") is True and last == "faking":
+            c.soft("final.stopped", "is true, but the last phase is 'faking'; make them agree")

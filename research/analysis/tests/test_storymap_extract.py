@@ -11,7 +11,7 @@ from research.analysis.storymap import extract as ex
 from research.analysis.storymap.fake_rule import classify, is_fake
 
 FIX = Path(__file__).parent / "fixtures" / "storymap"
-KEYS = {"i", "t", "ts", "turn", "kind", "tool", "text", "event"}
+KEYS = {"i", "t", "ts", "turn", "kind", "tool", "text", "event", "call_id", "mid"}
 EVENT_KEYS = {"type", "id", "author", "author_role", "fake", "tags", "outcome", "detail"}
 KINDS = {"reasoning", "text", "tool_call", "tool_result", "event", "context"}
 TYPES = {"L1", "L2", "P1", "P2", "B1", "D1", "S1", "O1", "C1", "N1", "R1"}
@@ -201,7 +201,7 @@ class StoryMapExtractTest(unittest.TestCase):
         b = ex.Builder(ctx, "agent-001")
         b.derive(120.0, "get_messages", {}, json.dumps({"ok": True, "messages": [], "system_notice": text}), 3)
         (r1,) = events(b.items, "R1")
-        assert r1["id"] == "R1:agent-001@2.0" and r1["detail"] == {"notice": text}
+        assert r1["id"] == "R1:agent-001@2.0" and r1["detail"] == {"notice": text, "delivery": "notice"}
         assert r1["text"].startswith("Integrity reminder: System notice") and r1["text"].endswith(" ...")
         assert len(r1["text"]) < len(text) and r1["author"] is None and b.items[0]["turn"] == 3
         b = ex.Builder(ctx, "agent-001")
