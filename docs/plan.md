@@ -1771,6 +1771,21 @@ above: the public copy `research/analysis/storymap/taxonomy.md` is the default t
 and credential-shaped strings. The private original `private/research/analysis/storymap/taxonomy.md` is unchanged
 and still the one the pipeline reads.)
 
+### Story maps with the full reasoning chain (November 3, 2026)
+
+Owner decision (November 3, 2026): publish the redesigned story maps (GUI redesign, HANDOFF item 25) **with** the
+inline full reasoning chain (evidence chains, HANDOFF item 24) on both public libraries: the 7 math maps (control
+r3, 1ov r2, 2ov r3, 10ov r3 at 180 min; integrity reminder r1-r3 at 60 min) and the 2 ImpossibleBench coding maps.
+Each agent page then embeds the agent's own capped timeline (reasoning, text, tool calls and results, events; never
+the agents' prompts), beyond the quotes shown before. Conditions: the embedded text goes through `view.py`'s
+redaction (credential shapes, secret-looking variables' values, host paths, paths into a private/ directory), and
+before every upload an extra credential scan that is independent of that redaction runs on the decoded page text
+(HTML entities and JSON escapes undone, embedded JSON parsed): provider key and token shapes, Bearer/JWT, private
+keys, `*_KEY=`/`*_TOKEN=`/`*_SECRET=`/`PASSWORD=` values, `.env` contents, host paths (`/Users/`, `/home/` other than
+the agents' container home, host temp dirs), private/ paths, e-mail addresses, IP addresses and infrastructure names,
+plus the `scripts/storymap_site.py` guards. Any hit means fixing the redaction in `view.py` (with a test) and
+re-rendering; a page with a hit is never uploaded. The validation pages are re-rendered with the maps.
+
 ## Baseline with periodic integrity reminder (November 3, 2026)
 
 Owner decision (chat, November 3, 2026): "Baseline with periodic integrity reminder: 3 identical runs, no overseers,

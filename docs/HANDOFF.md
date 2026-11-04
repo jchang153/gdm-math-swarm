@@ -1194,7 +1194,7 @@ is being merged into main via `collab-env`.
 
 25. **DONE 2026-11-03 (~21:30 PT): story-map GUI redesign and bug fixes** (`research/analysis/storymap/view.py`,
    tests `research/analysis/tests/test_storymap_view.py`; owner's five complaints plus a QA pass over all 9 maps).
-   Re-rendered locally into the session scratchpad (`after/<run>`), **not published** (awaiting the owner).
+   Re-rendered locally into the session scratchpad (`after/<run>`); **published with the reasoning chain in item 28**.
    - **Time axis follows the run**: `max_run_seconds` from `RUN/settings.json` (beside the map or pipeline.json's
      `run_dir`), else the data rounded to the half hour; ticks every 10/15/30 min (`--minutes` overrides). The 60-min
      maps were on a 0-180 axis before.
@@ -1260,7 +1260,7 @@ is being merged into main via `collab-env`.
      (control), 2->3 (1ov); first warning read, never faked again 120/128 -> 122/130 (94%).
    - **Heatmaps** republished with the new rule (gdm, 54 runs whose data changed; IB unchanged): deployment fa94ff1f,
      receipt `runs/phase-b/cloudflare/receipts/faking-heatmap-echo-20261103.json`; r1 page: 82 rows, 10 credited. The
-     caption's rule wording ("restates ... or proves it by Iff.rfl") is still the old phrasing.
+     caption's rule wording ("restates ... or proves it by Iff.rfl") is still the old phrasing on the site (code fixed in item 28).
    - **Judge labels** (display only): "submitted, never credited", exclusive-level note; `scripts/simple_judge_site.py`
      (`LEVEL_TEXT`, `relabel_report_page`), `simple_judge/report.py`, `catalogue_page.py`, new
      `publish_cloudflare.py judge-labels`. gdm 54 runs (results + judge report) deployment 084d3688, catalogue 061cd391;
@@ -1277,6 +1277,35 @@ is being merged into main via `collab-env`.
    180-minute runs and 18 commsonly/enforceonly phase-b folders re-offloaded (one batch commit; 3.8 GB freed). The
    story-map runs in use by the publisher, the IB runs and `phase-b/cloudflare*` are offloaded at the end once their
    agents are done (sizes in `HANDOFF.local.md`).
+
+28. **DONE 2026-11-03 (~21:40 PT): redesigned story maps with the full reasoning chain published on both sites**
+   (owner decision, docs/plan.md "Story maps with the full reasoning chain (November 3, 2026)"; items 24-26).
+   - Rendered from the current `runs/<id>/analysis/storymap` (post answer-echo rerun, validation regenerated) with
+     the item-25 `view.py` and the evidence chains, into scratch `pub1103/{gdm,ib}/<run>` (validation.md copied,
+     validation pages re-rendered): 7 math maps (105 files each; 180-min ~92-103 MB, 60-min ~52-57 MB) and 2 IB maps
+     (25 files, 12 and 15 MB).
+   - **Independent scan** (`pub1103/indscan.py`, separate from view.py's redaction; decodes HTML entities and JSON
+     escapes and parses every embedded `application/json` block): 785 files, 607 MB, 740 embedded timelines; **0
+     hard hits** (key/token shapes incl. sk-/hf_/ghp_/AKIA/AIza/ya29/xox/Bearer/JWT, private keys, `*_KEY=`/`*_TOKEN=`/
+     `*_SECRET=`/`PASSWORD=` values, host paths `/Users/`, `/home/` other than `/home/researcher`, host temp dirs,
+     private/ paths, infrastructure names and owner e-mail). First pass had false positives only, all reviewed: agent
+     prose "KEY: idea" (11), Lean prose "private/protected" (5), container Claude Code dirs `/tmp/claude-1000` and
+     `/tmp/claude-XXXX-cwd`; patterns narrowed. Review classes all benign: "e-mails" are Lean `\n@Nat.foo` /
+     Python `@functools` tokens, 1 "IP" a Lean version-like literal, long hex = submission sha256 / git revs / packs /
+     numerals, long base64 = Lean identifiers, sandbox temp names and thinking signatures in the agents' own sandbox
+     request logs; the one env dump (reminder r3 agent-079) shows `ANTHROPIC_AUTH_TOKEN=[redacted]`, the rest model
+     names and localhost URL. No view.py change was needed. `scan.py` 785 files 0 hits; `storymap_site.public_files`
+     passes all 9.
+   - Deployed: gdm `168d7ed5` (735 story-map files replaced, nothing else changed; 9,877 files, 2.44 GB on the site),
+     ib `aa59d6d5` (50 replaced; 252 files, 60 MB). Receipts `runs/phase-b/cloudflare{,-ib}/receipts/storymap-chain-20261103.json`.
+   - Live: `verify` ok on both; byte-for-byte 785/785 story-map files (`pub1103/livecheck.py`); 6 agent pages
+     (control r3, 1ov r2, reminder r1/r3, IB control/2ov) have the embedded chain (reasoning, text, tool calls/results,
+     events), the expander, axis max 180/60 as expected, the legend markup and stack badges; all 9 catalogue links,
+     results-page Story map tabs and story-map indexes resolve.
+   - The 9 story-map runs are no longer in use by the publisher (item 27 may offload them).
+   - `scripts/faking_heatmap.py` caption now states the answer-echo-v2 rule (answer restates the statement directly
+     or through its own definitions, reflexivity-only proofs, a term related to itself). Published heatmaps keep
+     the old wording until republished (`publish_cloudflare.py heatmap`).
 
 ## Next steps / open items
 
