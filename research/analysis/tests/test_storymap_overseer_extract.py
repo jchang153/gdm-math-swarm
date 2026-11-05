@@ -148,8 +148,11 @@ class OverseerExtractTests(unittest.TestCase):
                           f["check_not_genuine"], f["revert"], f["overseer_board_post"], f["sleep"]),
                          (1.0, 4.0, 4.0, 5.0, 4.0, 10.0, 11.0, 16.0))
         self.assertEqual(f["overseer_board_read"], 11.9)
-        self.assertEqual(hf["at_first"]["revert"], {"t": 10.0, "solver_fakers": 1, "accepted_fakes": 1,
+        # the seed's planted fake (accepted 3.0, reverted 5.99) counts in the accepted and standing fakes
+        self.assertEqual(hf["at_first"]["revert"], {"t": 10.0, "solver_fakers": 1, "accepted_fakes": 2,
                                                     "standing_fakes": 0})
+        self.assertEqual(hf["at_first"]["check_seed"], {"t": 4.0, "solver_fakers": 0, "accepted_fakes": 1,
+                                                        "standing_fakes": 1})
         self.assertEqual(hf["at_first"]["library_list"]["solver_fakers"], 0)
         c = hf["counts"]
         self.assertEqual((c["reverts_ok"], c["reverts_failed"], c["reverts_duplicate"], c["checks_duplicate"],
@@ -164,6 +167,28 @@ class OverseerExtractTests(unittest.TestCase):
         self.assertEqual(none["at_first"]["revert"]["solver_fakers"], None)
         self.assertIsNone(none["board_enabled"])
 
+    def test_seed_fake_counts_and_known_faker(self):
+        c = self.context
+        self.assertEqual([ov.seed_fake_at(c, t) for t in (None, 2.9, 3.0, 5.0, 5.99, 20.0)],
+                         [(0, 0), (0, 0), (1, 1), (1, 1), (1, 0), (1, 0)])
+        self.assertEqual(ov.seed_agents(c), {"agent-101"})
+        legacy = dict(c, seed_fake={k: v for k, v in c["seed_fake"].items() if k != "agent"})
+        self.assertEqual(ov.seed_agents(legacy), {"agent-101"})      # contexts written before the fix
+        self.assertNotIn("agent-101", ov._known_fakers(c, 2.0))      # not yet accepted
+        self.assertIn("agent-101", ov._known_fakers(c, 3.5))
+        self.assertEqual(ov.fakes_at(c, 4.0), {"t": 4.0, "solver_fakers": 0, "accepted_fakes": 1, "standing_fakes": 1})
+        self.assertEqual(ov.fakes_at(None, 4.0)["accepted_fakes"], None)
+        no_seed = dict(c, seed_fake=None)
+        self.assertEqual(ov.fakes_at(no_seed, 4.0)["accepted_fakes"], 0)
+        dm = [it for it in self.items if (it.get("event") or {}).get("type") == "O1"
+              and (it["event"].get("detail") or {}).get("channel") == "dm"]
+        self.assertTrue(dm)
+        to_seed = [dict(it, event=dict(it["event"], detail=dict(it["event"]["detail"], to="agent-101"))) for it in dm]
+        items = [to_seed[dm.index(it)] if it in dm else it for it in self.items]
+        hf = ov.hard_facts(OV, items, self.index[OV], c)
+        self.assertTrue(all(x["known_faker"] for x in hf["dm_targets"] if x["t"] >= 3.0))
+        self.assertEqual(hf["counts"]["dms_to_known_fakers"], sum(x["t"] >= 3.0 for x in hf["dm_targets"]))
+
     def test_context(self):
         c = self.context
         self.assertEqual((c["schema"], c["run_minutes"], c["overseers"], c["seed"], c["board"]),
@@ -173,6 +198,7 @@ class OverseerExtractTests(unittest.TestCase):
         self.assertEqual(c["standing_fakes_curve"], [[0.0, 0], [8.0, 1], [9.98, 0]])
         self.assertEqual([f["submission_id"] for f in c["solver_fakes"]], ["sub-000002", "sub-000004"])
         self.assertEqual(c["seed_fake"]["reverted_by"], "agent-103")
+        self.assertEqual(c["seed_fake"]["agent"], "agent-101")
         self.assertEqual([(x["overseer"], x["submission_id"], x["outcome"]) for x in c["checks"]][2],
                          ("agent-103", "sub-000002", "not genuine"))
         self.assertEqual([x["ok"] for x in c["reverts"]], [True, True, False])

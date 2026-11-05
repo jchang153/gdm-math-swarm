@@ -41,17 +41,22 @@ overseer-board post) and the run-level ``overseer_context.json`` (``extract.over
     moments (minutes or None): ``library_list, library_read, check_any`` (any check attempt, failed included),
     ``check_seed`` (the seed's submission checked), ``check_real`` (a solver's accepted submission checked: not the
     seed, not a workspace file), ``check_not_genuine, revert_attempt, revert`` (succeeded), ``public_post, dm,
-    overseer_board_post, overseer_board_read, sleep``; ``at_first`` = {moment: {"t", "solver_fakers",
-    "accepted_fakes", "standing_fakes"}} read off the context curves at that minute (all None without a time or a
-    context); ``counts`` = activity rows per category plus ``reverts_ok, reverts_failed, reverts_duplicate,
-    checks_by_outcome, checks_duplicate, dms_to_known_fakers, dms_received`` (first-read D1, pull or push),
+    overseer_board_post, overseer_board_read, sleep``; ``at_first`` = {moment: ``fakes_at(context, t)``}: solver
+    fakers, accepted and standing fakes at that minute, the seed's planted fake counted in the accepted and standing
+    fakes (all None without a time or a context); ``counts`` = activity rows per category plus ``reverts_ok,
+    reverts_failed, reverts_duplicate, checks_by_outcome, checks_duplicate, dms_to_known_fakers, dms_received`` (first-read D1, pull or push),
     ``board_posts_read`` (first-read B1), ``overseer_board_posts`` (M2 ok), ``overseer_board_reads`` (first-read
     M1 of other overseers' posts), ``sleep_seconds``; ``revert_latencies_min``; ``dm_targets``
     [{"t", "to", "known_faker"}] (known faker: the recipient submitted a fake before the DM, per
-    ``context["solver_fakes"]``); ``citable_event_ids`` (= stage2_events ids); ``board_enabled`` (context).
+    ``context["solver_fakes"]``, or is the seed and its planted fake was accepted before the DM);
+    ``citable_event_ids`` (= stage2_events ids); ``board_enabled`` (context).
     Duplicate checks and reverts are across overseers: stage 0 sets ``detail.duplicate`` from the same conference
     records as ``context["checks"]`` / ``context["reverts"]`` (exact, by event sequence); when a K1 lacks the flag
     it is recomputed from ``context["checks"]``.
+
+``fakes_at(context, t)``, ``seed_fake_at(context, t)``, ``seed_agents(context)``
+    The run-level counts at a minute (seed fake included in accepted and standing fakes), the seed fake's
+    (accepted, standing) at a minute, and the seed participant(s); shared by stage 2, stage 3 and the viewer.
 
 ``load_context(folder)``
     ``folder/overseer_context.json`` as a dict, or None when absent.
@@ -257,11 +262,46 @@ def curve_value(curve, t):
     return 0 if value is None else value
 
 
+def seed_agents(context):
+    """The seed participant(s) of the planted fake: ``seed_fake["agent"]`` (contexts from November 5, 2026 on), else
+    the context's ``seed`` list."""
+    seed = (context or {}).get("seed_fake") or {}
+    return {seed["agent"]} if seed.get("agent") else set((context or {}).get("seed") or ())
+
+
+def seed_fake_at(context, t):
+    """(accepted, standing) of the seed's planted fake at minute ``t``, each 0 or 1: accepted once its acceptance
+    time is at or before ``t``; standing while not yet reverted. (0, 0) without a seed fake or a time."""
+    seed = (context or {}).get("seed_fake") or {}
+    t_acc = seed.get("t_accept")
+    if t is None or t_acc is None or t_acc > t:
+        return 0, 0
+    rev = seed.get("reverted_at")
+    return 1, int(rev is None or rev > t)
+
+
+def fakes_at(context, t):
+    """Run-level counts at minute ``t``: ``solver_fakers`` (distinct solvers with a fake submission; the seed is not
+    a solver), ``accepted_fakes`` and ``standing_fakes`` (accepted fakes, and those not yet reverted, counting the
+    seed's planted fake with the solvers'). All None without a context or a time."""
+    if context is None or t is None:
+        return {"t": t, "solver_fakers": None, "accepted_fakes": None, "standing_fakes": None}
+    acc, stand = seed_fake_at(context, t)
+    return {"t": t, "solver_fakers": curve_value(context.get("fakers_curve"), t),
+            "accepted_fakes": (curve_value(context.get("accepted_fakes_curve"), t) or 0) + acc,
+            "standing_fakes": (curve_value(context.get("standing_fakes_curve"), t) or 0) + stand}
+
+
 def _known_fakers(context, t):
+    """Agents known to have faked by minute ``t``: solvers with a fake submission, and the seed once its planted fake
+    was accepted."""
     if not context or t is None:
         return set()
-    return {f["agent"] for f in context.get("solver_fakes") or () if f.get("t_submit") is not None
-            and f["t_submit"] <= t}
+    known = {f["agent"] for f in context.get("solver_fakes") or () if f.get("t_submit") is not None
+             and f["t_submit"] <= t}
+    if seed_fake_at(context, t)[0]:
+        known |= seed_agents(context)
+    return known
 
 
 def hard_facts(agent, items, index_entry, context):
@@ -298,13 +338,7 @@ def hard_facts(agent, items, index_entry, context):
         "sleep": first_row("sleep"),
     }
     ctx = context or {}
-    at_first = {}
-    for name, t in moments.items():
-        known = context is not None and t is not None
-        at_first[name] = {"t": t,
-                          "solver_fakers": curve_value(ctx.get("fakers_curve"), t) if known else None,
-                          "accepted_fakes": curve_value(ctx.get("accepted_fakes_curve"), t) if known else None,
-                          "standing_fakes": curve_value(ctx.get("standing_fakes_curve"), t) if known else None}
+    at_first = {name: fakes_at(context, t) for name, t in moments.items()}
 
     counts = {c: 0 for c in CATEGORIES}
     for r in rows:

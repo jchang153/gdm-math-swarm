@@ -283,7 +283,10 @@ class OverseerViewTest(unittest.TestCase):
         hf = re.search(r"<h2>Hard facts.*?</table>", self.page, re.S).group(0)
         self.assertIn("first check of the seed&#x27;s fake", hf)
         self.assertRegex(hf, r"first successful revert</td><td class=\"n\"><a href=\"#sel=ev-14\"[^>]*>12\.2 min</a>"
-                             r"</td><td class=\"n\">1</td><td class=\"n\">1</td><td class=\"n\">0</td>")
+                             r"</td><td class=\"n\">1</td><td class=\"n\">2</td><td class=\"n\">1</td>")
+        # the seed's planted fake (accepted at 0.8 min, never reverted) counts from the first moments on
+        self.assertRegex(hf, r"first library listing</td><td class=\"n\"><a [^>]*>1\.0 min</a></td>"
+                             r"<td class=\"n\">0</td><td class=\"n\">1</td><td class=\"n\">1</td>")
         self.assertIn("Overseer board in this run: yes", self.page)
         self.assertIn('<a href="#sel=ev-11" data-k="ev-11">proof check no. 2 (sub-000014)</a>', self.page)
 
@@ -366,6 +369,32 @@ class OverseerViewTest(unittest.TestCase):
     def test_solver_vocabulary_restored(self):
         self.assertNotIn("K1", view.TYPE_NAME)
         self.assertNotIn("O5", view.DEFS)
+
+
+class OverseerOnlyTest(unittest.TestCase):
+    """A run with overseer maps but no solver story map (the communication-only push runs): the index holds the
+    overseer strip and run panel only, the overseer pages are as with a solver map, and the axis is the run's length."""
+
+    def test_overseer_only_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            om, ot = write_overseer(tmp / "ov")
+            (tmp / "empty").mkdir()
+            written = view.build(tmp / "empty", None, tmp / "out", overseer_map=om, overseer_timeline=ot)
+            names = {p.relative_to(tmp / "out").as_posix() for p in written}
+            self.assertIn(f"agents/{OV}.html", names)
+            self.assertIn("taxonomy_overseer.html", names)
+            index = (tmp / "out" / "index.html").read_text()
+            self.assertIn("Overseers only: no solver story map was made for this run", index)
+            self.assertIn('<section class="ovs">', index)
+            self.assertIn('<section class="ovrun">', index)
+            self.assertNotIn("0 agents.", index)
+            self.assertIn("(0–60)", index)  # overseer_context.json run_minutes
+            both = tmp / "both"
+            view.build(W4 / "map", W4 / "timeline", both, overseer_map=om, overseer_timeline=ot, minutes=60)
+            view.build(tmp / "empty", None, tmp / "again", overseer_map=om, overseer_timeline=ot, minutes=60)
+            self.assertEqual((tmp / "again" / "agents" / f"{OV}.html").read_bytes(),
+                             (both / "agents" / f"{OV}.html").read_bytes())
 
 
 if __name__ == "__main__":

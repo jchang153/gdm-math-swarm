@@ -1339,6 +1339,17 @@ def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css=""):
     return page(f"Story map {run}".strip(), body, LEGEND_JS + FILTER_JS, css=css)
 
 
+def overseer_only_index(ov, tmax, nav):
+    """index.html of a run whose overseers are mapped but whose solvers are not (no solver story map was made): the
+    overseer strip and run panel only (storymap/view_overseer.py)."""
+    run = (ov.pipeline or {}).get("run_id") or ""
+    block, css = ov.index_block()
+    body = (f"{nav}<h1>Story map{(': ' + esc(run)) if run else ''}</h1>{banner(model_names(ov.pipeline))}"
+            f'<p class="muted">Overseers only: no solver story map was made for this run, so solvers appear only in '
+            f'the run-level fake counts below. Time axis: minutes from run start (0–{int(tmax)}).</p>{block}')
+    return page(f"Story map {run}".strip(), body, css=css)
+
+
 def _yn(v):
     return "yes" if v is True else "no" if v is False else ""
 
@@ -2228,6 +2239,9 @@ def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=
     DEFS.clear()
     DEFS.update(load_definitions(taxonomy) if taxonomy else {})
     has_tax = bool(names) and Path(taxonomy).is_file()
+    if not agents and minutes is None and overseer_timeline is not None:  # overseer-only: the run's configured length
+        ctx_file = timeline_dir(overseer_timeline) / "overseer_context.json"
+        minutes = (_read_json(ctx_file) or {}).get("run_minutes") if ctx_file.is_file() else None
     tmax = axis_max(agents, minutes or run_minutes(map_dir, pipeline))
     models = model_names(pipeline)
     validation = Path(map_dir) / "validation.md"
@@ -2243,7 +2257,11 @@ def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=
         from . import view_overseer  # only in overseer mode, so solver builds never depend on it
         ov = view_overseer.prepare(overseer_map, overseer_timeline, tmax, has_val, has_tax,
                                    view_module=sys.modules[__name__])
-    write(out / "index.html", index_page(agents, pipeline, tmax, nav, names, *(ov.index_block() if ov else ("", ""))))
+    if ov is not None and not agents:  # a run with overseer maps but no solver story map
+        write(out / "index.html", overseer_only_index(ov, tmax, nav))
+    else:
+        write(out / "index.html", index_page(agents, pipeline, tmax, nav, names,
+                                             *(ov.index_block() if ov else ("", ""))))
     write(out / "events.html", events_page(agents, tmax, models, nav, names))
     if has_val:
         write(out / "validation.html", validation_page(validation.read_text(encoding="utf-8"), models, nav))

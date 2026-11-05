@@ -1043,7 +1043,7 @@ def overseer_context(ctx):
         role = ctx.role(s["agent_id"])
         if role == "seed":
             if acc and seed_fake is None:
-                seed_fake = {"submission_id": sid(s["submission_id"]), "t_accept": t_acc,
+                seed_fake = {"agent": s["agent_id"], "submission_id": sid(s["submission_id"]), "t_accept": t_acc,
                              "reverted_at": t(rev["reverted_at"]) if rev else None,
                              "reverted_by": rev["reverted_by"] if rev else None, "library_path": path}
             continue

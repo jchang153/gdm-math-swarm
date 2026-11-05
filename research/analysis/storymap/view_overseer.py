@@ -521,6 +521,30 @@ def event_title(ev, known_fakers_at=None):
 
 # ------------------------------------------------------------------ data
 
+def _seed_at(ctx, t):
+    """(accepted, standing) of the seed's planted fake at minute t (storymap/overseer.py seed_fake_at)."""
+    if OV is not None and hasattr(OV, "seed_fake_at"):
+        return OV.seed_fake_at(ctx, t)
+    return 0, 0
+
+
+def _seed_agents(ctx):
+    return OV.seed_agents(ctx) if OV is not None and hasattr(OV, "seed_agents") else set()
+
+
+def _with_seed(ctx, name):
+    """The context's accepted / standing fake curve with the seed's planted fake added (other curves as given)."""
+    curve = [list(p) for p in ctx.get(name) or [] if isinstance(p, (list, tuple)) and len(p) == 2]
+    seed = ctx.get("seed_fake") or {}
+    if name not in ("accepted_fakes_curve", "standing_fakes_curve") or seed.get("t_accept") is None or not curve:
+        return curve
+    changes = [(V._num(seed["t_accept"]), 1)]
+    if name == "standing_fakes_curve" and seed.get("reverted_at") is not None:
+        changes.append((V._num(seed["reverted_at"]), -1))
+    times = sorted({V._num(p[0]) for p in curve} | {t for t, _ in changes})
+    return [[t, _curve_at(curve, t) + sum(d for ct, d in changes if ct <= t + 1e-9)] for t in times]
+
+
 def _curve_at(curve, t):
     """Value of a step curve ([[t, n], ...]; each point holds until the next) at minute t (None when t is None)."""
     if t is None or not curve:
@@ -666,9 +690,11 @@ class Overseer:
             if isinstance(given, dict) and given.get("t") is not None:
                 self.at_first[k] = given
             else:
+                acc, stand = _seed_at(self.ctx, t)
+                plus = lambda v, n: v + n if isinstance(v, (int, float)) else v  # noqa: E731
                 self.at_first[k] = {"t": t, "solver_fakers": _curve_at(self.ctx.get("fakers_curve"), t),
-                                    "accepted_fakes": _curve_at(self.ctx.get("accepted_fakes_curve"), t),
-                                    "standing_fakes": _curve_at(self.ctx.get("standing_fakes_curve"), t)}
+                                    "accepted_fakes": plus(_curve_at(self.ctx.get("accepted_fakes_curve"), t), acc),
+                                    "standing_fakes": plus(_curve_at(self.ctx.get("standing_fakes_curve"), t), stand)}
 
     def known_faker_at(self, agent, t):
         """True when ``agent`` had a fake submission at or before minute ``t`` (from the run context)."""
@@ -677,6 +703,8 @@ class Overseer:
         for f in self.ctx.get("solver_fakes") or []:
             if f.get("agent") == agent and V._num(f.get("t_submit"), 1e9) <= t + 1e-9:
                 return True
+        if _seed_at(self.ctx, t)[0] and agent in _seed_agents(self.ctx):  # the seed, once its fake was accepted
+            return True
         targets = {(x.get("to"), round(V._num(x.get("t")), 1)) for x in self.hf.get("dm_targets") or []
                    if x.get("known_faker")}
         return (agent, round(t, 1)) in targets
@@ -916,8 +944,8 @@ def hard_facts_html(o):
                     f'{num(at.get("solver_fakers"))}{num(at.get("accepted_fakes"))}{num(at.get("standing_fakes"))}</tr>')
     first = ('<table class="hf"><tr><th>Moment</th><th class="n">At</th><th class="n" title="Distinct solvers with at '
              'least one fake submission by then">Solver fakers</th><th class="n" title="Accepted fake submissions by '
-             'solvers by then">Accepted fakes</th><th class="n" title="Accepted fakes not yet reverted at that '
-             f'moment">Standing fakes</th></tr>{"".join(rows)}</table>')
+             'then (solvers and the seed\'s planted fake)">Accepted fakes</th><th class="n" title="Accepted fakes '
+             f'not yet reverted at that moment (the seed\'s included)">Standing fakes</th></tr>{"".join(rows)}</table>')
     counts = dict(hf.get("counts") or {})
     if not counts:
         counts = dict(Counter(str(r.get("category")) for r in o.rows))
@@ -1285,10 +1313,9 @@ def run_panel(ovs, ctx, tmax):
         return ('<section class="ovrun"><h2>Solver fakes and overseer moments</h2><p class="muted">No run context '
                 '(overseer_context.json beside the overseer timeline): the curves are not shown.</p></section>')
     curves = (("fakers_curve", "cv-fakers", "solvers who faked (cumulative)"),
-              ("standing_fakes_curve", "cv-standing", "accepted fakes standing (not yet reverted)"),
-              ("accepted_fakes_curve", "cv-accepted", "accepted fakes (cumulative)"))
-    top = max([V._num(pt[1]) for c, _, _ in curves for pt in ctx.get(c) or [] if isinstance(pt, (list, tuple))
-               and len(pt) == 2] + [1])
+              ("standing_fakes_curve", "cv-standing", "accepted fakes standing (not yet reverted; seed included)"),
+              ("accepted_fakes_curve", "cv-accepted", "accepted fakes (cumulative; seed included)"))
+    top = max([V._num(pt[1]) for c, _, _ in curves for pt in _with_seed(ctx, c)] + [1])
     ymax, ystep = _nice(top)
     H, T, B = 250, 14, 22  # height, top padding, bottom (axis labels)
     ph = H - T - B
@@ -1305,7 +1332,7 @@ def run_panel(ovs, ctx, tmax):
         svg.append(f'<text x="{x:.2f}%" y="{H - 6}" text-anchor="{anchor}">{t}</text>')
         t += step
     for c, cls, label in curves:
-        pts = [(V._num(p[0]), V._num(p[1])) for p in ctx.get(c) or [] if isinstance(p, (list, tuple)) and len(p) == 2]
+        pts = [(V._num(p[0]), V._num(p[1])) for p in _with_seed(ctx, c)]
         if not pts:
             continue
         pts.sort()
@@ -1360,13 +1387,13 @@ def run_panel(ovs, ctx, tmax):
                      if seed.get("reverted_at") is not None else " and never reverted."))
     lg = ('<ul class="ovlg"><li><svg viewBox="0 0 22 10"><line class="cv-fakers" x1="1" x2="21" y1="5" y2="5"/></svg>'
           'solvers who faked (cumulative)</li><li><svg viewBox="0 0 22 10"><line class="cv-standing" x1="1" x2="21" '
-          'y1="5" y2="5"/></svg>accepted fakes standing (not yet reverted)</li><li><svg viewBox="0 0 22 10"><line '
-          'class="cv-accepted" x1="1" x2="21" y1="5" y2="5"/></svg>accepted fakes (cumulative)</li><li><svg '
+          'y1="5" y2="5"/></svg>accepted fakes standing (not yet reverted; seed included)</li><li><svg viewBox="0 0 22 10"><line '
+          'class="cv-accepted" x1="1" x2="21" y1="5" y2="5"/></svg>accepted fakes (cumulative; seed included)</li><li><svg '
           'viewBox="0 0 22 10"><line x1="11" x2="11" y1="0" y2="10" style="stroke:var(--fg);stroke-dasharray:2 2"/>'
           '</svg>an overseer\'s first moment (labelled)</li></ul>')
     return (f'<section class="ovrun"><h2>Solver fakes and overseer moments</h2>'
-            f'<p class="muted">Counts from the run\'s records (seed and overseers excluded): step lines over the run, '
-            f'0–{int(tmax)} min. Vertical lines: each overseer\'s first library listing, check of the seed\'s fake, check '
+            f'<p class="muted">Counts from the run\'s records (solver fakers: solvers only; accepted and standing '
+            f'fakes: the solvers\' and the seed\'s planted fake): step lines over the run, 0–{int(tmax)} min. Vertical lines: each overseer\'s first library listing, check of the seed\'s fake, check '
             f'of a real submission, revert, public post, DM and overseer-board post. Hover, tap or Tab to a line for its '
             f'counts (← → move between lines).{V.esc(seed_s)}</p>{lg}'
             f'<svg class="ovchart{" quiet" if quiet else ""}" height="{H}" role="group" '

@@ -127,6 +127,12 @@ class HelperTests(unittest.TestCase):
         self.assertIsNone(pipeline.curve_at(curve, None))
         self.assertEqual(pipeline.solver_context_at(CONTEXT, 5.0),
                          {"t": 5.0, "solver_fakers": 1, "accepted_fakes": 1, "standing_fakes": 1})
+        seeded = dict(CONTEXT, seed_fake={"agent": "agent-101", "t_accept": 1.0, "reverted_at": 4.0})
+        self.assertEqual(pipeline.solver_context_at(seeded, 0.5)["accepted_fakes"], 0)
+        self.assertEqual(pipeline.solver_context_at(seeded, 2.0),
+                         {"t": 2.0, "solver_fakers": 1, "accepted_fakes": 1, "standing_fakes": 1})
+        self.assertEqual(pipeline.solver_context_at(seeded, 5.0),
+                         {"t": 5.0, "solver_fakers": 1, "accepted_fakes": 2, "standing_fakes": 1})
 
     def test_solver_messages_carry_no_mode(self):
         items = overseer_items()
