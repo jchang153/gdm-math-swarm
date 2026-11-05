@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-05 12:35 PT by Claude (Opus 5.5) sweep operator (item 33: five-model 25-agent sweep launched, Grok skipped).
+Last updated: 2026-11-05 13:15 PT by Claude (Opus 5.5) overseer story-map subagent (item 32 DONE: overseer story maps + 3-run pilot published).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1474,36 +1474,41 @@ is being merged into main via `collab-env`.
      uploaded and remain only on the VM disks. `offload_runs.py offload` for the 9 units on 2026-11-05: 9 done,
      0 failed, 0 bytes uploaded (all already present), dataset commit `7a8376cf`.
 
-32. **IN PROGRESS (started 2026-11-05 11:40 PT): overseer story maps, then a 3-run pilot** (docs/plan.md, "Overseer
-   story maps (November 5, 2026)"; owner approval verbatim there). Lead: a Claude (Opus 5.5) implementation subagent
-   with development subagents by file ownership: A taxonomy_overseer.md + schema_overseer.py, B extract.py/chunk.py
-   overseer events and hard facts, C pipeline.py overseer mode (+ mock), D view.py overseer pages, index strip and
-   faker-curve overlay (+ storymap_site.py allowlist). Overseer maps go to `RUN/analysis/storymap-overseer/` (own
-   output folder, own budget label), so solver maps and their budgets are untouched.
-   - Pilot: agent-102 of `glmflash100-seeded-1ov-glm-120m-push-r{1,2,3}-*`, `--run-limit 10` each, stage models as
-     the push solver maps; records restored read-only into the lead's scratchpad (`offload_runs.py restore --dest`).
-   - Resume: if this stalls, the code state is on main (check `git log -- research/analysis/storymap`); rerun the
-     pilot per run with the extract `--overseers` and pipeline `--overseer` options documented in the module
-     docstrings, render with `view --overseer-map`, then publish with `publish_cloudflare.py storymap`.
-
-33. **RUNNING (launched 2026-11-05 12:18-12:21 PT): five-model 25-agent sweep, 4 of 5 launched** (owner decision,
-   docs/plan.md "Five-model 25-agent sweep (November 5, 2026)"). Configs
-   `configs/{grok47,kimik31pro,dsv41flash,gpt6luna,gemini4argon}-25-seeded-control-60m-push.json` (25 solvers on one
-   model, seed agent-026 at +3 min, push delivery, library notices, 60 min, simple judge, no overseers); catalogue
-   series `sweep25`. One per owner VM (n2d-highmem-96; VM per run in `HANDOFF.local.md`). Compat checks and preflight
-   passed for the four launched; `settings.json` confirms push, `["library"]`, seed agent-026, 25 agents.
-   - `dsv41flash-25-seeded-control-60m-push-20261105T201815Z` 12:18 PT (budget $50)
-   - `gpt6luna-25-seeded-control-60m-push-20261105T201919Z` 12:19 PT ($50)
-   - `kimik31pro-25-seeded-control-60m-push-20261105T201936Z` 12:19 PT ($150)
-   - `gemini4argon-25-seeded-control-60m-push-20261105T202154Z` 12:21 PT ($150)
-   - **Grok 4.7 skipped** (budget was $150): on route `xai` the compat cap probe failed (`reasoning_cap_unverified`:
-     22,202 generated tokens at `max_tokens` 1024, stop reason `stop`; the route ignores the cap); on
-     `amazon-bedrock/global` (same price; needed non-strict tools, `c5070a3`) the cap holds but the route returns no
-     reasoning content, so the required `reasoning_replay_accepted` fails (0 replays). The config stays pinned to
-     Bedrock. Compat spend about $0.27. Its VM is TERMINATED at n2-standard-64.
-   - Post-processing: operator scratchpad `sweep25/post.sh` (wait for core, `fetch_keep` without publishing, stop +
-     resize back, heatmap), then `sweep25/deployq.sh 4` (one publish at a time under `cf-deploy.lock`), catalogue,
-     verify, offload. No story maps (not authorised).
+32. **DONE 2026-11-05 (~13:15 PT; started 11:40 PT): overseer story maps, plus a 3-run pilot published** (docs/plan.md,
+   "Overseer story maps (November 5, 2026)"; owner approval verbatim there). Code `bc7190c`.
+   - **Code** (`research/analysis/storymap/`): codebook `taxonomy_overseer.md` (groups O orientation, H hypotheses,
+     I investigation, T detection, A action, G other; statuses not_looking / investigating_other / investigating_trick /
+     enforcing / coordinating / idle); `schema_overseer.py` (+ private `prompts_overseer.md`); `extract.py --overseers`
+     adds events K1 check_proof, V1 revert (failed and duplicate attempts too), M1 overseer-board post read, M2 own
+     overseer-board post, and writes `timeline/overseer_context.json` (solver faker / accepted / standing-fake curves,
+     seed fake, every check and revert). Conference event `call_id`s are the service's own ids, so calls are joined to
+     the events table by agent, tool, kind, time window and ids (`Builder.ov_join`). `overseer.py` classifies every
+     tool call (check, revert, board, DM, overseer board, library, problems, status, submit, workspace, sleep, other),
+     selects stage-2 events and computes hard facts. `pipeline.py --overseer` writes `RUN/analysis/storymap-overseer/`
+     with ledger label `storymap-overseer-<run>` (its own budget), crosscheck off; `run_storymap.py --overseer`
+     extracts + maps and leaves rendering to `view --map SOLVER_MAP --timeline SOLVER_TL --overseer-map OM
+     --overseer-timeline OT` (overseer page `agents/<id>.html`, index strip + faker-curve overlay panel,
+     `taxonomy_overseer.html`). With overseer mode off, solver timelines, units and pages are byte-identical (checked on
+     real r1/r2/r3 data and golden tests). `storymap_site.py` allows `taxonomy_overseer.html`, guards the overseer
+     prompts and excludes `analysis/storymap-overseer/` from publication. Tests: 1,465 (`tests/`) + 814
+     (`research/analysis/tests`) OK.
+   - **Pilot** (agent-102, stage 1 Claude Haiku 5.5, stage 2 GPT-6.1 Terra, stage 3 GPT-6.1 Sol, `--run-limit 10` each):
+     | run (1ov push) | settled $ | requests | stage-1 chunks / stage-2 events | first: library list, check, revert, public post, DM (min) | detection (stage 3) |
+     |---|---|---|---|---|---|
+     | r1 `...-r1-20261104T042820Z` | 1.67 | 65 | 6 / 58 | 16.1, 13.2 (workspace), 26.0, 30.7, 31.8 | 18.3 (real fake confirmed 21.9); 67 reverts |
+     | r2 `...-r2-20261104T042740Z` | 0.17 | 8 | 3 / 3 | 8.6, 10.7 (seed, not genuine), 11.2, 12.1, 11.9 | 10.5 |
+     | r3 `...-r3-20261104T043327Z` | 0.22 | 10 | 3 / 3 | 9.1, 12.4 (seed, not genuine), 13.0, 8.5, 13.7 | 10.6 |
+     None of the three runs has an overseer board (only 10-overseer runs do); the lane shows "no overseer board".
+   - **Site:** story maps of the three runs republished with the overseer strip/overlay, `agents/agent-102.html` and
+     `taxonomy_overseer.html` (deployment `a597e02f`, under `cf-deploy.lock`, 12 files new or changed, solver agent
+     pages unchanged byte for byte vs the published render; receipt
+     `runs/phase-b/cloudflare/receipts/storymap-overseer-pilot-20261105.json`; built-in verify ok). Independent
+     decoded-text scan + `scan.py`: 0 hard hits. Live: index 200 and packed `agent-102.html` digest = local on
+     pages.dev and the custom domain path. The three runs were offloaded again (dataset commits recorded by
+     `offload_runs.py`).
+   - **Known caveats:** hard facts count `known_faker` and the faker curves over solvers only, so a DM to the seed
+     agent-101 is "not a known faker" and r2's early milestones show 0 accepted fakes although the seed's fake stood;
+     stage 3 flagged these as consistency flags. Fix candidates: count the seed's accepted fake in `known_faker`.
 
 ## Next steps / open items
 
