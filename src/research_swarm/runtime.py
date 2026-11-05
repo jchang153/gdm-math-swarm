@@ -1978,6 +1978,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "unread_notices": unread_notices,
             **({"unread_notice_channels": list(notice_channels)} if notice_channels else {}),
             **({"push_delivery": True} if push else {}),
+            **({"reasoning_replay": config["reasoning_replay"]} if "reasoning_replay" in config else {}),
             "integrity_reminder": None if integrity_reminder is None else {
                 "interval_seconds": integrity_reminder[0], "text": integrity_reminder[1],
                 "last_boundary": last_boundary},

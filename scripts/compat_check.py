@@ -128,7 +128,9 @@ from research_swarm.tools import canonical_tool_name  # noqa: E402
 from research_swarm.budget import (DEFAULT_LEDGER_PATH, BudgetExceeded, BudgetLedger, describe_budget,  # noqa: E402
                                    ledger_path_for, list_requests, run_budget)
 from research_swarm.inspect_adapter import _rejected_without_generation, classify_generate_error  # noqa: E402
-from research_swarm.provider import SIGNED_REASONING_MODEL_IDS, frozen_fields, settings_from_config  # noqa: E402
+from research_swarm.provider import (REASONING_REPLAY_CHECK, REASONING_REPLAY_KEY,  # noqa: E402
+                                     REASONING_REPLAY_UNAVAILABLE, SIGNED_REASONING_MODEL_IDS, frozen_fields,
+                                     reasoning_replay_exempt, settings_from_config)
 
 SCHEMA = "gdm-compatibility/1"
 PREFIX = "compatibility"
@@ -627,7 +629,7 @@ def build_checks(*, agent_id, events, conference_events, activity, settings, abo
     return checks
 
 
-def build_evidence(*, checks, images, settings, spent_usd, request_ids, created_at=None, **details):
+def build_evidence(*, checks, images, settings, spent_usd, request_ids, created_at=None, exempt_checks=(), **details):
     """Evidence record of the shared interface (launch gate ``compatibility``).
 
     ``request_ids`` (X4): every ledger request id the check admitted (agent and
@@ -637,7 +639,8 @@ def build_evidence(*, checks, images, settings, spent_usd, request_ids, created_
     for name in REQUIRED_CHECKS:  # a missing required check counts as failed
         checks.setdefault(name, _check(False, "check was not computed"))
     for name in REQUIRED_CHECKS:
-        checks[name]["required"] = True
+        # A config-scoped exception (provider.reasoning_replay_exempt) records the check as informational.
+        checks[name]["required"] = name not in exempt_checks
     request_ids = list(dict.fromkeys(str(i) for i in request_ids))
     record = {"schema": SCHEMA, "created_at": created_at or iso_now(),
               "all_required_passed": all(c["passed"] for c in checks.values() if c["required"]),
@@ -1022,7 +1025,11 @@ def run_role(args, config, role, role_config, settings, budget, budget_source, p
     if credentials is None:  # measured after the run (presence only)
         from research_swarm.inspect_adapter import credentials_in_environment
         credentials = credentials_in_environment()
+    exempt = role is None or role == "solver"
+    exempt = exempt and reasoning_replay_exempt(config)
     record = build_evidence(
+        exempt_checks=(REASONING_REPLAY_CHECK,) if exempt else (),
+        **({REASONING_REPLAY_KEY: REASONING_REPLAY_UNAVAILABLE} if exempt else {}),
         checks=checks, images=images, settings=result.get("settings") or settings, spent_usd=spent,
         request_ids=request_ids,
         kind="paid live compatibility check (one genuine Claude Code agent, frozen OpenRouter route)",

@@ -50,6 +50,33 @@ KNOWN_MODEL_IDS = tuple(dict.fromkeys(m for ids in ((MODEL_ID,), *TRACK_MODEL_ID
 # tool calls. Their live compatibility check must show such a replay accepted
 # (``signed_reasoning_tool_call_replay``, scripts/compat_check.py).
 SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID, GEMINI4_MODEL_ID, GPT_SOL_MODEL_ID, GPT6_LUNA_MODEL_ID)
+# Config-scoped reasoning-replay exception (owner decision, chat, November 5, 2026: "sure that's fine";
+# docs/plan.md "Five-model 25-agent sweep (November 5, 2026)"). On amazon-bedrock/global Grok 4.7
+# enforces max_tokens but returns no reasoning content, so there is nothing to replay: the model sees only
+# its earlier visible text and tool calls, and transcripts carry no reasoning text. Only a config that
+# names the exception (REASONING_REPLAY_KEY = REASONING_REPLAY_UNAVAILABLE) for an approved (model, route)
+# pair waives the compatibility check ``reasoning_replay_accepted``; every other check stays required.
+REASONING_REPLAY_KEY = "reasoning_replay"
+REASONING_REPLAY_UNAVAILABLE = "unavailable_on_route"
+REASONING_REPLAY_EXCEPTIONS = frozenset({("x-ai/grok-4.7", "amazon-bedrock/global")})
+REASONING_REPLAY_CHECK = "reasoning_replay_accepted"
+
+
+def reasoning_replay_exempt(config) -> bool:
+    """True when ``config`` declares the approved reasoning-replay exception for its own model and route;
+    False when it does not name the key; ValueError for any other value or an unapproved model/route."""
+    if not isinstance(config, dict) or REASONING_REPLAY_KEY not in config:
+        return False
+    if config[REASONING_REPLAY_KEY] != REASONING_REPLAY_UNAVAILABLE:
+        raise ValueError(f"{REASONING_REPLAY_KEY} must be {REASONING_REPLAY_UNAVAILABLE!r} when set")
+    settings = config.get("provider_settings") if isinstance(config.get("provider_settings"), dict) else {}
+    pair = (settings.get("model_id"), config.get("provider_route"))
+    if pair not in REASONING_REPLAY_EXCEPTIONS:
+        raise ValueError(f"{REASONING_REPLAY_KEY} exception is not approved for model/route {pair!r} "
+                         f"(provider.REASONING_REPLAY_EXCEPTIONS)")
+    return True
+
+
 # Anthropic thinking blocks are signed too (reasoning_details format anthropic-claude-v1).
 SIGNED_REASONING_MODEL_IDS += (CLAUDE_MODEL_ID,)
 # Anthropic models get OpenRouter's top-level automatic prompt caching (request_options). Inspect

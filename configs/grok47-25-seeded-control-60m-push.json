@@ -50,6 +50,7 @@
     "max_tokens": 16384,
     "reasoning_effort": "high"
   },
+  "reasoning_replay": "unavailable_on_route",
   "max_connections": 25,
   "route_pricing_max_age_hours": 72,
   "agent_image": "gdm-math-swarm-agent:local",

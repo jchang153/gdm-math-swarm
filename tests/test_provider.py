@@ -242,3 +242,55 @@ class GptModelTests(unittest.TestCase):
         # A route without max_tokens (Azure lists only max_completion_tokens) is refused.
         with self.assertRaises(ValueError):
             validate_catalog(self.catalog(), ProviderSettings(**{**frozen_fields(settings), "provider_route": "azure"}))
+
+
+class ReasoningReplayExceptionTests(unittest.TestCase):
+    """Config-scoped reasoning-replay exception (owner, November 5, 2026): Grok 4.7 on amazon-bedrock/global only."""
+    ROOT = Path(__file__).resolve().parents[1]
+
+    def config(self, name):
+        import json
+        return json.loads((self.ROOT / "configs" / name).read_text())
+
+    def test_only_the_approved_config_is_exempt(self):
+        from research_swarm.provider import reasoning_replay_exempt
+        from research_swarm.launch_gates import compatibility_required_checks
+        grok = self.config("grok47-25-seeded-control-60m-push.json")
+        self.assertTrue(reasoning_replay_exempt(grok))
+        self.assertFalse(reasoning_replay_exempt(self.config("gemini4argon-25-seeded-control-60m-push.json")))
+        with self.assertRaises(ValueError):
+            reasoning_replay_exempt(dict(grok, provider_route="xai"))
+        with self.assertRaises(ValueError):
+            reasoning_replay_exempt(dict(self.config("kimik31pro-25-seeded-control-60m-push.json"),
+                                         reasoning_replay="unavailable_on_route"))
+        with self.assertRaises(ValueError):
+            reasoning_replay_exempt(dict(grok, reasoning_replay="off"))
+        exempt = compatibility_required_checks("x-ai/grok-4.7", True)
+        self.assertNotIn("reasoning_replay_accepted", exempt)
+        for name in ("reasoning_cap_enforced", "route_pinned", "provider_cost_reported", "tool_call_parsed"):
+            self.assertIn(name, exempt)
+        self.assertIn("reasoning_replay_accepted", compatibility_required_checks("x-ai/grok-4.7"))
+
+    def test_evidence_marks_only_the_exempt_check_informational(self):
+        import importlib.util, sys
+        sys.path.insert(0, str(self.ROOT / "scripts"))
+        spec = importlib.util.spec_from_file_location("compat_check", self.ROOT / "scripts" / "compat_check.py")
+        compat = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(compat)
+        settings = settings_from_config(self.config("grok47-25-seeded-control-60m-push.json"))
+        checks = {n: compat._check(True, "ok") for n in compat.REQUIRED_CHECKS}
+        checks["reasoning_replay_accepted"] = compat._check(False, "0 replays")
+        images = {"agent": {"id": "a"}}
+        rec = compat.build_evidence(checks=checks, images=images, settings=settings, spent_usd=0, request_ids=[],
+                                    exempt_checks=("reasoning_replay_accepted",))
+        self.assertTrue(rec["all_required_passed"])
+        self.assertFalse(rec["checks"]["reasoning_replay_accepted"]["required"])
+        checks2 = {n: compat._check(True, "ok") for n in compat.REQUIRED_CHECKS}
+        checks2["reasoning_replay_accepted"] = compat._check(False, "0 replays")
+        rec = compat.build_evidence(checks=checks2, images=images, settings=settings, spent_usd=0, request_ids=[])
+        self.assertFalse(rec["all_required_passed"])
+        checks3 = {n: compat._check(True, "ok") for n in compat.REQUIRED_CHECKS}
+        checks3["reasoning_cap_enforced"] = compat._check(False, "cap ignored")
+        rec = compat.build_evidence(checks=checks3, images=images, settings=settings, spent_usd=0, request_ids=[],
+                                    exempt_checks=("reasoning_replay_accepted",))
+        self.assertFalse(rec["all_required_passed"])

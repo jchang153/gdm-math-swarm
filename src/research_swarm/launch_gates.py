@@ -290,10 +290,13 @@ COMPATIBILITY_INFORMATIONAL_CHECKS = ("truncation_observed", "compaction_observe
 COMPATIBILITY_SIGNED_REASONING_CHECK = "signed_reasoning_tool_call_replay"
 
 
-def compatibility_required_checks(model_id):
-    """The compatibility evidence's required checks for ``model_id``."""
+def compatibility_required_checks(model_id, reasoning_replay_exempt=False):
+    """The compatibility evidence's required checks for ``model_id``; without ``reasoning_replay_accepted``
+    only for a config with the approved exception (provider.reasoning_replay_exempt)."""
     signed = (COMPATIBILITY_SIGNED_REASONING_CHECK,) if model_id in SIGNED_REASONING_MODEL_IDS else ()
-    return COMPATIBILITY_REQUIRED_CHECKS + signed
+    base = tuple(c for c in COMPATIBILITY_REQUIRED_CHECKS
+                 if not (reasoning_replay_exempt and c == "reasoning_replay_accepted"))
+    return base + signed
 
 
 
@@ -909,7 +912,15 @@ class _Gates:
         if record.get("all_required_passed") is not True:
             problems.append("all_required_passed is not true")
         checks = record.get("checks") if isinstance(record.get("checks"), dict) else {}
-        problems += check_problems(checks, compatibility_required_checks(settings.model_id))
+        from .provider import REASONING_REPLAY_KEY, REASONING_REPLAY_UNAVAILABLE, reasoning_replay_exempt
+        try:
+            exempt = role_config is self.config and reasoning_replay_exempt(self.config)
+        except ValueError as exc:
+            exempt = False
+            problems.append(str(exc))
+        if exempt and record.get(REASONING_REPLAY_KEY) != REASONING_REPLAY_UNAVAILABLE:
+            problems.append(f"the config's {REASONING_REPLAY_KEY} exception is not recorded in the evidence")
+        problems += check_problems(checks, compatibility_required_checks(settings.model_id, exempt))
         if record.get("model_id") != settings.model_id:
             problems.append(f"model_id {record.get('model_id')!r} is not {settings.model_id!r}")
         if record.get("provider_route") != settings.provider_route:

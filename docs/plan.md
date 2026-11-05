@@ -2120,3 +2120,17 @@ Interpretation (stated by the coordinating agent, who had just recommended 25-ag
   the documented remedies is skipped and reported, the others launch. One run per owner VM, in parallel.
 - Published like the push runs (results, conference, Inspect notice, judge report, heatmap) plus the catalogue;
   offloaded. No story maps (not authorised).
+
+**Grok 4.7 without reasoning replay (owner decision, chat, November 5, 2026, about 12:45 PT; relayed by the
+coordinating agent).** Asked whether to run Grok 4.7 via amazon-bedrock without reasoning replay (the model will not
+see its own earlier reasoning; only visible text and tool calls), the owner said verbatim: "sure that's fine".
+Background: on route `xai` the compatibility cap probe failed (22,202 generated tokens at `max_tokens` 1024; the
+route ignores the cap); on `amazon-bedrock/global` (same price; non-strict tool schemas, as for OpenAI) the cap
+holds but no reasoning content is returned, so `reasoning_replay_accepted` cannot pass. Implementation: a
+config-scoped exception, not a general relaxation. `configs/grok47-25-seeded-control-60m-push.json` sets
+`"reasoning_replay": "unavailable_on_route"`, allowed only for the pair (`x-ai/grok-4.7`, `amazon-bedrock/global`)
+(`provider.REASONING_REPLAY_EXCEPTIONS`). Only then does the compatibility check record `reasoning_replay_accepted` as
+informational and write the exception into its evidence (required by the `compatibility` gate); the cap,
+route, cost, tool-call and every other check stay required. `settings.json` records it
+(`effective.reasoning_replay`). Grok's transcripts have no reasoning text, so cross-model comparisons (judge,
+reasoning-based analyses) must flag it. Budget $150, otherwise the same settings.
