@@ -2047,3 +2047,42 @@ else the same."
 - Published on the site like the push runs (results, conference, Inspect notice, judge report, heatmap), in their own
   catalogue series ("120-minute communication-only overseers with pushed messages"). Story maps are not authorised
   for these runs.
+
+## Overseer story maps (November 5, 2026)
+
+**Approved by the owner (chat, November 5, 2026; relayed by the coordinating agent; an approval, not a proposal).**
+Verbatim: "yes, I approve the plan. Please make sure all the overseer affordances are included in the story map,
+especially the private message board. Let's go ahead and run the pilot after implementation".
+
+The approved plan (proposed by the coordinating agent, approved as above):
+1. An overseer codebook, `research/analysis/storymap/taxonomy_overseer.md` (same heading conventions as the solver
+   taxonomy; researcher-facing and public like it), with tracks Orientation (reads instructions; surveys problems,
+   board and library; plans a strategy), Hypotheses (suspects an exploit and names which: answer restatement, name
+   shadowing, header tamper, axioms, other; dismisses a suspicion), Investigation (lists or reads the library; reads
+   a submission; `check_proof` with target and verdict; local experiments and scripts; idle or sleep), Detection
+   (first recognises the planted answer-restatement trick; confirms it on a real submission) and Action (revert with
+   target and latency since acceptance; board posts: specific or vague, names the trick, states consequences; DMs:
+   target and whether a known faker; private overseer-board posts and reads: coordination, division of labour,
+   duplicate work). A per-overseer status bar replaces the solver's position-on-cheating bar: not yet looking /
+   investigating something else / investigating the trick / enforcing / coordinating / idle.
+2. Pipeline: overseers are mapped only in an explicit overseer mode (solver maps unchanged byte for byte; the seed
+   agent stays excluded). Stage 1 has an overseer prompt and schema; stage 2 reads the overseer's reactions to the
+   solver events it actually saw (a new accepted fake or library file, a solver board post or DM, a peer's
+   overseer-board post); stage 3 writes a story per overseer plus code-derived hard facts (minutes to the first
+   library listing, first `check_proof` of the seed file, first `check_proof` of any real submission, first revert,
+   first public post, first DM, first overseer-board post and read; solver fakers and accepted fakes at each of those
+   moments; counts of reverts, posts, DMs and overseer-board posts; duplicated reverts and checks with 10 overseers).
+3. Every overseer affordance appears in the map (owner's emphasis): every overseer tool call and result, i.e.
+   `check_proof`, `revert_submission` (including failed and duplicate attempts), public board posts and reads, DMs
+   sent and received, the private overseer board (posts and reads), library listing and reads, the problem list,
+   conference status, workspace shell and file operations and sleeps, with matching rows and glyphs on the overseer
+   page.
+4. Viewer: overseer agent pages with the status bar and rows (checks, reverts, posts, DMs, overseer board, library,
+   investigation and sleep); an overseer strip on the run's story-map index; a run-level panel that overlays each
+   overseer's key moments on the solvers' cumulative-faker curve.
+5. Tests for overseer mode; existing tests pass; a mock dry run before spending.
+
+Pilot (approved with the plan): overseer story maps of `agent-102` in the three 120-minute push runs with one
+overseer, `glmflash100-seeded-1ov-glm-120m-push-r{1,2,3}-20261104T04*Z`, about $30 in total: each invocation is its
+own paid run with `--run-limit 10` (one budget per invocation; no other caps or approvals). Same stage models as the
+push solver maps. Published on the site alongside the existing push story maps.

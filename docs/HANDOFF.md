@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-05 10:50 PT by Claude (Opus 5.5) operator subagent (item 31 DONE: 9 commsonly push runs published, verified, offloaded; results table).
+Last updated: 2026-11-05 11:45 PT by Claude (Opus 5.5) overseer story-map subagent (item 32 started: overseer story maps + 3-run pilot).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1473,6 +1473,18 @@ is being merged into main via `collab-env`.
      16:21-17:12 PT). The Mac holds only the core. Resume archives that failed the credential screen were not
      uploaded and remain only on the VM disks. `offload_runs.py offload` for the 9 units on 2026-11-05: 9 done,
      0 failed, 0 bytes uploaded (all already present), dataset commit `7a8376cf`.
+
+32. **IN PROGRESS (started 2026-11-05 11:40 PT): overseer story maps, then a 3-run pilot** (docs/plan.md, "Overseer
+   story maps (November 5, 2026)"; owner approval verbatim there). Lead: a Claude (Opus 5.5) implementation subagent
+   with development subagents by file ownership: A taxonomy_overseer.md + schema_overseer.py, B extract.py/chunk.py
+   overseer events and hard facts, C pipeline.py overseer mode (+ mock), D view.py overseer pages, index strip and
+   faker-curve overlay (+ storymap_site.py allowlist). Overseer maps go to `RUN/analysis/storymap-overseer/` (own
+   output folder, own budget label), so solver maps and their budgets are untouched.
+   - Pilot: agent-102 of `glmflash100-seeded-1ov-glm-120m-push-r{1,2,3}-*`, `--run-limit 10` each, stage models as
+     the push solver maps; records restored read-only into the lead's scratchpad (`offload_runs.py restore --dest`).
+   - Resume: if this stalls, the code state is on main (check `git log -- research/analysis/storymap`); rerun the
+     pilot per run with the extract `--overseers` and pipeline `--overseer` options documented in the module
+     docstrings, render with `view --overseer-map`, then publish with `publish_cloudflare.py storymap`.
 
 ## Next steps / open items
 
