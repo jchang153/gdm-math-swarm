@@ -41,7 +41,7 @@
   "provider": "openrouter",
   "requested_model": "Grok 4.7",
   "candidate_model_id": "x-ai/grok-4.7",
-  "provider_route": "xai",
+  "provider_route": "amazon-bedrock/global",
   "provider_settings": {
     "prompt_usd_per_token": "0.000004",
     "output_usd_per_token": "0.000012",

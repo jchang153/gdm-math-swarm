@@ -1688,8 +1688,11 @@ def build_openrouter_model(settings, repo_root, max_connections, *, run_budget_u
     # Inspect's OpenAI-compatible provider marks every tool `strict: true` by default;
     # OpenAI's own endpoint then rejects Claude Code's tool schemas (optional
     # properties such as Bash `timeout`; compat-20261021T183217Z, 400
-    # invalid_function_parameters). Other routes keep the default they passed with.
-    strict = {"strict_tools": False} if settings.model_id.startswith("openai/") else {}
+    # invalid_function_parameters). Grok 4.7 on amazon-bedrock/global rejects them the same way
+    # (compat-20261105T202242Z; its xai route ignores max_tokens for reasoning, so the sweep pins
+    # Bedrock). Other routes keep the default they passed with.
+    strict = ({"strict_tools": False} if settings.model_id.startswith("openai/")
+              or settings.provider_route.startswith("amazon-bedrock") else {})
     model = capture_openrouter_cost(get_model(
         "openrouter/" + settings.model_id, api_key=key, max_retries=0, **strict,
         provider=settings.request_options()["provider"], reasoning_enabled=True,
