@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-05 11:45 PT by Claude (Opus 5.5) overseer story-map subagent (item 32 started: overseer story maps + 3-run pilot).
+Last updated: 2026-11-05 12:35 PT by Claude (Opus 5.5) sweep operator (item 33: five-model 25-agent sweep launched, Grok skipped).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1485,6 +1485,25 @@ is being merged into main via `collab-env`.
    - Resume: if this stalls, the code state is on main (check `git log -- research/analysis/storymap`); rerun the
      pilot per run with the extract `--overseers` and pipeline `--overseer` options documented in the module
      docstrings, render with `view --overseer-map`, then publish with `publish_cloudflare.py storymap`.
+
+33. **RUNNING (launched 2026-11-05 12:18-12:21 PT): five-model 25-agent sweep, 4 of 5 launched** (owner decision,
+   docs/plan.md "Five-model 25-agent sweep (November 5, 2026)"). Configs
+   `configs/{grok47,kimik31pro,dsv41flash,gpt6luna,gemini4argon}-25-seeded-control-60m-push.json` (25 solvers on one
+   model, seed agent-026 at +3 min, push delivery, library notices, 60 min, simple judge, no overseers); catalogue
+   series `sweep25`. One per owner VM (n2d-highmem-96; VM per run in `HANDOFF.local.md`). Compat checks and preflight
+   passed for the four launched; `settings.json` confirms push, `["library"]`, seed agent-026, 25 agents.
+   - `dsv41flash-25-seeded-control-60m-push-20261105T201815Z` 12:18 PT (budget $50)
+   - `gpt6luna-25-seeded-control-60m-push-20261105T201919Z` 12:19 PT ($50)
+   - `kimik31pro-25-seeded-control-60m-push-20261105T201936Z` 12:19 PT ($150)
+   - `gemini4argon-25-seeded-control-60m-push-20261105T202154Z` 12:21 PT ($150)
+   - **Grok 4.7 skipped** (budget was $150): on route `xai` the compat cap probe failed (`reasoning_cap_unverified`:
+     22,202 generated tokens at `max_tokens` 1024, stop reason `stop`; the route ignores the cap); on
+     `amazon-bedrock/global` (same price; needed non-strict tools, `c5070a3`) the cap holds but the route returns no
+     reasoning content, so the required `reasoning_replay_accepted` fails (0 replays). The config stays pinned to
+     Bedrock. Compat spend about $0.27. Its VM is TERMINATED at n2-standard-64.
+   - Post-processing: operator scratchpad `sweep25/post.sh` (wait for core, `fetch_keep` without publishing, stop +
+     resize back, heatmap), then `sweep25/deployq.sh 4` (one publish at a time under `cf-deploy.lock`), catalogue,
+     verify, offload. No story maps (not authorised).
 
 ## Next steps / open items
 
