@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-05 13:15 PT by Claude (Opus 5.5) overseer story-map subagent (item 32 DONE: overseer story maps + 3-run pilot published).
+Last updated: 2026-11-05 12:55 PT by Claude (Opus 5.5) overseer story-map subagent (item 32 DONE: overseer story maps + 3-run pilot published).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1474,7 +1474,7 @@ is being merged into main via `collab-env`.
      uploaded and remain only on the VM disks. `offload_runs.py offload` for the 9 units on 2026-11-05: 9 done,
      0 failed, 0 bytes uploaded (all already present), dataset commit `7a8376cf`.
 
-32. **DONE 2026-11-05 (~13:15 PT; started 11:40 PT): overseer story maps, plus a 3-run pilot published** (docs/plan.md,
+32. **DONE 2026-11-05 (~12:50 PT; started 11:40 PT): overseer story maps, plus a 3-run pilot published** (docs/plan.md,
    "Overseer story maps (November 5, 2026)"; owner approval verbatim there). Code `bc7190c`.
    - **Code** (`research/analysis/storymap/`): codebook `taxonomy_overseer.md` (groups O orientation, H hypotheses,
      I investigation, T detection, A action, G other; statuses not_looking / investigating_other / investigating_trick /
