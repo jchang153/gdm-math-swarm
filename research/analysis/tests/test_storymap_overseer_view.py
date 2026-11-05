@@ -371,6 +371,16 @@ class OverseerViewTest(unittest.TestCase):
         self.assertNotIn("O5", view.DEFS)
 
 
+class ManyOverseersPanelTest(unittest.TestCase):
+    def test_run_panel_labels_never_run_out_of_rows(self):
+        """Ten overseers whose first moments all fall within a minute (10ov push runs) still get a label row each."""
+        from types import SimpleNamespace
+        ovs = [SimpleNamespace(name=f"agent-{102 + k}", first={m: 5.0 + k * 0.01 for m in vo.CHART_MOMENTS},
+                               at_first={}) for k in range(10)]
+        html_ = vo.run_panel(ovs, {"fakers_curve": [[0, 0]], "seed_fake": None}, 120.0)
+        self.assertEqual(html_.count('class="mkr"'), 10 * len(vo.CHART_MOMENTS))
+
+
 class OverseerOnlyTest(unittest.TestCase):
     """A run with overseer maps but no solver story map (the communication-only push runs): the index holds the
     overseer strip and run panel only, the overseer pages are as with a solver map, and the axis is the run's length."""

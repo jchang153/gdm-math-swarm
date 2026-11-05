@@ -28,6 +28,7 @@ timeline events and says what it could not show. No network, no external assets.
 """
 from __future__ import annotations
 
+import itertools
 import json
 import math
 import re
@@ -1365,7 +1366,7 @@ def run_panel(ovs, ctx, tmax):
                 continue
             x = V.pct(t, tmax)
             lab = (o.name.replace("agent-", "") + " " if multi else "") + short
-            row = next(r for r in range(20) if all(abs(x - px) > 9 for px in rowx[r]))
+            row = next(r for r in itertools.count() if all(abs(x - px) > 9 for px in rowx[r]))  # no cap: 10 overseers
             rowx[row].append(x)
             info = (f"{o.name}: {label} at {V.fmt_t(t)}"
                     + (f" — {V.plural(fk, 'solver')} had faked, {V.plural(af, 'fake')} accepted, {sf} standing"
