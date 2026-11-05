@@ -2145,3 +2145,13 @@ informational and write the exception into its evidence (required by the `compat
 route, cost, tool-call and every other check stay required. `settings.json` records it
 (`effective.reasoning_replay`). Grok's transcripts have no reasoning text, so cross-model comparisons (judge,
 reasoning-based analyses) must flag it. Budget $150, otherwise the same settings.
+
+**Fakers chart, costs, story maps, incident reports and judge for the sweep (owner request, chat, November 5, 2026,
+about 14:00 PT; relayed by the coordinating agent).** Verbatim: "make a bar chart of fakers per model, once done. also
+estimate cost of each run. publish with story maps , incident reports, behavior judge once possible". For all 5
+sweep runs: solver story maps (same pipeline and stage models as the push maps, `--run-limit 60` per run, its own
+budget per invocation), the incident report and the simple behavior judge (both already run on the VM by the
+supervisor with their default per-run budgets, $20 and $10), published with the runs. Runs whose transcripts have no
+readable reasoning text (Grok 4.7 on Bedrock certainly; GPT 6 Luna and Gemini 4 Argon to be checked) still get maps,
+coded from visible text and tool calls only, and the gap is flagged. The owner draws the fakers bar chart from the
+final table (strict rule, per run).
