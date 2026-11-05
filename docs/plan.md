@@ -2087,6 +2087,17 @@ overseer, `glmflash100-seeded-1ov-glm-120m-push-r{1,2,3}-20261104T04*Z`, about $
 own paid run with `--run-limit 10` (one budget per invocation; no other caps or approvals). Same stage models as the
 push solver maps. Published on the site alongside the existing push story maps.
 
+**Extension to all push runs (owner request, chat, November 5, 2026; relayed by the coordinating agent; an approval,
+not a proposal).** Verbatim: "please extend overseer maps to all of those recent "push" runs".
+Scope (as relayed): every overseer of the 18 push runs with overseers, i.e.
+`glmflash100-seeded-{1,2,10}ov-glm-120m-push-r{1,2,3}-20261104T04*Z` (November 3, full powers; the three 1ov
+`agent-102` maps of the pilot are re-rendered only) and `glmflash100-seeded-{1,2,10}ov-glm-120m-push-commsonly-r{1,2,3}-20261104T21*Z`
+(November 4, communication only): 75 new overseers. Budgets, one per paid invocation: `--run-limit 10` for each 1ov
+and 2ov run, `--run-limit 40` for each 10ov run; same stage models as the pilot. First, the pilot's open fix: the
+hard facts count the seed's accepted fake (`known_faker`, accepted and standing fakes at each milestone). The
+communication-only runs have no solver story map (not authorised), so their story-map pages hold the overseers only.
+Published in batched guarded deploys under `cf-deploy.lock`.
+
 ## Five-model 25-agent sweep (November 5, 2026)
 
 **Approved by the owner (chat, November 5, 2026; relayed by the coordinating agent; an approval, not a proposal).**
