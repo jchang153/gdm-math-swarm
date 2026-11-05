@@ -388,7 +388,9 @@ def pack_site(files):
 def pack_viewer(run):
     from site_style import themed
     script = r"""
-const run = document.body.dataset.run, base = '/' + run + '/';
+// The site may be served under a path prefix (a proxy such as /swarms/gdm-math-swarm/): keep it.
+const run = document.body.dataset.run, at = location.pathname.indexOf('/' + run + '/');
+const base = (at > 0 ? location.pathname.slice(0, at) : '') + '/' + run + '/';
 const list = document.getElementById('list'), view = document.getElementById('view');
 let wanted = '';
 if (location.pathname.startsWith(base)) {
