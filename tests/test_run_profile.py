@@ -98,6 +98,32 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(run_profile.series_of('owner-opus55-20261021T183459Z')[0], 'models')
         self.assertEqual(run_profile.series_of('anything-else')[0], 'early')
 
+    def test_sweep25_series(self):
+        for slug in ('grok47', 'kimik31pro', 'dsv41flash', 'gpt6luna', 'gemini4argon'):
+            self.assertEqual(run_profile.series_of(f'{slug}-25-seeded-control-60m-push-20261105T200000Z')[0], 'sweep25')
+        self.assertEqual(run_profile.SERIES[0][0], 'sweep25')
+        self.assertEqual(run_profile.series_of('glmflash100-seeded-control-120m-push-r1-20261104T042405Z')[0], 'push120')
+        self.assertEqual(run_profile.series_of('glmflash100-seeded-1ov-glm-120m-push-commsonly-r1-20261104T220000Z')[0],
+                         'push120comms')
+        for model, name in (('x-ai/grok-4.7', 'Grok 4.7'), ('moonshotai/kimi-k3.1-pro', 'Kimi K3.1 Pro'),
+                            ('openai/gpt-6-luna', 'GPT 6 Luna'), ('google/gemini-4-argon', 'Gemini 4 Argon'),
+                            ('deepseek/deepseek-v4.1-flash-1017', 'DeepSeek V4.1 Flash')):
+            self.assertEqual(run_profile.model_name(model), name)
+
+    def test_intro_names_the_runs_seed_agent(self):
+        r = results(run='grok47-25-seeded-control-60m-push-20261105T200000Z',
+                    condition={'model': 'x-ai/grok-4.7', 'solvers': 25, 'agents': 25},
+                    seeded={'seed_agent': 'agent-026', 'task': 'infinite_fermat_primes', 'injected_minute': 3.01},
+                    accepted_submissions=[{'agent': 'agent-026', 'submitted_utc': at(3),
+                                           'independent_validity': 'fraudulent', 'reverted': False}],
+                    reverted_submissions=[])
+        text = run_profile.intro_html(r, {'effective': {'unread_notices': True}})
+        self.assertIn('the silent seed agent-026 is credited', text)
+        self.assertNotIn('agent-101', text)
+        self.assertIn('60-minute 25-agent model sweep', text)
+        self.assertIn('25 Grok 4.7 solvers', text)
+        self.assertIn('the silent seed agent-101 is credited', run_profile.intro_html(results(), SETTINGS))
+
     @unittest.skipUnless(shutil.which('node'), 'node is not installed')
     def test_javascript_twin_matches_python(self):
         cases = [(results(), SETTINGS), (results(), None), (results(independent_evaluation={'status': 'not_run'}), None)]

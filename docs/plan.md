@@ -2086,3 +2086,37 @@ Pilot (approved with the plan): overseer story maps of `agent-102` in the three 
 overseer, `glmflash100-seeded-1ov-glm-120m-push-r{1,2,3}-20261104T04*Z`, about $30 in total: each invocation is its
 own paid run with `--run-limit 10` (one budget per invocation; no other caps or approvals). Same stage models as the
 push solver maps. Published on the site alongside the existing push story maps.
+
+## Five-model 25-agent sweep (November 5, 2026)
+
+**Approved by the owner (chat, November 5, 2026; relayed by the coordinating agent; an approval, not a proposal).**
+Verbatim: "Let's do one run per model, 25 models, 60 minutes, with the 3-minute seed. let's do these models: grok 4.7,
+kimi 3.1 pro, deepseek v4.1 flash, gpt 6 luna, gemini 4 argon. no oversight"
+
+Interpretation (stated by the coordinating agent, who had just recommended 25-agent swarms for frontier models):
+"25 models" means **25 solver agents per run**, all on that run's model.
+
+- 5 runs, one per model, no replicates. All solvers of a run on one model. OpenRouter ids and pinned routes (public
+  catalog, November 5, 2026; first-party where offered, the earlier route for DeepSeek and Gemini):
+  `x-ai/grok-4.7` via `xai`; `moonshotai/kimi-k3.1-pro` via `moonshotai/mxfp4`; `deepseek/deepseek-v4.1-flash-1017`
+  (the dated 2026-10-17 checkpoint, as in the October 26 overseer configs; the undated id resolves to the 2026-09-10
+  checkpoint) via `deepinfra/fp8/priority`; `openai/gpt-6-luna` via `openai`; `google/gemini-4-argon` via
+  `google-vertex/global`. Reservation prices cover each route's long-prompt override tier (Grok above 200K, GPT 6 Luna
+  above 272K and its cache-write price). GPT 6 Luna is a signed-reasoning model (encrypted openai-responses reasoning,
+  as GPT 5.6 Sol), so its signed replay is a required compatibility check.
+- Otherwise identical to `configs/glmflash100-seeded-control-120m-push.json`: no overseers, `push_delivery` true,
+  `unread_notices: "library"`, all 71 problems (the same frozen manifest), the declared seed planting the
+  answer-restating `infinite_fermat_primes` proof at +3 min, simple behavior judge, `max_tokens` 16384, reasoning
+  effort high, 7 GiB per agent. Differences: `agent_count` 25 (`max_connections` 25, personas 7/6/6/6 with the same
+  persona seed), `max_run_seconds` 3600, and the seed participant is **agent-026** (the launch gate requires the
+  identifier right after the solvers; its trigger and artifact are unchanged). The owner track gains 25 as an allowed
+  agent count (`research_swarm.budget`).
+- Configs `configs/{grok47,kimik31pro,dsv41flash,gpt6luna,gemini4argon}-25-seeded-control-60m-push.json`; run ids
+  `<slug>-25-seeded-control-60m-push-<UTC>`; catalogue series `sweep25` ("60-minute 25-agent model sweep",
+  `scripts/run_profile.py`, first in the list).
+- Per-run budgets (`run_budget_usd`, the one spending control): Grok 4.7 $150, Kimi K3.1 Pro $150, Gemini 4 Argon
+  $150, DeepSeek V4.1 Flash $50, GPT 6 Luna $50.
+- Each model passes the route freeze and live compatibility check before its launch; a model that still fails after
+  the documented remedies is skipped and reported, the others launch. One run per owner VM, in parallel.
+- Published like the push runs (results, conference, Inspect notice, judge report, heatmap) plus the catalogue;
+  offloaded. No story maps (not authorised).

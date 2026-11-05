@@ -30,7 +30,16 @@ OWNER_MULTIMODEL_IDS = (GEMINI4_MODEL_ID, CLAUDE_MODEL_ID, GPT_SOL_MODEL_ID, GLM
 GLM_FLASH_MODEL_ID = "z-ai/glm-5.3-flash"
 DEEPSEEK_FLASH_1017_MODEL_ID = "deepseek/deepseek-v4.1-flash-1017"
 MULTI_OVERSEER_MODEL_IDS = (GLM_FLASH_MODEL_ID, DEEPSEEK_FLASH_1017_MODEL_ID)
-GEMINI_MODEL_IDS = (GEMINI_MODEL_ID, *OWNER_MULTIMODEL_IDS, *MULTI_OVERSEER_MODEL_IDS)
+# Five-model 25-agent sweep (docs/plan.md, "Five-model 25-agent sweep (November 5, 2026)"): Grok 4.7,
+# Kimi K3.1 Pro, DeepSeek V4.1 Flash (1017), GPT 6 Luna, Gemini 4 Argon. New IDs verified in the public
+# OpenRouter catalog on November 5, 2026 (first-party routes xai, moonshotai/mxfp4, openai).
+GROK47_MODEL_ID = "x-ai/grok-4.7"
+KIMI_K31_PRO_MODEL_ID = "moonshotai/kimi-k3.1-pro"
+# GPT 6 Luna: OpenAI reasoning comes back as openai-responses-v1 reasoning_details with an encrypted
+# item, as for GPT 5.6 Sol, so its signed replay is a required compatibility check.
+GPT6_LUNA_MODEL_ID = "openai/gpt-6-luna"
+SWEEP25_MODEL_IDS = (GROK47_MODEL_ID, KIMI_K31_PRO_MODEL_ID, GPT6_LUNA_MODEL_ID)
+GEMINI_MODEL_IDS = (GEMINI_MODEL_ID, *OWNER_MULTIMODEL_IDS, *MULTI_OVERSEER_MODEL_IDS, *SWEEP25_MODEL_IDS)
 # Models each budget track (budget.BUDGET_TRACKS) may run; the launch gates check this table.
 # Budget track "gemini" is the owner's track (its name predates the multi-model runs).
 TRACK_MODEL_IDS = {"ablation": ABLATION_MODEL_IDS, "gemini": GEMINI_MODEL_IDS}
@@ -40,7 +49,7 @@ KNOWN_MODEL_IDS = tuple(dict.fromkeys(m for ids in ((MODEL_ID,), *TRACK_MODEL_ID
 # encrypted payload, e.g. Gemini thought signatures) and must be passed back on later turns with
 # tool calls. Their live compatibility check must show such a replay accepted
 # (``signed_reasoning_tool_call_replay``, scripts/compat_check.py).
-SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID, GEMINI4_MODEL_ID, GPT_SOL_MODEL_ID)
+SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID, GEMINI4_MODEL_ID, GPT_SOL_MODEL_ID, GPT6_LUNA_MODEL_ID)
 # Anthropic thinking blocks are signed too (reasoning_details format anthropic-claude-v1).
 SIGNED_REASONING_MODEL_IDS += (CLAUDE_MODEL_ID,)
 # Anthropic models get OpenRouter's top-level automatic prompt caching (request_options). Inspect

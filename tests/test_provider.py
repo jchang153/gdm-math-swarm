@@ -129,7 +129,8 @@ class GeminiModelTests(unittest.TestCase):
         self.assertEqual(options["reasoning"], {"effort": "high", "exclude": False})
         self.assertEqual(TRACK_MODEL_IDS["gemini"], (GEMINI_MODEL_ID, "google/gemini-4-argon",
                                                      "anthropic/claude-opus-5.5", "openai/gpt-5.6-sol", "z-ai/glm-5.3",
-                                                     "z-ai/glm-5.3-flash", "deepseek/deepseek-v4.1-flash-1017"))
+                                                     "z-ai/glm-5.3-flash", "deepseek/deepseek-v4.1-flash-1017",
+                                                     "x-ai/grok-4.7", "moonshotai/kimi-k3.1-pro", "openai/gpt-6-luna"))
         self.assertNotIn(GEMINI_MODEL_ID, TRACK_MODEL_IDS["ablation"])
         self.assertIn(GEMINI_MODEL_ID, KNOWN_MODEL_IDS)
         # Lower-tier reservation prices do not cover the >200K tier.
