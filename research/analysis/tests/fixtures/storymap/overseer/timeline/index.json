@@ -1,0 +1,13 @@
+{
+ "agent-102": {
+  "items": 56,
+  "est_tokens": 2741,
+  "first_min": 0.0,
+  "last_min": 28.5,
+  "role": "overseer",
+  "source": "session_jsonl"
+ },
+ "agent-103": {
+  "error": "ValueError: No Inspect sample for: agent-103"
+ }
+}

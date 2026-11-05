@@ -16,6 +16,9 @@ Writes (default ``--out`` = ``--map``):
 * ``validation.html``: ``validation.md`` (checks against the run's records, model agreement) in the pages' words.
 * ``taxonomy.html``: the code set (``--taxonomy``, default the public copy ``storymap/taxonomy.md``) with an anchor
   per code; the pages link each code to it. Letters are only code groups; event types are named in words there too.
+* Overseer mode (``--overseer-map`` / ``--overseer-timeline``, owner approval November 5, 2026): overseer pages
+  ``agents/<overseer>.html``, an overseer strip and run panel on ``index.html`` and ``taxonomy_overseer.html``, all
+  from storymap/view_overseer.py; without these options every page is byte for byte as before.
 * ``events.html``: each overseer post or DM, other relevant board post, revert, library file and (runs with the
   periodic integrity reminder) each delivery number of the reminder, with who read it and when, and the breakdown of
   stage-2 reactions (no change / belief / behaviour by direction).
@@ -1010,10 +1013,10 @@ def phases_of(a, tmax):
     return out, ("stage-1 reading (no stage-3 reading)" if out else "none")
 
 
-def page(title, body, scripts="", body_class=""):
+def page(title, body, scripts="", body_class="", css=""):
     doc = (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
            f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-           f'<meta name="robots" content="noindex"><title>{esc(title)}</title><style>{CSS}</style></head>'
+           f'<meta name="robots" content="noindex"><title>{esc(title)}</title><style>{CSS}{css}</style></head>'
            f'<body{f" class={chr(34)}{body_class}{chr(34)}" if body_class else ""}>{body}'
            f'{"<script>" + scripts + "</script>" if scripts else ""}</body></html>')
     return themed(doc)
@@ -1268,7 +1271,8 @@ def stance_title(frm, to, st, label):
             + (f" · {label}" if label else ""))
 
 
-def index_page(agents, pipeline, tmax, nav="", names=None):
+def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css=""):
+    """``extra`` / ``css``: the overseer block and its styles (view_overseer.py); empty = the solver page as before."""
     rows, counts = [], Counter()
     push_seen = False
     sources = sorted({str(((a["stage3"] or {}).get("final") or {}).get("source", "unknown"))
@@ -1327,12 +1331,12 @@ def index_page(agents, pipeline, tmax, nav="", names=None):
             f'{banner(model_names(pipeline))}'
             f"{legend_bar('index', push=push_seen)}"
             f'<p class="muted">{len(agents)} agents. {SOURCE_TITLE}: {summary}. Time axis: minutes from run start '
-            f'(0–{int(tmax)}). A number on a shape counts the items stacked there.</p>{filters}'
+            f'(0–{int(tmax)}). A number on a shape counts the items stacked there.</p>{extra}{filters}'
             f'<div class="grid"><div class="hdr"><div>Agent</div><div>{header_axis}</div>'
             f'<div class="lab">Final reading (stage 3)</div></div>'
             f'{"".join(rows) or "<div class=empty>No agents found.</div>"}</div>'
             f"{legend_about('index', names, 'taxonomy.html' if names else '', DEFS, push=push_seen)}")
-    return page(f"Story map {run}".strip(), body, LEGEND_JS + FILTER_JS)
+    return page(f"Story map {run}".strip(), body, LEGEND_JS + FILTER_JS, css=css)
 
 
 def _yn(v):
@@ -2191,12 +2195,15 @@ def nav_html(prefix="", has_val=False, has_tax=False):
 
 # ------------------------------------------------------------------ main
 
-def build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, domain=None, evidence=True, minutes=None):
+def build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, domain=None, evidence=True, minutes=None,
+          overseer_map=None, overseer_timeline=None):
     """Write index.html, events.html and agents/<agent>.html; return the list of written paths. ``domain``
     (default: recorded in pipeline.json or timeline/domain.json, else lean) selects coding wording and, when the
     default taxonomy is asked for, the public coding taxonomy (storymap/domain.py); Lean maps are unchanged.
     ``evidence`` False leaves out the embedded timeline behind the reasoning chains; ``minutes`` sets the time axis
-    (default: the run's configured length, else from the data)."""
+    (default: the run's configured length, else from the data). ``overseer_map`` / ``overseer_timeline``: an overseer
+    story map (pipeline --overseer) to add as overseer pages, the index's overseer strip and run panel and
+    taxonomy_overseer.html (storymap/view_overseer.py); without them the output is exactly as before."""
     from . import domain as domain_mod
     domain = domain or domain_mod.map_domain(map_dir, timeline)
     if domain == domain_mod.CODE and taxonomy and Path(taxonomy) == DEFAULT_TAXONOMY:
@@ -2204,12 +2211,13 @@ def build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, domain=No
     with domain_mod.view_overrides(sys.modules[__name__], domain):
         EVIDENCE["on"] = bool(evidence)
         try:
-            return _build(map_dir, timeline, out, taxonomy, minutes)
+            return _build(map_dir, timeline, out, taxonomy, minutes, overseer_map, overseer_timeline)
         finally:
             EVIDENCE["on"] = True
 
 
-def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=None):
+def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=None, overseer_map=None,
+           overseer_timeline=None):
     """Write index.html, events.html and agents/<agent>.html; return the list of written paths."""
     agents, pipeline = load(map_dir, timeline)
     out = Path(out or map_dir)
@@ -2230,7 +2238,12 @@ def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=
     def write(path, text):
         path.write_text(text, encoding="utf-8")
         written.append(path)
-    write(out / "index.html", index_page(agents, pipeline, tmax, nav, names))
+    ov = None
+    if overseer_map is not None or overseer_timeline is not None:
+        from . import view_overseer  # only in overseer mode, so solver builds never depend on it
+        ov = view_overseer.prepare(overseer_map, overseer_timeline, tmax, has_val, has_tax,
+                                   view_module=sys.modules[__name__])
+    write(out / "index.html", index_page(agents, pipeline, tmax, nav, names, *(ov.index_block() if ov else ("", ""))))
     write(out / "events.html", events_page(agents, tmax, models, nav, names))
     if has_val:
         write(out / "validation.html", validation_page(validation.read_text(encoding="utf-8"), models, nav))
@@ -2240,6 +2253,10 @@ def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=
     for a in agents.values():
         write(out / "agents" / f"{a['name']}.html", agent_page(a, names, tmax, agents.keys(), models, agent_nav,
                                                                "../taxonomy.html" if has_tax else ""))
+    if ov:
+        for path, text in ov.pages():
+            (out / path).parent.mkdir(parents=True, exist_ok=True)
+            write(out / path, text)
     return written
 
 
@@ -2253,9 +2270,12 @@ def main(argv=None):
     ap.add_argument("--no-evidence", action="store_true",
                     help="leave out the embedded timeline behind the 'full reasoning chain' expanders")
     ap.add_argument("--minutes", type=float, help="time axis length (default: the run's configured length)")
+    ap.add_argument("--overseer-map", help="overseer story map dir (pipeline --overseer): adds overseer pages")
+    ap.add_argument("--overseer-timeline", help="overseer stage-0 dir (extract --overseers; holds "
+                    "overseer_context.json)")
     args = ap.parse_args(argv)
     written = build(args.map, args.timeline, args.out, args.taxonomy, evidence=not args.no_evidence,
-                    minutes=args.minutes)
+                    minutes=args.minutes, overseer_map=args.overseer_map, overseer_timeline=args.overseer_timeline)
     print(f"wrote {len(written)} pages to {Path(args.out or args.map)}")
     return 0
 

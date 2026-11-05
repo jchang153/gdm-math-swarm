@@ -16,6 +16,12 @@ Steps, all on runs/<id> while holding a lease on the run (scripts/offload_runs.p
 5. offload (owner decision, November 3, 2026: docs/plan.md, "Always offload to the logs dataset"): the run goes back
    to its core (offload_runs.auto_offload; deferred while another step holds a lease on the run). ``--no-offload``
    keeps every file local. A pipeline that stopped (exit 3) or failed is not offloaded.
+
+``--overseer`` (docs/plan.md, "Overseer story maps (November 5, 2026)") maps the run's overseers instead: stage 0
+with ``extract --overseers`` into ``--timeline`` (default ``--out``, default RUN/analysis/storymap-overseer), the
+pipeline with ``--overseer`` (its own ledger label and budget), no validation (validate.py is solver-specific) and
+no pages: the overseer pages are rendered with the solver map by
+``view --map SOLVER_MAP --timeline SOLVER_TIMELINE --overseer-map OM --overseer-timeline OT``.
 """
 from __future__ import annotations
 
@@ -37,7 +43,10 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--timeline", type=Path, help="stage-0 folder (default RUN/analysis/storymap)")
-    parser.add_argument("--out", type=Path, help="story-map folder (default RUN/analysis/storymap)")
+    parser.add_argument("--out", type=Path, help="story-map folder (default RUN/analysis/storymap; --overseer: "
+                                                 "RUN/analysis/storymap-overseer)")
+    parser.add_argument("--overseer", action="store_true",
+                        help="map the overseers (extract --overseers, pipeline --overseer); no validation or pages")
     offload_runs.add_offload_flag(parser)
     return parser.parse_known_args(argv)
 
@@ -66,7 +75,7 @@ def main(argv=None, *, steps=None):
     args, rest = parse_args(argv)
     log = lambda message: print(message, file=sys.stderr, flush=True)  # noqa: E731
     run_dir = args.run_dir.resolve()
-    out_dir = (args.out or run_dir / "analysis" / "storymap").resolve()
+    out_dir = (args.out or run_dir / "analysis" / ("storymap-overseer" if args.overseer else "storymap")).resolve()
     timeline = (args.timeline or out_dir).resolve()
     steps = steps or default_steps()
     unit = offload_runs.unit_of(run_dir)
@@ -75,17 +84,23 @@ def main(argv=None, *, steps=None):
             stack.enter_context(offload_runs.lease(run_dir, "story map"))
         if not has_timeline(timeline):
             steps["restore"](run_dir, log)
-            code = steps["extract"](["--run-dir", str(run_dir), "--out", str(timeline)])
+            code = steps["extract"](["--run-dir", str(run_dir), "--out", str(timeline),
+                                     *(["--overseers"] if args.overseer else [])])
             if code:
                 log(f"story map: stage 0 failed (exit {code})")
                 return code
         code = steps["pipeline"](["--run-dir", str(run_dir), "--timeline", str(timeline), "--out", str(out_dir),
-                                  *rest])
+                                  *(["--overseer"] if args.overseer else []), *rest])
         if code:
             log(f"story map: pipeline exit {code}; not validated, rendered or offloaded")
             return code
-        for name, argv_ in (("validate", ["validate", "--map", str(out_dir), "--timeline", str(timeline)]),
-                            ("view", ["--map", str(out_dir), "--timeline", str(timeline)])):
+        if args.overseer:
+            log(f"story map: overseer map in {out_dir}; not validated (solver-specific) or rendered here: render "
+                f"with view --map SOLVER_MAP --timeline SOLVER_TIMELINE --overseer-map {out_dir} "
+                f"--overseer-timeline {timeline}")
+        for name, argv_ in () if args.overseer else (
+                ("validate", ["validate", "--map", str(out_dir), "--timeline", str(timeline)]),
+                ("view", ["--map", str(out_dir), "--timeline", str(timeline)])):
             code = steps[name](argv_)
             if code:
                 log(f"story map: {name} exit {code}; not offloaded")

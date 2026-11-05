@@ -2,7 +2,10 @@
 
 Owner decision, November 2, 2026 (docs/plan.md, "Story maps on the public site (November 2, 2026)"): the story map
 pages of research/analysis/storymap/view.py are published. Only the pages and the validation summary go to the site:
-RUN/analysis/storymap/index.html, events.html, validation.html, validation.md, taxonomy.html and agents/<agent>.html.
+RUN/analysis/storymap/index.html, events.html, validation.html, validation.md, taxonomy.html and agents/<agent>.html;
+with overseer story maps (owner, November 5, 2026) also taxonomy_overseer.html, from the public overseer codebook
+research/analysis/storymap/taxonomy_overseer.md (overseer pages are agents/<overseer>.html; the overseer prompts,
+private/.../prompts_overseer.md, are screened like the solver prompts).
 Owner, November 2, 2026 (docs/plan.md): the taxonomy (codes, names, definitions, examples) is public; its committed
 copy research/analysis/storymap/taxonomy.md is rendered as taxonomy.html and its names appear on every page. Everything
 else in the folder stays local: the stage-0 timelines (timeline/, a private category), stage1/-stage3/, units/,
@@ -19,7 +22,8 @@ import re
 from incident_site import _insert
 
 STORYMAP_DIR = 'analysis/storymap'
-STORYMAP_FILES = ('index.html', 'events.html', 'validation.html', 'validation.md', 'taxonomy.html')
+STORYMAP_FILES = ('index.html', 'events.html', 'validation.html', 'validation.md', 'taxonomy.html',
+                  'taxonomy_overseer.html')
 AGENT_PAGE = re.compile(r'agents/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.html')
 STORYMAP_INDEX = STORYMAP_DIR + '/index.html'
 STORYMAP_LABEL = 'Story map'
@@ -31,7 +35,10 @@ TAB = f'<a {TAB_MARKER} href="{STORYMAP_INDEX}">{STORYMAP_LABEL}</a>'
 HELP = f'<li {TAB_MARKER}><strong>{STORYMAP_LABEL}</strong>: {html.escape(STORYMAP_HELP)}</li>'
 REPO = Path(__file__).resolve().parents[1]
 PROMPTS = REPO / 'private' / 'research' / 'analysis' / 'storymap' / 'prompts.md'
+# Overseer story maps (owner, November 5, 2026): their prompts are private too, their codebook public.
+PROMPT_FILES = (PROMPTS, PROMPTS.with_name('prompts_overseer.md'))
 PUBLIC_TAXONOMY = REPO / 'research' / 'analysis' / 'storymap' / 'taxonomy.md'
+PUBLIC_TAXONOMIES = (PUBLIC_TAXONOMY, PUBLIC_TAXONOMY.with_name('taxonomy_overseer.md'))
 PROMPT_LINE_MIN = 40  # a prompt line this long (stripped) that is not taxonomy text must not appear on a page
 # Credential-shaped strings (provider keys, tokens, private keys): never on a published page.
 SECRET = re.compile(rb'sk-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{10,}|hf_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}'
@@ -53,9 +60,16 @@ def published(relative):
     return relative in STORYMAP_FILES or bool(AGENT_PAGE.fullmatch(relative))
 
 
+OVERSEER_DIR = 'analysis/storymap-overseer'  # the overseer map's records (pipeline --overseer): never published
+
+
 def storymap_excluded(relative):
-    """True for run paths under analysis/storymap/ outside the publication allowlist (prepare_hf_library)."""
+    """True for run paths under analysis/storymap/ outside the publication allowlist (prepare_hf_library), and for
+    everything under analysis/storymap-overseer/ (overseer timelines and stage records; the overseer pages are
+    rendered into analysis/storymap/)."""
     parts = Path(relative).parts
+    if parts[:2] == ('analysis', 'storymap-overseer'):
+        return True
     if parts[:2] != ('analysis', 'storymap') or len(parts) == 2:
         return False
     rest = parts[2:]
@@ -69,17 +83,28 @@ def public_copy(relative, data):
     return data
 
 
-def prompt_lines(prompts=PROMPTS, taxonomy=PUBLIC_TAXONOMY):
+def _paths(value):
+    return [value] if isinstance(value, (str, Path)) else list(value)
+
+
+def prompt_lines(prompts=PROMPT_FILES, taxonomy=PUBLIC_TAXONOMIES):
     """Stripped lines of the private stage prompts (at least PROMPT_LINE_MIN characters) that are not public
-    taxonomy text; empty when this checkout has no prompts file."""
-    try:
-        lines = Path(prompts).read_text(encoding='utf-8').splitlines()
-    except OSError:
+    taxonomy text; empty when this checkout has no prompts file. ``prompts`` and ``taxonomy`` are a path or several
+    (default: the solver and overseer prompts; the solver and overseer codebooks); missing files are skipped."""
+    lines, public = [], []
+    for path in _paths(prompts):
+        try:
+            lines += Path(path).read_text(encoding='utf-8').splitlines()
+        except OSError:
+            continue
+    if not lines:
         return frozenset()
-    try:
-        public = Path(taxonomy).read_text(encoding='utf-8')
-    except OSError:
-        public = ''
+    for path in _paths(taxonomy):
+        try:
+            public.append(Path(path).read_text(encoding='utf-8'))
+        except OSError:
+            continue
+    public = '\n'.join(public)
     return frozenset(s for s in (x.strip() for x in lines)
                      if len(s) >= PROMPT_LINE_MIN and s not in public and not s.startswith(('#', '|', '```')))
 

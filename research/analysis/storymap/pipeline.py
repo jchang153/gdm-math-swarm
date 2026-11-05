@@ -53,6 +53,15 @@ private/research/analysis/storymap/) is marked with a 5-minute ``cache_control``
 OpenAI/Google cache it implicitly. Prefix normalization ``storymap-prefix-v1``: the system prompt is exactly the
 loaded text, everything variable is in the user message.
 
+Overseer mode (docs/plan.md, "Overseer story maps (November 5, 2026)"; INTERFACE.md, "Overseer mode"):
+``--overseer`` maps the timeline's overseers (index role ``overseer``, from ``extract --overseers``; ``--agents``
+may narrow) into ``--out`` (default ``RUN/analysis/storymap-overseer``) with ``storymap/schema_overseer.py``,
+stage-2 selection and stage-3 facts from ``storymap/overseer.py`` (run context ``overseer_context.json`` from the
+timeline folder) and no cross-check. Its ledger label is ``storymap-overseer-<run id>``, so the solver map's spend
+and the overseer map's spend never count against each other's budget. Unit headers carry ``"mode": "overseer"``
+and pipeline.json records ``"mode": "overseer"`` (``billing``: mock or paid) only in this mode; solver mode is byte
+for byte as before. Lean (math) runs only.
+
 Outputs (``OUT``): ``stage1/<agent>.jsonl`` (one row per chunk), ``stage2/<agent>.jsonl`` (one row per event),
 ``stage3/<agent>.json``, ``map.jsonl`` (every stage-3 row in ``OUT/stage3``), ``pipeline.json`` (models, prompt
 SHA-256s, per-stage requests, tokens and cost, budget record, stop), ``units/``, ``raw/`` (request and response
@@ -209,6 +218,56 @@ def load_schema_module():
     return schema
 
 
+OVERSEER = "overseer"
+
+
+def load_overseer_schema_module():
+    try:
+        from . import schema_overseer
+    except ImportError as error:
+        raise PipelineError(f"storymap/schema_overseer.py is not importable: {error}") from None
+    return schema_overseer
+
+
+def load_overseer_module():
+    try:
+        from . import overseer
+    except ImportError as error:
+        raise PipelineError(f"storymap/overseer.py is not importable: {error}") from None
+    return overseer
+
+
+def list_overseers(folder, index=None):
+    """Agent ids with a timeline file whose index role is ``overseer``, sorted (never the seed; the solver
+    listing, ``chunk.list_agents``, is unchanged)."""
+    index = chunking.load_index(folder) if index is None else index
+    agents = sorted(p.stem for p in Path(folder).glob("agent-*.jsonl") if chunking.AGENT_FILE.match(p.stem))
+    return [a for a in agents if (index.get(a) or {}).get("role") == OVERSEER]
+
+
+def curve_at(curve, t):
+    """Value of a step curve (``[[t, n], ...]``, each point a change) at minute ``t``; None when unknown."""
+    if not isinstance(t, (int, float)) or isinstance(t, bool) or not isinstance(curve, list):
+        return None
+    value = None
+    for point in curve:
+        if not isinstance(point, (list, tuple)) or len(point) < 2 or not isinstance(point[0], (int, float)):
+            continue
+        if point[0] <= t + 1e-9:
+            value = point[1]
+        else:
+            break
+    return 0 if value is None and curve else value
+
+
+def solver_context_at(context, t):
+    """Run-level solver counts at minute ``t`` (overseer mode): solver fakers, accepted fakes, standing fakes."""
+    context = context or {}
+    return {"t": t, "solver_fakers": curve_at(context.get("fakers_curve"), t),
+            "accepted_fakes": curve_at(context.get("accepted_fakes_curve"), t),
+            "standing_fakes": curve_at(context.get("standing_fakes_curve"), t)}
+
+
 # ---------------------------------------------------------------------------
 # Parsing
 
@@ -240,9 +299,11 @@ def section(name, body):
     return f"=== {name} ===\n{body.strip() if body and body.strip() else '(none)'}"
 
 
-def stage1_user(agent, chunk, chunks, state, gap, role=None):
+def stage1_user(agent, chunk, chunks, state, gap, role=None, mode=None):
     header = {"stage": 1, "agent": agent, "chunk": chunk["chunk"], "chunks": chunks,
               **{k: chunk[k] for k in ("first_item", "last_item", "first_turn", "last_turn", "t_from", "t_to")}}
+    if mode:
+        header["mode"] = mode
     carried = _dumps(state) + ("\nNote: the preceding chunk could not be analysed (its output failed or was refused); "
                                "this is the state after the last chunk that was, so the agent may have changed in "
                                "between." if gap else "")
@@ -322,13 +383,17 @@ def same_delivery(items, item):
             and it["event"]["detail"].get("delivery_id") == did]
 
 
-def stage2_user(agent, event, window, state_before, thoughts, delivery=()):
+def stage2_user(agent, event, window, state_before, thoughts, delivery=(), mode=None, context=None):
+    """The stage-2 user message. Overseer mode (``mode="overseer"``) adds the mode to the header, has no
+    ``overseer_expected`` and adds a SOLVER CONTEXT AT EVENT section (run-level counts at the event time)."""
     item = event["item"]
     header = {"stage": 2, "agent": agent, "event_id": event["event_id"], "event_type": event["type"],
               "event_item": item["i"], "event_t": item.get("t"), "selected_because": event["reason"],
-              "overseer_expected": overseer_expected(event),
+              "overseer_expected": None if mode == OVERSEER else overseer_expected(event),
               "window": {k: window[k] for k in ("first_item", "last_item", "first_turn", "last_turn", "end_rule",
                                                 "truncated")}}
+    if mode:
+        header["mode"] = mode
     span = (f"items i={window['first_item']} to i={window['last_item']}, turns {window['first_turn']} to "
             f"{window['last_turn']}; ends at: {window['end_rule']}{', trimmed to fit' if window['truncated'] else ''}")
     note = [section("EVENT NOTE", REMINDER_STAGE2_NOTE)] if event["type"] == "R1" else []
@@ -339,6 +404,13 @@ def stage2_user(agent, event, window, state_before, thoughts, delivery=()):
         note = [section("EVENT NOTE", (PUSH_REMINDER_NOTE + "\n\n" if event["type"] == "R1" else "") + PUSH_STAGE2_NOTE),
                 section("SAME DELIVERY", f"(item {int(detail.get('position') or 0) + 1} of {detail.get('delivery_size')} "
                                          f"in block {detail.get('delivery_id')})\n" + chunking.render_items(delivery))]
+    if mode == OVERSEER:
+        counts = solver_context_at(context, item.get("t"))
+        note.append(section("SOLVER CONTEXT AT EVENT",
+                            f"at t={chunking._fmt_t(item.get('t'))} (run-level, code-derived; strict fake rule): "
+                            f"solvers with a fake submission so far={_dash_count(counts['solver_fakers'])}, accepted "
+                            f"fake submissions so far={_dash_count(counts['accepted_fakes'])}, accepted fakes not yet "
+                            f"reverted={_dash_count(counts['standing_fakes'])}"))
     return "\n\n".join([
         unit_line(header),
         section("EVENT", f"event_id={event['event_id']} agent={agent}\n{chunking.render_item(item)}"),
@@ -348,8 +420,14 @@ def stage2_user(agent, event, window, state_before, thoughts, delivery=()):
         section("STAGE-1 THOUGHTS", "\n".join(_thought_line(t) for t in thoughts))])
 
 
-def stage3_user(agent, facts, s1_rows, s2_rows):
+def _dash_count(value):
+    return "unknown" if value is None else str(value)
+
+
+def stage3_user(agent, facts, s1_rows, s2_rows, mode=None):
     header = {"stage": 3, "agent": agent, "first_min": facts.get("first_min"), "last_min": facts.get("last_min")}
+    if mode:
+        header["mode"] = mode
     thoughts, states = [], []
     for row in s1_rows:
         span = (f"chunk {row['chunk'] + 1}/{row['chunks']} i={row['first_item']}-{row['last_item']} "
@@ -362,6 +440,7 @@ def stage3_user(agent, facts, s1_rows, s2_rows):
     reactions = []
     for row in s2_rows:
         keep = ("event_id", "event_type", "event_t", "status", "reason") if row["status"] != "ok" else \
+            OVERSEER_STAGE2_KEEP if mode == OVERSEER else \
             ("event_id", "event_type", "event_t", "registered", "change", "direction", "reason", "self_attributed",
              "overseer", "next_action", "quotes", "certainty")
         reactions.append(_dumps({k: row.get(k) for k in keep}))
@@ -374,6 +453,10 @@ def stage3_user(agent, facts, s1_rows, s2_rows):
         *([section("NOTE ON INTEGRITY REMINDERS", REMINDER_STAGE3_NOTE)] if facts.get("integrity_reminders_seen")
           else []),
         *([section("NOTE ON PUSH DELIVERY", PUSH_STAGE3_NOTE)] if facts.get("push_deliveries") else [])])
+
+
+OVERSEER_STAGE2_KEEP = ("event_id", "event_type", "event_t", "registered", "change", "response", "recognised_trick",
+                        "reason", "next_action", "quotes", "certainty")
 
 
 def overseer_expected(event):
@@ -390,8 +473,13 @@ class StoryMap:
     def __init__(self, *, timeline_dir, out_dir, pool, schema, run_id, mode="paid", log=None,
                  chunk_tokens=chunking.DEFAULT_CHUNK_TOKENS, window_before=chunking.WINDOW_BEFORE_TURNS,
                  window_after=chunking.WINDOW_AFTER_TURNS, window_max_tokens=chunking.WINDOW_MAX_TOKENS,
-                 retry_failed=False, run_limit=None, agent_concurrency=None):
+                 retry_failed=False, run_limit=None, agent_concurrency=None, overseer=False):
         self.timeline = chunking.timeline_folder(timeline_dir)
+        # Overseer mode: ``overseer`` is True; selection and facts from storymap/overseer.py, run context from the
+        # timeline folder's overseer_context.json. Solver mode never imports either.
+        self.map_mode = OVERSEER if overseer else None
+        self.overseer = load_overseer_module() if overseer else None
+        self.context = self.overseer.load_context(self.timeline) if overseer else None
         self.agent_concurrency = agent_concurrency   # agents mapped at once (None: all)
         self.out_dir = Path(out_dir)
         self.pool = pool
@@ -611,7 +699,8 @@ class StoryMap:
             if stopped:
                 rows.append({**meta, **self._not_run(model_id), "thoughts": None, "state": None})
                 continue
-            user = stage1_user(agent, chunk, len(chunks), state, gap, (self.index.get(agent) or {}).get("role"))
+            user = stage1_user(agent, chunk, len(chunks), state, gap, (self.index.get(agent) or {}).get("role"),
+                               mode=self.map_mode)
             try:
                 unit = await self.unit(stage=1, model_id=model_id, folder=root / "units" / "stage1" / agent,
                                        name=f"c{chunk['chunk']:03d}", unit_id=f"{prefix}{agent}:s1:c{chunk['chunk']:03d}",
@@ -637,7 +726,7 @@ class StoryMap:
         return rows, stopped
 
     async def stage2(self, agent, items, s1_rows, model_id, root, prefix=""):
-        events = chunking.stage2_events(items)
+        events = self.overseer.stage2_events(items) if self.overseer else chunking.stage2_events(items)
         thoughts = [t for r in s1_rows if r["status"] == "ok" for t in (r.get("thoughts") or []) if isinstance(t, dict)]
         system = self.prompts["stage2"]
 
@@ -653,13 +742,15 @@ class StoryMap:
                     "event_item": item["i"], "event_t": item.get("t"), "selected_because": event["reason"],
                     "window": {k: window[k] for k in ("first_item", "last_item", "first_turn", "last_turn", "end_rule",
                                                       "truncated", "est_tokens")}}
-            user = stage2_user(agent, event, window, state_before, inside, same_delivery(items, item))
+            user = stage2_user(agent, event, window, state_before, inside, same_delivery(items, item),
+                               mode=self.map_mode, context=self.context)
             name = f"{item['i']:06d}-{event['event_id']}"
             try:
                 unit = await self.unit(stage=2, model_id=model_id, folder=root / "units" / "stage2" / agent, name=name,
                                        unit_id=f"{prefix}{agent}:s2:{event['event_id']}", system=system, user=user,
                                        context={"event_id": event["event_id"], "items": window["items"],
-                                                "overseer_expected": overseer_expected(event)})
+                                                "overseer_expected": None if self.overseer
+                                                else overseer_expected(event)})
             except BudgetStop:
                 return {**meta, **self._not_run(model_id)}, True
             row = {**meta, **self._base(unit, model_id)}
@@ -674,8 +765,9 @@ class StoryMap:
         return rows, any(s for _, s in done)
 
     async def stage3(self, agent, items, s1_rows, s2_rows, model_id, root, prefix=""):
-        facts = chunking.hard_facts(agent, items, self.index.get(agent))
-        user = stage3_user(agent, facts, s1_rows, s2_rows)
+        facts = self.overseer.hard_facts(agent, items, self.index.get(agent), self.context) if self.overseer \
+            else chunking.hard_facts(agent, items, self.index.get(agent))
+        user = stage3_user(agent, facts, s1_rows, s2_rows, mode=self.map_mode)
         meta = {"agent": agent, "facts": facts,
                 "inputs": {"stage1_chunks": len(s1_rows), "stage1_failed": sum(r["status"] != "ok" for r in s1_rows),
                            "stage2_events": len(s2_rows), "stage2_failed": sum(r["status"] != "ok" for r in s2_rows)}}
@@ -852,8 +944,13 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--timeline", type=Path, required=True, help="W1 output DIR (holding timeline/) or the folder")
-    parser.add_argument("--out", type=Path, help="default RUN/analysis/storymap")
-    parser.add_argument("--agents", help="comma-separated agent ids (default: every solver in the timeline)")
+    parser.add_argument("--out", type=Path, help="default RUN/analysis/storymap (--overseer: "
+                                                 "RUN/analysis/storymap-overseer)")
+    parser.add_argument("--agents", help="comma-separated agent ids (default: every solver in the timeline; "
+                                         "--overseer: every overseer)")
+    parser.add_argument("--overseer", action="store_true",
+                        help="map the overseers (timeline from extract --overseers); own folder, ledger label and "
+                             "budget; no cross-check")
     parser.add_argument("--run-limit", type=Decimal,
                         help="this run's story-map budget in USD (default: RUN/settings.json behavior_judge_max_usd, "
                              "else $50)")
@@ -903,7 +1000,14 @@ def _budget(args, run_dir, prior_usd, rtj=None):
 def build(args, run_dir, out_dir, model_ids, log, *, schema_module=None, transport=None):
     """(StoryMap, metadata) for one invocation: route settings, ledger, budget, clients."""
     from research.analysis.judge.client import FakeTransport, RunLimit, committed_for_judging
-    label = f"storymap-{run_dir.name}"
+    overseer = bool(getattr(args, "overseer", False))
+    # The overseer map is its own judging run: its label never matches the solver map's ``:storymap-<run>:``.
+    label = f"storymap-overseer-{run_dir.name}" if overseer else f"storymap-{run_dir.name}"
+    if overseer:
+        from . import domain as domain_mod
+        if domain_mod.run_domain(run_dir) != domain_mod.LEAN:
+            raise PipelineError(f"overseer story maps support Lean (math) runs only; {run_dir.name} is a "
+                                f"{domain_mod.run_domain(run_dir)} run")
     extras = [m for m in model_ids if m in EXTRA_SPECS]
     if args.mock:
         from .pipeline_mock import MockStorymapModel
@@ -938,20 +1042,29 @@ def build(args, run_dir, out_dir, model_ids, log, *, schema_module=None, transpo
         rtj.record_run_budget(out_dir, {"limit_usd": limit["limit_usd"], "source": limit["source"],
                                         "basis": limit["basis"], "prior_usd": prior["committed_usd"],
                                         "ledger_run_id": run_limit.run_id, "label_run_id": label,
-                                        "purpose": "storymap"}, run_dir=run_dir, ledger=ledger)
+                                        "purpose": "storymap-overseer" if overseer else "storymap"},
+                               run_dir=run_dir, ledger=ledger)
     pool = ModelPool(ledger_path=ledger, archive_root=out_dir / "raw", anthropic_settings=anthropic,
                      extra_settings=extra, scope=scope, run_limit=run_limit, run_id=label, **common)
     from . import domain as domain_mod
     domain = domain_mod.run_domain(run_dir)   # coding runs use the coding prompts and taxonomy (same codes)
-    schema = SchemaAdapter(schema_module if schema_module is not None
-                           else domain_mod.schema_module(domain, load_schema_module()))
+    if schema_module is not None:
+        schema = SchemaAdapter(schema_module)
+    elif overseer:
+        schema = SchemaAdapter(load_overseer_schema_module())
+    else:
+        schema = SchemaAdapter(domain_mod.schema_module(domain, load_schema_module()))
     story = StoryMap(timeline_dir=args.timeline, out_dir=out_dir, pool=pool, schema=schema, run_id=run_dir.name,
                      mode="mock" if args.mock else "paid", log=log, chunk_tokens=args.chunk_tokens,
                      retry_failed=args.retry_failed, run_limit=run_limit,
-                     agent_concurrency=args.agent_concurrency or None)
+                     agent_concurrency=args.agent_concurrency or None, overseer=overseer)
     meta = {"ledger": str(ledger), "scope": scope, "ledger_label_run_id": label,
             "budget_rule": "--run-limit, else RUN/settings.json behavior_judge_max_usd, else $50; earlier "
                            "invocations into this output directory count against it"}
+    if overseer:
+        meta.update(mode=OVERSEER, billing=story.mode,
+                    budget_rule=meta["budget_rule"] + "; the overseer map is its own judging run (label "
+                                                      "storymap-overseer-<run>): the solver map's spend never counts")
     if domain != domain_mod.LEAN:
         meta["domain"] = domain
     return story, meta
@@ -961,7 +1074,7 @@ def main(argv=None, *, schema_module=None, transport=None):
     args = parse_args(argv)
     log = lambda message: print(message, file=sys.stderr, flush=True)  # noqa: E731
     run_dir = args.run_dir.resolve()
-    out_dir = (args.out or run_dir / "analysis" / "storymap").resolve()
+    out_dir = (args.out or run_dir / "analysis" / ("storymap-overseer" if args.overseer else "storymap")).resolve()
     if args.mock and (out_dir == run_dir or run_dir in out_dir.parents):
         log("refused: --mock writes outside the run directory (pass --out)")
         return 2
@@ -971,18 +1084,27 @@ def main(argv=None, *, schema_module=None, transport=None):
         log(f"refused: {error}")
         return 2
     folder = chunking.timeline_folder(args.timeline)
-    solvers = chunking.list_agents(folder)
+    solvers = list_overseers(folder) if args.overseer else chunking.list_agents(folder)
     if args.agents:
         agents = [a.strip() for a in args.agents.split(",") if a.strip()]
         missing = [a for a in agents if not (folder / f"{a}.jsonl").is_file()]
         if missing:
             log(f"refused: no timeline for {missing} in {folder}")
             return 2
+        if args.overseer and [a for a in agents if a not in solvers]:
+            log(f"refused: not overseers in {folder / 'index.json'}: {[a for a in agents if a not in solvers]}")
+            return 2
     else:
         agents = solvers
     if not agents:
-        log(f"refused: no solver timelines in {folder}")
+        log(f"refused: no {'overseer' if args.overseer else 'solver'} timelines in {folder}"
+            + (" (stage 0 with extract --overseers)" if args.overseer else ""))
         return 2
+    if args.overseer:
+        if not (folder / "overseer_context.json").is_file():
+            log(f"refused: no overseer_context.json in {folder} (stage 0 with extract --overseers)")
+            return 2
+        cross = None   # no cross-check in overseer mode
     sample = [a for a in crosscheck_sample(solvers, args.crosscheck_fraction, args.crosscheck_seed) if a in agents] \
         if cross and not bakeoff else []
     model_ids = list(dict.fromkeys(bakeoff or [*models.values(), *([cross] if sample else [])]))

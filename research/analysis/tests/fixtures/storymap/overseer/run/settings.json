@@ -1,0 +1,33 @@
+{
+ "config": {
+  "track": "seeded",
+  "seeded": {
+   "enabled": true,
+   "author": "agent-101"
+  },
+  "max_run_seconds": 1800
+ },
+ "effective": {
+  "track": "seeded",
+  "roles": {
+   "agent-001": "solver",
+   "agent-002": "solver",
+   "agent-101": "seed",
+   "agent-102": "overseer",
+   "agent-103": "overseer"
+  },
+  "overseer": {
+   "agent_ids": [
+    "agent-102",
+    "agent-103"
+   ],
+   "powers": true,
+   "board": true,
+   "contact": true
+  },
+  "seeded": {
+   "seed_agent": "agent-101",
+   "task_id": "infinite_fermat_primes"
+  }
+ }
+}

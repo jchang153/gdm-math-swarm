@@ -97,6 +97,42 @@ class AllowlistTests(unittest.TestCase):
             self.assertEqual(sm.prompt_lines(tmp / 'p.md', tmp / 't.md'), frozenset({line}))
             self.assertEqual(sm.prompt_lines(tmp / 'missing.md', tmp / 't.md'), frozenset())
 
+    def test_overseer_pages(self):
+        """Overseer story maps (owner, November 5, 2026): taxonomy_overseer.html and agents/<overseer>.html are
+        published; the overseer prompts are screened like the solver prompts; the overseer codebook is public text."""
+        self.assertTrue(sm.published('taxonomy_overseer.html'))
+        self.assertTrue(sm.published('agents/agent-102.html'))
+        self.assertFalse(prepare_hf_library.run_excluded('analysis/storymap/taxonomy_overseer.html'))
+        self.assertTrue(prepare_hf_library.run_excluded('analysis/storymap/timeline/overseer_context.json'))
+        self.assertTrue(prepare_hf_library.run_excluded('analysis/storymap-overseer/stage1/agent-102.jsonl'))
+        self.assertIn(sm.PROMPTS.with_name('prompts_overseer.md'), sm.PROMPT_FILES)
+        self.assertIn(sm.PUBLIC_TAXONOMY.with_name('taxonomy_overseer.md'), sm.PUBLIC_TAXONOMIES)
+        solver = 'Return one JSON object with exactly these keys and nothing else around it.'
+        overseer = 'Code the overseer only from its own words and acts, never from the host records.'
+        public = 'The overseer reasons about its task, tools, powers and the rules given to solvers.'
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / 'prompts.md').write_text(solver + '\n')
+            (tmp / 'prompts_overseer.md').write_text(overseer + '\n' + public + '\n')
+            (tmp / 'taxonomy.md').write_text('# t\n')
+            (tmp / 'taxonomy_overseer.md').write_text(public + '\n')
+            lines = sm.prompt_lines((tmp / 'prompts.md', tmp / 'prompts_overseer.md', tmp / 'missing.md'),
+                                    (tmp / 'taxonomy.md', tmp / 'taxonomy_overseer.md'))
+            self.assertEqual(lines, frozenset({solver, overseer}))
+            self.assertEqual(sm.prompt_lines(tmp / 'prompts_overseer.md', tmp / 'taxonomy_overseer.md'),
+                             frozenset({overseer}))
+            page = f'<p>{overseer}</p>'.encode()
+            self.assertEqual(sm.page_problems('agents/agent-102.html', page, {'agents/agent-102.html'}, prompts=lines),
+                             ['text of the private stage prompts'])
+            files = sm.public_files(storymap_folder(tmp / 'map', **{
+                'taxonomy_overseer.html': '<h3 id="code-O1">O1 - Reads its role</h3><a href="index.html">i</a>',
+                'agents/agent-102.html': AGENT + '<a href="../taxonomy_overseer.html#code-O1">O1</a>'}))
+            self.assertIn('taxonomy_overseer.html', files)
+            self.assertIn('agents/agent-102.html', files)
+            with self.assertRaises(ValueError):  # an overseer page linking to an unpublished file is refused
+                sm.public_files(storymap_folder(tmp / 'map2', **{
+                    'agents/agent-102.html': AGENT + '<a href="../taxonomy_overseer.html">codes</a>'}))
+
     def test_tab_before_inspect_and_idempotent(self):
         page = sm.add_storymap_tab(RESULTS)
         self.assertLess(page.index(sm.TAB), page.index('href="inspect-view/'))
