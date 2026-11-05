@@ -1547,6 +1547,18 @@ is being merged into main via `collab-env`.
      `29f57080`; DeepSeek and Grok queued). Then `sweep25/final.sh` does one batched story-map deploy, one heatmap
      deploy and one catalogue deploy, plus `verify`, all under `cf-deploy.lock`. Afterwards, offload the 5 units.
 
+34. **IN FLIGHT (started 2026-11-05 13:40 PT): overseer story maps for all 18 push runs with overseers** (owner
+   request verbatim in docs/plan.md, "Overseer story maps (November 5, 2026)", "Extension to all push runs"). Runs:
+   `glmflash100-seeded-{2,10}ov-glm-120m-push-r{1,2,3}-20261104T04*Z` and
+   `glmflash100-seeded-{1,2,10}ov-glm-120m-push-commsonly-r{1,2,3}-20261104T21*Z` (15 runs, 75 overseers) plus a
+   re-render of the three 1ov pilot maps (item 32). Budgets `--run-limit 10` (1ov/2ov) and `--run-limit 40` (10ov),
+   pilot stage models. Steps: (1) fix: hard facts count the seed's accepted fake (`known_faker`, accepted/standing
+   fakes at each milestone); (2) overseer-only story-map pages for the communication-only runs (no solver map);
+   (3) read-only restores into the operator scratchpad `ovx/r/` (`offload_runs.py restore --dest ... --no-offload`),
+   `run_storymap.py --overseer` with `--out runs/RUN/analysis/storymap-overseer`; (4) render, scan, batched
+   `publish_cloudflare.py storymap` deploys under `cf-deploy.lock`; (5) offload, delete restores. Resume: rerun
+   step 3 with `--retry-failed` (the ledger keeps each run's committed spend).
+
 ## Next steps / open items
 
 - **VM HF upload token (item 16):** confirmed working on the owner's first VM (item 17). `vm_hf_setup.py` failed on
