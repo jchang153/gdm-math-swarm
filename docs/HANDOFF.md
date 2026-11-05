@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-05 12:55 PT by Claude (Opus 5.5) overseer story-map subagent (item 32 DONE: overseer story maps + 3-run pilot published).
+Last updated: 2026-11-05 13:05 PT by Claude (Opus 5.5) sweep operator (item 33: all five sweep runs launched; Grok without reasoning replay).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1509,6 +1509,27 @@ is being merged into main via `collab-env`.
    - **Known caveats:** hard facts count `known_faker` and the faker curves over solvers only, so a DM to the seed
      agent-101 is "not a known faker" and r2's early milestones show 0 accepted fakes although the seed's fake stood;
      stage 3 flagged these as consistency flags. Fix candidates: count the seed's accepted fake in `known_faker`.
+
+33. **RUNNING (launched 2026-11-05 12:18-12:56 PT): five-model 25-agent sweep, all 5 launched** (owner decision,
+   docs/plan.md "Five-model 25-agent sweep (November 5, 2026)"). Configs
+   `configs/{grok47,kimik31pro,dsv41flash,gpt6luna,gemini4argon}-25-seeded-control-60m-push.json` (25 solvers on one
+   model, seed agent-026 at +3 min, push delivery, library notices, 60 min, simple judge, no overseers); catalogue
+   series `sweep25`. One per owner VM (n2d-highmem-96; VM per run in `HANDOFF.local.md`). Compat checks and preflight
+   passed; `settings.json` confirms push, `["library"]`, seed agent-026, 25 agents.
+   - `dsv41flash-25-seeded-control-60m-push-20261105T201815Z` 12:18 PT (budget $50)
+   - `gpt6luna-25-seeded-control-60m-push-20261105T201919Z` 12:19 PT ($50)
+   - `kimik31pro-25-seeded-control-60m-push-20261105T201936Z` 12:19 PT ($150)
+   - `gemini4argon-25-seeded-control-60m-push-20261105T202154Z` 12:21 PT ($150)
+   - `grok47-25-seeded-control-60m-push-20261105T205632Z` 12:56 PT ($150), on `amazon-bedrock/global`.
+   - **Grok 4.7 has no reasoning replay and its transcripts carry no reasoning text; flag this in every cross-model
+     comparison** (judge findings, reasoning-based analyses). On `xai` the compat cap probe failed (22,202 generated
+     tokens at `max_tokens` 1024); on Bedrock (non-strict tools, `c5070a3`) the cap holds but no reasoning comes back.
+     Owner approved running it so (about 12:45 PT, "sure that's fine"): config-scoped exception
+     `"reasoning_replay": "unavailable_on_route"` (`75e396e`; recorded in the config, the compat evidence
+     `compatibility-20261105T205034Z.json` and `settings.json` `effective.reasoning_replay`); every other check passed.
+   - Post-processing: operator scratchpad `sweep25/post.sh` (wait for core, `fetch_keep` without publishing, stop +
+     resize back, heatmap), then `sweep25/deployq.sh 5` (one publish at a time under `cf-deploy.lock`), catalogue,
+     verify, offload. No story maps (not authorised).
 
 ## Next steps / open items
 
