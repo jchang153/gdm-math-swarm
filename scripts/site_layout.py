@@ -201,7 +201,9 @@ OVERVIEW_CSS = (
     '.ov-judge .ov-src{font-size:12px;color:var(--muted);margin:4px 14px 10px;max-width:none}'
     '.ov-judge .ov-more{margin:auto 14px 10px;font-size:13px;font-weight:600}'
     '@media (max-width:900px){.ov-row{grid-template-columns:minmax(0,1fr)}}'
-    + _PHONE + f'.ov-head{{padding:14px 14px 12px}}.ov-graph iframe{{height:min({GRAPH_HEIGHT}px,72vh)}}'
+    + _PHONE + f'.ov-head{{padding:14px 14px 12px}}.ov-head nav.tabs{{display:flex;flex-wrap:nowrap;overflow-x:auto;'
+    f'-webkit-overflow-scrolling:touch;scrollbar-width:none;margin-right:-14px;padding-right:14px}}'
+    f'.ov-head nav.tabs::-webkit-scrollbar{{display:none}}.ov-head nav.tabs>*{{flex:none;white-space:nowrap}}.ov-graph iframe{{height:min({GRAPH_HEIGHT}px,72vh)}}'
     '.ov-bar{height:26px}}'
 )
 
@@ -413,7 +415,7 @@ def _judge_card(document, agents, counts, report, storymap):
 # The embedded viewer follows the system theme by itself; a theme forced with the page's toggle (data-theme on
 # <html>, scripts/site_style.py) is passed on as &theme= so both match.
 _THEME_SYNC = ('<script>(function(){var f=document.getElementById("ov-graph"),r=document.documentElement;'
-               'function s(){var t=r.getAttribute("data-theme"),u="analysis/storymap/graph.html?embed=1"+'
+               'function s(){var t=r.getAttribute("data-theme"),u="analysis/storymap/graph.html?embed=1&t=end"+'
                '(t==="light"||t==="dark"?"&theme="+t:"");if(f.getAttribute("src")!==u)f.setAttribute("src",u);}'
                's();new MutationObserver(s).observe(r,{attributes:true,attributeFilter:["data-theme"]});})();'
                '</script>')
@@ -423,7 +425,7 @@ def _graph_pane(document, has_graph):
     if has_graph:
         return ('<section class="ov-pane ov-graph" aria-label="Interaction graph"><header><h2>Interaction graph</h2>'
                 f'<a href="{GRAPH}" target="_blank" rel="noopener">Full screen ↗</a></header>'
-                f'<iframe id="ov-graph" src="{GRAPH}?embed=1" title="Interaction graph of this run" loading="lazy">'
+                f'<iframe id="ov-graph" src="{GRAPH}?embed=1&amp;t=end" title="Interaction graph of this run" loading="lazy">'
                 '</iframe>' + _THEME_SYNC +
                 '<p class="ov-note">Agents and the messages, files and submissions between them over the run; '
                 'click a bubble to open it. Each agent links to its <a href="analysis/storymap/index.html">story '

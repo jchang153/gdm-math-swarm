@@ -1030,7 +1030,7 @@ function frame(now) {
   renderStanceLegend(); renderFeed(); renderMsgs(); if (hover && hover !== locked) renderTip(); if (locked) renderFollow();
   requestAnimationFrame(frame);
 }
-readColors(); resize(); setTime(tMin); updateNodes(); animZones(1); rebuildLinks();
+readColors(); resize(); setTime(new URLSearchParams(location.search).get("t") === "end" ? tMax : tMin); updateNodes();  // &t=end: open on the end of the run (Play rewinds) animZones(1); rebuildLinks();
 for (let i = 0; i < 120; i++) sim.tick();
 requestAnimationFrame(frame);
 window.__graph = { follow: (id) => follow(byId.get(id) || null), setTime: (t) => setTime(t), get t() { return tNow; }, nodes, pairs: () => pairs, play: togglePlay,

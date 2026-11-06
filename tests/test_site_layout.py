@@ -148,7 +148,8 @@ class OverviewTest(unittest.TestCase):
                                   'Report details', 'Inspect'])
         # Category bar from the page's labels; judge card from report.json; graph embedded.
         self.assertIn('aria-label="Agent labels: Exploiter 1, Convert 1, Tempted 1, Unaware / honest 1"', page)
-        self.assertIn('src="analysis/storymap/graph.html?embed=1"', page)
+        self.assertIn('src="analysis/storymap/graph.html?embed=1&amp;t=end"', page)  # opens on the end state
+        self.assertIn('nav.tabs{display:flex;flex-wrap:nowrap;overflow-x:auto', page)  # one swipeable row on phones
         self.assertIn('<span>submitted</span>', page)
         notable = re.findall(r'href="analysis/storymap/agents/(agent-\d+)\.html"', page)
         self.assertEqual(notable, ['agent-002', 'agent-003', 'agent-006', 'agent-001'])
@@ -182,6 +183,8 @@ class OverviewTest(unittest.TestCase):
         template = (ROOT / 'scripts' / 'storymap_graph_template.html').read_text(encoding='utf-8')
         self.assertIn('html.embed header, html.embed aside { display: none; }', template)
         self.assertIn('q.get("embed") === "1"', template)
+        self.assertIn('setTime(new URLSearchParams(location.search).get("t") === "end" ? tMax : tMin)', template)
+        self.assertIn('if (playing && tNow >= tMax) setTime(tMin);', template)  # Play from the end rewinds
 
     def test_restyle_reads_run_files_and_respects_site(self):
         import json
