@@ -487,7 +487,7 @@ def _overview(document, read=None):
              '<ul class="ov-chips">' + ''.join(f'<li><b>{html.escape(k)}</b>{html.escape(v)}</li>' for k, v in chips)
              + '</ul>' + bar + '</div></section>' + _tabs(nav)
              + f'<div class="ov-row"{"" if judged else " style=grid-template-columns:1fr"}>{row}</div>'
-             '<div id="ov-panel" hidden><div class="ov-pbar"><strong id="ov-ptitle"></strong>'
+             '<div id="ov-panel" hidden><div class="ov-pbar">'
              '<a id="ov-popen" href="#" target="_blank" rel="noopener">Open in new tab ↗</a></div>'
              f'<div id="ov-frames"></div></div>{TABS_JS}<i id="ov-end" hidden></i>{OV_END}')
     crumbs = re.search(r'<p class="crumbs">.*?</p>', document, re.S)
@@ -511,10 +511,10 @@ TABS_CSS = (
     '#ov-tabs{position:sticky;top:0;z-index:30;background:var(--bg);margin:10px 0 0;padding:6px 0 0;'
     'box-shadow:0 1px 0 var(--line)}'
     '#ov-panel{margin:0}#ov-panel[hidden]{display:none}'
-    '.ov-pbar{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:6px 2px;'
-    'font-size:13px}.ov-pbar strong{font-size:14px}.ov-pbar a{font-weight:600;text-decoration:none;white-space:nowrap}'
-    '#ov-frames iframe{display:block;width:100%;height:calc(100vh - var(--ov-top,56px) - 36px);'
-    'height:calc(100dvh - var(--ov-top,56px) - 36px);min-height:360px;border:1px solid var(--line);'
+    '.ov-pbar{display:flex;justify-content:flex-end;padding:3px 2px;font-size:12.5px;line-height:1.4}'
+    '.ov-pbar a{font-weight:600;text-decoration:none;white-space:nowrap}'
+    '#ov-frames iframe{display:block;width:100%;height:calc(100vh - var(--ov-top,56px) - 30px);'
+    'height:calc(100dvh - var(--ov-top,56px) - 30px);min-height:360px;border:1px solid var(--line);'
     'border-radius:10px;background:var(--bg)}'
     'html[data-ov-tab]:not([data-ov-tab="report"]) #ov-end~*:not(.site-theme-toggle){display:none}'
     'html[data-ov-tab]:not([data-ov-tab="overview"]) .ov-row{display:none}'
@@ -528,7 +528,7 @@ TABS_CSS = (
 TABS_JS = r'''<script>(function(){
 var R=document.documentElement,nav=document.getElementById("ov-tabs"),panel=document.getElementById("ov-panel");
 if(!nav||!panel||!window.history||!history.replaceState)return;
-var frames=document.getElementById("ov-frames"),title=document.getElementById("ov-ptitle"),
+var frames=document.getElementById("ov-frames"),
 open=document.getElementById("ov-popen"),base=location.href.replace(/[#?].*$/,"").replace(/[^\/]*$/,""),
 tabs={},order=[],cur=null,
 PRE={judge:"analysis/simple_judge/","judge-rubric":"analysis/judge/",storymap:"analysis/storymap/",
@@ -564,11 +564,12 @@ function show(k,u){if(!tabs[k])k="overview";cur=k;R.setAttribute("data-ov-tab",k
  if(nav.scrollWidth>nav.clientWidth){var at=tabs[k].a;if(at.offsetLeft<nav.scrollLeft||at.offsetLeft+at.offsetWidth>nav.scrollLeft+nav.clientWidth)nav.scrollLeft=at.offsetLeft-16;}
  var p=PRE[k]!==undefined;panel.hidden=!p;
  [].forEach.call(frames.children,function(f){f.hidden=f.getAttribute("data-ov")!==k;});
- if(p){var f=frame(k,u);title.textContent=tabs[k].label;open.href=u||tabs[k].href;
+ if(p){var f=frame(k,u);open.href=u||tabs[k].href;
   try{var w=f.contentWindow.location.href;if(w&&w!=="about:blank"&&!u)open.href=w;}catch(e){}}}
 function go(k,u,push){var h="#"+k;if(push&&location.hash!==h)history.pushState({ov:k,u:u||null},"",h);
  else history.replaceState({ov:k,u:u||null},"",h);show(k,u);
- if(k!=="overview"){var y=window.pageYOffset+nav.getBoundingClientRect().top-0;top();
+ if(k==="overview"){if(push)window.scrollTo(0,0);}
+ else{var y=window.pageYOffset+nav.getBoundingClientRect().top-0;top();
   if(Math.abs(nav.getBoundingClientRect().top)>2&&(k!=="report"||push))window.scrollTo(0,y);}}
 function fromHash(){var h=location.hash.slice(1);return tabs[h]?h:"overview";}
 nav.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-ov]");
