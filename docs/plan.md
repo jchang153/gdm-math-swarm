@@ -2261,3 +2261,7 @@ each of the nine 120-minute push communication-only runs (1/2/10 overseers × r1
 (`run_budget_usd` / run limit for each run's story-map invocation; no cumulative cap). Unmapped solvers are drawn
 by observed behaviour (faked / no fake yet), labelled as such, not as stances. Full 100-solver maps (est.
 $1,000–1,500) were not requested.
+
+Owner intention (November 6, 2026): future runs always get a full story map (all solvers and overseers) and its
+interaction graph, so the "not mapped" behaviour zones exist only for the older partially mapped runs (the nine push
+comms-only runs). Each future story-map run still has its own per-run budget.
