@@ -2265,3 +2265,9 @@ $1,000–1,500) were not requested.
 Owner intention (November 6, 2026): future runs always get a full story map (all solvers and overseers) and its
 interaction graph, so the "not mapped" behaviour zones exist only for the older partially mapped runs (the nine push
 comms-only runs). Each future story-map run still has its own per-run budget.
+
+Owner request (November 6, 2026, verbatim): "can you also run story maps on the 180-minute overseer replicates, with
+unread notices". Scope: full solver story maps for the 8 runs of that series that lack one (control r1/r2, 1ov r1/r3,
+2ov r1/r2, 10ov r1/r2; control r3, 1ov r2, 2ov r3 and 10ov r3 already have maps), plus overseer maps for its 9
+overseer runs, then interaction graphs and publication. Per-run budget $200 for each solver map (earlier maps of
+these runs settled $106–166) and $20 for each overseer map; no cumulative cap.
