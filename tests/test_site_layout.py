@@ -182,6 +182,10 @@ class OverviewTest(unittest.TestCase):
         self.assertIn('html[data-ov-tab]:not([data-ov-tab="report"]) #ov-end~*:not(.site-theme-toggle){display:none}',
                       page)
         self.assertNotIn('data-ov-tab', page.split('<body', 1)[1].split('<script>', 1)[0])  # no JS: all visible
+        # Only the active tab's iframe shows: the author display rule must not override [hidden] (bug, Nov 6).
+        self.assertIn('#ov-frames iframe[hidden]{display:none}', page)
+        self.assertNotIn('scrollTo(0,', page)  # a tab switch never moves the page (owner, November 6, 2026)
+        self.assertIn('if(window.pageYOffset!==y)window.scrollTo(window.pageXOffset,y);', page)
         self.assertEqual(site_layout.apply(f'{RUN_ID}/results.html', page), page)  # idempotent
         # A rubric-3.1 judge tab gets its own panel next to the behavior judge.
         rubric = RUN_PAGE.replace('Behavior judge</a>', 'Behavior judge</a><a data-tab="judge-rubric-3-1" '

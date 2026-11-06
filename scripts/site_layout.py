@@ -515,7 +515,7 @@ TABS_CSS = (
     '.ov-pbar a{font-weight:600;text-decoration:none;white-space:nowrap}'
     '#ov-frames iframe{display:block;width:100%;height:calc(100vh - var(--ov-top,56px) - 30px);'
     'height:calc(100dvh - var(--ov-top,56px) - 30px);min-height:360px;border:1px solid var(--line);'
-    'border-radius:10px;background:var(--bg)}'
+    'border-radius:10px;background:var(--bg)}#ov-frames iframe[hidden]{display:none}'
     'html[data-ov-tab]:not([data-ov-tab="report"]) #ov-end~*:not(.site-theme-toggle){display:none}'
     'html[data-ov-tab]:not([data-ov-tab="overview"]) .ov-row{display:none}'
     + _PHONE + '#ov-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;'
@@ -555,22 +555,29 @@ function fix(f){var d,k=f.getAttribute("data-ov");try{d=f.contentDocument;}catch
   var j=tabOf(u);if(j&&j!==k){e.preventDefault();go(j,u,true);}
   else if(!j&&(u.indexOf(location.origin)!==0||u.indexOf(base)!==0||/results\.html(?:#.*)?$/.test(u))){e.preventDefault();
    window.location.href=u;}},true);}}
-function frame(k,u){var t=tabs[k];if(!t.f){t.f=document.createElement("iframe");t.f.title=t.label;
+// A page loading in a panel may scroll this page (Inspect focuses its viewer): for a few seconds after a panel
+// starts loading, the scroll position is held unless the reader scrolls themselves.
+var hold=null;function release(){hold=null;}
+["wheel","touchstart","keydown","mousedown"].forEach(function(e){window.addEventListener(e,release,{passive:true});});
+window.addEventListener("scroll",function(){if(hold&&Date.now()<hold.t&&window.pageYOffset!==hold.y)window.scrollTo(window.pageXOffset,hold.y);});
+function frame(k,u){var t=tabs[k];hold={y:window.pageYOffset,t:Date.now()+4000};if(!t.f){t.f=document.createElement("iframe");t.f.title=t.label;
  t.f.setAttribute("data-ov",k);t.f.src=u||t.href;t.f.addEventListener("load",function(){fix(t.f);});frames.appendChild(t.f);}
  else if(u&&abs(u)!==t.f.src){try{t.f.contentWindow.location.replace(abs(u));}catch(e){t.f.src=u;}}return t.f;}
-function show(k,u){if(!tabs[k])k="overview";cur=k;R.setAttribute("data-ov-tab",k);
+function show(k,u){if(!tabs[k])k="overview";cur=k;var y=window.pageYOffset,p=PRE[k]!==undefined,f=null;
+ // Every DOM change first, with no layout read in between, then the scroll position restored: a tab switch never
+ // moves the page (owner, November 6, 2026); only the active tab's iframe is shown.
+ if(p){f=frame(k,u);f.hidden=false;panel.hidden=false;}
+ R.setAttribute("data-ov-tab",k);
+ [].forEach.call(frames.children,function(x){if(x!==f)x.hidden=true;});
+ if(!p)panel.hidden=true;
  order.forEach(function(x){var a=tabs[x].a;if(x===k){a.classList.add("current");a.setAttribute("aria-current","page");}
   else{a.classList.remove("current");a.removeAttribute("aria-current");}});
- if(nav.scrollWidth>nav.clientWidth){var at=tabs[k].a;if(at.offsetLeft<nav.scrollLeft||at.offsetLeft+at.offsetWidth>nav.scrollLeft+nav.clientWidth)nav.scrollLeft=at.offsetLeft-16;}
- var p=PRE[k]!==undefined;panel.hidden=!p;
- [].forEach.call(frames.children,function(f){f.hidden=f.getAttribute("data-ov")!==k;});
- if(p){var f=frame(k,u);open.href=u||tabs[k].href;
-  try{var w=f.contentWindow.location.href;if(w&&w!=="about:blank"&&!u)open.href=w;}catch(e){}}}
+ if(p){open.href=u||tabs[k].href;try{var w=f.contentWindow.location.href;if(w&&w!=="about:blank"&&!u)open.href=w;}catch(e){}}
+ if(window.pageYOffset!==y)window.scrollTo(window.pageXOffset,y);
+ if(nav.scrollWidth>nav.clientWidth){var at=tabs[k].a;if(at.offsetLeft<nav.scrollLeft||at.offsetLeft+at.offsetWidth>nav.scrollLeft+nav.clientWidth)nav.scrollLeft=at.offsetLeft-16;}}
 function go(k,u,push){var h="#"+k;if(push&&location.hash!==h)history.pushState({ov:k,u:u||null},"",h);
  else history.replaceState({ov:k,u:u||null},"",h);show(k,u);
- if(k==="overview"){if(push)window.scrollTo(0,0);}
- else{var y=window.pageYOffset+nav.getBoundingClientRect().top-0;top();
-  if(Math.abs(nav.getBoundingClientRect().top)>2&&(k!=="report"||push))window.scrollTo(0,y);}}
+ top();}  // the scroll position never changes on a tab switch (owner, November 6, 2026)
 function fromHash(){var h=location.hash.slice(1);return tabs[h]?h:"overview";}
 nav.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-ov]");
  if(!a||e.button||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;e.preventDefault();go(a.getAttribute("data-ov"),null,true);});
