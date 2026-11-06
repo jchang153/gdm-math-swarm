@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-05 17:30 PT by Claude (Opus 5.5) overseer-map operator (item 34 DONE; item 33 is the sweep operator's).
+Last updated: 2026-11-05 17:45 PT by Claude (Opus 5.5) interaction-graph data agent (item 35 started).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1593,6 +1593,12 @@ is being merged into main via `collab-env`.
      peers; duplicate checks were heavy with ten overseers (62-67 per run) and 7 revert attempts failed because a peer
      had already reverted (10ov r1 5, r3 2); in 10ov r2 an overseer reverted a genuine solution and the board
      reversed it.
+
+35. **IN FLIGHT 2026-11-05 (started ~17:40 PT): story-map interaction graph, pilot on 1ov push r1** (owner request
+   and decisions verbatim in docs/plan.md, "Story-map interaction graph (November 5, 2026)"). Data/integration
+   agent: `scripts/storymap_graph.py` (graph.json, render into the template), discreet index link, tests, publish.
+   Front-end agent: `scripts/storymap_graph_template.html`. No paid calls. Inputs restored read-only to the operator
+   scratchpad `sgraph/restore/`.
 
 ## Next steps / open items
 

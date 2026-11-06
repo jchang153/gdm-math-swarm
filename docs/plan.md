@@ -2155,3 +2155,32 @@ supervisor with their default per-run budgets, $20 and $10), published with the 
 readable reasoning text (Grok 4.7 on Bedrock certainly; GPT 6 Luna and Gemini 4 Argon to be checked) still get maps,
 coded from visible text and tool calls only, and the gap is flagged. The owner draws the fakers bar chart from the
 final table (strict rule, per run).
+
+## Story-map interaction graph (November 5, 2026)
+
+**Owner request (chat, November 5, 2026; relayed by the coordinating agent), verbatim:** "I'd like to turn the story
+map into something sort of like a graph-based, dynamic graph-based interactive map in which you see the 100 agents as
+nodes of a graph, and as the time goes on, you can see when someone posts to a library or a message or a DM, you can
+see that interaction pop up on the graph. And the colors of the nodes change color depending on what they're thinking
+and their beliefs based on the labels from the story map judges. DMs can sort of cluster certain agents together, or
+certain thoughts can cluster them more or less different areas, so they can sort of evolve in direction, and edges,
+strength of edges, can denote some interaction strength. You can also click on each node separately, and that will
+open the original story map visualization."
+
+**Owner decisions (same session):**
+- Pilot on one run: `glmflash100-seeded-1ov-glm-120m-push-r1-20261104T042820Z` (push delivery, one overseer
+  agent-102, seed agent-101).
+- Layout: interactions plus a weak pull toward belief (stance) zones.
+- Edges decay unless renewed (about 10-minute half-life).
+- Edge types: DMs; reading another agent's library file (reader to author); board post read (reader to poster);
+  overseer actions (revert, DM, proof check to the solver; overseer to overseer on the private board).
+- Later message, verbatim: "also make it discreet on the website; just a little link from the current story map page,
+  I don't want this completely overriding the story map yet". So the story-map index gains one small text link
+  "Interaction graph (experimental) ↗" only when `graph.html` exists for the run; nothing else on the story map
+  changes.
+
+**Implementation (no paid calls).** `scripts/storymap_graph.py` builds `graph.json` (schema `storymap-graph/1`) from
+the run's conference records and its existing story map (same time origin, run minutes from `run_started_at`; fakes
+by the story map fake rule) and inlines it into the front-end template `scripts/storymap_graph_template.html`, writing
+`RUN/analysis/storymap/graph.html`. `graph.html` joins the story-map publication allowlist (`scripts/storymap_site.py`)
+and is screened like the other story-map pages.
