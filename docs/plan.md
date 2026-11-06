@@ -2228,3 +2228,22 @@ most fakers stopped after the overseer's reverts and warnings. The page legend s
   `graph.json` (`storymap-graph/1`) from the same folder. Both files are on the story-map allowlist; they are not
   packed. `storymap_graph.py --inline` (or `view --graph-inline`) keeps the self-contained single file for previews
   opened from disk.
+
+## Site redesign: run panes with the interaction graph (November 6, 2026)
+
+Owner request (verbatim): "I want to improve the overall site design a bit more. It's not super easy to find the story
+map page, and I also want to make the graph visualization more obvious. Each run should be a large selectable pane. I
+feel like the graph visualization should be probably the most important thing alongside the behavior judge report.
+But the interface should be flashier and immediately we shoudl see the most important things: number &
+categorization of different agents, run spec, and the graph visualization (which implicitly links to the story map).
+Please thnk about how to implement this"
+
+Owner decisions (November 6, 2026, answers to the proposal):
+- Catalogue pane graph: **static end-of-run snapshot plus a hover timelapse** (sped-up replay while hovered).
+- Run page: **embed the live interaction graph with the behavior-judge summary** in a new overview at the top.
+- Catalogue: **5 run panes per row** (desktop).
+- Scope: **math site only**; the ImpossibleBench site stays as it is for now.
+- Panes show: run spec chips, agent categorization (behavior-judge labels with counts), key fake/genuine numbers,
+  the graph snapshot (click opens the graph), prominent Interaction graph / Behavior judge / Story map buttons and a
+  quiet row for the other records. Runs without a story map keep the fakes sparkline as their picture.
+- A local mock built from live data is reviewed by the owner before any deploy.
