@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-05 15:05 PT by Claude (Opus 5.5) sweep operator (item 33: sweep runs done, results; publishing in flight).
+Last updated: 2026-11-05 16:35 PT by Claude (Opus 5.5) sweep operator (item 33 DONE: sweep published, verified, offloaded).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1510,7 +1510,7 @@ is being merged into main via `collab-env`.
      agent-101 is "not a known faker" and r2's early milestones show 0 accepted fakes although the seed's fake stood;
      stage 3 flagged these as consistency flags. Fix candidates: count the seed's accepted fake in `known_faker`.
 
-33. **Runs DONE, publishing IN FLIGHT (2026-11-05 15:00 PT; launched 12:18-12:56 PT): five-model 25-agent sweep**
+33. **DONE 2026-11-05 (16:35 PT; launched 12:18-12:56 PT): five-model 25-agent sweep, published**
    (owner decisions, docs/plan.md "Five-model 25-agent sweep (November 5, 2026)"). Configs
    `configs/{grok47,kimik31pro,dsv41flash,gpt6luna,gemini4argon}-25-seeded-control-60m-push.json` (25 solvers on one
    model, seed agent-026 at +3 min, push delivery, library notices, 60 min, simple judge, no overseers); catalogue
@@ -1547,10 +1547,14 @@ is being merged into main via `collab-env`.
      `answer(...)` + `Iff.rfl`) and Grok agent-017 posted an answer-restating "solution" of Erdős 539.
    - Other spend: simple judge $0.85 / 0.23 / 0.44 / 0.27 / 0.35, incident reports $3.84 / 1.53 / 2.85 / 2.53 / 1.72, story
      maps (`--run-limit 60`) $12.09 / 6.41 / 3.86 / 2.73 / 9.19 (order as in the table); compat checks about $0.65.
-   - **Site:** the per-run bundles (results, conference, Inspect notice, judge report, incident report) are deployed
-     one at a time by operator scratchpad `sweep25/deployq.sh 5` (Kimi `ce0e9019`, Gemini `1c437bd6`, GPT
-     `29f57080`; DeepSeek and Grok queued). Then `sweep25/final.sh` does one batched story-map deploy, one heatmap
-     deploy and one catalogue deploy, plus `verify`, all under `cf-deploy.lock`. Afterwards, offload the 5 units.
+   - **Site (gdm), all live:** per-run bundles (results, conference, Inspect notice, simple-judge report, incident
+     report) Kimi `ce0e9019`, Gemini `1c437bd6`, GPT `29f57080`, DeepSeek `af21d576`, Grok `9a14f7b5`; story maps for all
+     5 in one deploy `f4da290b`; heatmaps `f5d2b8ac`; catalogue `b872b1c1` (series "60-minute 25-agent model sweep",
+     5 runs). The Grok base and story-map deploys committed, but their built-in verify hit network errors, so
+     their receipts (`runs/phase-b/cloudflare/receipts/{grok47-…,storymap-sweep25-20261105}.json`) were written by hand
+     from `wrangler pages deployment list` plus live checks. Production `verify` at 16:25 PT: ok (97 runs, 6,176 files).
+   - Offloaded (`offload_runs.py offload`, 5 of 5 done); scratch site bundles deleted. Operator scripts:
+     scratchpad `sweep25/` (up.sh, post.sh, deployq.sh, after.sh/after2.sh, final.sh, stats.py, reasoncheck.py).
 
 34. **IN FLIGHT (started 2026-11-05 13:40 PT): overseer story maps for all 18 push runs with overseers** (owner
    request verbatim in docs/plan.md, "Overseer story maps (November 5, 2026)", "Extension to all push runs"). Runs:
