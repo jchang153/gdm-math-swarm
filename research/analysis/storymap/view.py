@@ -1287,7 +1287,17 @@ def graph_link(on):
             f'readings">{esc(GRAPH_LINK_TEXT)}</a></p>')
 
 
-def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css="", graph=False):
+def sample_note(record):
+    """The index's note on a sampled map (MAP/sample.json from run_storymap --sample; storymap/sample.py): how many
+    solvers are mapped and how they were chosen. '' without a sample record, so other indexes are unchanged."""
+    if not record:
+        return ""
+    from .sample import note_text
+    return (f'<p class="sample-note" style="border-left:3px solid currentColor;padding:.3em .7em;margin:.4em 0 .8em">'
+            f'<strong>{esc(note_text(record))}</strong></p>')
+
+
+def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css="", graph=False, sample=None):
     """``extra`` / ``css``: the overseer block and its styles (view_overseer.py); empty = the solver page as before.
     ``graph``: add the discreet link to the experimental interaction graph (graph.html)."""
     rows, counts = [], Counter()
@@ -1344,7 +1354,7 @@ def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css="", gra
                + '<button type="button" id="reset">Reset</button> <span id="shown" class="muted"></span></div>')
     summary = "".join(tbadge(f"{source_label(k)}: {v}", SOURCE_HINT) for k, v in sorted(counts.items()))
     run = pipeline.get("run_id") or ""
-    body = (f"{nav}<h1>Story map{(': ' + esc(run)) if run else ''}</h1>{graph_link(graph)}"
+    body = (f"{nav}<h1>Story map{(': ' + esc(run)) if run else ''}</h1>{graph_link(graph)}{sample_note(sample)}"
             f'{banner(model_names(pipeline))}'
             f"{legend_bar('index', push=push_seen)}"
             f'<p class="muted">{len(agents)} agents. {SOURCE_TITLE}: {summary}. Time axis: minutes from run start '
@@ -2282,8 +2292,10 @@ def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=
     if ov is not None and not agents:  # a run with overseer maps but no solver story map
         write(out / "index.html", overseer_only_index(ov, tmax, nav, graph))
     else:
+        from .sample import load as load_sample
         write(out / "index.html", index_page(agents, pipeline, tmax, nav, names,
-                                             *(ov.index_block() if ov else ("", "")), graph=graph))
+                                             *(ov.index_block() if ov else ("", "")), graph=graph,
+                                             sample=load_sample(map_dir)))
     write(out / "events.html", events_page(agents, tmax, models, nav, names))
     if has_val:
         write(out / "validation.html", validation_page(validation.read_text(encoding="utf-8"), models, nav))
