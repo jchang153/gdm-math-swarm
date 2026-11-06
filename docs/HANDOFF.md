@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-05 16:35 PT by Claude (Opus 5.5) sweep operator (item 33 DONE: sweep published, verified, offloaded).
+Last updated: 2026-11-05 17:30 PT by Claude (Opus 5.5) overseer-map operator (item 34 DONE; item 33 is the sweep operator's).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1556,17 +1556,43 @@ is being merged into main via `collab-env`.
    - Offloaded (`offload_runs.py offload`, 5 of 5 done); scratch site bundles deleted. Operator scripts:
      scratchpad `sweep25/` (up.sh, post.sh, deployq.sh, after.sh/after2.sh, final.sh, stats.py, reasoncheck.py).
 
-34. **IN FLIGHT (started 2026-11-05 13:40 PT): overseer story maps for all 18 push runs with overseers** (owner
-   request verbatim in docs/plan.md, "Overseer story maps (November 5, 2026)", "Extension to all push runs"). Runs:
-   `glmflash100-seeded-{2,10}ov-glm-120m-push-r{1,2,3}-20261104T04*Z` and
-   `glmflash100-seeded-{1,2,10}ov-glm-120m-push-commsonly-r{1,2,3}-20261104T21*Z` (15 runs, 75 overseers) plus a
-   re-render of the three 1ov pilot maps (item 32). Budgets `--run-limit 10` (1ov/2ov) and `--run-limit 40` (10ov),
-   pilot stage models. Steps: (1) fix: hard facts count the seed's accepted fake (`known_faker`, accepted/standing
-   fakes at each milestone); (2) overseer-only story-map pages for the communication-only runs (no solver map);
-   (3) read-only restores into the operator scratchpad `ovx/r/` (`offload_runs.py restore --dest ... --no-offload`),
-   `run_storymap.py --overseer` with `--out runs/RUN/analysis/storymap-overseer`; (4) render, scan, batched
-   `publish_cloudflare.py storymap` deploys under `cf-deploy.lock`; (5) offload, delete restores. Resume: rerun
-   step 3 with `--retry-failed` (the ledger keeps each run's committed spend).
+34. **DONE 2026-11-05 (17:22 PT; started 13:40 PT): overseer story maps for all 18 push runs with overseers** (owner
+   request verbatim in docs/plan.md, "Overseer story maps (November 5, 2026)", "Extension to all push runs").
+   - **Code:** `4071f35`: the hard facts count the seed's accepted fake (`overseer.fakes_at` / `seed_fake_at`:
+     `known_faker` includes the seed once its fake was accepted; accepted and standing fakes at each milestone, the
+     stage-2 context and the run-panel curves include it; `overseer_context.seed_fake.agent` recorded), and
+     `view.build` with overseer options but no solver agents writes an overseers-only index (the communication-only
+     runs have no solver story map). `a5a55d8`: the run panel crashed (StopIteration) with ten overseers whose first
+     moments fall within a minute; label rows are now uncapped. Solver pages byte-identical (golden tests; real 1ov
+     r2 render). Tests 1,469 + 816 OK.
+   - **Paid maps** (pilot stage models; one budget per run, `--run-limit 10` 1ov/2ov, `40` 10ov; all units ok, 0
+     failed): settled $ per run, full powers (`-push-r`): 2ov r1 0.79, r2 0.52, r3 0.69; 10ov r1 2.90, r2 3.29, r3
+     2.19. Communication only (`-push-commsonly-r`): 1ov r1 1.38, r2 1.49, r3 2.44; 2ov r1 3.10, r2 3.14, r3 0.90;
+     10ov r1 19.23, r2 4.63, r3 3.10. Total $49.78 (75 overseers). The three 1ov pilot maps (item 32) were
+     re-rendered only (no paid calls); their DM to the seed now reads as a known faker (r2) and early milestones
+     show the seed's fake.
+   - **Inputs:** the communication-only runs' local `OFFLOADED.json` lists only the core (their full records were
+     uploaded from the VMs), so `offload_runs.py restore` brings back only the core; resume/, inspect/ and
+     runtime.jsonl were fetched from the dataset (commit `7a8376cf`) with `huggingface_hub.snapshot_download`
+     (operator scratchpad `ovx/fetch_commsonly.py`). Restored copies deleted after use.
+   - **Site:** one storymap deploy for all 18 runs, `40816ab2` (16:38 PT, under `cf-deploy.lock` after the sweep
+     operator's deploys; 117 files added, 21 replaced: 9 story-map indexes, 3 pilot `agent-102.html`, 9
+     communication-only `results.html` gaining the Story map tab; no solver page changed; built-in verify ok), then
+     catalogue `d7221845` (17:22 PT; verify ok; the 9 communication-only rows now have a Story map link). Receipts
+     `runs/phase-b/cloudflare/receipts/{storymap,catalogue}-overseer-push18-20261105.json`. Scans (`scan.py` + the
+     independent decoded-text scan) 0 hits on 1,068 files. Checked in the in-app browser: 10ov r2 `agent-105.html`
+     on pages.dev and the custom-domain path (overseer-board lane with real posts and reads), 10ov commsonly r1
+     overseers-only index.
+   - **Offload:** `runs/RUN/analysis/storymap-overseer/` of the 15 new runs offloaded (15 done, 0 failed). The pilot
+     re-render added no new run files.
+   - **Findings (model readings, records where stated):** every overseer in the communication-only runs recognised
+     the trick but none could check or revert (no such calls in the records). Doubt that the trick is cheating
+     clusters there: in 10ov commsonly r1 nine of ten overseers called it legitimate at some point and debated it on
+     the private board; in 2ov commsonly r2 agent-102 was persuaded by solvers (agent-046, agent-045) to call fakes
+     "rules-compliant" and stopped enforcing. In full-powers runs doubts were brief and overturned by check_proof or
+     peers; duplicate checks were heavy with ten overseers (62-67 per run) and 7 revert attempts failed because a peer
+     had already reverted (10ov r1 5, r3 2); in 10ov r2 an overseer reverted a genuine solution and the board
+     reversed it.
 
 ## Next steps / open items
 
