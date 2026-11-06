@@ -45,6 +45,8 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
         (relative to the run) must already be served, must not be a page (.html), a pack file or a private
         category; --entry replaces the run's catalogue entry (same run, links inside the run) and re-renders the
         catalogue. Every replacement is recorded with old and new digests. Nothing else changes.
+        --page PATH=LOCAL replaces a served page of the run and --remove PATH removes a served record of it (both
+        explicit and repeatable; November 6, 2026, the Gemini 4 Argon sweep correction).
     publish_cloudflare.py storymap --run RUN=PAGES_DIRECTORY [--run ...] [--commit] [--receipt FILE]
         Add (or refresh) the agent story map of runs already on the site (owner, November 2, 2026): only the
         allowlisted pages of PAGES_DIRECTORY (``storymap_site``: index.html, events.html, validation.html/.md,
@@ -1089,16 +1091,41 @@ def plan_catalogue(base_files, unlisted, site=None):
                    'storymap_links': sorted(e['run'] for e in catalogue(files) if STORYMAP_LABEL in e['links'])}
 
 
-def plan_correct(base_files, unlisted, run, records, entry=None, site=None):
+def plan_correct(base_files, unlisted, run, records, entry=None, site=None, pages=None, remove=()):
     """The site with named records of one run replaced by corrected bytes (owner decision, November 4, 2026:
     docs/plan.md, "Correct 2ov r1's immutable records"). ``records``: run-relative path -> local file. Each path must
     already be served, and must not be a page, a pack file or a private category; ``entry`` (a catalogue entry
-    dict) replaces the run's catalogue entry. Every replacement is recorded with old and new digests."""
+    dict) replaces the run's catalogue entry. Every replacement is recorded with old and new digests.
+
+    ``pages`` (run-relative page -> local file) and ``remove`` (run-relative paths) were added for the Gemini 4
+    Argon sweep correction (owner decision, November 6, 2026: its run page shows the corrected fake counts and its
+    heatmap image goes once the run has no fakers). A page must be named explicitly here, already be served and not
+    be a pack viewer or private; a removed file must be served, not a page, pack file or private category."""
     if run not in {run_of(n) for n in base_files if run_of(n)}:
         raise ValueError('Run not on the site: ' + run)
-    if not records and entry is None:
-        raise ValueError('correct needs at least one --file or --entry')
+    pages, remove = dict(pages or {}), sorted(set(remove or ()))
+    if not records and entry is None and not pages and not remove:
+        raise ValueError('correct needs at least one --file, --page, --remove or --entry')
     files, replaced = dict(base_files), []
+    for relative in sorted(pages):
+        name = f'{run}/{relative}'
+        if name not in base_files:
+            raise ValueError('Not on the site (correct only replaces served pages): ' + name)
+        if not name.endswith(('.html', '.htm')) or is_pack_file(name) or private_category(name) is not None:
+            raise ValueError('Not a correctable page (not a page, a pack viewer or a private category): ' + name)
+        data = Path(pages[relative]).read_bytes()
+        if data != base_files[name]:
+            replaced.append({'path': name, 'old': digest(base_files[name]), 'new': digest(data)})
+            files[name] = data
+    removed = []
+    for relative in remove:
+        name = f'{run}/{relative}'
+        if name not in base_files:
+            raise ValueError('Not on the site (correct only removes served files): ' + name)
+        if name.endswith(('.html', '.htm')) or is_pack_file(name) or private_category(name) is not None:
+            raise ValueError('Not a removable record (page, pack file or private category): ' + name)
+        removed.append({'path': name, 'old': digest(base_files[name])})
+        del files[name]
     for relative in sorted(records):
         name = f'{run}/{relative}'
         if name not in base_files:
@@ -1124,7 +1151,7 @@ def plan_correct(base_files, unlisted, run, records, entry=None, site=None):
             files.update(render_catalogue([entry if e['run'] == run else e for e in entries], unlisted, files,
                                           site=site))
     return files, {'source': {'kind': 'correct', 'runs': [run]}, 'replaced_records': replaced,
-                   'catalogue_entry': entry_change}
+                   'removed_records': removed, 'catalogue_entry': entry_change}
 
 
 def plan_repack(base_files):
@@ -1436,6 +1463,8 @@ def main(argv=None):
     fix.add_argument('--run', required=True)
     fix.add_argument('--file', action='append', default=[], help='PATH=LOCAL: run-relative served record (repeatable)')
     fix.add_argument('--entry', type=Path, help='JSON file with the corrected catalogue entry of the run')
+    fix.add_argument('--page', action='append', default=[], help='PATH=LOCAL: run-relative served page (repeatable)')
+    fix.add_argument('--remove', action='append', default=[], help='PATH: run-relative served record to remove')
     labels = sub.add_parser('judge-labels', help='rewrite the simplified judge\'s level wording on the site')
     labels.add_argument('--run', action='append', help='only this run (repeatable; default every judged run)')
     for command in (mirror, bundle, restyle, withdraw, repack, story, heat, cat, labels, fix):
@@ -1504,7 +1533,9 @@ def main(argv=None):
         elif args.command == 'correct':
             records = dict(spec.split('=', 1) for spec in args.file)
             entry = json.loads(args.entry.read_text()) if args.entry else None
-            files, plan = plan_correct(base_files, unlisted, args.run, records, entry, site=site)
+            pages = dict(spec.split('=', 1) for spec in args.page)
+            files, plan = plan_correct(base_files, unlisted, args.run, records, entry, site=site, pages=pages,
+                                       remove=args.remove)
             message = 'Correct records of ' + args.run
         elif args.command == 'judge-labels':
             files, plan = plan_judge_labels(base_files, args.run)

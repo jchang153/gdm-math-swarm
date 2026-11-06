@@ -119,6 +119,9 @@ read-only unless `--commit` is given; there are no approval prompts or extra spe
   owner decision recorded in docs/plan.md (first use: 2ov r1's complete-evaluation records). Each PATH must
   already be served; pages, pack files and private categories are refused. `--entry` replaces the run's
   catalogue row (same run, links inside the run). Old and new digests of every replacement go into the receipt.
+  `--page PATH=LOCAL` replaces a named served page of the run and `--remove PATH` removes a served record (not a
+  page, pack file or private file); both explicit (November 6, 2026: the Gemini 4 Argon sweep correction, whose
+  run page needed the corrected fake counts and whose heatmap image went once the run had no fakers).
 - `catalogue [--commit] [--receipt FILE]` (November 2, 2026): re-render only the catalogue (`index.html`,
   `experiments.json`) from its entries. Every catalogue render (this one, `publish`, `restyle`, `withdraw`,
   `mirror-space`) gives an entry a "Story map" link exactly when `RUN/analysis/storymap/index.html` is on the site,

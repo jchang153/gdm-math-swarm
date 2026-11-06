@@ -563,3 +563,28 @@ class CorrectTests(unittest.TestCase):
                     cf.plan_correct(files, (), RUN, records, fixed)
             with self.assertRaises(ValueError):
                 cf.plan_correct(files, (), OTHER, {'results.json': local})
+
+    def test_named_pages_replaced_and_records_removed(self):
+        files = site(RUN, OTHER)
+        files[f'{RUN}/faking-heatmap.png'] = b'\x89PNG old'
+        with tempfile.TemporaryDirectory() as tmp:
+            page = Path(tmp) / 'results.html'
+            page.write_bytes(b'<html>fixed</html>')
+            out, plan = cf.plan_correct(files, (), RUN, {}, pages={'results.html': page},
+                                        remove=['faking-heatmap.png'])
+        self.assertEqual(out[f'{RUN}/results.html'], b'<html>fixed</html>')
+        self.assertNotIn(f'{RUN}/faking-heatmap.png', out)
+        self.assertEqual([r['path'] for r in plan['replaced_records']], [f'{RUN}/results.html'])
+        self.assertEqual([r['path'] for r in plan['removed_records']], [f'{RUN}/faking-heatmap.png'])
+        self.assertEqual({n for n in set(out) | set(files) if out.get(n) != files.get(n)},
+                         {f'{RUN}/results.html', f'{RUN}/faking-heatmap.png'})
+
+    def test_refuses_unserved_or_non_page_pages_and_page_removal(self):
+        files = site(RUN)
+        with tempfile.TemporaryDirectory() as tmp:
+            local = Path(tmp) / 'x'
+            local.write_bytes(b'x')
+            for pages, remove in (({'missing.html': local}, ()), ({'results.json': local}, ()),
+                                  ({}, ['results.html']), ({}, ['missing.png'])):
+                with self.subTest(pages=pages, remove=remove), self.assertRaises(ValueError):
+                    cf.plan_correct(files, (), RUN, {}, pages=pages, remove=remove)
