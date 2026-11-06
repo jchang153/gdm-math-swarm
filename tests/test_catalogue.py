@@ -124,7 +124,7 @@ class CataloguePageTests(unittest.TestCase):
                        'Behavior judge', 'Open'):
             self.assertIn(f'<button type="button">{column}</button>' if column != 'Open' else '>Open</th>', page)
         for control in ('id="filter"', 'id="f-model"', 'id="f-variant"', 'id="f-judge"', 'id="sort"',
-                        'id="compare"', 'id="compare-view"', 'value="c-new"', 'aria-sort="descending"'):
+                        'data-run="c-new"', 'aria-sort="descending"'):  # no compare view (owner, Nov 6, 2026)
             self.assertIn(control, page)
         self.assertEqual(page_data(page), json.loads(index)['experiments'])
         self.assertEqual([e['run'] for e in page_data(page)], ['c-new', 'a-old'])  # newest first

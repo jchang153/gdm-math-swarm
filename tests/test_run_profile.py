@@ -168,8 +168,8 @@ class CataloguePageTests(unittest.TestCase):
             self.assertIn(anchor, page)
         for term in ('Fake-minutes', 'Seed readers', 'Standing fake', 'Overseer', 'Revert', 'Genuine'):
             self.assertIn(f'<dt>{term}</dt>', page)
-        # The existing table, filters and compare view are kept.
-        for control in ('id="runs"', 'id="filter"', 'id="compare"', 'id="compare-view"'):
+        # The existing table and filters are kept; the compare view is gone (owner, November 6, 2026).
+        for control in ('id="runs"', 'id="filter"', 'id="per-row"'):
             self.assertIn(control, page)
 
     def test_series_cards_with_and_without_profile(self):
@@ -195,7 +195,9 @@ class CataloguePageTests(unittest.TestCase):
         self.assertIn('<span class="chip k-model" title="Solver model × solvers"><b>GLM 5.3 Flash</b> × 100</span>'
                       '<span class="chip k-ov" title="Overseers"><b>2</b> DeepSeek V4.1 Flash overseers</span>', cards)
         self.assertIn('<dl class="pane-nums" data-static=1><div title="Accepted submissions', cards)
-        self.assertIn('class="card-pick" value="owner-opus55-20261021T183459Z"', cards)
+        # No compare feature on the math catalogue (owner, November 6, 2026).
+        for gone in ('class="card-pick"', 'id="compare"', 'id="compare-view"', 'Tick 2 to 4', 'td class="pick"'):
+            self.assertNotIn(gone, page)
         self.assertIn('const RP=(()=>{', page)
         self.assertIn('"deepseek/deepseek-v4.1-flash-1017": "DeepSeek V4.1 Flash"', page)
 
@@ -261,6 +263,7 @@ class PaneTests(unittest.TestCase):
         self.assertIn('<span class="chip k-push" title="Board posts and DMs are pushed into the next tool result">'
                       'push delivery</span>', page)
         self.assertIn('class="legend lg-graph"', page)
+        self.assertIn('<input id="per-row" type="range" min="0" max="8" step="1" value="0"', page)  # 0 = Auto
         # Series sidebar by the series titles; the one-line summary under the heading and as the hover title.
         line = catalogue_intro.SERIES_LINES['push120']
         self.assertIn(f'<a href="#series-push120" data-series="push120" title="{line}"><span class="sn-t">'

@@ -484,6 +484,11 @@ PANE_STYLE = (
     '.snav a{display:flex;gap:6px;white-space:nowrap;padding:5px 10px;border-color:var(--line);background:var(--card)}'
     '.cat-main>.block.runs{margin-top:16px}.cat-main .series,#runs-top{scroll-margin-top:56px}}'
     '@media (max-width:860px){.cat-main .rc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+    '#cards-view.fixed-cols .rc-grid{grid-template-columns:repeat(var(--cols),minmax(0,1fr))}'
+    '.pane-graph canvas{max-height:70vh}'
+    '.per-row{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--soft)}'
+    '.per-row input{width:110px;accent-color:var(--accent)}.per-row output{min-width:34px;font-variant-numeric:tabular-nums;'
+    'color:var(--fg);font-weight:600}'
     '@media (max-width:560px){.cat-main .rc-grid{grid-template-columns:minmax(0,1fr)}}'
     '.legend .lg-dot{width:9px;height:9px;border-radius:50%}.legend .lg-zone{width:11px;height:11px;border-radius:50%;'
     'opacity:.85}.legend .lg-ov{width:8px;height:8px;transform:rotate(45deg);background:var(--s-none);'
@@ -573,13 +578,13 @@ function layout(th,fi,W,H){const fr=th.frames[fi],nodes=th.nodes,cnt={},members=
   pos[i]=[C[z][0]+Math.cos(a)*rr,C[z][1]+Math.sin(a)*rr];});}
  ovs.forEach((i,k)=>{pos[i]=[W/2+(k-(ovs.length-1)/2)*Math.min(12,(W-20)/Math.max(ovs.length,1)),9];});
  return {pos,C,R,cnt,dot,unk,lbl};}
-function drawThumb(cv,th,fi,mix,next){const dpr=window.devicePixelRatio||1,W=cv.clientWidth||240,H=cv.clientHeight||165;
- if(cv.width!==Math.round(W*dpr)){cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);}
+function drawThumb(cv,th,fi,mix,next){const nf=th.frames.length;fi=Math.max(0,Math.min(nf-1,fi|0));if(next!=null)next=Math.max(0,Math.min(nf-1,next|0));const dpr=window.devicePixelRatio||1,W=cv.clientWidth||240,H=cv.clientHeight||165;
+ if(cv.width!==Math.round(W*dpr)||cv.height!==Math.round(H*dpr)){cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);}
  const g=cv.getContext('2d'),c=colors();g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
  const A=layout(th,fi,W,H),B=next!=null?layout(th,next,W,H):A,t=next!=null?mix:0,L=(a,b)=>a+(b-a)*t;
  for(const z of ZORDER){const r=L(A.R[z],B.R[z]);if(r<=0)continue;const x=L(A.C[z][0],B.C[z][0]),y=L(A.C[z][1],B.C[z][1]);
   g.globalAlpha=0.16;g.fillStyle=c[z];g.beginPath();g.arc(x,y,r,0,7);g.fill();g.globalAlpha=0.55;g.strokeStyle=c[z];g.lineWidth=1;g.stroke();
-  g.globalAlpha=0.9;g.fillStyle=c.muted;g.font='9px system-ui,sans-serif';g.textAlign='center';
+  g.globalAlpha=0.9;g.fillStyle=c.muted;g.font=Math.round(Math.max(9,Math.min(14,W/28)))+'px system-ui,sans-serif';g.textAlign='center';
   const F=t<0.5?A:B,n=F.lbl[z],up=z==='deferred'||z==='considering';
   if(r>6)g.fillText(z==='none'?(n?'no idea '+n:'')+(F.unk?(n?' · ':'')+F.unk+' no stance':''):z+' '+n,x,up?y-r-3:y+r+10);}
  g.globalAlpha=1;const fa=th.frames[fi].f,fb=next!=null?th.frames[next].f:fa,sa=th.frames[fi].s,sb=next!=null?th.frames[next].s:sa;
@@ -590,7 +595,7 @@ function drawThumb(cv,th,fi,mix,next){const dpr=window.devicePixelRatio||1,W=cv.
   else{g.beginPath();g.arc(x,y,d,0,7);g.fill();}
   if((t<0.5?fa:fb)[i]==='1'){g.fillStyle=c.fake;g.beginPath();g.arc(x+d*0.9,y-d*0.9,Math.max(1.3,d*0.55),0,7);g.fill();}});
  return th.frames[fi].t+(next!=null?(th.frames[next].t-th.frames[fi].t)*t:0);}
-function clock(g,W,H,m,c){g.globalAlpha=1;g.fillStyle=c.fg;g.font='600 10px system-ui,sans-serif';g.textAlign='left';
+function clock(g,W,H,m,c){g.globalAlpha=1;g.fillStyle=c.fg;g.font='600 '+Math.round(Math.max(10,Math.min(15,W/24)))+'px system-ui,sans-serif';g.textAlign='left';
  g.fillText('+'+Math.floor(m)+' min',5,H-6);}
 function validThumb(t){return t&&t.schema==='storymap-graph-thumb/1'&&Array.isArray(t.nodes)&&Array.isArray(t.frames)&&t.frames.length&&
  t.frames.every(f=>typeof f.s==='string'&&f.s.length===t.nodes.length&&typeof f.f==='string'&&f.f.length===t.nodes.length&&typeof f.t==='number');}
@@ -603,7 +608,7 @@ function setupGraph(card,th){const e=byRun.get(card.dataset.run),a=card.querySel
  const still=()=>{const m=drawThumb(cv,th,last);clock(cv.getContext('2d'),W(),H(),m,colors());};
  still();cv._still=still;let raf=0;
  const play=()=>{if(reduce||th.frames.length<2)return;cancelAnimationFrame(raf);const t0=performance.now(),D=4000;
-  const step=now=>{const u=Math.min(1,(now-t0)/D),x=u*last,i=Math.min(last-1,Math.floor(x)),m=drawThumb(cv,th,i,x-i,i+1);
+  const step=now=>{const u=Math.max(0,Math.min(1,(now-t0)/D)),x=u*last,i=Math.max(0,Math.min(last-1,Math.floor(x))),m=drawThumb(cv,th,i,Math.max(0,Math.min(1,x-i)),i+1);
    clock(cv.getContext('2d'),W(),H(),m,colors());if(u<1)raf=requestAnimationFrame(step);};raf=requestAnimationFrame(step);};
  a.addEventListener('mouseenter',play);a.addEventListener('focus',play);
  const stop=()=>{cancelAnimationFrame(raf);still();};a.addEventListener('mouseleave',stop);a.addEventListener('blur',stop);
@@ -619,6 +624,14 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change',redraw);
 new MutationObserver(redraw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
 let rz=0;window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(redraw,150);});
 for(const e of data)paneFill(e);
+// Panes per row (owner, November 6, 2026): a per-browser convenience in localStorage; 0 = Auto; phones cap at 2.
+{const R=$('per-row'),V=$('per-row-v'),grid=$('cards-view'),KEY='gdm-catalogue-per-row',phone=matchMedia('(max-width: 560px)');
+ if(R&&grid){let n=0;try{n=Number(localStorage.getItem(KEY))||0;}catch(_){}n=Math.max(0,Math.min(8,Math.round(n)));R.value=String(n);
+  const set=save=>{n=Number(R.value)||0;const cols=n&&phone.matches?Math.min(n,2):n;V.textContent=n?String(n):'Auto';
+   grid.classList.toggle('fixed-cols',!!cols);if(cols)grid.style.setProperty('--cols',String(cols));else grid.style.removeProperty('--cols');
+   if(save)try{n?localStorage.setItem(KEY,String(n)):localStorage.removeItem(KEY);}catch(_){}
+   requestAnimationFrame(redraw);};
+  R.addEventListener('input',()=>set(true));phone.addEventListener('change',()=>set(false));set(false);}}
 // Run categories (sidebar): one series at a time, or all; the search and filters still apply within it.
 let series='';const nav=[...document.querySelectorAll('.snav a[data-series]')];
 function showSeries(){for(const s of document.querySelectorAll('section.series'))if(series&&s.dataset.series!==series)s.hidden=true;

@@ -136,6 +136,8 @@ class CatalogueTests(unittest.TestCase):
         self.assertIn('class="rc pane"', math_page)
         self.assertNotIn('class="rc pane"', ib_page)
         self.assertNotIn('catalogue-labels', ib_page)
+        self.assertNotIn('id="per-row"', ib_page)
+        self.assertIn('id="compare-view"', ib_page)  # the IB catalogue keeps its compare view
         self.assertEqual(ib_page.rsplit('<script>', 1)[1],
                          catalogue_page.SCRIPT.replace('/*CARDJS*/', run_profile.CARD_JS) + '</script></body></html>')
         self.assertEqual(math_page.rsplit('<script>', 1)[1], index.pane_script() + '</script></body></html>')

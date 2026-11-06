@@ -536,8 +536,7 @@ def run_pane(entry, scale):
              ('Duration', esc(duration_text(entry['elapsed_seconds']))),
              ('Spend', f'${Decimal(entry["pilot_spent_usd"]):.2f}'), ('Agents', esc(str(entry['agents'])))]
     return (f'<article class="rc pane" data-run="{run}"><header class="rc-head"><h3 class="rc-title">{head}</h3>'
-            f'<label class="rc-pick" title="Select to compare"><input type="checkbox" class="card-pick" value="{run}" '
-            f'aria-label="Compare {run}"><span class="sr">Compare</span></label></header>'
+            '</header>'
             f'<p class="pane-spec"{" data-static=1" if p else ""}>{spec_chips(entry, p)}</p>'
             f'<div class="pane-pic">{graph}<div class="rc-body" data-profile="{1 if p else 0}">{body}</div></div>'
             '<div class="pane-cat"><p class="cat-none">Behavior judge counts…</p></div>'
@@ -598,6 +597,17 @@ def series_sections(groups, panes=False, lines=None):
 
 
 PANE_START = 'options();sort();apply();selection();fromHash();'
+# The math catalogue has no compare controls (owner, November 6, 2026): the shared script's compare code is guarded.
+NO_COMPARE = (
+    ("const boxes=rows.map(r=>r.querySelector('input[type=checkbox]'));",
+     "const boxes=rows.map(r=>r.querySelector('input[type=checkbox]')).filter(Boolean);"),
+    ("$('compare').disabled=n<2;$('compare').textContent='Compare selected ('+n+')'+(n>=MAX?' · max '+MAX:'');}",
+     "if($('compare')){$('compare').disabled=n<2;$('compare').textContent='Compare selected ('+n+')'+(n>=MAX?' · max '+MAX:'');}}"),
+    ("$('clear').addEventListener(", "if($('clear'))$('clear').addEventListener("),
+    ("$('compare').addEventListener('click',", "if($('compare'))$('compare').addEventListener('click',"),
+    ("$('close-compare').addEventListener(", "if($('close-compare'))$('close-compare').addEventListener("),
+    ("function fromHash(){const m=", "function fromHash(){if(!$('compare-view'))return;const m="),
+)
 PANE_THEN = ('Promise.all(unprofiled.map(enrichProfile)).then(drawSeries);',
              'Promise.all(unprofiled.map(enrichProfile)).then(()=>{drawSeries();for(const e of data)paneFill(e);});')
 PANE_MISSING = ('Promise.all(missing.map(enrich)).then(()=>{options();',
@@ -615,7 +625,7 @@ def pane_labels(entries, labels):
 def pane_script():
     """The catalogue script with the pane behaviour (catalogue_page.PANE_JS) inside its closure."""
     script = SCRIPT.replace('/*CARDJS*/', run_profile.CARD_JS)
-    for old, new in ((PANE_START, PANE_JS.replace('MODELNAMES', json.dumps(run_profile.MODEL_NAMES, sort_keys=True))
+    for old, new in (*NO_COMPARE, (PANE_START, PANE_JS.replace('MODELNAMES', json.dumps(run_profile.MODEL_NAMES, sort_keys=True))
                       + PANE_START), PANE_THEN, PANE_MISSING):
         if script.count(old) != 1:
             raise AssertionError('catalogue script changed: pane hook not found')
@@ -659,8 +669,10 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
                  ('Cost', f'{spent:.6f}', '', f'${spent:.2f}'),
                  ('Behavior judge', str(judge_sort), 'c-judge', judge),
                  ('Open', None, 'open', links)]
-        rows.append(f'<tr data-run="{esc(e["run"], quote=True)}"><td class="pick"><input type="checkbox" '
-                    f'aria-label="Compare {esc(e["run"], quote=True)}" value="{esc(e["run"], quote=True)}"></td>'
+        # The math catalogue has no compare view (owner, November 6, 2026: "remove the compare button").
+        pick = ('' if panes else f'<td class="pick"><input type="checkbox" aria-label="Compare '
+                f'{esc(e["run"], quote=True)}" value="{esc(e["run"], quote=True)}"></td>')
+        rows.append(f'<tr data-run="{esc(e["run"], quote=True)}">{pick}'
                     + ''.join(f'<td data-label="{label}"' + (f' data-sort="{sort}"' if sort is not None else '')
                               + (f' class="{cls}"' if cls else '') + f'><div class="v">{content}</div></td>'
                               for label, sort, cls, content in cells) + '</tr>')
@@ -675,7 +687,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
             'backing up or moving a run.')
     glossary = ''.join(f'<dt>{esc(COHORT_LABELS[k][1].capitalize())}</dt><dd>{esc(COHORT_GLOSS[k])}</dd>'
                        for k in COHORTS)
-    headers = [('', None), ('Start', 'start'), ('Model', 'model'), ('Prompt variant', 'variant'),
+    headers = [('', None)] * (not panes) + [('Start', 'start'), ('Model', 'model'), ('Prompt variant', 'variant'),
                ('Agents', 'agents'), ('Duration', 'duration'), ('Accepted / genuine', 'tasks'),
                ('Cost', 'cost'), ('Behavior judge', 'judge'), ('Open', None)]
     head = ''.join(f'<th scope="col" data-key="{k}"' + (' aria-sort="descending"' if k == 'start' else '')
@@ -700,7 +712,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
                + '</aside><div class="cat-main">' if panes else '') +
             '<section class="block runs" id="runs-top"><div class="runs-head"><h2>Runs</h2>'
             f'<p class="sub">{len(entries)} saved experiment{"" if len(entries) == 1 else "s"} in {len(groups)} series, '
-            'newest first. Tick 2 to 4 runs to compare them side by side.'
+            + ('newest first.' if panes else 'newest first. Tick 2 to 4 runs to compare them side by side.')
             + (f' {mapped} run{"" if mapped == 1 else "s"} {"has" if mapped == 1 else "have"} an agent story map '
                '(the Story map link).' if mapped else '') + '</p></div>'
             + ('' if panes else intro.toc([(k, t, len(es)) for k, t, _, es in groups])) +
@@ -717,13 +729,19 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
             + '</select></label><button type="button" id="direction" aria-label="Sort direction">Newest first ↓</button>'
             '<span class="seg" role="group" aria-label="View">'
             '<button type="button" id="view-cards" aria-pressed="true">Cards</button>'
-            '<button type="button" id="view-table" aria-pressed="false">Table</button></span></div>'
+            '<button type="button" id="view-table" aria-pressed="false">Table</button></span>'
+            # Panes per row (owner, November 6, 2026): 0 = Auto (the responsive rule), else 1 to 8; phones cap at 2.
+            + ('<label class="per-row" title="Panes per row"><span>Per row</span><input id="per-row" type="range" '
+               'min="0" max="8" step="1" value="0" aria-label="Panes per row (0 is automatic)">'
+               '<output id="per-row-v" for="per-row">Auto</output></label>' if panes else '') + '</div>'
             '<div class="actions"><span id="shown" aria-live="polite"></span>'
-            '<button type="button" id="compare" disabled>Compare selected (0)</button>'
-            '<button type="button" id="clear" class="quiet">Clear</button></div></div>'
-            '<section id="compare-view" hidden aria-label="Compare runs"><div class="cmp-head"><h2>Compare runs</h2>'
-            '<button type="button" id="close-compare" class="quiet">Close</button></div><div class="scroll" id="compare-table"></div></section>'
-            '</section><div id="cards-view">' + series_sections(groups, panes, getattr(intro, 'SERIES_LINES', None)) + '</div>'
+            + ('</div></div>' if panes else
+               '<button type="button" id="compare" disabled>Compare selected (0)</button>'
+               '<button type="button" id="clear" class="quiet">Clear</button></div></div>'
+               '<section id="compare-view" hidden aria-label="Compare runs"><div class="cmp-head"><h2>Compare runs</h2>'
+               '<button type="button" id="close-compare" class="quiet">Close</button></div><div class="scroll" '
+               'id="compare-table"></div></section>')
+            + '</section><div id="cards-view">' + series_sections(groups, panes, getattr(intro, 'SERIES_LINES', None)) + '</div>'
             '<section id="table-view" class="block"><h2>All runs</h2>'
             '<div class="scroll"><table id="runs"><thead><tr>' + head + '</tr></thead><tbody>'
             + ''.join(rows) + '</tbody></table></div>'
