@@ -368,7 +368,7 @@ class MessageTextTest(unittest.TestCase):
 
     def test_viewer_has_follow_panel_and_messages(self):
         html = sg.TEMPLATE.read_text(encoding='utf-8')
-        for marker in ('id="follow"', 'id="msgs"', 'id="pinned"', 'drawBubbles', 'bubbleAt', 'id="key"', 'Open full story map'):
+        for marker in ('id="follow"', 'id="msgs"', 'drawBubbles', 'bubbleAt', 'jumpToMsg', 'id="gripSide"', 'id="gripPanes"', 'id="gripFol"', 'id="speedOut"', 'id="key"', 'Open full story map'):
             self.assertIn(marker, html)
 
 
