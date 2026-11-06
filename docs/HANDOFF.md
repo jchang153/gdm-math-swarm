@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-05 17:45 PT by Claude (Opus 5.5) interaction-graph data agent (item 35 started).
+Last updated: 2026-11-05 18:25 PT by Claude (Opus 5.5) interaction-graph data agent (item 35 DONE).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1594,11 +1594,36 @@ is being merged into main via `collab-env`.
      had already reverted (10ov r1 5, r3 2); in 10ov r2 an overseer reverted a genuine solution and the board
      reversed it.
 
-35. **IN FLIGHT 2026-11-05 (started ~17:40 PT): story-map interaction graph, pilot on 1ov push r1** (owner request
-   and decisions verbatim in docs/plan.md, "Story-map interaction graph (November 5, 2026)"). Data/integration
-   agent: `scripts/storymap_graph.py` (graph.json, render into the template), discreet index link, tests, publish.
-   Front-end agent: `scripts/storymap_graph_template.html`. No paid calls. Inputs restored read-only to the operator
-   scratchpad `sgraph/restore/`.
+35. **DONE 2026-11-05 (~18:25 PT; started ~17:40 PT): story-map interaction graph, pilot on 1ov push r1** (owner request,
+   decisions and five follow-up requests verbatim in docs/plan.md, "Story-map interaction graph (November 5, 2026)").
+   No paid calls.
+   - **Code:** `scripts/storymap_graph.py` builds `graph.json` (schema `storymap-graph/1`: nodes, states, thoughts,
+     `maps` for the hover card, events, public code names) from the conference records plus the existing story map
+     (stage-1 chunks, stage-3 phases/turning points/story; time origin `run_started_at`; fakes by the story map fake
+     rule) and inlines it into `scripts/storymap_graph_template.html` (d3 from cdnjs) as
+     `RUN/analysis/storymap/graph.html`. Overseer statuses map onto stances (documented in the script; raw status in
+     `ov_status`). `storymap_site.py` allowlists `graph.html`; `view.py` adds one muted "Interaction graph
+     (experimental) ↗" line under the index h1 only when `graph.html` exists (`--graph-link/--no-graph-link`;
+     byte-identical otherwise). Tests: `tests/test_storymap_graph.py`, `research/analysis/tests/test_storymap_graph_link.py`;
+     story-map, site, catalogue and publish suites OK.
+   - **Front end:** stance zones as solid containers (no exploit idea centre, others on an adaptive ring), edges decay
+     with a 10-min half-life, red dot from an agent's first fake, hover card = miniature story map, speed in multiples
+     of real time (5x default), keys ←/→ 5 s, Shift 1 min, j/k 10 s, click opens `agents/<id>.html`.
+   - **Pilot data:** 102 nodes, 1,894 events (submit 818, board_read 472, library_read 294, library_publish 105,
+     credited 105, revert 67, board_post 16, dm 15, check 2); push deliveries are left out. Reading note: colour is the
+     stage-3 position, so at minute 35 only 8 solvers read "faking" though 36 had faked (most stopped after the
+     overseer's reverts); the legend says so.
+   - **Site:** storymap deploy `d4464c90` (under `cf-deploy.lock`; 1 file added (`graph.html`, 1.04 MB), 1 replaced
+     (the run's story-map index, which differs from the live one only by the link); built-in verify ok; receipt
+     `runs/phase-b/cloudflare/receipts/storymap-graph-pilot-20261105.json`). `scan.py` + the publication screen: 0 hits
+     on 108 files. Live on pages.dev and the custom-domain path: `graph.html` 200 with the local digest, index carries
+     the link, `agents/agent-001.html` and `agent-102.html` answer with the packed-page viewer (404 by design) and both
+     are in `RUN/packed/index.json`. The in-app browser was refused navigation to both public hosts, so the live
+     click-through was not checked visually (it was checked locally against the same relative layout).
+   - Render: `.venv/bin/python scripts/storymap_graph.py --run-dir runs/RUN --map MAP --overseer-map OMAP --out
+     DIR/graph.html`, then re-run `view` into DIR so the index gets the link. The run's story-map stage records were
+     restored read-only for this (operator scratchpad `sgraph/`); nothing was offloaded (`runs/RUN/analysis/storymap/graph.html`
+     exists only locally).
 
 ## Next steps / open items
 
