@@ -46,13 +46,17 @@ Catalogue thumbnail (owner, November 6, 2026; docs/plan.md "Site redesign: run p
 ``graph-thumb.json`` beside graph.json, schema ``storymap-graph-thumb/1``, no text, built from graph.json alone
 (``thumb``; CLI ``--thumb-from-json``)::
 
-    {"schema", "minutes" (graph.json minutes), "solvers", "overseers", "nodes": [{"id", "role"}] (graph order),
+    {"schema", "minutes" (graph.json minutes), "solvers", "overseers", "nodes": [{"id", "role", "b"?}] (graph order),
      "frames": [{"t", "s", "f"}]  (THUMB_FRAMES frames evenly over the viewer's time range; the last is its end)}
 
 ``s`` has one character per node, its stance at ``t`` as the viewer reads it (stateAt: the last state with
 t_from <= t; overseer stances are already mapped by OV_STANCE): n none, c considering, d deferred, x faking,
 r rejected, s stopped, '.' no story-map state (or an unknown stance). ``f`` is '1' once the node has faked by ``t``
 (the viewer's first-fake rule: its first fake submission; the seed's fake library publish), else '0'.
+``b`` (optional) is the node's behaviour badge letters as on the public run pages (research/analysis/agent_badges
+run_badges, e.g. "E", "CW", "O", "S", "?"; "" for none). It is set on every node only when the run folder holds
+behaviour-judge records (simplified or rubric-3.1 judge); without them (a roles-only map, or no run folder, as with
+--thumb-from-json away from the run) every ``b`` is omitted, since the role already gives O and S.
 """
 from __future__ import annotations
 
@@ -427,11 +431,29 @@ def _finite(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float('inf')
 
 
-def thumb(graph, frames=THUMB_FRAMES):
+def node_badges(run_dir):
+    """{agent: badge letters} of a run from its behaviour-judge records (agent_badges.run_badges), or None when the
+    run folder or its judge records are missing (a roles-only map is None too: see the module docstring)."""
+    if not run_dir or not (Path(run_dir) / 'settings.json').is_file():
+        return None
+    try:
+        from research.analysis import agent_badges
+        badge_map = agent_badges.run_badges(run_dir)
+    except Exception:  # noqa: BLE001  (badges are optional: never block the graph)
+        return None
+    if not badge_map or badge_map.get('source') not in ('simple', 'rubric'):
+        return None
+    return {a: ''.join(b['letter'] for b in bs) for a, bs in (badge_map.get('agents') or {}).items()}
+
+
+def thumb(graph, frames=THUMB_FRAMES, badges=None):
     """The graph-thumb.json object of a graph.json object (contract in the module docstring). Mirrors the viewer
     (scripts/storymap_graph_template.html): its time range (tMin = min(0, first event, first state), tMax =
-    max(minutes, last event)), stateAt and first-fake rule."""
+    max(minutes, last event)), stateAt and first-fake rule. ``badges``: node_badges() of the run, or None."""
     nodes = [{'id': n['id'], 'role': n.get('role') or 'solver'} for n in graph.get('nodes') or []]
+    if badges is not None:
+        for n in nodes:
+            n['b'] = badges.get(n['id'], '')
     ids = {n['id']: n for n in nodes}
     events = sorted((e for e in graph.get('events') or [] if isinstance(e, dict) and _finite(e.get('t'))),
                     key=lambda e: e['t'])
@@ -470,11 +492,12 @@ def thumb(graph, frames=THUMB_FRAMES):
             'overseers': sum(n['role'] == 'overseer' for n in nodes), 'nodes': nodes, 'frames': out}
 
 
-def write_thumb(graph, path):
-    """Write graph-thumb.json (compact) for a graph.json object; return the path."""
+def write_thumb(graph, path, run_dir=None):
+    """Write graph-thumb.json (compact) for a graph.json object, with badges from ``run_dir`` when it has
+    behaviour-judge records; return the path."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(dumps(thumb(graph)), encoding='utf-8')
+    path.write_text(dumps(thumb(graph, badges=node_badges(run_dir))), encoding='utf-8')
     return path
 
 
@@ -608,13 +631,22 @@ def main(argv=None):
     ap.add_argument('--thumb-from-json', metavar='PATH', help=f'only build {THUMB_JSON} from an existing graph.json '
                     '(no conference records needed); written next to it unless --out-thumb')
     ap.add_argument('--out-thumb', metavar='PATH', help=f'{THUMB_JSON} path for --thumb-from-json')
+    # with --thumb-from-json, --run-dir only supplies the badges (default: the run folder holding the graph.json,
+    # RUN/analysis/storymap/graph.json, else runs/<graph run>)
     args = ap.parse_args(argv)
     if args.thumb_from_json:
         src = Path(args.thumb_from_json)
         graph = json.loads(src.read_text(encoding='utf-8'))
         if graph.get('schema') != SCHEMA:
             ap.error(f'{src} is not a {SCHEMA} graph.json')
-        path = write_thumb(graph, args.out_thumb or src.with_name(THUMB_JSON))
+        run = Path(args.run_dir) if args.run_dir else None
+        if run is None:
+            for cand in (src.resolve().parents[2] if len(src.resolve().parents) > 2 else None,
+                         REPO / 'runs' / str(graph.get('run') or '')):
+                if cand and graph.get('run') and cand.name == graph['run'] and (cand / 'settings.json').is_file():
+                    run = cand
+                    break
+        path = write_thumb(graph, args.out_thumb or src.with_name(THUMB_JSON), run)
         print(f'wrote {path} ({path.stat().st_size} bytes)')
         return 0
     if args.viewer_dir:
@@ -634,7 +666,7 @@ def main(argv=None):
         Path(args.json).parent.mkdir(parents=True, exist_ok=True)
         Path(args.json).write_text(dumps(graph), encoding='utf-8')
         if args.no_html:
-            write_thumb(graph, Path(args.json).with_name(THUMB_JSON))
+            write_thumb(graph, Path(args.json).with_name(THUMB_JSON), run)
         print(f'wrote {args.json} ({len(graph["events"])} events, {len(graph["nodes"])} nodes)')
     if not args.no_html:
         out = Path(args.out) if args.out else run / 'analysis' / 'storymap' / 'graph.html'
@@ -648,7 +680,7 @@ def main(argv=None):
             out.with_name(GRAPH_JSON).write_text(dumps(graph), encoding='utf-8')
             out.write_text(shell(args.viewer_prefix), encoding='utf-8')
             print(f'wrote {out.with_name(GRAPH_JSON)}')
-        write_thumb(graph, out.with_name(THUMB_JSON))  # the catalogue's snapshot (also beside an inline page)
+        write_thumb(graph, out.with_name(THUMB_JSON), run)  # the catalogue's snapshot (also beside an inline page)
         print(f'wrote {out.with_name(THUMB_JSON)}')
         print(f'wrote {out}')
     return 0

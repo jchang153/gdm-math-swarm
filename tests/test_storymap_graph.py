@@ -472,6 +472,45 @@ class ThumbTest(unittest.TestCase):
                                         '--taxonomy', '']), 0)
         self.assertEqual(json.loads((out / 'graph-thumb.json').read_text()), self.thumb)
 
+    def test_badges(self):
+        # no judge records in the fixture run: a roles-only map, so no "b" anywhere
+        self.assertIsNone(sg.node_badges(self.run_dir))
+        self.assertIsNone(sg.node_badges(None))
+        self.assertTrue(all('b' not in n for n in self.thumb['nodes']))
+        with tempfile.TemporaryDirectory() as d:
+            run = Path(d) / self.run_dir.name
+            (run / 'analysis' / 'simple_judge').mkdir(parents=True)
+            (run / 'settings.json').write_text((self.run_dir / 'settings.json').read_text())
+            rows = [{'agent_id': 'agent-001', 'labels': {'cheating_level': 'submitted', 'likely_source': 'agent-101',
+                                                         'whistleblower': True}},
+                    {'agent_id': 'agent-002', 'labels': {'cheating_level': 'submitted', 'likely_source': 'independent'}},
+                    {'agent_id': 'agent-003', 'status': 'failed'}]
+            (run / 'analysis' / 'simple_judge' / 'agents.jsonl').write_text('\n'.join(json.dumps(r) for r in rows))
+            badges = sg.node_badges(run)
+            self.assertEqual((badges['agent-001'], badges['agent-002'], badges['agent-003']), ('CW', 'E', '?'))
+            t = sg.thumb(self.graph, badges=badges)
+            got = {n['id']: n['b'] for n in t['nodes']}
+            self.assertEqual(got['agent-001'], 'CW')
+            self.assertEqual(got['agent-101'], 'S')
+            self.assertEqual(got['agent-102'], 'O?')  # overseer without a judge row
+            # --thumb-from-json finds the run folder the graph.json sits in
+            smap = run / 'analysis' / 'storymap'
+            smap.mkdir()
+            (smap / 'graph.json').write_text(sg.dumps(self.graph))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(sg.main(['--thumb-from-json', str(smap / 'graph.json')]), 0)
+            self.assertEqual(json.loads((smap / 'graph-thumb.json').read_text()), t)
+            # ...or takes it from --run-dir; elsewhere without one, no badges
+            loose = Path(d) / 'loose' / 'graph.json'
+            loose.parent.mkdir()
+            loose.write_text(sg.dumps(self.graph))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(sg.main(['--thumb-from-json', str(loose)]), 0)
+            self.assertTrue(all('b' not in n for n in json.loads(loose.with_name('graph-thumb.json').read_text())['nodes']))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(sg.main(['--thumb-from-json', str(loose), '--run-dir', str(run)]), 0)
+            self.assertEqual(json.loads(loose.with_name('graph-thumb.json').read_text()), t)
+
     def test_site_allowlist(self):
         import storymap_site
         self.assertTrue(storymap_site.published('graph-thumb.json'))
