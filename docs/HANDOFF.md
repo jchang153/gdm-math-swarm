@@ -1625,6 +1625,35 @@ is being merged into main via `collab-env`.
      restored read-only for this (operator scratchpad `sgraph/`); nothing was offloaded (`runs/RUN/analysis/storymap/graph.html`
      exists only locally).
 
+36. **DONE 2026-11-06 (~12:45 PT): interaction graph on every story-mapped run, shared viewer, auto-build, follow
+   panel and full messages** (owner requests Nov 6 in docs/plan.md, interaction-graph section). No paid calls.
+   - **Auto-build (7a872f0):** `research.analysis.storymap.view` (so `run_storymap` and the public-copy render) calls
+     `ensure_graph()` before rendering: writes the graph next to `index.html`, so the index link appears; skips with
+     "interaction graph: skipped (...)" when the run folder, `conference/state.sqlite` or story-map records are
+     missing; `--run-dir` for maps outside `RUN/analysis/`, `--no-graph-link` to turn off.
+   - **Shared viewer (c30e7e1):** per run `graph.html` is a small shell that loads `../../../_graph/viewer.{js,css}`
+     and fetches `./graph.json`. `publish_cloudflare.py` adds/refreshes `_graph/` from the template on any deploy
+     with a graph, so **a design change = edit `scripts/storymap_graph_template.html` + any deploy from up-to-date
+     main** (no per-run rebuild, no restores). `--inline` keeps the old single-file page for previews from disk;
+     `--viewer-dir DIR` writes the viewer by hand. Data changes (new fields/event types) still need a rebuild from
+     the run's conference records (restored read-only if offloaded).
+   - **Viewer (7fbe5fd, 8ecc337):** click an agent = follow it in a docked side panel (live stance, mini story map
+     clickable to seek, current thought, its events; "Open full story map ↗"; "keep in view" camera; Esc/×/click
+     again to stop). Board posts and DMs keep their full text in `graph.json` (`MESSAGE_MAX` 8000, line breaks kept;
+     other text still clipped at 160): a scrolling "Board posts and DMs" pane (click to read, pin to keep at top),
+     snippet bubbles travelling sender → recipient on the graph (click a bubble to pin and open it). Sidebar = stance
+     counts + two live panes; legend and toggles in a collapsed "Key and settings".
+   - **Backfill:** all 38 story-mapped runs (36 math incl. the pilot, 2 ImpossibleBench coding runs) rebuilt at
+     7fbe5fd. Math deploy `8f44f98e` (71 added, 35 indexes replaced only by the link line, pilot shell, `_graph/`;
+     0 removed; verify ok); IB deploy `92b77981` (verify ok). Receipts
+     `runs/phase-b/cloudflare{,-ib}/receipts/storymap-graph-all-20261106.json`. Privacy: 0 hits on the 114 new files.
+     The live gemini4argon / gpt6luna / grok47 indexes keep their hand-added "No readable reasoning" note (link
+     inserted into the live bytes). The 9 commsonly runs have overseer maps only, so their solvers have no stance or
+     hover card. Backed up add-only to the logs dataset (graph.json + graph.html for 38 runs). Read-only restores
+     (~11 GB) in the operator scratchpad `sgall/r/`, deletable.
+   - Local iteration: build the shared viewer from a scratch template copy with `--template COPY --viewer-dir
+     SITE/_graph` and serve SITE with a static server; never edit the repo template while a deploy is running.
+
 ## Next steps / open items
 
 - **VM HF upload token (item 16):** confirmed working on the owner's first VM (item 17). `vm_hf_setup.py` failed on

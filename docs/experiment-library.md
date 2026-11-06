@@ -111,6 +111,8 @@ read-only unless `--commit` is given; there are no approval prompts or extra spe
   `agents/*.html`); the reference path is removed from the validation files, and any host path, `private/` path,
   taxonomy name next to its code or link to an unpublished file refuses the run. Earlier story map pages of the
   run are replaced (stale ones removed) and `results.html` gains a "Story map" tab; nothing else changes.
+  The render also writes the interaction graph (`graph.html` shell + `graph.json`) next to `index.html` when the
+  run's conference records are on disk; deploys add the shared viewer `_graph/` automatically (HANDOFF item 36).
   `prepare_hf_library.py` applies the same allowlist and screens to a run's `analysis/storymap/`.
 - `correct --run RUN --file PATH=LOCAL [--file ...] [--entry ENTRY_JSON] [--commit] [--receipt FILE]`
   (November 4, 2026): replace named records of a run already on the site with corrected bytes, only after an
