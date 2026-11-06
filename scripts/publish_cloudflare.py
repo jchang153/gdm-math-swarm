@@ -83,6 +83,7 @@ Wrangler runs with the operator's own login, from a clean working directory (nev
 """
 import argparse
 import base64
+import contextlib
 import datetime
 import importlib
 import hashlib
@@ -104,6 +105,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_experiment_index import (GRAPH_PAGE, GRAPH_THUMB, STORYMAP_LABEL, STORYMAP_TARGET,  # noqa: E402
                                     agent_label_counts, unlisted_runs, with_storymap_link, write_index)
 import dataset_logs  # noqa: E402
+import deploy_lock  # noqa: E402
 import hf_visibility  # noqa: E402
 import site_layout  # noqa: E402
 import site_look  # noqa: E402
@@ -1501,7 +1503,10 @@ def main(argv=None):
     site = SITES[args.site]
     if args.command == 'mirror-space' and not site.mirror_space:
         parser.error(f'mirror-space copies the math library\'s HF Space; not for --site {site.key}')
-    with tempfile.TemporaryDirectory(prefix='cf-publish-') as tmp:
+    # Every committing command holds the deploy lock from reading the served site to verifying its deployment
+    # (scripts/deploy_lock.py; production race, November 6, 2026). Plans without --commit never wait.
+    with (deploy_lock.held(what=f'{args.command} --commit') if getattr(args, 'commit', False) else
+          contextlib.nullcontext()), tempfile.TemporaryDirectory(prefix='cf-publish-') as tmp:
         workdir = args.workdir or Path(tmp)
         workdir.mkdir(parents=True, exist_ok=True)
         current = deployments(workdir, project=site.project)

@@ -329,7 +329,16 @@ def _spec(document, run):
     return title, chips
 
 
-def _bar(agents):
+def _judge_page(nav):
+    """The behavior-judge page this run has, from its tab bar: the simplified judge's, else the rubric-3.1 judge's,
+    else None (the overview then links to no judge page; production verify, November 6, 2026)."""
+    for page in (JUDGE_JSON.replace('.json', '.html'), 'analysis/judge/report.html'):
+        if f'href="{page}"' in nav:
+            return page
+    return None
+
+
+def _bar(agents, judge=None):
     counts = {k: 0 for k in _PRIMARY + _EXTRA}
     for kinds in agents.values():
         for kind in kinds:
@@ -344,7 +353,7 @@ def _bar(agents):
                   for k in _PRIMARY + _EXTRA if counts[k])
     return (f'<div class="ov-bar" role="img" aria-label="Agent labels: ' + ', '.join(
         f'{_NAMES[k]} {counts[k]}' for k in _PRIMARY if counts[k]) + f'">{bar}</div>'
-        f'<p class="ov-key">{key} <a href="analysis/simple_judge/report.html#agent-labels">Label definitions</a></p>',
+        f'<p class="ov-key">{key}' + (f' <a href="{judge}#agent-labels">Label definitions</a>' if judge else '') + '</p>',
         counts)
 
 
@@ -375,7 +384,7 @@ def _why(kinds, agent, order):
     return labels, first
 
 
-def _judge_card(document, agents, counts, report, storymap):
+def _judge_card(document, agents, counts, report, storymap, judge=None):
     levels = ((report or {}).get('counts') or {}).get('cheating_level') or {}
     c = (report or {}).get('counts') or {}
     labelled = c.get('labelled') if isinstance(c.get('labelled'), int) else sum(counts[k] for k in _PRIMARY)
@@ -385,7 +394,7 @@ def _judge_card(document, agents, counts, report, storymap):
     whistle = (c.get('whistleblower') or {}).get('True', counts['whistleblower'])
     aware = (c.get('evaluation_aware') or {}).get('True', counts['eval_aware'])
     out = ['<section class="ov-pane ov-judge" aria-label="Behavior judge summary"><header><h2>Behavior judge</h2>'
-           '<a href="analysis/simple_judge/report.html">Full report →</a></header>',
+           + (f'<a href="{judge}">Full report →</a>' if judge else '') + '</header>',
            '<div class="ov-big">'
            f'<div><div class="v">{cheating}<small style="font-size:14px;font-weight:600;color:var(--muted)">'
            f' / {labelled}</small></div><div class="k">{"explored, submitted or credited an exploit" if report else "submitted an exploit"}</div></div>'
@@ -407,8 +416,8 @@ def _judge_card(document, agents, counts, report, storymap):
         items = []
         for agent in notable:
             labels, first = _why(agents[agent], agent, order)
-            href = f'analysis/storymap/agents/{agent}.html' if storymap else 'analysis/simple_judge/report.html'
-            items.append(f'<li><a href="{href}"><code>{agent}</code></a> ' + ''.join(
+            href = f'analysis/storymap/agents/{agent}.html' if storymap else judge
+            items.append('<li>' + (f'<a href="{href}"><code>{agent}</code></a> ' if href else f'<code>{agent}</code> ') + ''.join(
                 f'<span class="ab ab-{k}" title="{n}">{_letter(k)}</span>' for n, k in labels) + ' <small>'
                 + ', '.join(n.lower() for n, _ in labels) + '</small></li>')
         out.append('<h3>Agents to read first' + (' (story maps)' if storymap else '') + '</h3><ul>'
@@ -484,9 +493,10 @@ def _overview(document, read=None):
     has_graph = bool(graph) if read is not None and graph is not None else storymap
     agents = _agents(document)
     title, chips = _spec(document, run)
-    bar, counts = _bar(agents)
+    judge = _judge_page(nav)
+    bar, counts = _bar(agents, judge)
     judged = bool(report) or any(counts[k] for k in _PRIMARY)
-    row = _graph_pane(document, has_graph) + (_judge_card(document, agents, counts, report, storymap) if judged
+    row = _graph_pane(document, has_graph) + (_judge_card(document, agents, counts, report, storymap, judge) if judged
                                                else '')
     block = (f'{OV_START}<section class="ov" id="overview" aria-label="Run overview"><div class="ov-head">'
              '<p class="ov-kicker">Run overview</p>'

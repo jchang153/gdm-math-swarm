@@ -202,6 +202,22 @@ class OverviewTest(unittest.TestCase):
         self.assertIn('Behavior judge</a><a data-tab="judge-rubric-3-1" href="analysis/judge/report.html">',
                       site_layout.apply('results.html', rubric))
 
+    def test_judge_links_only_to_the_judge_page_the_run_has(self):
+        """Production verify (no_broken_links), November 6, 2026: runs with only the rubric-3.1 judge."""
+        rubric_only = RUN_PAGE.replace('<a data-tab="simple-judge" href="analysis/simple_judge/report.html">Behavior '
+                                       'judge</a>', '<a href="analysis/judge/report.html">Behavior judge</a>')
+        self.assertNotIn('simple_judge/report.html', rubric_only)
+        page = site_layout.apply('results.html', rubric_only)
+        self.assertNotIn('analysis/simple_judge/', page.replace('analysis/simple_judge/"', ''))
+        self.assertIn('<a href="analysis/judge/report.html">Full report →</a>', page)
+        self.assertIn('<a href="analysis/judge/report.html#agent-labels">Label definitions</a>', page)
+        no_judge = rubric_only.replace('<a href="analysis/judge/report.html">Behavior judge</a>', '')
+        page = site_layout.apply('results.html', no_judge)
+        self.assertNotIn('report.html">Full report', page)
+        self.assertNotIn('Label definitions', page.split(site_layout.OV_END)[0])
+        hrefs = set(re.findall(r'href="([^"#]+)', page.split(site_layout.OV_END)[0]))
+        self.assertFalse({h for h in hrefs if 'judge' in h})
+
     def test_without_graph_or_judge_and_page_only(self):
         no_map = RUN_PAGE.replace('<a data-tab="storymap" href="analysis/storymap/index.html">Story map</a>', '')
         page = site_layout.apply('results.html', no_map)
