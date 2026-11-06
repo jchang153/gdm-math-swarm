@@ -2271,3 +2271,7 @@ unread notices". Scope: full solver story maps for the 8 runs of that series tha
 2ov r1/r2, 10ov r1/r2; control r3, 1ov r2, 2ov r3 and 10ov r3 already have maps), plus overseer maps for its 9
 overseer runs, then interaction graphs and publication. Per-run budget $200 for each solver map (earlier maps of
 these runs settled $106–166) and $20 for each overseer map; no cumulative cap.
+
+Owner decision (November 6, 2026, "yes switch"): the nine 120-minute push communication-only runs get FULL solver
+story maps (all 100 solvers) instead of the 20-solver sample, per-run budget $40 (ledger: typical 100-agent 120-min
+solver maps settled $12–29). Supersedes the sample decision above.
