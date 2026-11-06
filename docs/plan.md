@@ -2200,3 +2200,13 @@ and is screened like the other story-map pages.
 as on the index), not whether it ever faked. In the pilot, at minute 35 the solvers read rejected 47, stopped 37,
 faking 8, although 36 had submitted a fake by then (30 of them between minutes 25 and 35, only 14 after minute 35):
 most fakers stopped after the overseer's reverts and warnings. The page legend says so.
+- "add a red dot for agents who ever faked". A small red badge at the node's upper right from the agent's first fake
+  submission onwards (the `submit.fake` rule; scrubbing back removes it); the seed gets it from its injected fake
+  library file. Legend row and "first fake at mm:ss" in the hover card.
+- "can you make the regions more concrete? I mean I like how the agents are sort of dynamically being bounce around
+  but I'd like the regions to be more solid." Six stance zones on a fixed 3x2 grid (overseers in a row above), each a
+  container: area proportional to its current members (with a minimum, animated), tinted fill, solid border, live
+  count label; a soft wall keeps nodes inside while they still jiggle; a stance change is a visible move to the new
+  zone; links across zones are drawn but pull only weakly.
+- "also make the "arrow key" changes go up and down 5 seconds instead of 1min" and "and make j,k be 10 seconds":
+  arrow keys step 5 run-seconds (Shift+arrow 1 minute), j and k step back and forward 10 seconds.
