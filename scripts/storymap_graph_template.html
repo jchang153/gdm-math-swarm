@@ -51,7 +51,24 @@ main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 270px; min-
 #stage { position: relative; min-height: 420px; overflow: hidden; }
 #graph { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
 #graph.pointer { cursor: pointer; }
-aside { border-left: 1px solid var(--line); background: var(--panel); padding: 12px 14px; overflow-y: auto; font-size: 12px; }
+aside { border-left: 1px solid var(--line); background: var(--panel); padding: 12px 14px 8px; font-size: 12px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+#stances { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
+#stances .row { margin: 1px 0; }
+.live { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.pane { min-height: 90px; overflow-y: auto; border-top: 1px solid var(--line); }
+#paneMsgs { flex: 1.25 1 0; }
+#paneEvents { flex: 1 1 0; }
+.pane h2 { position: sticky; top: 0; background: var(--panel); margin: 0 !important; padding: 8px 0 5px; z-index: 1; }
+.pane h2 .sub { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--faint); }
+#key { flex: none; border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; max-height: 48%; overflow-y: auto; }
+#key summary { cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+#key .kn { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+#pinned:empty { display: none; }
+#pinned { list-style: none; margin: 0 0 4px; padding: 0 0 4px; border-bottom: 2px solid var(--line); }
+li.pinned { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.pin { margin-left: auto; font: inherit; font-size: 11px; color: var(--faint); background: none; border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; cursor: pointer; flex: none; }
+.pin:hover { color: var(--fg); border-color: var(--faint); }
+li.pinned .pin { color: var(--accent); border-color: var(--accent); }
 aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; font-weight: 600; }
 aside h2:first-child { margin-top: 0; }
 .row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
@@ -112,10 +129,11 @@ footer { border-top: 1px solid var(--line); background: var(--panel); padding: 8
 #follow .mhint { color: var(--faint); font-size: 10px; }
 @media (max-width: 820px) { #follow { width: auto; left: 10px; max-height: 55%; } #follow canvas.mini { width: 100%; } }
 #msgs { list-style: none; margin: 0; padding: 0; }
-#msgs li, #follow li.msg { padding: 4px 0; border-bottom: 1px solid var(--grid); color: var(--muted); cursor: pointer; }
-#msgs li .hd, #follow li.msg .hd { display: flex; gap: 6px; align-items: baseline; }
-#msgs li .tm { font-variant-numeric: tabular-nums; color: var(--faint); }
-#msgs li b { color: var(--fg); font-weight: 500; }
+#feed li { cursor: default; }
+#msgs li, #pinned li, #follow li.msg { padding: 4px 0; border-bottom: 1px solid var(--grid); color: var(--muted); cursor: pointer; }
+#msgs li .hd, #pinned li .hd, #follow li.msg .hd { display: flex; gap: 6px; align-items: baseline; }
+#msgs li .tm, #pinned li .tm { font-variant-numeric: tabular-nums; color: var(--faint); }
+#msgs li b, #pinned li b { color: var(--fg); font-weight: 500; }
 .kind { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; border-radius: 8px; padding: 0 5px; color: #fff; flex: none; }
 .snip { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
 .full { display: none; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin-top: 4px; max-height: 320px; overflow-y: auto; font-size: 12px; cursor: text; }
@@ -128,7 +146,9 @@ li.fresh { animation: fresh 1.6s ease-out; }
 @media (max-width: 820px) {
   main { grid-template-columns: 1fr; }
   #stage { min-height: 62vh; }
-  aside { border-left: 0; border-top: 1px solid var(--line); }
+  aside { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .pane { max-height: 40vh; }
+  #key { max-height: none; }
   header, footer { padding-left: 16px; padding-right: 16px; }
 }
 </style>
@@ -148,9 +168,22 @@ li.fresh { animation: fresh 1.6s ease-out; }
     <div id="empty">No graph data embedded.</div>
   </div>
   <aside>
-    <h2>Stance at current time (solvers)</h2>
+    <h2>Stance now (solvers)</h2>
     <div id="stances"></div>
-    <p style="color:var(--muted);font-size:12px;margin:4px 0 0">Colour = the agent's current position as read by the story map (stage 3), not whether it ever faked; agents that faked and then stopped show 'stopped'.</p>
+    <div class="live">
+      <section class="pane" id="paneMsgs">
+        <h2>Board posts and DMs <span class="sub">click to read · pin to keep</span></h2>
+        <ul id="pinned"></ul>
+        <ul id="msgs"></ul>
+      </section>
+      <section class="pane" id="paneEvents">
+        <h2>Recent events</h2>
+        <ul id="feed"></ul>
+      </section>
+    </div>
+    <details id="key">
+      <summary>Key and settings</summary>
+      <p class="kn">Colour = the agent's current position as read by the story map (stage 3), not whether it ever faked; agents that faked and then stopped show 'stopped'.</p>
     <h2>Nodes</h2>
     <div class="row"><svg class="shape" viewBox="-8 -8 16 16"><circle r="5.5" fill="var(--s-none)"/></svg>solver (size grows with credited solves)</div>
     <div class="row"><svg class="shape" viewBox="-8 -8 16 16"><circle r="4.5" fill="var(--s-none)"/><circle r="7" fill="none" stroke="var(--trick)" stroke-width="1.3"/></svg>has the trick (ring)</div>
@@ -167,12 +200,9 @@ li.fresh { animation: fresh 1.6s ease-out; }
     <div class="row"><span class="sw" style="background:var(--fake)"></span>fake submission</div>
     <div class="row"><span class="sw" style="background:var(--gold)"></span>credited solve</div>
     <div class="row"><span class="ln" style="background:repeating-linear-gradient(90deg,var(--fake) 0 4px,transparent 4px 7px)"></span>overseer revert</div>
-    <h2>Board posts and DMs (click to read)</h2>
-    <ul id="msgs"></ul>
-    <label class="row" style="margin-top:6px"><input type="checkbox" id="tgBubbles" checked>show message text on the graph</label>
-    <h2>Recent events</h2>
-    <ul id="feed"></ul>
-    <div class="hint">Hover a node for its labels; click it to follow it in a side panel (Esc to stop), where its full story map opens. Drag to pan, scroll to zoom, double-click to reset. Space plays / pauses; ← / → step 5 run-seconds (Shift: 1 minute); j / k step 10 seconds.</div>
+      <label class="row"><input type="checkbox" id="tgBubbles" checked>message text on the graph</label>
+    <div class="hint">Hover a node for its labels; click it to follow it in a side panel (Esc to stop), where its full story map opens. Click a message bubble to pin it, opened, at the top of the board posts and DMs list. Drag to pan, scroll to zoom, double-click to reset. Space plays / pauses; ← / → step 5 run-seconds (Shift: 1 minute); j / k step 10 seconds.</div>
+    </details>
   </aside>
 </main>
 <footer>
@@ -428,6 +458,12 @@ canvas.addEventListener("dblclick", () => d3.select(canvas).transition().duratio
 
 // ---------- hover / click ----------
 let hover = null, downAt = null;
+function bubbleAt(ev) {
+  if (!showBubbles) return null;
+  const r = canvas.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top;
+  for (const b of bubbleHits) if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h + 6) return b;
+  return null;
+}
 function pick(ev) {
   const r = canvas.getBoundingClientRect();
   const [x, y] = zt.invert([ev.clientX - r.left, ev.clientY - r.top]);
@@ -436,6 +472,7 @@ function pick(ev) {
   return best;
 }
 canvas.addEventListener("pointermove", (ev) => {
+  if (bubbleAt(ev)) { hover = null; canvas.classList.add("pointer"); tip.style.display = "none"; return; }
   hover = pick(ev); canvas.classList.toggle("pointer", !!hover);
   if (hover && hover !== locked) { renderTip(); placeTip(ev); } else tip.style.display = "none";
 });
@@ -443,6 +480,7 @@ canvas.addEventListener("pointerleave", () => { hover = null; tip.style.display 
 canvas.addEventListener("pointerdown", (ev) => { downAt = [ev.clientX, ev.clientY]; });
 canvas.addEventListener("click", (ev) => {
   if (downAt && Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 4) return;
+  const bb = bubbleAt(ev); if (bb) { pinFromGraph(bb.i); return; }
   const n = pick(ev); if (n) follow(n === locked ? null : n);
 });
 function placeTip(ev) {
@@ -727,7 +765,7 @@ function renderFeed() {
   const hi = upto(evT, tNow);
   if (hi === feedKey) return; feedKey = hi;
   const ul = $("feed"); ul.textContent = "";
-  for (let i = hi, k = 0; i >= 0 && k < 9; i--) {
+  for (let i = hi, k = 0; i >= 0 && k < 40; i--) {
     const e = events[i]; if (e.type === "board_read" || e.type === "ov_board_read") continue; k++;
     const li = document.createElement("li"); if (e.fake) li.className = "fake";
     const tm = document.createElement("span"); tm.className = "tm"; tm.textContent = fmtT(e.t);
@@ -744,15 +782,18 @@ function renderFeed() {
 const MSG_TYPES = { dm: "DM", board_post: "post", ov_board_post: "overseer post" };
 const msgIdx = []; events.forEach((e, i) => { if (MSG_TYPES[e.type] && e.text) msgIdx.push(i); });
 const msgT = Float64Array.from(msgIdx, (i) => events[i].t);
-const openMsgs = new Set();
+const openMsgs = new Set(), pinned = new Set();
 function msgColor(e) { return e.type === "dm" ? C.edge.dm : e.type === "ov_board_post" ? C.edge.overseer : C.edge.board; }
 function msgItem(i, fresh) {
-  const e = events[i], li = document.createElement("li"); li.className = "msg" + (openMsgs.has(i) ? " open" : "") + (fresh ? " fresh" : "");
+  const e = events[i], li = document.createElement("li"); li.className = "msg" + (openMsgs.has(i) ? " open" : "") + (pinned.has(i) ? " pinned" : "") + (fresh ? " fresh" : "");
   const hd = document.createElement("div"); hd.className = "hd";
   const tm = document.createElement("span"); tm.className = "tm"; tm.textContent = fmtT(e.t);
   const k = document.createElement("span"); k.className = "kind"; k.style.background = msgColor(e); k.textContent = MSG_TYPES[e.type];
   const who = document.createElement("b"); who.textContent = e.src + (e.dst ? " → " + e.dst : "");
-  hd.append(tm, k, who);
+  const pin = document.createElement("button"); pin.type = "button"; pin.className = "pin";
+  pin.textContent = pinned.has(i) ? "unpin" : "pin"; pin.title = pinned.has(i) ? "Remove from the pinned list" : "Keep this message at the top of the list";
+  pin.onclick = (ev) => { ev.stopPropagation(); togglePin(i); };
+  hd.append(tm, k, who, pin);
   const sn = document.createElement("div"); sn.className = "snip"; sn.textContent = e.text.replace(/\s+/g, " ");
   const full = document.createElement("div"); full.className = "full"; full.textContent = e.text;
   full.onclick = (ev) => ev.stopPropagation();
@@ -761,18 +802,32 @@ function msgItem(i, fresh) {
   return li;
 }
 let msgKey = -2, msgShown = -1;
+function renderPinned() {
+  const ul = $("pinned"); ul.textContent = "";
+  for (const i of [...pinned].sort((a, b) => events[b].t - events[a].t)) ul.appendChild(msgItem(i, false));
+}
+function togglePin(i, open) {
+  if (pinned.has(i) && !open) pinned.delete(i); else { pinned.add(i); openMsgs.add(i); }
+  renderPinned(); msgKey = -3; renderMsgs(); folKey = "";
+}
+function pinFromGraph(i) {
+  togglePin(i, true); $("paneMsgs").scrollTop = 0;
+  const li = $("pinned").querySelector("li"); if (li) { li.classList.remove("fresh"); void li.offsetWidth; li.classList.add("fresh"); }
+}
 function renderMsgs() {
   const hi = upto(msgT, tNow); if (hi === msgKey) return;
-  const grew = hi > msgKey && msgKey !== -2; msgKey = hi;
+  const grew = hi > msgKey && msgKey >= -1; msgKey = hi;
   const ul = $("msgs"); ul.textContent = "";
   if (hi < 0) { const li = document.createElement("li"); li.textContent = "None yet."; li.style.cursor = "default"; ul.appendChild(li); return; }
-  for (let j = hi; j >= 0 && j > hi - 8; j--) ul.appendChild(msgItem(msgIdx[j], grew && j > msgShown));
+  for (let j = hi; j >= 0 && j > hi - 40; j--) if (!pinned.has(msgIdx[j])) ul.appendChild(msgItem(msgIdx[j], grew && j > msgShown));
   msgShown = hi;
 }
 // snippet bubbles: a DM's text rides from sender to recipient, a post's rises from its author; drawn in screen space
 const MSG_SEC = 5;   // real seconds a bubble stays up
+let bubbleHits = [];   // screen rects of the bubbles drawn last frame: {x, y, w, h, i}
 function drawBubbles() {
   const Dm = MSG_SEC * Math.max(playing ? speed : 5, 1) / 60, hi = upto(msgT, tNow);
+  bubbleHits = [];
   ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.font = "12px system-ui, -apple-system, sans-serif"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
   let shown = 0;
@@ -788,7 +843,8 @@ function drawBubbles() {
     const w = Math.min(330, Math.max(ctx.measureText(txt).width, ctx.measureText(head).width) + 16), h = 36;
     let bx = sx - w / 2, by = sy - h - 14 - shown * 2; bx = Math.max(4, Math.min(W - w - 4, bx)); by = Math.max(4, by);
     ctx.globalAlpha = p > 0.8 ? (1 - p) / 0.2 : Math.min(1, p / 0.06);
-    ctx.fillStyle = C.panel || C.bg; ctx.strokeStyle = msgColor(e); ctx.lineWidth = 1.5;
+    bubbleHits.push({ x: bx, y: by, w, h, i: msgIdx[j] });
+    ctx.fillStyle = C.panel || C.bg; ctx.strokeStyle = msgColor(e); ctx.lineWidth = pinned.has(msgIdx[j]) ? 2.5 : 1.5;
     ctx.beginPath(); ctx.roundRect(bx, by, w, h, 7); ctx.fill(); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(sx - 5, by + h); ctx.lineTo(sx, Math.min(by + h + 7, sy - 3)); ctx.lineTo(sx + 5, by + h); ctx.fill();
     ctx.fillStyle = msgColor(e); ctx.font = "600 10px system-ui, -apple-system, sans-serif"; ctx.fillText(head, bx + 8, by + 11);
