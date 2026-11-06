@@ -24,6 +24,7 @@ from site_style import themed
 from space_navigation import private_space_navigation
 import catalogue_intro
 import run_profile
+import site_look
 
 ROOT = Path(__file__).resolve().parents[1]
 # Runs the owner removed from the library lists (docs/plan.md, October 20, 2026). Their files
@@ -703,7 +704,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
     body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(intro.TITLE)}</title><style>' + STYLE + (PANE_STYLE if panes else '') + '</style>'
-            + (PANE_TOKENS if panes else '') + '</head><body>'
+            + (PANE_TOKENS + site_look.block() if panes else '') + '</head><body>'
             + intro.hero(stats)
             + (live_section(entries) if hosted else '')
             # Run panes: the run categories move into a sticky sidebar (owner, November 6, 2026).

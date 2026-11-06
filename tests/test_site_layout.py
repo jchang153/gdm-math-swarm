@@ -24,7 +24,7 @@ RESULTS = themed(
 
 def text(document):
     """Visible text and link targets, without the layout's own style block."""
-    document = re.sub(r'<style id="site-layout">.*?</style>', '', document, flags=re.S)
+    document = re.sub(r'<style id="site-(?:layout|look)">.*?</style>', '', document, flags=re.S)
     return re.sub(r'<(?!a )[^>]*>', '', document), re.findall(r'href="([^"]*)"', document)
 
 
@@ -53,8 +53,15 @@ class LayoutTest(unittest.TestCase):
         page = site_layout.apply('RUN/conference-view/index.html', conference)
         self.assertIn('#records{display:grid', page)
         self.assertEqual(site_layout.kind('RUN/analysis/simple_judge/report.html'), 'simple_judge')
-        for name in ('index.html', 'RUN/analysis/incident/report.html', 'RUN/conference-view/files.html',
-                     'RUN/inspect-view/index.html'):
+        # Look only (math site): the incident report and the story map's pages, not the graph shell.
+        self.assertEqual(site_layout.kind('RUN/analysis/incident/report.html'), 'incident')
+        self.assertEqual(site_layout.kind('RUN/analysis/storymap/index.html'), 'storymap')
+        incident = site_layout.apply('RUN/analysis/incident/report.html', conference)
+        self.assertNotIn(site_layout.MARKER, incident)
+        self.assertIn('id="site-look"', incident)
+        self.assertEqual(site_layout.apply('RUN/analysis/incident/report.html', conference, overview=False), conference)
+        for name in ('index.html', 'RUN/conference-view/files.html', 'RUN/analysis/storymap/graph.html',
+                     'RUN/analysis/storymap/agents/agent-001.html', 'RUN/inspect-view/index.html'):
             self.assertIsNone(site_layout.kind(name))
             self.assertEqual(site_layout.apply(name, conference), conference)
 
@@ -80,9 +87,11 @@ class RestyleTest(unittest.TestCase):
                 'OLD/results.html': b'<!doctype html><p>legacy page without the theme</p>',
                 'OLD/results.json': b'{}'}
         files, plan = pc.plan_restyle(base, set())
-        self.assertEqual([r['path'] for r in plan['replaced_pages']], ['RUN/results.html'])
+        self.assertEqual([r['path'] for r in plan['replaced_pages']],
+                         ['RUN/analysis/incident/report.html', 'RUN/results.html'])  # the site look (Nov 6)
         self.assertEqual(plan['unthemed_pages_left_as_served'], ['OLD/results.html'])
-        for name in ('RUN/results.json', 'RUN/analysis/incident/report.html', 'OLD/results.html', 'OLD/results.json'):
+        self.assertIn(b'id="site-look"', files['RUN/analysis/incident/report.html'])
+        for name in ('RUN/results.json', 'OLD/results.html', 'OLD/results.json'):
             self.assertEqual(files[name], base[name])
         self.assertEqual(set(files) - set(base), {'index.html'})
         self.assertIn(site_layout.MARKER.encode(), files['RUN/results.html'])
@@ -210,6 +219,28 @@ class OverviewTest(unittest.TestCase):
         page = site_layout.apply('results.html', coding)
         self.assertNotIn(site_layout.OV_START, page)
         self.assertNotIn('.ov-head', page)
+
+    def test_site_look_fonts_and_buttons(self):
+        """Owner, November 6, 2026: a type pairing instead of system-ui, a back button, self-hosted fonts."""
+        import site_look
+        page = site_layout.apply(f'{RUN_ID}/results.html', RUN_PAGE)
+        self.assertEqual(page.count('id="site-look"'), 1)
+        self.assertLess(page.index(site_layout.MARKER), page.index('id="site-look"'))  # after the layout block
+        self.assertIn('font-display:swap', page)
+        self.assertIn('.crumbs a::before{content:"\\2190"', page)
+        self.assertEqual(site_look.apply(page), page)  # idempotent
+        self.assertNotRegex(site_look.CSS, r'https?:|@import')  # fonts from the site itself
+        for path in re.findall(r'url\((/[^)]+)\)', site_look.CSS):
+            self.assertTrue(path.startswith('/_assets/fonts/'))
+        assets = site_look.font_assets()
+        self.assertEqual(set(assets), {f'_assets/fonts/{n}' for n in site_look.FONT_FILES + site_look.LICENCES})
+        self.assertLess(sum(len(d) for n, d in assets.items() if n.endswith('.woff2')), 250_000)
+        for name in site_look.FONT_FILES:
+            self.assertTrue(assets[f'_assets/fonts/{name}'].startswith(b'wOF2'))
+        for name in site_look.LICENCES:
+            self.assertIn(b'SIL Open Font License', assets[f'_assets/fonts/{name}'])
+        # ImpossibleBench pages (overview=False) never get it.
+        self.assertNotIn('id="site-look"', site_layout.apply('results.html', RUN_PAGE, overview=False))
 
     def test_viewer_has_embed_mode(self):
         """The overview iframe loads graph.html?embed=1: the shared viewer hides its header and side panel."""

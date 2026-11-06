@@ -106,6 +106,7 @@ from build_experiment_index import (STORYMAP_LABEL, STORYMAP_TARGET, agent_label
 import dataset_logs  # noqa: E402
 import hf_visibility  # noqa: E402
 import site_layout  # noqa: E402
+import site_look  # noqa: E402
 import site_style  # noqa: E402
 import simple_judge_site  # noqa: E402
 import storymap_site  # noqa: E402
@@ -723,7 +724,7 @@ def catalogue(files):
 
 # Top-level folders that are not runs: live mirrors, and the shared interaction-graph viewer (owner, November 6,
 # 2026; storymap_site.graph_assets, refreshed from the template on every deployment that has a graph.html).
-NON_RUN = frozenset({'live', storymap_site.VIEWER_DIR})
+NON_RUN = frozenset({'live', storymap_site.VIEWER_DIR, site_look.ASSET_DIR.split('/')[0]})
 
 
 def run_of(name):
@@ -1178,6 +1179,8 @@ def finish(files, base_manifest, plan, project=None, site=None):
     if packed:
         plan['packed_runs'] = packed
     files.update(storymap_site.graph_assets(files))  # the one shared graph viewer, current with the template
+    if site.domain == 'lean':  # the math site's self-hosted fonts (scripts/site_look.py; owner, November 6, 2026)
+        files.update(site_look.font_assets())
     files[NOT_FOUND] = not_found_page()
     files[PRIVATE_PAGE] = private_page()
     for name, data in files.items():

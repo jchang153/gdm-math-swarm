@@ -186,7 +186,8 @@ class BundleTests(unittest.TestCase):
 class FinishTests(unittest.TestCase):
     def test_manifest_generated_pages_and_limits(self):
         files, manifest = cf.finish(site(RUN), {'history': [{'utc': 'old'}]}, {'source': {'kind': 'test'}})
-        self.assertEqual(set(files) - set(site(RUN)), {cf.SITE_MANIFEST, cf.NOT_FOUND, cf.PRIVATE_PAGE})
+        self.assertEqual(set(files) - set(site(RUN)), {cf.SITE_MANIFEST, cf.NOT_FOUND, cf.PRIVATE_PAGE}
+                         | set(cf.site_look.font_assets()))  # the math site's fonts (November 6, 2026)
         recorded = json.loads(files[cf.SITE_MANIFEST])
         self.assertEqual(recorded['schema'], cf.SITE_SCHEMA)
         self.assertEqual(set(recorded['files']), set(files) - {cf.SITE_MANIFEST})

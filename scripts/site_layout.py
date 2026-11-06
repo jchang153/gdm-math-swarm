@@ -15,6 +15,8 @@ import html
 import json
 import re
 
+import site_look
+
 MARKER = 'id="site-layout"'
 MEASURE = '70ch'
 # Owner, October 29, 2026 ("doesn't look any narrower"): every page's content sits in one centred column.
@@ -63,6 +65,9 @@ KINDS = (
     (re.compile(r'(?:^|/)results\.html$'), 'results', RESULTS_CSS),
     (re.compile(r'(?:^|/)conference-view/index\.html$'), 'conference', CONFERENCE_CSS),
     (re.compile(r'(?:^|/)analysis/simple_judge/report\.html$'), 'simple_judge', SIMPLE_JUDGE_CSS),
+    # Site look only (scripts/site_look.py; math site): the incident report and the story map's own pages.
+    (re.compile(r'(?:^|/)analysis/incident/report\.html$'), 'incident', ''),
+    (re.compile(r'(?:^|/)analysis/storymap/(?!graph\.html$)[^/]+\.html$'), 'storymap', ''),
 )
 
 _STYLE_BLOCK = re.compile(r'<style id="site-layout">.*?</style>', re.S)
@@ -123,7 +128,10 @@ def apply(name, document, read=None, overview=True):
                 if overview:
                     document = _overview(document, read)
                     css = css + (OVERVIEW_CSS + TABS_CSS if OV_START in document else '')
-            return _insert_style(document, css)
+            if css:
+                document = _insert_style(document, css)
+            # The site look (fonts, buttons, shadows; owner, November 6, 2026): math site only, like the overview.
+            return site_look.apply(document) if overview and 'eference-test evaluator' not in document else document
     return document
 
 
