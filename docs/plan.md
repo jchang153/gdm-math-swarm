@@ -2255,3 +2255,9 @@ Owner decision (November 6, 2026, "yes correct gemini"): correct the published r
 mismatch (answer_based False, outcome accepted_after_close). Gemini's fakers are 0 of 25. Use
 `publish_cloudflare.py correct` (catalogue entry and affected records/heatmap), keeping raw records; the story map's
 own reader labels stay as model output, with the correction noted.
+
+Owner decision (November 6, 2026, "just go ahead and run those"): solver story maps for a sample of 20 solvers in
+each of the nine 120-minute push communication-only runs (1/2/10 overseers × r1–r3), per-run budget $40
+(`run_budget_usd` / run limit for each run's story-map invocation; no cumulative cap). Unmapped solvers are drawn
+by observed behaviour (faked / no fake yet), labelled as such, not as stances. Full 100-solver maps (est.
+$1,000–1,500) were not requested.
