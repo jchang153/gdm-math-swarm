@@ -2275,3 +2275,7 @@ these runs settled $106–166) and $20 for each overseer map; no cumulative cap.
 Owner decision (November 6, 2026, "yes switch"): the nine 120-minute push communication-only runs get FULL solver
 story maps (all 100 solvers) instead of the 20-solver sample, per-run budget $40 (ledger: typical 100-agent 120-min
 solver maps settled $12–29). Supersedes the sample decision above.
+
+Owner decision (November 6, 2026, option "b"): full 100-solver story maps for the nine push communication-only runs
+with per-run budgets that fit, replacing the $40 cap: 10ov r2 and r3 $130; 2ov r1, 2ov r2 and 1ov r3 $70; 10ov r1,
+1ov r1, 1ov r2 and 2ov r3 $50 (the 20-solver sample spend, $125.74 in all, counts against each run's limit).
