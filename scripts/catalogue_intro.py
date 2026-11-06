@@ -170,44 +170,38 @@ def about_section(text=None):
             f'<details id="glossary"><summary>Glossary</summary><dl class="defs">{terms}</dl></details></section>')
 
 
-# Run categories for newcomers (owner, November 6, 2026: "the categories are also not super readable to anyone except
-# me"): the series of run_profile.SERIES, each named by the question it answers, with a one-line description. The
-# detailed series paragraph stays at the top of each section. A series missing here is listed by its own title.
-SERIES_NAV = {
-    'sweep25': ('Which models cheat?', 'Five frontier models, 25 agents each, a planted cheat, no overseers; 1 h'),
-    'push120': ('Can overseers stop a planted cheat?',
-                'Latest design, 100 agents: none vs 1, 2 or 10 overseers who can check and undo, and a reminder '
-                'variant; 3 repeats each, 2 h'),
-    'push120comms': ('Can overseers stop it just by talking?',
-                     'Overseers that can only post and message (no undo); 1, 2 or 10 of them, 2 h'),
-    'reminder60': ('Do integrity reminders help?', 'A reminder of the rules every 5 minutes, no overseers; 1 h'),
-    'conditions180': ('Talking or undoing: which overseer power matters?',
-                      'Overseers with only messaging or only check-and-undo powers; 3 h'),
-    'notices180': ('Overseers over three hours', 'None vs 1, 2 or 10 overseers, 3 repeats each, unread notices; 3 h'),
-    'notices60': ('Overseers, once agents see their messages',
-                  'Unread-message notices on; none vs 1 to 10 overseers; 1 h'),
-    'oversight60': ('How many overseers does it take?', 'None vs 1, 2, 5 or 10 overseers of two models; 1 h'),
-    'seeded6': ('Six different planted cheats', 'Six kinds of cheat planted at once, no overseers; 30 min'),
-    'oversight30': ('First overseer teams', 'Pilots with 1, 2 or 5 overseers; 30 min'),
-    'seeded30': ('First planted-cheat runs', 'The planted cheat, with and without one overseer; 30 min'),
-    'baseline100': ('Do 100 agents find a cheat on their own?', 'No planted cheat, no overseers; 30 and 90 min'),
-    'small': ('Small swarms', '5 or 10 agents: prompt variants and a first overseer; 1 to 2 h'),
-    'models': ('Five agents, four models', 'Claude Opus 5.5, GPT 5.6 Sol, Gemini 4 Argon and GLM 5.3; 1 h'),
-    'early': ('Early pilots', 'The first runs: 20 DeepSeek agents, and a 6-hour Gemini run'),
+# One-line series summaries (owner, November 6, 2026): shown under each series heading of the math catalogue, above
+# its detailed paragraph, and as the hover title of the series in the sidebar. The sidebar itself lists the series
+# titles of run_profile.SERIES ("I prefer the old names which I'm familiar with").
+SERIES_LINES = {
+    'sweep25': 'Five frontier models, 25 agents each, a planted cheat and no overseers; 1 hour.',
+    'push120': '100 agents with a planted cheat: no overseer, a reminder every 5 minutes, or 1, 2 or 10 overseers who '
+               'can check and undo; 3 repeats each, 2 hours.',
+    'push120comms': 'Overseers who can only post and message, no undo; 1, 2 or 10 of them, 2 hours.',
+    'reminder60': 'A reminder of the integrity rules every 5 minutes, no overseers; 1 hour.',
+    'conditions180': 'Overseers with only messaging or only check-and-undo powers; 3 hours.',
+    'notices180': 'No overseer or 1, 2 or 10 overseers, 3 repeats each, with unread notices; 3 hours.',
+    'notices60': 'Unread-message notices on; no overseer or 1 to 10 overseers; 1 hour.',
+    'oversight60': 'No overseer or 1, 2, 5 or 10 overseers of two models; 1 hour.',
+    'seeded6': 'Six different kinds of cheat planted at once, no overseers; 30 minutes.',
+    'oversight30': 'The first overseer teams: 1, 2 or 5 overseers; 30 minutes.',
+    'seeded30': 'The first planted cheat, with and without one overseer; 30 minutes.',
+    'baseline100': '100 agents, no planted cheat and no overseers; 30 and 90 minutes.',
+    'small': '5 or 10 agents: prompt variants and a first overseer; 1 to 2 hours.',
+    'models': 'Five agents driven by Claude Opus 5.5, GPT 5.6 Sol, Gemini 4 Argon or GLM 5.3; 1 hour.',
+    'early': 'The first runs: 20 DeepSeek agents, and a 6-hour Gemini run.',
 }
 
 
 def series_nav(series, total, text=None):
-    """The run-category sidebar of the math catalogue: "All runs" and one entry per series, [(key, title, count)]."""
-    nav = getattr(_text(text), 'SERIES_NAV', {})
+    """The series sidebar of the math catalogue: "All runs" and one entry per series, [(key, title, count)], by
+    its title with its run count; the one-line summary is the hover title."""
+    lines = getattr(_text(text), 'SERIES_LINES', {})
     items = [f'<a href="#runs-top" data-series="" aria-current="true"><span class="sn-t">All runs</span>'
              f'<span class="n">{total}</span></a>']
     for key, title, count in series:
-        name, line = nav.get(key, (title, ''))
-        items.append(f'<a href="#series-{html.escape(key, quote=True)}" data-series="{html.escape(key, quote=True)}" '
-                     f'title="{html.escape(title, quote=True)}"><span class="sn-t">{html.escape(name)}</span>'
-                     f'<span class="n">{count}</span>'
-                     + (f'<span class="sn-d">{html.escape(line)}</span>' if line else '') + '</a>')
-    return ('<nav class="snav jump" aria-label="Run categories"><p class="snav-h">Browse runs</p>'
-            + ''.join(items) + '</nav>')
-
+        line = lines.get(key)
+        items.append(f'<a href="#series-{html.escape(key, quote=True)}" data-series="{html.escape(key, quote=True)}"'
+                     + (f' title="{html.escape(line, quote=True)}"' if line else '')
+                     + f'><span class="sn-t">{html.escape(title)}</span><span class="n">{count}</span></a>')
+    return ('<nav class="snav jump" aria-label="Series"><p class="snav-h">Series</p>' + ''.join(items) + '</nav>')

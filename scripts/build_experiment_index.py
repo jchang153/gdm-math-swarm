@@ -579,15 +579,19 @@ def series_legend(members, scale, panes=False):
     return (GRAPH_LEGEND if graphs else '') + (spark if graphs < len(members) else '')
 
 
-def series_sections(groups, panes=False):
+def series_sections(groups, panes=False, lines=None):
+    """The series sections; ``lines``: one-line summaries by series key, shown under the heading (panes)."""
     esc = html.escape
+    lines = lines or {}
     card = run_pane if panes else run_card
     out = []
     for key, title, text, members in groups:
         scale = run_profile.series_scale([valid_profile(e) for e in members])
         count = f'{len(members)} run' + ('' if len(members) == 1 else 's')
         out.append(f'<section class="series" id="series-{esc(key, quote=True)}" data-series="{esc(key, quote=True)}">'
-                   f'<div class="series-head"><h2>{esc(title)}<span class="count">{count}</span></h2><p>{esc(text)}</p>'
+                   f'<div class="series-head"><h2>{esc(title)}<span class="count">{count}</span></h2>'
+                   + (f'<p class="series-line">{esc(lines[key])}</p>' if panes and lines.get(key) else '')
+                   + f'<p>{esc(text)}</p>'
                    + series_legend(members, scale, panes) + '</div>'
                    '<div class="rc-grid">' + ''.join(card(e, scale) for e in members) + '</div></section>')
     return ''.join(out)
@@ -719,7 +723,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
             '<button type="button" id="clear" class="quiet">Clear</button></div></div>'
             '<section id="compare-view" hidden aria-label="Compare runs"><div class="cmp-head"><h2>Compare runs</h2>'
             '<button type="button" id="close-compare" class="quiet">Close</button></div><div class="scroll" id="compare-table"></div></section>'
-            '</section><div id="cards-view">' + series_sections(groups, panes) + '</div>'
+            '</section><div id="cards-view">' + series_sections(groups, panes, getattr(intro, 'SERIES_LINES', None)) + '</div>'
             '<section id="table-view" class="block"><h2>All runs</h2>'
             '<div class="scroll"><table id="runs"><thead><tr>' + head + '</tr></thead><tbody>'
             + ''.join(rows) + '</tbody></table></div>'

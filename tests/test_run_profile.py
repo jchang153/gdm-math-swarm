@@ -261,6 +261,11 @@ class PaneTests(unittest.TestCase):
         self.assertIn('<span class="chip k-push" title="Board posts and DMs are pushed into the next tool result">'
                       'push delivery</span>', page)
         self.assertIn('class="legend lg-graph"', page)
+        # Series sidebar by the series titles; the one-line summary under the heading and as the hover title.
+        line = catalogue_intro.SERIES_LINES['push120']
+        self.assertIn(f'<a href="#series-push120" data-series="push120" title="{line}"><span class="sn-t">'
+                      '120-minute runs with pushed messages</span><span class="n">1</span></a>', page)
+        self.assertIn(f'<span class="count">1 run</span></h2><p class="series-line">{line}</p><p>', page)
 
 
 class IntroTests(unittest.TestCase):
