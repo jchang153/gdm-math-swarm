@@ -350,5 +350,27 @@ class SharedViewerTest(unittest.TestCase):
         self.assertEqual(assets, {'_graph/' + k: v for k, v in self.files.items()})
 
 
+class MessageTextTest(unittest.TestCase):
+    """Board posts and DMs keep their full text (line breaks included) so the viewer can show them; other event
+    text stays clipped."""
+
+    def test_message_kept_in_full(self):
+        text = 'line one\n\n' + 'x' * 900
+        self.assertEqual(sg.message_text('  ' + text + '  '), text)
+
+    def test_message_safety_cap(self):
+        out = sg.message_text('y' * (sg.MESSAGE_MAX + 50))
+        self.assertEqual(len(out), sg.MESSAGE_MAX)
+        self.assertTrue(out.endswith('…'))
+
+    def test_other_text_clipped(self):
+        self.assertLessEqual(len(sg.clip('z ' * 500, sg.TEXT_MAX)), sg.TEXT_MAX)
+
+    def test_viewer_has_follow_panel_and_messages(self):
+        html = sg.TEMPLATE.read_text(encoding='utf-8')
+        for marker in ('id="follow"', 'id="msgs"', 'drawBubbles', 'Open full story map'):
+            self.assertIn(marker, html)
+
+
 if __name__ == '__main__':
     unittest.main()

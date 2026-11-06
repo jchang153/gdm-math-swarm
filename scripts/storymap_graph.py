@@ -62,10 +62,18 @@ TEMPLATE = REPO / 'scripts' / 'storymap_graph_template.html'
 SOLVER_TAXONOMY = REPO / 'research' / 'analysis' / 'storymap' / 'taxonomy.md'
 OVERSEER_TAXONOMY = REPO / 'research' / 'analysis' / 'storymap' / 'taxonomy_overseer.md'
 SUMMARY_MAX, QUOTE_MAX, TEXT_MAX, STORY_MAX = 300, 200, 160, 200
+# board posts and DMs are rare and read in full in the viewer: whitespace kept, only a safety cap
+MESSAGE_MAX = 8000
+MESSAGE_TYPES = ('dm', 'board_post', 'ov_board_post')
 OV_STANCE = {'not_looking': 'none', 'investigating_other': 'none', 'investigating_trick': 'considering',
              'enforcing': 'rejected', 'coordinating': 'rejected', 'idle': 'stopped'}
 TYPES = ('dm', 'board_post', 'board_read', 'library_publish', 'library_read', 'submit', 'credited', 'revert', 'check',
          'ov_board_post', 'ov_board_read')
+
+
+def message_text(text):
+    text = str(text).strip()
+    return text if len(text) <= MESSAGE_MAX else text[:MESSAGE_MAX - 1].rstrip() + '…'
 
 
 def clip(text, n):
@@ -279,7 +287,7 @@ def build_events(ctx, rows):
     def add(ts, typ, src, dst=None, fake=None, problem=None, text=None):
         events.append({'t': minutes(ts, start), 'type': typ, 'src': src, 'dst': dst,
                        'fake': fake if isinstance(fake, bool) else None, 'problem': problem,
-                       'text': clip(text, TEXT_MAX) if text else None})
+                       'text': (message_text(text) if typ in MESSAGE_TYPES else clip(text, TEXT_MAX)) if text else None})
 
     def lib_fake(path, rev):
         lib = ctx.library.get((path, rev))

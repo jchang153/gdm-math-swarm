@@ -88,6 +88,41 @@ footer { border-top: 1px solid var(--line); background: var(--panel); padding: 8
 #tip .story { margin-top: 4px; }
 #tip .open { color: var(--faint); font-size: 11px; margin-top: 6px; }
 .pill { display: inline-block; padding: 0 6px; border-radius: 9px; font-size: 11px; color: #fff; }
+#follow { position: absolute; top: 10px; right: 10px; width: 364px; max-height: calc(100% - 20px); overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 22px rgba(0,0,0,.14); padding: 10px 12px 12px; font-size: 12px; z-index: 6; }
+#follow[hidden] { display: none; }
+#follow .fh { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+#follow .fh .id { font-weight: 600; font-size: 14px; }
+#follow .fh .tag { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); border: 1px solid var(--accent); border-radius: 9px; padding: 0 6px; }
+#follow .fh .x { margin-left: auto; font: inherit; font-size: 16px; line-height: 1; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 2px 4px; }
+#follow .meta { color: var(--muted); margin: 2px 0 6px; }
+#follow .q { border-left: 2px solid var(--line); padding-left: 7px; margin-top: 6px; color: var(--muted); font-style: italic; }
+#follow canvas.mini { display: block; width: 340px; margin: 4px 0 2px; cursor: crosshair; }
+#follow .tps { color: var(--muted); font-size: 11px; }
+#follow .story { margin-top: 4px; }
+#follow .acts { display: flex; gap: 8px; align-items: center; margin: 8px 0 2px; flex-wrap: wrap; }
+#follow .acts a.btn { font-size: 12px; padding: 4px 10px; border: 1px solid var(--accent); border-radius: 6px; text-decoration: none; }
+#follow .acts label { color: var(--muted); display: flex; gap: 5px; align-items: center; cursor: pointer; }
+#follow h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 10px 0 4px; font-weight: 600; }
+#follow ul { list-style: none; margin: 0; padding: 0; }
+#follow li { padding: 3px 0; border-bottom: 1px solid var(--grid); color: var(--muted); overflow-wrap: anywhere; cursor: pointer; }
+#follow li:hover { color: var(--fg); }
+#follow li b { color: var(--fg); font-weight: 500; }
+#follow li .tm { font-variant-numeric: tabular-nums; color: var(--faint); margin-right: 4px; }
+#follow li.fake b.ty { color: var(--fake); }
+#follow .mhint { color: var(--faint); font-size: 10px; }
+@media (max-width: 820px) { #follow { width: auto; left: 10px; max-height: 55%; } #follow canvas.mini { width: 100%; } }
+#msgs { list-style: none; margin: 0; padding: 0; }
+#msgs li, #follow li.msg { padding: 4px 0; border-bottom: 1px solid var(--grid); color: var(--muted); cursor: pointer; }
+#msgs li .hd, #follow li.msg .hd { display: flex; gap: 6px; align-items: baseline; }
+#msgs li .tm { font-variant-numeric: tabular-nums; color: var(--faint); }
+#msgs li b { color: var(--fg); font-weight: 500; }
+.kind { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; border-radius: 8px; padding: 0 5px; color: #fff; flex: none; }
+.snip { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+.full { display: none; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; margin-top: 4px; max-height: 320px; overflow-y: auto; font-size: 12px; cursor: text; }
+li.open .full { display: block; }
+li.open .snip { display: none; }
+li.fresh { animation: fresh 1.6s ease-out; }
+@keyframes fresh { from { background: color-mix(in srgb, var(--accent) 18%, transparent); } to { background: transparent; } }
 #empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: var(--muted); }
 .hint { color: var(--faint); font-size: 11px; margin-top: 8px; }
 @media (max-width: 820px) {
@@ -109,6 +144,7 @@ footer { border-top: 1px solid var(--line); background: var(--panel); padding: 8
   <div id="stage">
     <canvas id="graph" aria-label="Agent interaction graph"></canvas>
     <div id="tip"></div>
+    <div id="follow" hidden aria-live="polite"></div>
     <div id="empty">No graph data embedded.</div>
   </div>
   <aside>
@@ -131,9 +167,12 @@ footer { border-top: 1px solid var(--line); background: var(--panel); padding: 8
     <div class="row"><span class="sw" style="background:var(--fake)"></span>fake submission</div>
     <div class="row"><span class="sw" style="background:var(--gold)"></span>credited solve</div>
     <div class="row"><span class="ln" style="background:repeating-linear-gradient(90deg,var(--fake) 0 4px,transparent 4px 7px)"></span>overseer revert</div>
+    <h2>Board posts and DMs (click to read)</h2>
+    <ul id="msgs"></ul>
+    <label class="row" style="margin-top:6px"><input type="checkbox" id="tgBubbles" checked>show message text on the graph</label>
     <h2>Recent events</h2>
     <ul id="feed"></ul>
-    <div class="hint">Hover a node for its labels; click to open its story map. Drag to pan, scroll to zoom, double-click to reset. Space plays / pauses; ← / → step 5 run-seconds (Shift: 1 minute); j / k step 10 seconds.</div>
+    <div class="hint">Hover a node for its labels; click it to follow it in a side panel (Esc to stop), where its full story map opens. Drag to pan, scroll to zoom, double-click to reset. Space plays / pauses; ← / → step 5 run-seconds (Shift: 1 minute); j / k step 10 seconds.</div>
   </aside>
 </main>
 <footer>
@@ -255,7 +294,8 @@ for (const et of EDGE_TYPES) {
   lab.firstChild.onchange = (ev) => { showEdge[et.key] = ev.target.checked; rebuildLinks(); reheat(0.25); };
   $("edgeToggles").appendChild(lab);
 }
-let showAnim = true, showLabels = false;
+let showAnim = true, showLabels = false, showBubbles = true;
+$("tgBubbles").onchange = (e) => { showBubbles = e.target.checked; };
 $("tgAnim").onchange = (e) => { showAnim = e.target.checked; };
 $("tgLabels").onchange = (e) => { showLabels = e.target.checked; };
 
@@ -396,14 +436,14 @@ function pick(ev) {
   return best;
 }
 canvas.addEventListener("pointermove", (ev) => {
-  hover = pick(ev); canvas.classList.toggle("pointer", !!(hover && hover.page));
-  if (hover) { renderTip(); placeTip(ev); } else tip.style.display = "none";
+  hover = pick(ev); canvas.classList.toggle("pointer", !!hover);
+  if (hover && hover !== locked) { renderTip(); placeTip(ev); } else tip.style.display = "none";
 });
 canvas.addEventListener("pointerleave", () => { hover = null; tip.style.display = "none"; });
 canvas.addEventListener("pointerdown", (ev) => { downAt = [ev.clientX, ev.clientY]; });
 canvas.addEventListener("click", (ev) => {
   if (downAt && Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 4) return;
-  const n = pick(ev); if (n && n.page) window.open(n.page, "_blank", "noopener");
+  const n = pick(ev); if (n) follow(n === locked ? null : n);
 });
 function placeTip(ev) {
   const r = stage.getBoundingClientRect();
@@ -532,9 +572,78 @@ function renderTip() {
   }
   if (s && s.summary) h += `<div class="meta" style="margin-top:4px">Now: ${esc(s.summary)}</div>`;
   if (th) h += `<div class="q">${th.code ? `<b style="font-style:normal">${esc(codes[th.code] || th.code)}</b> (${fmtT(th.t)}): ` : ""}“${esc(th.quote)}”</div>`;
-  h += `<div class="open">${n.page ? "Click to open the full story map" : "No story-map page"}</div>`;
+  h += `<div class="open">${n === locked ? "Following (click again or Esc to stop)" : "Click to follow this agent"}</div>`;
   tip.innerHTML = h;
   const cv = tip.querySelector("canvas.mini"); if (cv) drawMini(n, cv);
+}
+
+// ---------- follow panel: a locked agent tracked on the side ----------
+const fol = $("follow");
+let locked = null, folKey = "", folEvKey = -2, camFollow = false;
+function follow(n) {
+  locked = n; folKey = ""; folEvKey = -2;
+  if (!n) { fol.hidden = true; fol.innerHTML = ""; return; }
+  tip.style.display = "none"; fol.hidden = false; renderFollow();
+}
+function followEvents(n, k) {
+  const all = agentEvents(n), hi = upto(Float64Array.from(all, (e) => e.t), tNow), out = [];
+  for (let i = hi; i >= 0 && out.length < k; i--) { const e = all[i]; if (e.type !== "board_read" && e.type !== "ov_board_read") out.push(e); }
+  return out;
+}
+function renderFollow() {
+  const n = locked; if (!n) return;
+  const s = n.state, th = thoughtAt(n, tNow), faked = n.firstFake !== undefined && n.firstFake <= tNow;
+  const key = (s ? s.t_from : "") + "|" + (th ? th.t : "") + "|" + n.cred + "|" + faked + "|" + C.bg;
+  if (key !== folKey) {
+    folKey = key; folEvKey = -2;
+    const st = s ? s.stance : "none", mm = maps[n.id];
+    let h = `<div class="fh"><span class="id">${esc(n.id)}</span><span class="tag">following</span><button class="x" type="button" title="Stop following (Esc)" aria-label="Stop following">×</button></div>`;
+    h += `<div class="meta">${esc(n.role)} · <span class="pill" style="background:${C.stance[st] || C.faint}">${esc(STANCE_LABEL[st] || st)}</span>${s && s.has_trick ? " · has the trick" : ""}`;
+    h += `<br>believes judge: ${esc(s ? s.believes_judge : "unknown")} · credited: ${n.cred}${faked ? ` · <b style="color:${C.fake}">first fake at ${fmtT(n.firstFake)}</b>` : ""}</div>`;
+    h += `<div class="acts">${n.page ? `<a class="btn" href="${esc(n.page)}" target="_blank" rel="noopener">Open full story map ↗</a>` : `<span class="meta">No story-map page</span>`}`;
+    h += `<label><input type="checkbox" class="cam"${camFollow ? " checked" : ""}>keep in view</label></div>`;
+    if (mm || n.states.length) {
+      h += `<canvas class="mini"></canvas><div class="mhint">Click the strip to jump to that time.</div>`;
+      const tps = (mm && mm.turning_points) || [];
+      if (tps.length) h += `<div class="tps">▾ ${tps.map((tp) => `${fmtT(tp.t)} ${esc(String(tp.from).replace(/_/g, " "))} → ${esc(String(tp.to).replace(/_/g, " "))}`).join(" · ")}</div>`;
+      if (mm && mm.story) h += `<div class="story">${esc(mm.story)}</div>`;
+    }
+    if (s && s.summary) h += `<div class="meta" style="margin-top:6px">Now: ${esc(s.summary)}</div>`;
+    if (th) h += `<div class="q">${th.code ? `<b style="font-style:normal">${esc(codes[th.code] || th.code)}</b> (${fmtT(th.t)}): ` : ""}“${esc(th.quote)}”</div>`;
+    h += `<h3>Its recent events</h3><ul class="fev"></ul>`;
+    fol.innerHTML = h;
+    fol.querySelector(".x").onclick = () => follow(null);
+    fol.querySelector(".cam").onchange = (e) => { camFollow = e.target.checked; };
+    const cv = fol.querySelector("canvas.mini");
+    if (cv) cv.addEventListener("click", (ev) => {
+      const b = miniBase(n), r = cv.getBoundingClientRect(), x = (ev.clientX - r.left) * b.w / r.width;
+      if (x >= MINI_LBL) setTime(tMin + (tMax - tMin) * (x - MINI_LBL) / (b.w - 4 - MINI_LBL));
+    });
+  }
+  const cv = fol.querySelector("canvas.mini"); if (cv) drawMini(n, cv);
+  const evs = followEvents(n, 12), ek = evs.length ? evs[0].t + ":" + evs.length : "none";
+  if (ek === folEvKey) return; folEvKey = ek;
+  const ul = fol.querySelector("ul.fev"); ul.textContent = "";
+  if (!evs.length) { const li = document.createElement("li"); li.textContent = "Nothing yet."; ul.appendChild(li); }
+  for (const e of evs) {
+    if (MSG_TYPES[e.type] && e.text) { ul.appendChild(msgItem(events.indexOf(e), false)); continue; }
+    const li = document.createElement("li"); if (e.fake) li.className = "fake"; li.title = "Jump to " + fmtT(e.t);
+    const tm = document.createElement("span"); tm.className = "tm"; tm.textContent = fmtT(e.t);
+    const who = document.createElement("b"); who.textContent = e.src === n.id ? (e.dst ? "→ " + e.dst : "") : "from " + e.src;
+    const ty = document.createElement("b"); ty.className = "ty"; ty.textContent = " " + (TYPE_LABEL[e.type] || e.type) + (e.fake ? " (fake)" : "");
+    li.append(tm, who, ty);
+    const extra = [e.problem, e.text].filter(Boolean).join(": ");
+    if (extra) li.append(" " + (extra.length > 120 ? extra.slice(0, 117) + "…" : extra));
+    li.onclick = () => setTime(e.t);
+    ul.appendChild(li);
+  }
+}
+function followCamera() {
+  if (!camFollow || !locked || !isFinite(locked.x)) return;
+  const panelW = fol.hidden || W < 820 ? 0 : fol.offsetWidth + 20;
+  const k = zt.k, tx = (W - panelW) / 2 - k * locked.x, ty = H / 2 - k * locked.y;
+  const nx = zt.x + (tx - zt.x) * 0.12, ny = zt.y + (ty - zt.y) * 0.12;
+  if (Math.abs(nx - zt.x) + Math.abs(ny - zt.y) > 0.3) d3.select(canvas).call(zoom.transform, d3.zoomIdentity.translate(nx, ny).scale(k));
 }
 
 // ---------- time controls ----------
@@ -557,7 +666,8 @@ $("speed").onchange = (e) => { speed = +e.target.value; };
 scrub.addEventListener("input", () => setTime(tMin + (tMax - tMin) * scrub.value / 1000, true));
 document.addEventListener("keydown", (e) => {
   if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT" && e.target.type !== "range" && e.target.type !== "checkbox") return;
-  if (e.code === "Space") { e.preventDefault(); togglePlay(); }
+  if (e.key === "Escape" && locked) { e.preventDefault(); follow(null); }
+  else if (e.code === "Space") { e.preventDefault(); togglePlay(); }
   else if (e.key === "ArrowRight") { e.preventDefault(); setTime(tNow + (e.shiftKey ? 1 : 5 / 60)); }
   else if (e.key === "ArrowLeft") { e.preventDefault(); setTime(tNow - (e.shiftKey ? 1 : 5 / 60)); }
   else if (e.key === "k" && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); setTime(tNow + 10 / 60); }
@@ -628,6 +738,64 @@ function renderFeed() {
     if (extra) li.append(" " + (extra.length > 140 ? extra.slice(0, 137) + "…" : extra));
     ul.appendChild(li);
   }
+}
+
+// ---------- board posts and DMs: full text in the side panel, snippets travelling on the graph ----------
+const MSG_TYPES = { dm: "DM", board_post: "post", ov_board_post: "overseer post" };
+const msgIdx = []; events.forEach((e, i) => { if (MSG_TYPES[e.type] && e.text) msgIdx.push(i); });
+const msgT = Float64Array.from(msgIdx, (i) => events[i].t);
+const openMsgs = new Set();
+function msgColor(e) { return e.type === "dm" ? C.edge.dm : e.type === "ov_board_post" ? C.edge.overseer : C.edge.board; }
+function msgItem(i, fresh) {
+  const e = events[i], li = document.createElement("li"); li.className = "msg" + (openMsgs.has(i) ? " open" : "") + (fresh ? " fresh" : "");
+  const hd = document.createElement("div"); hd.className = "hd";
+  const tm = document.createElement("span"); tm.className = "tm"; tm.textContent = fmtT(e.t);
+  const k = document.createElement("span"); k.className = "kind"; k.style.background = msgColor(e); k.textContent = MSG_TYPES[e.type];
+  const who = document.createElement("b"); who.textContent = e.src + (e.dst ? " → " + e.dst : "");
+  hd.append(tm, k, who);
+  const sn = document.createElement("div"); sn.className = "snip"; sn.textContent = e.text.replace(/\s+/g, " ");
+  const full = document.createElement("div"); full.className = "full"; full.textContent = e.text;
+  full.onclick = (ev) => ev.stopPropagation();
+  li.append(hd, sn, full);
+  li.onclick = () => { if (openMsgs.has(i)) openMsgs.delete(i); else openMsgs.add(i); li.classList.toggle("open"); };
+  return li;
+}
+let msgKey = -2, msgShown = -1;
+function renderMsgs() {
+  const hi = upto(msgT, tNow); if (hi === msgKey) return;
+  const grew = hi > msgKey && msgKey !== -2; msgKey = hi;
+  const ul = $("msgs"); ul.textContent = "";
+  if (hi < 0) { const li = document.createElement("li"); li.textContent = "None yet."; li.style.cursor = "default"; ul.appendChild(li); return; }
+  for (let j = hi; j >= 0 && j > hi - 8; j--) ul.appendChild(msgItem(msgIdx[j], grew && j > msgShown));
+  msgShown = hi;
+}
+// snippet bubbles: a DM's text rides from sender to recipient, a post's rises from its author; drawn in screen space
+const MSG_SEC = 5;   // real seconds a bubble stays up
+function drawBubbles() {
+  const Dm = MSG_SEC * Math.max(playing ? speed : 5, 1) / 60, hi = upto(msgT, tNow);
+  ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = "12px system-ui, -apple-system, sans-serif"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+  let shown = 0;
+  for (let j = hi; j >= 0 && shown < 4; j--) {
+    const e = events[msgIdx[j]], age = tNow - e.t; if (age > Dm) break;
+    const a = byId.get(e.src); if (!a) continue; const b = e.dst ? byId.get(e.dst) : null; shown++;
+    const p = Dm > 0 ? age / Dm : 1, q = Math.min(1, p / 0.45);
+    const ease = q * q * (3 - 2 * q);
+    const x = b ? a.x + (b.x - a.x) * ease : a.x, y = b ? a.y + (b.y - a.y) * ease : a.y - 10 * ease;
+    const [sx, sy] = zt.apply([x, y]);
+    let txt = e.text.replace(/\s+/g, " "); if (txt.length > 64) txt = txt.slice(0, 63) + "…";
+    const head = MSG_TYPES[e.type] + " · " + e.src.replace(/^agent-/, "") + (e.dst ? " → " + e.dst.replace(/^agent-/, "") : "");
+    const w = Math.min(330, Math.max(ctx.measureText(txt).width, ctx.measureText(head).width) + 16), h = 36;
+    let bx = sx - w / 2, by = sy - h - 14 - shown * 2; bx = Math.max(4, Math.min(W - w - 4, bx)); by = Math.max(4, by);
+    ctx.globalAlpha = p > 0.8 ? (1 - p) / 0.2 : Math.min(1, p / 0.06);
+    ctx.fillStyle = C.panel || C.bg; ctx.strokeStyle = msgColor(e); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect(bx, by, w, h, 7); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx - 5, by + h); ctx.lineTo(sx, Math.min(by + h + 7, sy - 3)); ctx.lineTo(sx + 5, by + h); ctx.fill();
+    ctx.fillStyle = msgColor(e); ctx.font = "600 10px system-ui, -apple-system, sans-serif"; ctx.fillText(head, bx + 8, by + 11);
+    ctx.fillStyle = C.fg; ctx.font = "12px system-ui, -apple-system, sans-serif";
+    ctx.save(); ctx.beginPath(); ctx.rect(bx + 6, by, w - 12, h); ctx.clip(); ctx.fillText(txt, bx + 8, by + 25); ctx.restore();
+  }
+  ctx.restore();
 }
 
 // ---------- drawing ----------
@@ -710,8 +878,8 @@ function draw(D) {
   const hl = hover;
   for (const p of pairs.values()) {
     const [w, ty] = weightsAt(p, tNow); if (w < LINK_MIN_W || !ty) continue;
-    const rel = hl && (p.a === hl || p.b === hl);
-    ctx.globalAlpha = Math.min(0.85, 0.1 + 0.25 * Math.log1p(w)) * (hl && !rel ? 0.35 : 1);
+    const rel = (hl && (p.a === hl || p.b === hl)) || (locked && (p.a === locked || p.b === locked));
+    ctx.globalAlpha = Math.min(0.85, 0.1 + 0.25 * Math.log1p(w)) * ((hl || locked) && !rel ? 0.3 : 1);
     ctx.strokeStyle = C.edge[ty]; ctx.lineWidth = Math.min(6, 0.6 + 1.1 * Math.sqrt(w)) / Math.sqrt(zt.k);
     ctx.beginPath(); ctx.moveTo(p.a.x, p.a.y); ctx.lineTo(p.b.x, p.b.y); ctx.stroke();
   }
@@ -729,15 +897,17 @@ function draw(D) {
       ctx.beginPath(); ctx.arc(n.x + rr * 0.78, n.y - rr * 0.78, dr, 0, 7); ctx.fillStyle = C.fake; ctx.fill();
       ctx.lineWidth = 1; ctx.strokeStyle = C.bg; ctx.stroke();
     }
+    if (n === locked) { ctx.beginPath(); ctx.arc(n.x, n.y, n.r * (n.role === "solver" ? 1 : 1.5) + 6, 0, 7); ctx.lineWidth = 2.5; ctx.strokeStyle = C.accent || C.fg; ctx.stroke(); }
     if (n === hl) { ctx.beginPath(); ctx.arc(n.x, n.y, n.r * (n.role === "solver" ? 1 : 1.5) + 5, 0, 7); ctx.lineWidth = 2; ctx.strokeStyle = C.fg; ctx.stroke(); }
   }
-  if (showLabels || zt.k > 1.8 || hl) {
+  if (showLabels || zt.k > 1.8 || hl || locked) {
     ctx.font = `${11 / Math.sqrt(zt.k)}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.fillStyle = C.muted;
-    for (const n of nodes) if (showLabels || zt.k > 1.8 || n === hl || n.role !== "solver") {
-      ctx.fillStyle = n === hl ? C.fg : C.muted;
+    for (const n of nodes) if (showLabels || zt.k > 1.8 || n === hl || n === locked || n.role !== "solver") {
+      ctx.fillStyle = n === hl || n === locked ? C.fg : C.muted;
       ctx.fillText(n.id.replace(/^agent-/, ""), n.x, n.y - n.r * (n.role === "solver" ? 1 : 1.5) - 5);
     }
   }
+  if (showBubbles) drawBubbles();
 }
 
 // ---------- main loop ----------
@@ -750,16 +920,17 @@ function frame(now) {
   updateNodes(); animZones(1 - Math.exp(-dt * 4));
   if (playing) reheat(0.08);
   if (sim.alpha() > sim.alphaMin()) sim.tick();
+  followCamera();
   draw(ANIM_SEC * Math.max(playing ? speed : 5, 1) / 60);
   document.getElementById("clock").innerHTML = `${fmtT(tNow)} <span>/ ${fmtT(tMax)} run min</span>`;
   $("cursor").style.left = `calc(${100 * (tNow - tMin) / (tMax - tMin)}% - 1px)`;
-  renderStanceLegend(); renderFeed(); if (hover) renderTip();
+  renderStanceLegend(); renderFeed(); renderMsgs(); if (hover && hover !== locked) renderTip(); if (locked) renderFollow();
   requestAnimationFrame(frame);
 }
 readColors(); resize(); setTime(tMin); updateNodes(); animZones(1); rebuildLinks();
 for (let i = 0; i < 120; i++) sim.tick();
 requestAnimationFrame(frame);
-window.__graph = { setTime: (t) => setTime(t), get t() { return tNow; }, nodes, pairs: () => pairs, play: togglePlay,
+window.__graph = { follow: (id) => follow(byId.get(id) || null), setTime: (t) => setTime(t), get t() { return tNow; }, nodes, pairs: () => pairs, play: togglePlay,
   bench: (k) => { const t0 = performance.now(); for (let i = 0; i < (k || 30); i++) { rebuildLinks(); updateNodes(); animZones(0.2); sim.tick(); draw(ANIM_SEC * speed / 60); } return (performance.now() - t0) / (k || 30); } };
 })();
 </script>
