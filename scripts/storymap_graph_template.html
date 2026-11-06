@@ -164,8 +164,11 @@ const LINK_MIN_W = 0.06;
 const STANCES = ["none", "considering", "deferred", "faking", "rejected", "stopped"];
 const STANCE_LABEL = { none: "no exploit idea", considering: "considering", deferred: "deferred", faking: "faking", rejected: "rejected", stopped: "stopped" };
 // zone targets as fractions of the stage (x, y): rejected left, faking right, none centre.
-// Fixed 3x2 grid below the overseer row; each zone is a container sized by its current members (area ∝ count).
-const ZONES = { none: [0.18, 0.37], considering: [0.5, 0.37], deferred: [0.82, 0.37], rejected: [0.18, 0.77], faking: [0.5, 0.77], stopped: [0.82, 0.77] };
+// "no exploit idea" in the centre; the other zones on a ring around it whose radius follows the centre zone's size
+// (rejected left, faking right, deferred top-left, considering top-right, stopped below); overseers in a row above.
+// Each zone is a container sized by its current members (area ∝ count). ZONES holds the live centres (fractions).
+const ANGLE = { rejected: Math.PI, faking: 0, deferred: -0.75 * Math.PI, considering: -0.25 * Math.PI, stopped: 0.5 * Math.PI };
+const ZONES = { none: [0.5, 0.56], considering: [0.66, 0.36], deferred: [0.34, 0.36], faking: [0.86, 0.56], rejected: [0.14, 0.56], stopped: [0.5, 0.86] };
 const zoneR = {}, zoneN = {}, zoneLbl = {};   // animated radius (px), member count, solver count
 const EDGE_TYPES = [
   { key: "dm", label: "DMs", v: "--e-dm" },
@@ -302,7 +305,17 @@ const sameZone = (l) => l.source.role === "overseer" || l.target.role === "overs
 const linkForce = d3.forceLink([]).strength((l) => l.s * (sameZone(l) ? 1 : 0.02)).distance((l) => 26 + 40 * (1 - l.s));
 const fx = d3.forceX((n) => zoneOf(n)[0] * W).strength((n) => n.role === "overseer" ? 0.5 : 0.05);
 const fy = d3.forceY((n) => zoneOf(n)[1] * H).strength((n) => n.role === "overseer" ? 0.5 : 0.05);
-function zoneMax() { return Math.max(40, Math.min(W / 6, H * 0.2) - 8); }
+function zoneMax() { return Math.max(36, Math.min(W / 4.6, H * 0.19) - 6); }
+function placeZones() {
+  const mx = zoneMax(), cx = 0.5 * W, cy = 0.56 * H, base = Math.max(zoneR.none || mx, 0.75 * mx), top = 0.1 * H;
+  ZONES.none = [0.5, 0.56];
+  for (const s of Object.keys(ANGLE)) {
+    const R = zoneR[s] || mx * 0.3, d = base + R + 18;
+    let x = cx + d * Math.cos(ANGLE[s]), y = cy + d * Math.sin(ANGLE[s]);
+    x = Math.min(W - R - 4, Math.max(R + 4, x)); y = Math.min(H - R - 4, Math.max(top + R + 14, y));
+    ZONES[s] = [x / W, y / H];
+  }
+}
 function zoneTarget(s) {
   const tot = nodes.filter((n) => n.role !== "overseer").length || 1, mx = zoneMax();
   return (zoneN[s] || 0) ? Math.max(mx * 0.3, mx * Math.sqrt(zoneN[s] / tot)) : mx * 0.22;
@@ -311,7 +324,10 @@ function countZones() {
   for (const s of STANCES) { zoneN[s] = 0; zoneLbl[s] = 0; }
   for (const n of nodes) if (n.role !== "overseer") { const s = ZONES[n.stance] ? n.stance : "none"; zoneN[s]++; if (n.role === "solver") zoneLbl[s]++; }
 }
-function animZones(k) { for (const s of STANCES) { const t = zoneTarget(s); zoneR[s] = zoneR[s] === undefined ? t : zoneR[s] + (t - zoneR[s]) * k; } }
+function animZones(k) {
+  for (const s of STANCES) { const t = zoneTarget(s); zoneR[s] = zoneR[s] === undefined ? t : zoneR[s] + (t - zoneR[s]) * k; }
+  placeZones(); fx.x(fx.x()); fy.y(fy.y());
+}
 // containment: a soft wall keeps each node inside its zone (stronger than links); a node outside (just changed
 // stance) is pulled toward it at a capped speed, so the move is visible.
 function containForce() {
@@ -744,7 +760,7 @@ readColors(); resize(); setTime(tMin); updateNodes(); animZones(1); rebuildLinks
 for (let i = 0; i < 120; i++) sim.tick();
 requestAnimationFrame(frame);
 window.__graph = { setTime: (t) => setTime(t), get t() { return tNow; }, nodes, pairs: () => pairs, play: togglePlay,
-  bench: (k) => { const t0 = performance.now(); for (let i = 0; i < (k || 30); i++) { rebuildLinks(); updateNodes(); sim.tick(); draw(ANIM_SEC * speed / 60); } return (performance.now() - t0) / (k || 30); } };
+  bench: (k) => { const t0 = performance.now(); for (let i = 0; i < (k || 30); i++) { rebuildLinks(); updateNodes(); animZones(0.2); sim.tick(); draw(ANIM_SEC * speed / 60); } return (performance.now() - t0) / (k || 30); } };
 })();
 </script>
 </body>

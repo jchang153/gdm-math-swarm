@@ -2210,3 +2210,7 @@ most fakers stopped after the overseer's reverts and warnings. The page legend s
   zone; links across zones are drawn but pull only weakly.
 - "also make the "arrow key" changes go up and down 5 seconds instead of 1min" and "and make j,k be 10 seconds":
   arrow keys step 5 run-seconds (Shift+arrow 1 minute), j and k step back and forward 10 seconds.
+- Feedback on the zones, verbatim: "i liked the previous structure better, with the no exploit idea in the middle".
+  Restored: no exploit idea in the centre, rejected left, faking right, deferred top-left, considering top-right,
+  stopped below, overseers above; the outer zones sit on a ring whose radius follows the centre zone's current size,
+  so zones do not overlap. The container behaviour, red dot and keys stay.
