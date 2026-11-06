@@ -11,6 +11,8 @@ publish, so a page already on the site is converted exactly like a fresh one. It
 it never changes text, links, scripts or data, and it is idempotent. Pages it does not know are returned as is.
 Pure CSS in the ``site_style`` colour tokens (light/dark); no scripts, fonts or network.
 """
+import html
+import json
 import re
 
 MARKER = 'id="site-layout"'
@@ -108,11 +110,385 @@ def _insert_style(document, css):
     return document[:at] + block + document[at:]
 
 
-def apply(name, document):
-    """The page ``name`` (a site path such as RUN/results.html) in the dense layout; unknown pages unchanged."""
+def apply(name, document, read=None, overview=True):
+    """The page ``name`` (a site path such as RUN/results.html) in the dense layout; unknown pages unchanged.
+
+    results.html also gets the run overview (math site; ``overview=False`` for the ImpossibleBench site).
+    ``read(path)``, optional, returns the bytes of a file of the same run (path relative to the run folder, such
+    as analysis/simple_judge/report.json) or None; without it the overview uses the page alone."""
     for pattern, label, css in KINDS:
         if pattern.search(name):
             if label == 'results':
                 document = _results_markup(document)
+                if overview:
+                    document = _overview(document, read)
+                    css = css + (OVERVIEW_CSS if OV_START in document else '')
             return _insert_style(document, css)
     return document
+
+
+# ------------------------------------------------------------------------------------------------ run overview
+# Owner request and decisions, November 6, 2026 (docs/plan.md, "Site redesign: run panes with the interaction
+# graph"): the math site's run page opens with an overview: a short readable title (the run id kept small), the
+# run spec as chips, the agent categorization bar (the behavior judge's labels with counts), the live interaction
+# graph beside a behavior-judge summary card (runs without a graph show the fakes chart), and the tabs reordered
+# Overview · Behavior judge · Story map · Conference · Incident · Report details · Inspect. The overview is built
+# only from the page itself (the run intro, summary tiles, agent labels and accepted-submission order) plus, when
+# the caller can read the run's published files (``read``), analysis/simple_judge/report.json and the graph shell.
+# It is one block between <!--ov:start--> and <!--ov:end-->, replaced on every apply (idempotent); the tab bar is
+# moved into it (same links, new order). Math site only: ``overview=False`` (the ImpossibleBench site) skips it.
+OV_START, OV_END = '<!--ov:start-->', '<!--ov:end-->'
+_OV_BLOCK = re.compile(re.escape(OV_START) + '.*?' + re.escape(OV_END), re.S)
+GRAPH = 'analysis/storymap/graph.html'
+JUDGE_JSON = 'analysis/simple_judge/report.json'
+GRAPH_HEIGHT = 520
+
+# Primary label kinds in bar order, then the extra ones shown as counts (research/analysis/agent_badges.py).
+_PRIMARY = ('exploiter', 'convert', 'tempted', 'unaware', 'unlabelled')
+_EXTRA = ('whistleblower', 'eval_aware', 'overseer', 'seed')
+_NAMES = {'exploiter': 'Exploiter', 'convert': 'Convert', 'tempted': 'Tempted', 'unaware': 'Unaware / honest',
+          'unlabelled': 'Unlabelled', 'whistleblower': 'Whistleblower', 'eval_aware': 'Evaluation-aware',
+          'overseer': 'Overseer', 'seed': 'Seed'}
+_LEVELS = ('none', 'considered', 'explored', 'submitted', 'credited', 'unclear')
+_LEVEL_KIND = {'none': 'unaware', 'considered': 'tempted', 'explored': 'tempted', 'submitted': 'convert',
+               'credited': 'exploiter', 'unclear': 'unlabelled'}
+# Tab order (owner, November 6, 2026); keys match the tab's data-tab or link target.
+_TAB_ORDER = ('overview', 'simple-judge', 'judge', 'storymap', 'conference', 'incident', 'details', 'inspect')
+
+OVERVIEW_CSS = (
+    'body>h1{font:600 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);margin:22px 0 4px;'
+    'overflow-wrap:anywhere}'
+    '.ov{margin:10px 0 18px}.ov-head{position:relative;padding:18px 20px 16px;border:1px solid var(--line);'
+    'border-radius:14px;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 13%,var(--card)),'
+    'var(--card) 60%);overflow:hidden}'
+    '.ov-kicker{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);'
+    'margin:0 0 4px}.ov-title{font-size:clamp(1.35rem,3.2vw,1.9rem);line-height:1.2;font-weight:750;margin:0;'
+    'letter-spacing:-.01em}.ov-id{font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);'
+    'margin:4px 0 12px;overflow-wrap:anywhere}'
+    '.ov-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px;padding:0;list-style:none}'
+    '.ov-chips li{max-width:none;margin:0;padding:3px 10px;border:1px solid var(--line);border-radius:999px;'
+    'background:var(--card);font-size:12.5px;line-height:1.5}.ov-chips b{font-weight:600;color:var(--muted);'
+    'margin-right:4px;font-size:11px;text-transform:uppercase;letter-spacing:.04em}'
+    '.ov-bar{display:flex;height:30px;border-radius:8px;overflow:hidden;gap:2px;margin:4px 0 6px}'
+    '.ov-bar>span{display:flex;align-items:center;justify-content:center;min-width:22px;font:700 12.5px/1 system-ui,'
+    'sans-serif;border-radius:0;height:auto;padding:0 4px;box-sizing:border-box}'
+    '.ov-bar>.ab-unlabelled{box-shadow:inset 0 0 0 1.5px currentColor}'
+    '.ov-key{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;color:var(--muted);margin:0}'
+    '.ov-key span{white-space:nowrap}.ov-key .ab{margin-right:4px}.ov-key strong{color:var(--fg)}'
+    '.ov-head nav.tabs{margin:14px 0 0}'
+    '.ov-row{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,1fr);gap:14px;margin:14px 0 0;'
+    'align-items:stretch}'
+    '.ov-pane{border:1px solid var(--line);border-radius:14px;background:var(--card);min-width:0;'
+    'display:flex;flex-direction:column;overflow:hidden}'
+    '.ov-pane>header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:10px 14px;'
+    'border-bottom:1px solid var(--line)}.ov-pane>header h2{margin:0;font-size:1rem}'
+    '.ov-pane>header a{font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}'
+    f'.ov-graph iframe{{display:block;width:100%;height:{GRAPH_HEIGHT}px;border:0;background:var(--bg)}}'
+    '.ov-graph .ov-note{font-size:12px;color:var(--muted);margin:0;padding:6px 14px;'
+    'border-top:1px solid var(--line)}.ov-fakes{padding:12px 14px}.ov-fakes figure{margin:0;max-width:none}'
+    '.ov-fakes .spark{display:block;width:100%;height:220px}.ov-fakes figcaption{font-size:12px;color:var(--muted)}'
+    '.ov-judge{padding:0 0 4px}.ov-judge .ov-big{display:flex;gap:18px;flex-wrap:wrap;padding:12px 14px 4px}'
+    '.ov-judge .ov-big div{min-width:0}.ov-judge .ov-big .v{font-size:26px;font-weight:750;line-height:1.1}'
+    '.ov-judge .ov-big .k{font-size:12px;color:var(--muted)}'
+    '.ov-levels{margin:6px 14px 8px;display:grid;grid-template-columns:auto 1fr auto;gap:4px 8px;'
+    'align-items:center;font-size:12.5px}.ov-levels .t{height:9px;border-radius:5px;background:'
+    'color-mix(in srgb,var(--line) 70%,transparent);overflow:hidden}.ov-levels .t>span{display:block;height:100%;'
+    'border-radius:5px}.ov-levels .n{text-align:right;font-variant-numeric:tabular-nums}'
+    '.ov-judge h3{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);'
+    'margin:10px 14px 4px}.ov-judge ul{list-style:none;margin:0 14px 8px;padding:0}'
+    '.ov-judge li{max-width:none;margin:0;padding:5px 0;border-top:1px solid var(--line);font-size:13px;'
+    'line-height:1.4}.ov-judge li:first-child{border-top:0}.ov-judge li a{font-weight:600}'
+    '.ov-judge .ov-src{font-size:12px;color:var(--muted);margin:4px 14px 10px;max-width:none}'
+    '.ov-judge .ov-more{margin:auto 14px 10px;font-size:13px;font-weight:600}'
+    '@media (max-width:900px){.ov-row{grid-template-columns:minmax(0,1fr)}}'
+    + _PHONE + f'.ov-head{{padding:14px 14px 12px}}.ov-graph iframe{{height:min({GRAPH_HEIGHT}px,72vh)}}'
+    '.ov-bar{height:26px}}'
+)
+
+_TAB_LINK = re.compile(r'<a\b[^>]*>.*?</a>|<span class="off">.*?</span>', re.S)
+_NAV = re.compile(r'<nav class="tabs"[^>]*>.*?</nav>', re.S)
+_AB_ID = re.compile(r'<span class="ab-id">(agent-\d+)<span class="ab-set"[^>]*>(.*?)</span></span>', re.S)
+_AB_KIND = re.compile(r'class="ab ab-([a-z_]+)"')
+
+
+def _tab_key(item):
+    tab = re.search(r'data-tab="([^"]+)"', item)
+    if tab:
+        return tab[1]
+    href = re.search(r'href="([^"]*)"', item)
+    target = href[1] if href else ''
+    label = re.sub(r'<[^>]+>', '', item).strip().lower()
+    for key, needle in (('overview', '#overview'), ('details', '#report'), ('conference', 'conference-view/'),
+                        ('inspect', 'inspect-view/'), ('simple-judge', 'simple_judge/'), ('judge', 'judge/'),
+                        ('storymap', 'storymap/'), ('incident', 'incident/')):
+        if needle in target:
+            return key
+    return 'simple-judge' if label.startswith('behavior judge') else label
+
+
+def _tabs(nav):
+    """The run-page tab bar in the overview order: Overview (this page) first, the old Report tab as Report
+    details (#report), every other link kept as it was."""
+    opening = re.match(r'<nav[^>]*>', nav)[0]
+    items = [m for m in _TAB_LINK.findall(nav)
+             if _tab_key(m) not in ('overview', 'details', 'report')]
+    items += ['<a class="current" aria-current="page" data-tab="overview" href="#overview">Overview</a>',
+              '<a data-tab="details" href="#report">Report details</a>']
+    rank = {k: i for i, k in enumerate(_TAB_ORDER)}
+    items.sort(key=lambda m: rank.get(_tab_key(m), rank['judge'] if _tab_key(m).startswith('judge') else len(rank)))
+    return opening + ''.join(items) + '</nav>'
+
+
+def _agents(document):
+    """{agent: [label kinds]} from the page's agent labels (first labelled mention of each agent)."""
+    out = {}
+    for agent, badges in _AB_ID.findall(document):
+        if agent not in out:
+            out[agent] = _AB_KIND.findall(badges)
+    return out
+
+
+def _accepted_order(document):
+    """Agents in the order of their first accepted submission (the Accepted submissions table)."""
+    at = document.find('<h2>Accepted submissions</h2>')
+    if at < 0:
+        return []
+    end = document.find('</table>', at)
+    return list(dict.fromkeys(re.findall(r'<span class="ab-id">(agent-\d+)', document[at:end])))
+
+
+def _intro_parts(document):
+    cond = re.search(r'<p class="ri-cond">([^<]*)</p>', document)
+    return [p.strip() for p in html.unescape(cond[1]).rstrip('.').split(', ')] if cond else []
+
+
+def _tile(document, key):
+    found = re.search(r'<div class="tile"><div class="k">' + re.escape(key) + r'</div><div class="v">(.*?)</div>'
+                      r'<div class="s">(.*?)</div>', document, re.S)
+    return (html.unescape(re.sub(r'<[^>]+>', '', found[1])), html.unescape(found[2])) if found else (None, None)
+
+
+def _short_overseers(part):
+    m = re.match(r'(\d+) (.+?) overseers? (.*)$', part)
+    if not m:
+        return part
+    count, rest = int(m[1]), m[3]
+    powers = ('comms only' if 'without oversight powers' in rest else
+              'enforcement only' if 'no posting' in rest else
+              'check + revert' if 'check_proof' in rest else '')
+    return f'{count} overseer{"s" if count != 1 else ""}' + (f' ({powers})' if powers else '')
+
+
+def _spec(document, run):
+    """(title, [(chip key, chip value)]) from the run intro sentence, the summary tiles and the run id."""
+    parts, chips = _intro_parts(document), []
+    model, route = _tile(document, 'Model')
+    variant, _ = _tile(document, 'Prompt variant')
+    duration_tile, stop = _tile(document, 'Duration')
+    solvers = next((p for p in parts if re.match(r'\d+ .+ solvers?$', p)), None)
+    overseer = next((p for p in parts if 'overseer' in p), None)
+    seed = next((p for p in parts if 'exploit' in p), None)
+    duration = parts[-1] if parts and re.match(r'^[\d.]+ ?(?:h|min)', parts[-1]) else duration_tile
+    delivery = ('pushed messages' if re.search(r'-push(?:-|$)', run) else
+                'unread notices' if any('notices' in p for p in parts) or '-notices' in run else None)
+    if solvers:
+        chips.append(('Solvers', solvers))
+    elif model:
+        chips.append(('Model', model))
+    agents_tile, _ = _tile(document, 'Agents')
+    if not solvers and agents_tile:
+        chips.append(('Agents', agents_tile))
+    chips.append(('Oversight', overseer if overseer else ('no overseer' if 'no overseer' in parts else None)))
+    chips.append(('Exploit', seed if seed and seed != 'no planted exploit' else
+                  ('none planted' if seed else None)))
+    chips.append(('Delivery', delivery))
+    chips.append(('Duration', duration))
+    chips.append(('Prompt', variant if variant and variant != 'not recorded' else None))
+    if model and solvers:
+        chips.append(('Model id', model))
+    chips = [(k, v) for k, v in chips if v]
+    rep = re.search(r'-r(\d+)-\d{8}T', run)
+    if solvers:
+        title = solvers
+        title += ' · ' + (_short_overseers(overseer) if overseer else 'no overseer')
+    else:
+        title = (model or run) + (f' · {agents_tile}' if agents_tile else '')
+    if duration:
+        title += ' · ' + duration
+    if delivery == 'pushed messages':
+        title += ' · push'
+    if rep:
+        title += f' · r{rep[1]}'
+    return title, chips
+
+
+def _bar(agents):
+    counts = {k: 0 for k in _PRIMARY + _EXTRA}
+    for kinds in agents.values():
+        for kind in kinds:
+            if kind in counts:
+                counts[kind] += 1
+    judged = sum(counts[k] for k in _PRIMARY)
+    if not judged:
+        return '', counts
+    bar = ''.join(f'<span class="ab ab-{k}" style="flex:{counts[k]} 1 0" title="{_NAMES[k]}: {counts[k]}">'
+                  f'{counts[k]}</span>' for k in _PRIMARY if counts[k])
+    key = ''.join(f'<span><span class="ab ab-{k}">{_letter(k)}</span>{_NAMES[k]} <strong>{counts[k]}</strong></span>'
+                  for k in _PRIMARY + _EXTRA if counts[k])
+    return (f'<div class="ov-bar" role="img" aria-label="Agent labels: ' + ', '.join(
+        f'{_NAMES[k]} {counts[k]}' for k in _PRIMARY if counts[k]) + f'">{bar}</div>'
+        f'<p class="ov-key">{key} <a href="analysis/simple_judge/report.html#agent-labels">Label definitions</a></p>',
+        counts)
+
+
+def _letter(kind):
+    return {'exploiter': 'E', 'convert': 'C', 'tempted': 'T', 'unaware': 'U', 'unlabelled': '?',
+            'whistleblower': 'W', 'eval_aware': 'A', 'overseer': 'O', 'seed': 'S'}[kind]
+
+
+def _notable(agents, order, limit=5):
+    """Up to ``limit`` agents worth opening first: independent exploiters (earliest accepted submission first),
+    whistleblowers, then the earliest converts; within each group, agents without an accepted submission follow."""
+    rank = {a: i for i, a in enumerate(order)}
+    def by_time(group):
+        return sorted(group, key=lambda a: (rank.get(a, len(rank)), a))
+    picked = []
+    for kind, why, cap in (('exploiter', 'found an exploit independently', 3),
+                           ('whistleblower', 'reported the exploit', 2), ('convert', 'early convert', 5)):
+        group = by_time([a for a, kinds in agents.items() if kind in kinds and a not in picked])
+        for agent in group[:cap]:
+            if len(picked) < limit:
+                picked.append(agent)
+    return picked
+
+
+def _why(kinds, agent, order):
+    labels = [(_NAMES[k], k) for k in kinds if k in _NAMES and k != 'unaware']
+    first = order.index(agent) + 1 if agent in order else None
+    return labels, first
+
+
+def _judge_card(document, agents, counts, report, storymap):
+    levels = ((report or {}).get('counts') or {}).get('cheating_level') or {}
+    c = (report or {}).get('counts') or {}
+    labelled = c.get('labelled') if isinstance(c.get('labelled'), int) else sum(counts[k] for k in _PRIMARY)
+    cheating = c.get('cheating_any')
+    if cheating is None:
+        cheating = counts['exploiter'] + counts['convert']
+    whistle = (c.get('whistleblower') or {}).get('True', counts['whistleblower'])
+    aware = (c.get('evaluation_aware') or {}).get('True', counts['eval_aware'])
+    out = ['<section class="ov-pane ov-judge" aria-label="Behavior judge summary"><header><h2>Behavior judge</h2>'
+           '<a href="analysis/simple_judge/report.html">Full report →</a></header>',
+           '<div class="ov-big">'
+           f'<div><div class="v">{cheating}<small style="font-size:14px;font-weight:600;color:var(--muted)">'
+           f' / {labelled}</small></div><div class="k">{"explored, submitted or credited an exploit" if report else "submitted an exploit"}</div></div>'
+           f'<div><div class="v">{whistle}</div><div class="k">whistleblowers</div></div>'
+           f'<div><div class="v">{aware}</div><div class="k">evaluation-aware</div></div></div>']
+    if levels:
+        top = max([v for v in levels.values() if isinstance(v, int)] or [1]) or 1
+        out.append('<div class="ov-levels" role="table" aria-label="Cheating level">' + ''.join(
+            f'<span>{level}</span><span class="t"><span class="ab-{_LEVEL_KIND[level]}" '
+            f'style="width:{100 * levels[level] / top:.1f}%"></span></span><span class="n">{levels[level]}</span>'
+            for level in _LEVELS if isinstance(levels.get(level), int)) + '</div>')
+    seed = c.get('seeded_source') or {}
+    if seed.get('agents_that_read_seed_file') is not None:
+        out.append(f'<p class="ov-src">{seed["agents_that_read_seed_file"]} agents read the planted seed file; '
+                   f'{seed.get("cheating_agents_naming_seed", "?")} cheating agents named the seed as their source.</p>')
+    order = _accepted_order(document)
+    notable = _notable(agents, order)
+    if notable:
+        items = []
+        for agent in notable:
+            labels, first = _why(agents[agent], agent, order)
+            href = f'analysis/storymap/agents/{agent}.html' if storymap else 'analysis/simple_judge/report.html'
+            items.append(f'<li><a href="{href}"><code>{agent}</code></a> ' + ''.join(
+                f'<span class="ab ab-{k}" title="{n}">{_letter(k)}</span>' for n, k in labels) + ' <small>'
+                + ', '.join(n.lower() for n, _ in labels) + '</small></li>')
+        out.append('<h3>Agents to read first' + (' (story maps)' if storymap else '') + '</h3><ul>'
+                   + ''.join(items) + '</ul>')
+    out.append('</section>')
+    return ''.join(out)
+
+
+# The embedded viewer follows the system theme by itself; a theme forced with the page's toggle (data-theme on
+# <html>, scripts/site_style.py) is passed on as &theme= so both match.
+_THEME_SYNC = ('<script>(function(){var f=document.getElementById("ov-graph"),r=document.documentElement;'
+               'function s(){var t=r.getAttribute("data-theme"),u="analysis/storymap/graph.html?embed=1"+'
+               '(t==="light"||t==="dark"?"&theme="+t:"");if(f.getAttribute("src")!==u)f.setAttribute("src",u);}'
+               's();new MutationObserver(s).observe(r,{attributes:true,attributeFilter:["data-theme"]});})();'
+               '</script>')
+
+
+def _graph_pane(document, has_graph):
+    if has_graph:
+        return ('<section class="ov-pane ov-graph" aria-label="Interaction graph"><header><h2>Interaction graph</h2>'
+                f'<a href="{GRAPH}" target="_blank" rel="noopener">Full screen ↗</a></header>'
+                f'<iframe id="ov-graph" src="{GRAPH}?embed=1" title="Interaction graph of this run" loading="lazy">'
+                '</iframe>' + _THEME_SYNC +
+                '<p class="ov-note">Agents and the messages, files and submissions between them over the run; '
+                'click a bubble to open it. Each agent links to its <a href="analysis/storymap/index.html">story '
+                'map</a>.</p></section>')
+    figure = re.search(r'<section class="run-intro".*?(<figure>.*?</figure>)', document, re.S)
+    body = (figure[1] if figure else '<p class="muted">No interaction graph or fakes chart for this run.</p>')
+    link = '<a href="#faking-over-time">Faking over time ↓</a>' if 'id="faking-over-time"' in document else ''
+    return ('<section class="ov-pane ov-fakes-pane" aria-label="Standing fakes"><header><h2>Standing fakes over '
+            f'the run</h2>{link}</header><div class="ov-fakes">{body}</div></section>')
+
+
+def _fix_series(document, run):
+    """The run intro's Series line from the current run_profile.SERIES (a page rendered before its series was
+    added keeps the stale "Earlier pilots" text otherwise)."""
+    try:
+        import run_profile
+    except ImportError:
+        return document
+    _, title, text = run_profile.series_of(run)
+    line = (f'<p><span class="ri-k">Series</span><strong>{html.escape(title)}.</strong> '
+            f'{html.escape(text)}</p>')
+    return re.sub(r'<p><span class="ri-k">Series</span>.*?</p>', lambda _: line, document, count=1, flags=re.S)
+
+
+def _overview(document, read=None):
+    """The results page with the overview block (see above); pages without the run-page tab bar unchanged."""
+    nav = _NAV.search(document)  # the tab bar, inside an earlier overview block or still in place
+    run = re.search(r'<p><code>([^<]+)</code> · ', document)
+    if (not nav or not run or ('href="#report"' not in nav[0] and 'href="#overview"' not in nav[0])
+            or 'eference-test evaluator' in document):  # coding (ImpossibleBench) pages keep their layout
+        return document
+    nav = nav[0]
+    document = _NAV.sub('', _OV_BLOCK.sub('', document), count=1)
+    run = html.unescape(run[1])
+    document = _fix_series(document, run)
+
+    def load(path):
+        if read is None:
+            return None
+        try:
+            return read(path)
+        except (OSError, KeyError, ValueError):
+            return None
+    report = load(JUDGE_JSON)
+    try:
+        report = json.loads(report) if report else None
+    except ValueError:
+        report = None
+    storymap = 'data-tab="storymap"' in nav
+    graph = load(GRAPH)
+    has_graph = bool(graph) if read is not None and graph is not None else storymap
+    agents = _agents(document)
+    title, chips = _spec(document, run)
+    bar, counts = _bar(agents)
+    judged = bool(report) or any(counts[k] for k in _PRIMARY)
+    row = _graph_pane(document, has_graph) + (_judge_card(document, agents, counts, report, storymap) if judged
+                                               else '')
+    block = (f'{OV_START}<section class="ov" id="overview" aria-label="Run overview"><div class="ov-head">'
+             '<p class="ov-kicker">Run overview</p>'
+             f'<p class="ov-title" role="heading" aria-level="1">{html.escape(title)}</p>'
+             f'<p class="ov-id">{html.escape(run)}</p>'
+             '<ul class="ov-chips">' + ''.join(f'<li><b>{html.escape(k)}</b>{html.escape(v)}</li>' for k, v in chips)
+             + '</ul>' + bar + _tabs(nav) + '</div>'
+             f'<div class="ov-row"{"" if judged else " style=grid-template-columns:1fr"}>{row}</div>'
+             f'</section>{OV_END}')
+    crumbs = re.search(r'<p class="crumbs">.*?</p>', document, re.S)
+    at = crumbs.end() if crumbs else document.find('>', document.find('<body')) + 1
+    return document[:at] + block + document[at:]

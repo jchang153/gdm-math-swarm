@@ -896,7 +896,8 @@ def plan_restyle(base_files, unlisted, runs=None, site=None):
         if site_style.MARKER.encode() not in old:  # a page from before the shared theme: left as served
             legacy.append(name)
             continue
-        new = site_layout.apply(name, old.decode('utf-8')).encode('utf-8')
+        new = site_layout.apply(name, old.decode('utf-8'), read=lambda path, run=run: base_files.get(f'{run}/{path}'),
+                                overview=(site or SITES['gdm']).domain == 'lean').encode('utf-8')
         if new == old:
             continue
         replaced.append({'path': name, 'old': digest(old), 'new': digest(new)})

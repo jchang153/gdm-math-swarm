@@ -151,6 +151,10 @@ li.fresh { animation: fresh 1.6s ease-out; }
 @keyframes fresh { from { background: color-mix(in srgb, var(--accent) 18%, transparent); } to { background: transparent; } }
 #empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: var(--muted); }
 .hint { color: var(--faint); font-size: 11px; margin-top: 8px; }
+/* Embedded on the run page (results.html overview iframe, graph.html?embed=1): graph and playback only. */
+html.embed header, html.embed aside { display: none; }
+html.embed main { grid-template-columns: minmax(0, 1fr) !important; }
+html.embed #stage { min-height: 0; }
 @media (max-width: 820px) {
   main { grid-template-columns: 1fr; }
   #stage { min-height: 62vh; }
@@ -323,6 +327,10 @@ $("theme").onclick = () => {
   readColors();
 };
 try { const th = localStorage.getItem("sm-graph-theme"); if (th) document.documentElement.dataset.theme = th; } catch (e) {}
+// ---------- embed (run page overview: ?embed=1, optional &theme=light|dark from the host page) ----------
+(function () { const q = new URLSearchParams(location.search), root = document.documentElement;
+  if (q.get("embed") === "1") root.classList.add("embed");
+  const th = q.get("theme"); if (th === "light" || th === "dark") root.dataset.theme = th; })();
 
 // ---------- edge toggles ----------
 const showEdge = { dm: true, library: true, board: true, overseer: true };

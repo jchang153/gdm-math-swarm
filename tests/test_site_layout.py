@@ -92,5 +92,108 @@ class RestyleTest(unittest.TestCase):
         self.assertEqual(plan['replaced_pages'], [])
 
 
+def badge(agent, *kinds):
+    return (f'<span class="ab-id">{agent}<span class="ab-set">' + ''.join(
+        f'<span class="ab ab-{k}" title="{k}">x</span>' for k in kinds) + '</span></span>')
+
+
+RUN_ID = 'glmflash100-seeded-1ov-glm-120m-push-r1-20261104T042820Z'
+# A run page as published (Nov 2026): crumbs, id heading, intro with a stale series, tiles, tab bar, agent labels.
+RUN_PAGE = themed(
+    '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>r</title><style>body{}</style></head><body>'
+    f'<p class="crumbs"><a href="../index.html">All experiments</a></p><h1>{RUN_ID}</h1>'
+    f'<p><code>{RUN_ID}</code> · +0:00 to +2:00:01</p>'
+    '<section class="run-intro" aria-label="About this run"><style>.run-intro{}</style>'
+    '<p class="ri-cond">100 GLM 5.3 Flash solvers, 1 GLM 5.3 Flash overseer with check_proof and revert powers, '
+    'exploit planted at +3 min, 2 h.</p><p><span class="ri-k">Series</span><strong>Earlier pilots.</strong> '
+    'DeepSeek text.</p><figure><svg class="spark"></svg></figure></section><!--/run-intro-->'
+    '<section class="card" aria-label="Run summary"><div class="tile"><div class="k">Model</div>'
+    '<div class="v">z-ai/glm-5.3-flash</div><div class="s">route</div></div><div class="tile"><div class="k">'
+    'Prompt variant</div><div class="v">collab</div><div class="s">as recorded</div></div></section>'
+    '<nav class="tabs" aria-label="Run records"><a class="current" aria-current="page" href="#report">Report</a>'
+    '<a href="conference-view/index.html">Conference</a><a data-tab="simple-judge" '
+    'href="analysis/simple_judge/report.html">Behavior judge</a><a data-tab="incident" '
+    'href="analysis/incident/report.html">Incident report</a><a data-tab="storymap" '
+    'href="analysis/storymap/index.html">Story map</a><a href="inspect-view/index.html">Inspect</a></nav>'
+    '<ul class="tabhelp"><li>help</li></ul><main id="report"><h2>Agents</h2><table>'
+    + ''.join(f'<tr><td>{b}</td></tr>' for b in (
+        badge('agent-001', 'convert'), badge('agent-002', 'exploiter'), badge('agent-003', 'tempted', 'whistleblower'),
+        badge('agent-004', 'unaware'), badge('agent-005', 'seed'), badge('agent-006', 'overseer', 'whistleblower')))
+    + '</table><h2>Accepted submissions</h2><table><tr><td>' + badge('agent-001', 'convert') + '</td></tr><tr><td>'
+    + badge('agent-002', 'exploiter') + '</td></tr></table></main></body></html>')
+REPORT = {'counts': {'labelled': 4, 'cheating_any': 2, 'whistleblower': {'True': 2}, 'evaluation_aware': {'True': 0},
+                     'cheating_level': {'none': 1, 'considered': 1, 'explored': 0, 'submitted': 1, 'credited': 1,
+                                        'unclear': 0}}}
+
+
+class OverviewTest(unittest.TestCase):
+    """Run overview at the top of results.html (owner request and decisions, November 6, 2026)."""
+
+    def read(self, files):
+        return lambda path: files.get(path)
+
+    def test_overview_header_tabs_and_judge_card(self):
+        import json
+        files = {'analysis/simple_judge/report.json': json.dumps(REPORT).encode(),
+                 'analysis/storymap/graph.html': b'<!doctype html>'}
+        page = site_layout.apply(f'{RUN_ID}/results.html', RUN_PAGE, read=self.read(files))
+        self.assertEqual(page.count(site_layout.OV_START), 1)
+        self.assertLess(page.index(site_layout.OV_START), page.index(f'<h1>{RUN_ID}</h1>'))
+        self.assertIn('100 GLM 5.3 Flash solvers · 1 overseer (check + revert) · 2 h · push · r1', page)
+        self.assertIn('<li><b>Delivery</b>pushed messages</li>', page)
+        # Tabs: one bar, in the owner's order; every old link kept.
+        self.assertEqual(page.count('<nav class="tabs"'), 1)
+        labels = re.findall(r'>([^<>]+)</a>', re.search(r'<nav class="tabs".*?</nav>', page, re.S)[0])
+        self.assertEqual(labels, ['Overview', 'Behavior judge', 'Story map', 'Conference', 'Incident report',
+                                  'Report details', 'Inspect'])
+        # Category bar from the page's labels; judge card from report.json; graph embedded.
+        self.assertIn('aria-label="Agent labels: Exploiter 1, Convert 1, Tempted 1, Unaware / honest 1"', page)
+        self.assertIn('src="analysis/storymap/graph.html?embed=1"', page)
+        self.assertIn('<span>submitted</span>', page)
+        notable = re.findall(r'href="analysis/storymap/agents/(agent-\d+)\.html"', page)
+        self.assertEqual(notable, ['agent-002', 'agent-003', 'agent-006', 'agent-001'])
+        # Stale series text replaced from run_profile.SERIES; nothing else of the page lost.
+        self.assertNotIn('Earlier pilots', page)
+        self.assertIn('120-minute runs with pushed messages', page)
+        for kept in ('conference-view/index.html', 'inspect-view/index.html', '<h2>Agents</h2>', 'href="#report"'):
+            self.assertIn(kept, page)
+        self.assertEqual(site_layout.apply(f'{RUN_ID}/results.html', page, read=self.read(files)), page)
+
+    def test_without_graph_or_judge_and_page_only(self):
+        no_map = RUN_PAGE.replace('<a data-tab="storymap" href="analysis/storymap/index.html">Story map</a>', '')
+        page = site_layout.apply('results.html', no_map)
+        self.assertNotIn('<iframe', page)
+        self.assertIn('Standing fakes over the run', page)
+        self.assertIn('<svg class="spark">', page.split(site_layout.OV_END)[0])
+        self.assertIn('href="analysis/simple_judge/report.html">agent-002', page.replace('<code>', '')
+                      .replace('</code>', ''))
+        # Story map tab present, no read: the graph follows the tab (every story-mapped run has one).
+        self.assertIn('<iframe', site_layout.apply('results.html', RUN_PAGE))
+
+    def test_math_only(self):
+        self.assertNotIn(site_layout.OV_START, site_layout.apply('results.html', RUN_PAGE, overview=False))
+        coding = RUN_PAGE.replace('<h2>Agents</h2>', '<h2>Reference-test evaluator</h2>')
+        page = site_layout.apply('results.html', coding)
+        self.assertNotIn(site_layout.OV_START, page)
+        self.assertNotIn('.ov-head', page)
+
+    def test_viewer_has_embed_mode(self):
+        """The overview iframe loads graph.html?embed=1: the shared viewer hides its header and side panel."""
+        template = (ROOT / 'scripts' / 'storymap_graph_template.html').read_text(encoding='utf-8')
+        self.assertIn('html.embed header, html.embed aside { display: none; }', template)
+        self.assertIn('q.get("embed") === "1"', template)
+
+    def test_restyle_reads_run_files_and_respects_site(self):
+        import json
+        import publish_cloudflare as pc
+        base = {'experiments.json': json.dumps({'experiments': []}).encode(),
+                f'{RUN_ID}/results.html': RUN_PAGE.encode(),
+                f'{RUN_ID}/analysis/simple_judge/report.json': json.dumps(REPORT).encode()}
+        files, _ = pc.plan_restyle(base, set())
+        self.assertIn(b'<span>credited</span>', files[f'{RUN_ID}/results.html'])
+        files, _ = pc.plan_restyle(base, set(), site=pc.SITES['ib'])
+        self.assertNotIn(site_layout.OV_START.encode(), files[f'{RUN_ID}/results.html'])
+
+
 if __name__ == '__main__':
     unittest.main()

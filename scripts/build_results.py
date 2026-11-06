@@ -967,7 +967,7 @@ def render(results, title, inspect_logs=(), settings=None):
         '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
         f'content="width=device-width,initial-scale=1"><title>{esc(title or results["run"] + " results")}</title>'
         f'<style>{STYLE}</style></head><body>' + ''.join(body) + '</body></html>\n'),
-        run_clock.epoch(results['start_utc'])), results, settings))
+        run_clock.epoch(results['start_utc'])), results, settings), overview=results.get('domain') != 'code')
 
 
 # Times on the run page (owner, October 25, 2026): every time shows the offset from the run start and the
@@ -1021,6 +1021,15 @@ def with_agent_badges(page, run):
     return agent_badges.decorate_page(page, 'results.html', agent_badges.run_badges(run))
 
 
+def with_overview(page, run):
+    """results.html with the run overview rebuilt from the run's own files (site_layout.apply with ``read``):
+    the behavior judge's report.json and the interaction graph shell, after every tab and label is in place."""
+    def read(path):
+        target = run / path
+        return target.read_bytes() if target.is_file() and not target.is_symlink() else None
+    return site_layout.apply('results.html', page, read=read)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0],
                                      formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1069,6 +1078,7 @@ def main(argv=None):
             raise SystemExit(f'Refusing to write through a symlink: {target}')
         target.parent.mkdir(parents=True, exist_ok=True)
         page = faking_heatmap.add_to_run_page(page, run, target.parent)  # "Faking over time" (November 3, 2026)
+        page = with_overview(page, run)  # run overview (owner, November 6, 2026)
         temporary = target.with_name(target.name + '.tmp')
         temporary.write_text(page, encoding='utf-8')
         temporary.replace(target)
@@ -1089,6 +1099,7 @@ def main(argv=None):
         raise SystemExit('Refusing to replace existing ' + ', '.join(existing) + ' (pass --overwrite or --output-dir)')
     output.mkdir(parents=True, exist_ok=True)
     page = faking_heatmap.add_to_run_page(page, run, output)  # "Faking over time" (owner, November 3, 2026)
+    page = with_overview(page, run)  # run overview (owner, November 6, 2026)
     for path, text in zip(targets, (json_text, page)):
         if path.is_symlink():
             raise SystemExit(f'Refusing to write through a symlink: {path}')
