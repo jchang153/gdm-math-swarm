@@ -1651,6 +1651,10 @@ is being merged into main via `collab-env`.
      inserted into the live bytes). The 9 commsonly runs have overseer maps only, so their solvers have no stance or
      hover card. Backed up add-only to the logs dataset (graph.json + graph.html for 38 runs). Read-only restores
      (~11 GB) in the operator scratchpad `sgall/r/`, deletable.
+   - **Viewer 824aa94 (owner, Nov 6):** no pinning (a bubble click scrolls to and opens its message); drag to resize
+     the sidebar, the messages/events split and the follow panel (double-click resets; sizes kept in localStorage);
+     speed is a log slider 1x-1800x snapping to 1/5/15/60/300/1800. Viewer-only deploys `fd6c8b10` (math) and
+     `6afc55ee` (IB): only `_graph/viewer.{js,css}` changed, verify ok.
    - Local iteration: build the shared viewer from a scratch template copy with `--template COPY --viewer-dir
      SITE/_graph` and serve SITE with a static server; never edit the repo template while a deploy is running.
 
