@@ -10,7 +10,8 @@ private/.../prompts_overseer.md, are screened like the solver prompts). The expe
 public readings plus conference records, and screened like the other pages. Since November 6, 2026 (owner) graph.html
 is a shell loading the site's one shared viewer, _graph/viewer.js and _graph/viewer.css at the site root
 (``graph_assets``, built from scripts/storymap_graph_template.html), and fetching graph.json beside it; both per-run
-files are on the allowlist and screened.
+files are on the allowlist and screened. graph-thumb.json (owner, November 6, 2026: the catalogue's graph snapshot and
+hover timelapse; stances and fake flags per node, no text) is on the allowlist and screened too.
 Owner, November 2, 2026 (docs/plan.md): the taxonomy (codes, names, definitions, examples) is public; its committed
 copy research/analysis/storymap/taxonomy.md is rendered as taxonomy.html and its names appear on every page. Everything
 else in the folder stays local: the stage-0 timelines (timeline/, a private category), stage1/-stage3/, units/,
@@ -28,7 +29,7 @@ from incident_site import _insert
 
 STORYMAP_DIR = 'analysis/storymap'
 STORYMAP_FILES = ('index.html', 'events.html', 'validation.html', 'validation.md', 'taxonomy.html',
-                  'taxonomy_overseer.html', 'graph.html', 'graph.json')
+                  'taxonomy_overseer.html', 'graph.html', 'graph.json', 'graph-thumb.json')
 GRAPH_PAGE = 'graph.html'
 VIEWER_DIR = '_graph'  # site-root folder of the shared interaction-graph viewer (scripts/storymap_graph.py)
 VIEWER_FILES = ('viewer.js', 'viewer.css')

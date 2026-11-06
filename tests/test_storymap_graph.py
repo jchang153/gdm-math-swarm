@@ -372,5 +372,117 @@ class MessageTextTest(unittest.TestCase):
             self.assertIn(marker, html)
 
 
+class ThumbTest(unittest.TestCase):
+    """Owner, November 6, 2026 (docs/plan.md "Site redesign: run panes with the interaction graph"): graph-thumb.json
+    (schema storymap-graph-thumb/1) beside graph.json for the catalogue's end-of-run snapshot and hover timelapse."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.run_dir, _ = write_run(cls.tmp.name)
+        cls.graph = sg.build_graph(cls.run_dir, cls.run_dir / 'analysis' / 'storymap', None)
+        cls.thumb = sg.thumb(cls.graph)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_schema_and_shape(self):
+        t = self.thumb
+        self.assertEqual(set(t), {'schema', 'minutes', 'solvers', 'overseers', 'nodes', 'frames'})
+        self.assertEqual(t['schema'], 'storymap-graph-thumb/1')
+        self.assertEqual(t['minutes'], self.graph['minutes'])
+        self.assertEqual(t['nodes'], [{'id': n['id'], 'role': n['role']} for n in self.graph['nodes']])
+        self.assertEqual(t['solvers'], sum(n['role'] == 'solver' for n in self.graph['nodes']))
+        self.assertEqual(t['overseers'], sum(n['role'] == 'overseer' for n in self.graph['nodes']))
+        self.assertEqual(len(t['frames']), 24)
+        ts = [f['t'] for f in t['frames']]
+        self.assertEqual(ts, sorted(ts))
+        last = max([self.graph['minutes']] + [e['t'] for e in self.graph['events']])
+        self.assertAlmostEqual(ts[-1], last, places=2)
+        for f in t['frames']:
+            self.assertEqual(set(f), {'t', 's', 'f'})
+            self.assertEqual(len(f['s']), len(t['nodes']))
+            self.assertEqual(len(f['f']), len(t['nodes']))
+            self.assertTrue(set(f['s']) <= set('ncdxrs.'), f['s'])
+            self.assertTrue(set(f['f']) <= set('01'), f['f'])
+        self.assertNotIn(' ', sg.dumps(t))  # compact, no text
+
+    def test_final_frame_matches_graph(self):
+        final = self.thumb['frames'][-1]
+        t_end = final['t']
+        for i, n in enumerate(self.graph['nodes']):
+            rows = [s for s in self.graph['states'].get(n['id'], []) if s['t_from'] <= t_end]
+            want = sg.THUMB_CHAR.get(max(rows, key=lambda s: s['t_from'])['stance'], '.') if rows else '.'
+            self.assertEqual(final['s'][i], want, n['id'])
+            fakes = [e for e in self.graph['events'] if e['src'] == n['id'] and e['fake'] is True and (
+                e['type'] == 'submit' or (n['role'] == 'seed' and e['type'] == 'library_publish'))]
+            self.assertEqual(final['f'][i], '1' if fakes else '0', n['id'])
+        # the seed has no states; its fake library publish counts as its first fake
+        seed = [i for i, n in enumerate(self.graph['nodes']) if n['role'] == 'seed']
+        self.assertTrue(seed)
+        self.assertEqual(final['s'][seed[0]], '.')
+
+    def test_fake_flags_monotone(self):
+        frames = self.thumb['frames']
+        for a, b in zip(frames, frames[1:]):
+            self.assertTrue(all(x <= y for x, y in zip(a['f'], b['f'])))
+
+    def test_synthetic_stance_at_time(self):
+        graph = {'schema': sg.SCHEMA, 'minutes': 23, 'nodes': [
+            {'id': 'a', 'role': 'solver'}, {'id': 'o', 'role': 'overseer'}, {'id': 's', 'role': 'seed'}],
+            'states': {'a': [{'t_from': 0, 't_to': 10, 'stance': 'considering'},
+                             {'t_from': 10, 't_to': 23, 'stance': 'faking'}],
+                       'o': [{'t_from': 5, 't_to': 23, 'stance': 'rejected'}]},
+            'events': [{'t': 12, 'type': 'submit', 'src': 'a', 'fake': True},
+                       {'t': 1, 'type': 'library_publish', 'src': 's', 'fake': True},
+                       {'t': 2, 'type': 'library_publish', 'src': 'a', 'fake': True}]}
+        frames = sg.thumb(graph)['frames']
+        self.assertEqual([f['t'] for f in frames], list(range(24)))
+        self.assertEqual(frames[0], {'t': 0, 's': 'c..', 'f': '000'})
+        self.assertEqual(frames[1], {'t': 1, 's': 'c..', 'f': '001'})
+        self.assertEqual(frames[5]['s'], 'cr.')
+        self.assertEqual(frames[10]['s'], 'xr.')
+        self.assertEqual(frames[11]['f'], '001')  # a solver's fake library file is not its first fake
+        self.assertEqual(frames[12]['f'], '101')
+
+    def test_cli_writes_thumb_beside_graph_and_from_json(self):
+        out = Path(self.tmp.name) / 'cli'
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(sg.main(['--run-dir', str(self.run_dir), '--out', str(out / 'graph.html')]), 0)
+        written = (out / 'graph-thumb.json').read_text(encoding='utf-8')
+        self.assertEqual(json.loads(written), self.thumb)
+        other = Path(self.tmp.name) / 'elsewhere' / 'thumb.json'
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(sg.main(['--thumb-from-json', str(out / 'graph.json'), '--out-thumb', str(other)]), 0)
+        self.assertEqual(other.read_text(encoding='utf-8'), written)
+        (out / 'graph-thumb.json').unlink()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(sg.main(['--thumb-from-json', str(out / 'graph.json')]), 0)
+        self.assertEqual((out / 'graph-thumb.json').read_text(encoding='utf-8'), written)
+        bad = Path(self.tmp.name) / 'bad.json'
+        bad.write_text('{"schema": "other"}')
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            sg.main(['--thumb-from-json', str(bad)])
+
+    def test_story_map_render_writes_thumb(self):
+        out = Path(self.tmp.name) / 'pages'
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(view.main(['--map', str(self.run_dir / 'analysis' / 'storymap'), '--out', str(out),
+                                        '--taxonomy', '']), 0)
+        self.assertEqual(json.loads((out / 'graph-thumb.json').read_text()), self.thumb)
+
+    def test_site_allowlist(self):
+        import storymap_site
+        self.assertTrue(storymap_site.published('graph-thumb.json'))
+        self.assertFalse(storymap_site.storymap_excluded('analysis/storymap/graph-thumb.json'))
+        folder = Path(self.tmp.name) / 'public'
+        folder.mkdir(exist_ok=True)
+        (folder / 'index.html').write_text('<a href="graph.html">g</a>')
+        (folder / 'graph.html').write_text(sg.shell())
+        (folder / 'graph-thumb.json').write_text(sg.dumps(self.thumb))
+        self.assertIn('graph-thumb.json', storymap_site.public_files(folder, ()))
+
+
 if __name__ == '__main__':
     unittest.main()

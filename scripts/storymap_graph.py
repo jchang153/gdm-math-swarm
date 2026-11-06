@@ -41,6 +41,18 @@ viewer for the whole site, ``_graph/viewer.js`` and ``_graph/viewer.css`` at the
 RUN/analysis/storymap/graph.html), and fetches ``graph.json`` next to itself. Both viewer files are generated from
 the template (``viewer_files``), so a design change is one edit to the template plus a site deploy, with no per-run
 rebuild. ``--inline`` keeps the earlier self-contained single file (data inlined) for local previews.
+
+Catalogue thumbnail (owner, November 6, 2026; docs/plan.md "Site redesign: run panes with the interaction graph"):
+``graph-thumb.json`` beside graph.json, schema ``storymap-graph-thumb/1``, no text, built from graph.json alone
+(``thumb``; CLI ``--thumb-from-json``)::
+
+    {"schema", "minutes" (graph.json minutes), "solvers", "overseers", "nodes": [{"id", "role"}] (graph order),
+     "frames": [{"t", "s", "f"}]  (THUMB_FRAMES frames evenly over the viewer's time range; the last is its end)}
+
+``s`` has one character per node, its stance at ``t`` as the viewer reads it (stateAt: the last state with
+t_from <= t; overseer stances are already mapped by OV_STANCE): n none, c considering, d deferred, x faking,
+r rejected, s stopped, '.' no story-map state (or an unknown stance). ``f`` is '1' once the node has faked by ``t``
+(the viewer's first-fake rule: its first fake submission; the seed's fake library publish), else '0'.
 """
 from __future__ import annotations
 
@@ -67,6 +79,10 @@ MESSAGE_MAX = 8000
 MESSAGE_TYPES = ('dm', 'board_post', 'ov_board_post')
 OV_STANCE = {'not_looking': 'none', 'investigating_other': 'none', 'investigating_trick': 'considering',
              'enforcing': 'rejected', 'coordinating': 'rejected', 'idle': 'stopped'}
+THUMB_SCHEMA = 'storymap-graph-thumb/1'
+THUMB_JSON = 'graph-thumb.json'
+THUMB_FRAMES = 24
+THUMB_CHAR = {'none': 'n', 'considering': 'c', 'deferred': 'd', 'faking': 'x', 'rejected': 'r', 'stopped': 's'}
 TYPES = ('dm', 'board_post', 'board_read', 'library_publish', 'library_read', 'submit', 'credited', 'revert', 'check',
          'ov_board_post', 'ov_board_read')
 
@@ -407,6 +423,61 @@ def build_graph(run_dir, map_dir=None, overseer_map=None):
     return graph
 
 
+def _finite(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and abs(v) != float('inf')
+
+
+def thumb(graph, frames=THUMB_FRAMES):
+    """The graph-thumb.json object of a graph.json object (contract in the module docstring). Mirrors the viewer
+    (scripts/storymap_graph_template.html): its time range (tMin = min(0, first event, first state), tMax =
+    max(minutes, last event)), stateAt and first-fake rule."""
+    nodes = [{'id': n['id'], 'role': n.get('role') or 'solver'} for n in graph.get('nodes') or []]
+    ids = {n['id']: n for n in nodes}
+    events = sorted((e for e in graph.get('events') or [] if isinstance(e, dict) and _finite(e.get('t'))),
+                    key=lambda e: e['t'])
+    states = {}
+    for n in nodes:
+        rows = [s for s in (graph.get('states') or {}).get(n['id']) or [] if _finite(s.get('t_from'))]
+        states[n['id']] = sorted(rows, key=lambda s: s['t_from'])
+    first_fake = {}
+    for e in events:
+        a = ids.get(e.get('src'))
+        if not a or a['id'] in first_fake or e.get('fake') is not True:
+            continue
+        if e.get('type') == 'submit' or (a['role'] == 'seed' and e.get('type') == 'library_publish'):
+            first_fake[a['id']] = e['t']
+    t_min, t_max = 0.0, float(graph.get('minutes') or 0)
+    if events:
+        t_min, t_max = min(t_min, events[0]['t']), max(t_max, events[-1]['t'])
+    for rows in states.values():
+        if rows:
+            t_min = min(t_min, rows[0]['t_from'])
+    if t_max <= t_min:
+        t_max = t_min + 1
+    starts = {k: [s['t_from'] for s in rows] for k, rows in states.items()}
+    out = []
+    for k in range(frames):
+        t = t_max if k == frames - 1 else t_min + (t_max - t_min) * k / (frames - 1)
+        chars, fakes = [], []
+        for n in nodes:
+            i = bisect_right(starts[n['id']], t) - 1
+            chars.append(THUMB_CHAR.get(states[n['id']][i].get('stance'), '.') if i >= 0 else '.')
+            ff = first_fake.get(n['id'])
+            fakes.append('1' if ff is not None and ff <= t else '0')
+        out.append({'t': round(t, 2), 's': ''.join(chars), 'f': ''.join(fakes)})
+    return {'schema': THUMB_SCHEMA, 'minutes': graph.get('minutes'),
+            'solvers': sum(n['role'] == 'solver' for n in nodes),
+            'overseers': sum(n['role'] == 'overseer' for n in nodes), 'nodes': nodes, 'frames': out}
+
+
+def write_thumb(graph, path):
+    """Write graph-thumb.json (compact) for a graph.json object; return the path."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(dumps(thumb(graph)), encoding='utf-8')
+    return path
+
+
 def dumps(graph):
     return json.dumps(graph, ensure_ascii=False, separators=(',', ':'))
 
@@ -534,7 +605,18 @@ def main(argv=None):
                     f'(default {SHELL_PREFIX!r}: the site root\'s {VIEWER_DIR}/)')
     ap.add_argument('--viewer-dir', help=f'write the shared viewer (viewer.js, viewer.css) here, e.g. '
                     f'SITE/{VIEWER_DIR}')
+    ap.add_argument('--thumb-from-json', metavar='PATH', help=f'only build {THUMB_JSON} from an existing graph.json '
+                    '(no conference records needed); written next to it unless --out-thumb')
+    ap.add_argument('--out-thumb', metavar='PATH', help=f'{THUMB_JSON} path for --thumb-from-json')
     args = ap.parse_args(argv)
+    if args.thumb_from_json:
+        src = Path(args.thumb_from_json)
+        graph = json.loads(src.read_text(encoding='utf-8'))
+        if graph.get('schema') != SCHEMA:
+            ap.error(f'{src} is not a {SCHEMA} graph.json')
+        path = write_thumb(graph, args.out_thumb or src.with_name(THUMB_JSON))
+        print(f'wrote {path} ({path.stat().st_size} bytes)')
+        return 0
     if args.viewer_dir:
         for path in write_viewer(args.viewer_dir, args.template):
             print(f'wrote {path}')
@@ -551,6 +633,8 @@ def main(argv=None):
     if args.json:
         Path(args.json).parent.mkdir(parents=True, exist_ok=True)
         Path(args.json).write_text(dumps(graph), encoding='utf-8')
+        if args.no_html:
+            write_thumb(graph, Path(args.json).with_name(THUMB_JSON))
         print(f'wrote {args.json} ({len(graph["events"])} events, {len(graph["nodes"])} nodes)')
     if not args.no_html:
         out = Path(args.out) if args.out else run / 'analysis' / 'storymap' / 'graph.html'
@@ -564,6 +648,8 @@ def main(argv=None):
             out.with_name(GRAPH_JSON).write_text(dumps(graph), encoding='utf-8')
             out.write_text(shell(args.viewer_prefix), encoding='utf-8')
             print(f'wrote {out.with_name(GRAPH_JSON)}')
+        write_thumb(graph, out.with_name(THUMB_JSON))  # the catalogue's snapshot (also beside an inline page)
+        print(f'wrote {out.with_name(THUMB_JSON)}')
         print(f'wrote {out}')
     return 0
 
