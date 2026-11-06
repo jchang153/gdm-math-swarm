@@ -149,6 +149,11 @@ class CatalogueTests(unittest.TestCase):
         files = {f'{MATH}/results.html': page, f'{CODE}/results.html': page}
         math = cf.render_catalogue([entry(MATH, 2)], (), files)['index.html'].decode()
         self.assertIn('id="catalogue-labels">{"' + MATH + '":{"C":0,"E":1,', math)
+        self.assertNotIn('class="pane-graph', math)  # no graph files on this site
+        with_graph = {**files, f'{MATH}/analysis/storymap/graph-thumb.json': b'{}',
+                      f'{MATH}/analysis/storymap/graph.html': b'<!doctype html>'}
+        self.assertIn('<a class="pane-graph known" href="', cf.render_catalogue([entry(MATH, 2)], (), with_graph)
+                      ['index.html'].decode())
         ib = cf.render_catalogue([entry(CODE, 2)], (), files, site='ib')['index.html'].decode()
         self.assertNotIn('catalogue-labels', ib)  # the ImpossibleBench catalogue is unchanged
 

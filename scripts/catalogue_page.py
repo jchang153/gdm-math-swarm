@@ -435,7 +435,8 @@ PANE_STYLE = (
     'min-height:64px;display:flex;flex-direction:column;justify-content:center;overflow:hidden}'
     '.pane-pic .rc-body{padding:8px 8px 4px}.pane .rc-body .rc-fakes{display:none}'
     '.pane-graph{display:block;position:relative;cursor:pointer}.pane-graph[hidden]{display:none}'
-    '.pane-graph canvas{display:block;width:100%;aspect-ratio:16/11}'
+    '.pane-graph canvas{display:block;width:100%;aspect-ratio:16/11;'
+    'background:color-mix(in srgb,var(--line) 30%,transparent)}.pane-graph canvas.drawn{background:none}'
     '.pane-graph .pg-hint{position:absolute;right:6px;bottom:5px;font-size:10.5px;color:var(--muted);'
     'background:color-mix(in srgb,var(--card) 80%,transparent);padding:1px 5px;border-radius:6px;opacity:0;'
     'transition:opacity .2s}.pane-graph:hover .pg-hint,.pane-graph:focus-visible .pg-hint{opacity:1}'
@@ -606,7 +607,7 @@ const thumbs=new Map();
 function setupGraph(card,th){const e=byRun.get(card.dataset.run),a=card.querySelector('.pane-graph'),cv=a.querySelector('canvas');
  a.href=a.dataset.href;a.hidden=false;const body=card.querySelector('.pane-pic .rc-body');if(body)body.hidden=true;
  const btns=card.querySelector('.pane-btns');if(btns&&!btns.querySelector('.b-graph')){const b=document.createElement('a');b.className='b-graph';b.href=a.dataset.href;b.textContent='Interaction graph';btns.prepend(b);}
- thumbs.set(card.dataset.run,th);const last=th.frames.length-1,W=()=>cv.clientWidth||240,H=()=>cv.clientHeight||165;
+ thumbs.set(card.dataset.run,th);cv.classList.add('drawn');const last=th.frames.length-1,W=()=>cv.clientWidth||240,H=()=>cv.clientHeight||165;
  const still=()=>{const m=drawThumb(cv,th,last);clock(cv.getContext('2d'),W(),H(),m,colors());};
  still();cv._still=still;let raf=0;
  const play=()=>{if(reduce||th.frames.length<2)return;cancelAnimationFrame(raf);const t0=performance.now(),D=4000;
@@ -619,8 +620,12 @@ function setupGraph(card,th){const e=byRun.get(card.dataset.run),a=card.querySel
   d.innerHTML='<dt>agents who faked</dt><dd class="'+(faked?'bad':'')+'">'+faked+'<small> / '+th.nodes.filter(n=>n.role!=='seed').length+'</small></dd>';nums.insertBefore(d,nums.children[2]||null);nums.classList.add('n4');}
  const cats=catsFromBadges(th.nodes);if(cats){paneBadges.set(e.run,cats);paneFill(e);}}
 const io='IntersectionObserver' in window?new IntersectionObserver(es=>{for(const x of es){if(!x.isIntersecting)continue;io.unobserve(x.target);
- const card=x.target,a=card.querySelector('.pane-graph');read(a.dataset.thumb).then(t=>{if(validThumb(t))setupGraph(card,t);});}},{rootMargin:'600px 0px'}):null;
-if(/^https?:$/.test(location.protocol))for(const card of cards)if(card.querySelector('.pane-graph')){if(io)io.observe(card);}
+ const card=x.target,a=card.querySelector('.pane-graph');read(a.dataset.thumb).then(t=>{if(validThumb(t))setupGraph(card,t);else noGraph(card);});}},{rootMargin:'600px 0px'}):null;
+// A pane rendered with its graph placeholder (the run is known to have a snapshot) falls back to the sparkline when
+// the snapshot cannot be read or drawn here.
+function noGraph(card){const a=card.querySelector('.pane-graph.known');if(!a)return;a.hidden=true;const body=card.querySelector('.pane-pic .rc-body');if(body)body.hidden=false;}
+const http=/^https?:$/.test(location.protocol);
+for(const card of cards)if(card.querySelector('.pane-graph')){if(http&&io)io.observe(card);else noGraph(card);}
 const redraw=()=>{for(const cv of document.querySelectorAll('.pane-graph canvas'))if(cv._still)cv._still();};
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',redraw);
 new MutationObserver(redraw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});

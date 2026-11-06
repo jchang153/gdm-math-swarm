@@ -139,7 +139,8 @@ def build(runs, hosted=False, unlisted=None):
         except (ValueError, KeyError, TypeError, OSError) as error:
             warnings.append(f'{path.parent.name}: {type(error).__name__}')
     labels = local_label_counts(runs / e['run'] for e in entries)
-    return {**write_index(runs, entries, warnings, hosted=hosted, labels=labels), 'unlisted': hidden}
+    graphs = {e['run'] for e in entries if all((runs / e['run'] / f).is_file() for f in (GRAPH_THUMB, GRAPH_PAGE))}
+    return {**write_index(runs, entries, warnings, hosted=hosted, labels=labels, graphs=graphs), 'unlisted': hidden}
 
 
 # Agent story map (owner, November 2, 2026; docs/plan.md "Story maps on the public site"): a "Story map" link for
@@ -509,10 +510,15 @@ def local_label_counts(run_dirs):
     return out
 
 
-def run_pane(entry, scale):
+def run_pane(entry, scale, graphs=None):
     """One run pane: the title (its link, to the run report, covers the pane), spec chips, the picture (graph
     snapshot when the run has a story map and its thumb loads, else the fakes sparkline), agent categories (filled
-    by the script), big numbers, prominent buttons and a quiet row of the other records, and the card's Details."""
+    by the script), big numbers, prominent buttons and a quiet row of the other records, and the card's Details.
+
+    ``graphs``: the runs known to have graph-thumb.json and graph.html (owner, November 6, 2026: no sparkline flash
+    on reload). Their panes are rendered with the graph placeholder, its link and the Interaction graph button, the
+    sparkline kept hidden as the fallback if the thumb cannot be read; other runs get the sparkline directly. None:
+    not known, so story-mapped panes find their graph in the browser."""
     esc = html.escape
     p = valid_profile(entry)
     links = {k: v for k, v in entry['links'].items() if not hidden_link(k)}
@@ -522,14 +528,15 @@ def run_pane(entry, scale):
     head = (f'<a href="{esc(report, quote=True)}">{title}</a>' if report else title)
     body = run_profile.card_inner(p, scale) if p else (
         '<p class="rc-empty">Fakes over time are read from the run\'s own records in the browser.</p>')
-    graph = ''
-    if STORYMAP_LABEL in links:  # every story-mapped run has its graph (HANDOFF item 36); shown once the thumb loads
-        base = quote(entry['run'], safe='') + '/'
-        graph = (f'<a class="pane-graph" hidden data-thumb="{esc(base + GRAPH_THUMB, quote=True)}" '
-                 f'data-href="{esc(base + GRAPH_PAGE, quote=True)}" aria-label="Interaction graph of '
-                 f'{esc(short_title(entry), quote=True)}: open, hover to replay"><canvas></canvas>'
+    graph, known, base = '', graphs is not None and entry['run'] in graphs, quote(entry['run'], safe='') + '/'
+    if known or (graphs is None and STORYMAP_LABEL in links):
+        target = esc(base + GRAPH_PAGE, quote=True)
+        graph = (f'<a class="pane-graph{" known" if known else ""}"' + (f' href="{target}"' if known else ' hidden')
+                 + f' data-thumb="{esc(base + GRAPH_THUMB, quote=True)}" data-href="{target}" aria-label="Interaction '
+                 f'graph of {esc(short_title(entry), quote=True)}: open, hover to replay"><canvas></canvas>'
                  '<span class="pg-hint">hover replays · click opens</span></a>')
-    buttons = ''.join(f'<a href="{esc(links[k], quote=True)}">{esc(label)}</a>' for k, label in PRIMARY if k in links)
+    buttons = (f'<a class="b-graph" href="{esc(base + GRAPH_PAGE, quote=True)}">Interaction graph</a>' if known
+               else '') + ''.join(f'<a href="{esc(links[k], quote=True)}">{esc(label)}</a>' for k, label in PRIMARY if k in links)
     quiet = ''.join(f'<a href="{esc(links[k], quote=True)}">{esc(label)}</a>' for k, label in QUIET.items() if k in links)
     summary = entry.get('summary') if isinstance(entry.get('summary'), dict) else None
     accepted = summary.get('accepted_tasks') if summary else None
@@ -539,7 +546,8 @@ def run_pane(entry, scale):
     return (f'<article class="rc pane" data-run="{run}"><header class="rc-head"><h3 class="rc-title">{head}</h3>'
             '</header>'
             f'<p class="pane-spec"{" data-static=1" if p else ""}>{spec_chips(entry, p)}</p>'
-            f'<div class="pane-pic">{graph}<div class="rc-body" data-profile="{1 if p else 0}">{body}</div></div>'
+            f'<div class="pane-pic">{graph}<div class="rc-body"{" hidden" if known else ""} data-profile="{1 if p else 0}">'
+            f'{body}</div></div>'
             '<div class="pane-cat"><p class="cat-none">Behavior judge counts…</p></div>'
             f'<dl class="pane-nums"{" data-static=1" if p else ""}>{pane_numbers(entry, p)}</dl>'
             f'<p class="pane-btns">{buttons}</p>' + (f'<p class="pane-quiet">{quiet}</p>' if quiet else '')
@@ -567,7 +575,7 @@ GRAPH_LEGEND = ('<p class="legend lg-graph"><span>Graph pictures (agents by stan
                 '<span><i class="lg-star">★</i>seed</span></p>')
 
 
-def series_legend(members, scale, panes=False):
+def series_legend(members, scale, panes=False, graphs=None):
     """The series' picture legend: the fakes sparkline's (cards; panes without a story map) and, for panes with one,
     the interaction graph's stance colours."""
     spark = ('<p class="legend"><span><i class="lg-area"></i>standing fakes</span><span><i class="lg-cum"></i>'
@@ -575,15 +583,16 @@ def series_legend(members, scale, panes=False):
              f'shared scale: 0 to <b class="sc-fakes">{max(scale["fakes"], 1)}</b> fakes</span></p>')
     if not panes:
         return spark
-    graphs = sum(STORYMAP_LABEL in e['links'] for e in members)
-    return (GRAPH_LEGEND if graphs else '') + (spark if graphs < len(members) else '')
+    drawn = sum(e['run'] in graphs if graphs is not None else STORYMAP_LABEL in e['links'] for e in members)
+    return (GRAPH_LEGEND if drawn else '') + (spark if drawn < len(members) else '')
 
 
-def series_sections(groups, panes=False, lines=None):
-    """The series sections; ``lines``: one-line summaries by series key, shown under the heading (panes)."""
+def series_sections(groups, panes=False, lines=None, graphs=None):
+    """The series sections; ``lines``: one-line summaries by series key, shown under the heading (panes); ``graphs``:
+    see run_pane."""
     esc = html.escape
     lines = lines or {}
-    card = run_pane if panes else run_card
+    card = (lambda e, scale: run_pane(e, scale, graphs)) if panes else run_card
     out = []
     for key, title, text, members in groups:
         scale = run_profile.series_scale([valid_profile(e) for e in members])
@@ -592,7 +601,7 @@ def series_sections(groups, panes=False, lines=None):
                    f'<div class="series-head"><h2>{esc(title)}<span class="count">{count}</span></h2>'
                    + (f'<p class="series-line">{esc(lines[key])}</p>' if panes and lines.get(key) else '')
                    + f'<p>{esc(text)}</p>'
-                   + series_legend(members, scale, panes) + '</div>'
+                   + series_legend(members, scale, panes, graphs) + '</div>'
                    '<div class="rc-grid">' + ''.join(card(e, scale) for e in members) + '</div></section>')
     return ''.join(out)
 
@@ -634,7 +643,7 @@ def pane_script():
     return script
 
 
-def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=None):
+def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=None, graphs=None):
     """Render catalogue entries, including previously published remote runs. ``intro``: the module with the
     library's texts (default catalogue_intro, the math library; catalogue_intro_ib for the ImpossibleBench site)."""
     intro = intro or catalogue_intro
@@ -738,7 +747,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
                '<section id="compare-view" hidden aria-label="Compare runs"><div class="cmp-head"><h2>Compare runs</h2>'
                '<button type="button" id="close-compare" class="quiet">Close</button></div><div class="scroll" '
                'id="compare-table"></div></section>')
-            + '</section><div id="cards-view">' + series_sections(groups, panes, getattr(intro, 'SERIES_LINES', None)) + '</div>'
+            + '</section><div id="cards-view">' + series_sections(groups, panes, getattr(intro, 'SERIES_LINES', None), graphs) + '</div>'
             '<section id="table-view" class="block"><h2>All runs</h2>'
             '<div class="scroll"><table id="runs"><thead><tr>' + head + '</tr></thead><tbody>'
             + ''.join(rows) + '</tbody></table></div>'

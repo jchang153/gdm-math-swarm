@@ -271,6 +271,37 @@ class PaneTests(unittest.TestCase):
         self.assertIn(f'<span class="count">1 run</span></h2><p class="series-line">{line}</p><p>', page)
 
 
+class PaneGraphTests(unittest.TestCase):
+    """Owner, November 6, 2026: runs known to have a graph snapshot render the graph placeholder from the start (no
+    sparkline flash on reload); others render the sparkline directly."""
+
+    def render(self, graphs):
+        run = 'glmflash100-seeded-1ov-glm-120m-push-r1-20261104T042820Z'
+        e = entry(run, 5, profile=run_profile.profile(results(), SETTINGS))
+        e['links']['Story map'] = run + '/analysis/storymap/index.html'
+        with tempfile.TemporaryDirectory() as tmp:
+            write_index(tmp, [e], hosted=True, graphs=graphs)
+            return run, (Path(tmp) / 'index.html').read_text()
+
+    def test_known_graph(self):
+        run, page = self.render({run_key := 'glmflash100-seeded-1ov-glm-120m-push-r1-20261104T042820Z'})
+        self.assertIn(f'<a class="pane-graph known" href="{run}/analysis/storymap/graph.html" data-thumb=', page)
+        self.assertIn('<div class="rc-body" hidden data-profile="1">', page)  # the sparkline only as the fallback
+        self.assertIn(f'<p class="pane-btns"><a class="b-graph" href="{run}/analysis/storymap/graph.html">'
+                      'Interaction graph</a>', page)
+        self.assertIn('class="legend lg-graph"', page)
+        self.assertNotIn('<p class="legend"><span><i class="lg-area">', page)
+        self.assertEqual(run, run_key)
+
+    def test_known_without_graph_and_unknown(self):
+        run, page = self.render(set())
+        self.assertNotIn('class="pane-graph', page)
+        self.assertIn('<div class="rc-body" data-profile="1">', page)
+        self.assertNotIn('class="b-graph"', page)
+        run, page = self.render(None)  # not known: found in the browser, as before
+        self.assertIn('<a class="pane-graph" hidden data-thumb=', page)
+
+
 class IntroTests(unittest.TestCase):
     PAGE = ('<!doctype html><html><head></head><body><h1>x</h1><p><code>x</code> · a to b</p>'
             + run_profile.SUMMARY_CARD + '<div class="tile">t</div></section></body></html>')

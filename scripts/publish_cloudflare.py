@@ -101,8 +101,8 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_experiment_index import (STORYMAP_LABEL, STORYMAP_TARGET, agent_label_counts, unlisted_runs,  # noqa: E402
-                                    with_storymap_link, write_index)
+from build_experiment_index import (GRAPH_PAGE, GRAPH_THUMB, STORYMAP_LABEL, STORYMAP_TARGET,  # noqa: E402
+                                    agent_label_counts, unlisted_runs, with_storymap_link, write_index)
 import dataset_logs  # noqa: E402
 import hf_visibility  # noqa: E402
 import site_layout  # noqa: E402
@@ -749,7 +749,11 @@ def render_catalogue(entries, unlisted, files=None, site=None):
                 counts = agent_label_counts(page) if isinstance(page, (bytes, str)) else None
                 if counts:
                     labels[e['run']] = counts
-            write_index(tmp, entries, hosted=True, labels=labels)
+            # Runs with an interaction-graph snapshot: their panes render the graph, not the sparkline, from the start.
+            graphs = None if files is None else {
+                e['run'] for e in entries
+                if all(f'{e["run"]}/{name}' in files for name in (GRAPH_THUMB, GRAPH_PAGE))}
+            write_index(tmp, entries, hosted=True, labels=labels, graphs=graphs)
         else:
             write_index(tmp, entries, hosted=True, intro=importlib.import_module(site.intro))
         return {name: (Path(tmp) / name).read_bytes() for name in ('index.html', 'experiments.json')}
