@@ -187,5 +187,82 @@ class GraphContractTest(unittest.TestCase):
         self.assertIn('<a href="graph.html"', (out / 'index.html').read_text())
 
 
+class AutoGraphOnRenderTest(unittest.TestCase):
+    """Owner, November 6, 2026: every story-map render (view.main, also run by scripts/run_storymap.py and used for
+    the public copy) builds graph.html with scripts/storymap_graph.py and links it; missing inputs skip with a log
+    line and leave the index as before."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.run_dir, _ = write_run(self.tmp.name)
+        self.smap = self.run_dir / 'analysis' / 'storymap'
+        self.out = Path(self.tmp.name) / 'pages'
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def render(self, *extra, smap=None):
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = view.main(['--map', str(smap or self.smap), '--out', str(self.out), '--taxonomy', '', *extra])
+        self.assertEqual(code, 0)
+        return err.getvalue()
+
+    def test_render_builds_graph_like_the_cli_and_links_it(self):
+        log = self.render()
+        self.assertIn('interaction graph: wrote', log)
+        page = (self.out / 'graph.html').read_text(encoding='utf-8')
+        cli = Path(self.tmp.name) / 'cli' / 'graph.html'
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(sg.main(['--run-dir', str(self.run_dir), '--out', str(cli)]), 0)
+        self.assertEqual(page, cli.read_text(encoding='utf-8'))  # same output as the unchanged CLI
+        self.assertEqual((self.out / 'index.html').read_text().count('<a href="graph.html"'), 1)
+
+    def test_explicit_run_dir(self):
+        moved = Path(self.tmp.name) / 'elsewhere' / 'map'
+        moved.parent.mkdir()
+        self.smap.rename(moved)
+        self.assertIn('run folder unknown', self.render(smap=moved))
+        self.assertFalse((self.out / 'graph.html').exists())
+        self.render('--run-dir', str(self.run_dir), smap=moved)
+        self.assertTrue((self.out / 'graph.html').is_file())
+        self.assertIn('href="graph.html"', (self.out / 'index.html').read_text())
+
+    def test_no_conference_db_skips_gracefully(self):
+        (self.run_dir / 'conference' / 'state.sqlite').unlink()
+        log = self.render()
+        self.assertIn('interaction graph: skipped (no conference database', log)
+        self.assertFalse((self.out / 'graph.html').exists())
+        self.assertNotIn('graph.html', (self.out / 'index.html').read_text())
+
+    def test_no_map_records_skips(self):
+        empty = self.run_dir / 'analysis' / 'empty'
+        empty.mkdir()
+        self.assertEqual(view.ensure_graph(empty, self.out, log=self.log_to(lines := [])), None)
+        self.assertIn('no story map records', lines[0])
+
+    def test_no_graph_link_builds_nothing(self):
+        self.assertNotIn('interaction graph', self.render('--no-graph-link'))
+        self.assertFalse((self.out / 'graph.html').exists())
+        self.assertNotIn('graph.html', (self.out / 'index.html').read_text())
+
+    def test_build_failure_does_not_block_the_story_map(self):
+        def boom():
+            raise RuntimeError('broken')
+        orig = view._graph_module
+        view._graph_module = boom
+        try:
+            log = self.render()
+        finally:
+            view._graph_module = orig
+        self.assertIn('skipped (build failed: RuntimeError: broken)', log)
+        self.assertTrue((self.out / 'index.html').is_file())
+        self.assertNotIn('graph.html', (self.out / 'index.html').read_text())
+
+    @staticmethod
+    def log_to(lines):
+        return lines.append
+
+
 if __name__ == '__main__':
     unittest.main()

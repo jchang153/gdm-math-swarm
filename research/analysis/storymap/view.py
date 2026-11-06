@@ -2300,6 +2300,74 @@ def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=
     return written
 
 
+GRAPH_SCRIPT = REPO / "scripts" / "storymap_graph.py"
+
+
+def _graph_module():
+    """scripts/storymap_graph.py (loaded by path: scripts/ need not be on sys.path)."""
+    mod = sys.modules.get("storymap_graph")
+    if mod is not None:
+        return mod
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("storymap_graph", GRAPH_SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["storymap_graph"] = mod
+    try:
+        spec.loader.exec_module(mod)
+    except BaseException:
+        sys.modules.pop("storymap_graph", None)
+        raise
+    return mod
+
+
+def infer_run_dir(map_dir):
+    """RUN for a map folder RUN/analysis/<name> (the story map's usual place), else None."""
+    map_dir = Path(map_dir).resolve()
+    return map_dir.parents[1] if map_dir.parent.name == "analysis" and len(map_dir.parents) > 1 else None
+
+
+def ensure_graph(map_dir, out, run_dir=None, overseer_map=None, log=None):
+    """Build the experimental interaction graph (graph.html) into ``out`` with scripts/storymap_graph.py, offline
+    (owner, November 6, 2026: every story-map render includes the graph). ``run_dir`` defaults to RUN for a map
+    folder RUN/analysis/storymap; ``overseer_map`` to storymap_graph's own default (RUN/analysis/storymap-overseer
+    when it has stage records). Skips with one log line, leaving ``out`` untouched, when the run folder, its
+    conference database or the story map records are missing, or the build fails. Returns the graph.html path or
+    None."""
+    log = log or (lambda message: print(message, file=sys.stderr, flush=True))
+    map_dir, out = Path(map_dir), Path(out)
+    run_dir = Path(run_dir) if run_dir else infer_run_dir(map_dir)
+    if run_dir is None:
+        log(f"interaction graph: skipped (run folder unknown for {map_dir}; pass --run-dir)")
+        return None
+    db = run_dir / "conference" / "state.sqlite"
+    if not db.is_file():
+        log(f"interaction graph: skipped (no conference database at {db})")
+        return None
+    om = Path(overseer_map) if overseer_map else None
+    if not (any((map_dir / "stage1").glob("*.jsonl")) or (map_dir / "map.jsonl").is_file()
+            or (om is not None and (om / "stage1").is_dir())
+            or (run_dir / "analysis" / "storymap-overseer" / "stage1").is_dir()):
+        log(f"interaction graph: skipped (no story map records in {map_dir})")
+        return None
+    target = out / GRAPH_PAGE
+    argv = ["--run-dir", str(run_dir), "--map", str(map_dir), "--out", str(target)]
+    if om is not None:
+        argv += ["--overseer-map", str(om)]
+    try:
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = _graph_module().main(argv)
+    except Exception as exc:  # noqa: BLE001  (the graph is optional: never block the story map)
+        log(f"interaction graph: skipped (build failed: {type(exc).__name__}: {exc})")
+        return None
+    if code:
+        log(f"interaction graph: skipped (storymap_graph exit {code})")
+        return None
+    log(f"interaction graph: wrote {target}")
+    return target
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--map", required=True, help="stage outputs dir (runs/<id>/analysis/storymap)")
@@ -2315,8 +2383,13 @@ def main(argv=None):
                     "overseer_context.json)")
     ap.add_argument("--graph-link", action=argparse.BooleanOptionalAction, default=None,
                     help="link the index to the experimental interaction graph (graph.html; default: when it exists "
-                         "in the output dir)")
+                         "in the output dir). Unless --no-graph-link, graph.html is first (re)built into the output "
+                         "dir by scripts/storymap_graph.py when the run's conference records are at hand")
+    ap.add_argument("--run-dir", help="run folder for the interaction graph (default: RUN for --map "
+                    "RUN/analysis/storymap)")
     args = ap.parse_args(argv)
+    if args.graph_link is not False:
+        ensure_graph(args.map, args.out or args.map, args.run_dir, args.overseer_map)
     written = build(args.map, args.timeline, args.out, args.taxonomy, evidence=not args.no_evidence,
                     minutes=args.minutes, overseer_map=args.overseer_map, overseer_timeline=args.overseer_timeline,
                     graph=args.graph_link)

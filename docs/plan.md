@@ -2214,3 +2214,8 @@ most fakers stopped after the overseer's reverts and warnings. The page legend s
   Restored: no exploit idea in the centre, rejected left, faking right, deferred top-left, considering top-right,
   stopped below, overseers above; the outer zones sit on a ring whose radius follows the centre zone's current size,
   so zones do not overlap. The container behaviour, red dot and keys stay.
+- Owner request, November 6, 2026 (relayed by the coordinating agent): build the interaction graph automatically
+  whenever a run's story map is built or rendered for the site. Every story-map render (`view` main, hence
+  `scripts/run_storymap.py` and the public-copy render of docs/experiment-library.md) first rebuilds `graph.html` into
+  the output folder with `scripts/storymap_graph.py` (offline, unchanged CLI and output) and so links it; a missing
+  run folder, conference database or story-map records skips the graph with one log line; `--no-graph-link` opts out.
