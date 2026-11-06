@@ -172,8 +172,10 @@ class BuildResultsTest(unittest.TestCase):
         self.assertNotIn('<dt>rejected</dt>', gloss)
         self.assertIn('Stopped by the run clock (max run seconds).', gloss)
         self.assertIn('<span class="badge b-good">genuine</span>', page)
-        # The only script is the shared theme toggle.
-        self.assertNotIn('<script', re.sub(r'<script id="site-theme-toggle">.*?</script>', '', page))
+        # The only scripts are the shared theme toggle and the overview's in-page tabs (owner, November 6, 2026).
+        self.assertIn('history.pushState', page)
+        self.assertNotIn('<script', re.sub(r'<script id="site-theme-toggle">.*?</script>|<!--ov:start-->.*?<!--ov:end-->',
+                                           '', page, flags=re.S))
         self.assertLess(page.index('<meta charset="utf-8">'), 1024)
         # results.json keeps its schema: no layout-only fields.
         self.assertNotIn('inspect_logs', data)

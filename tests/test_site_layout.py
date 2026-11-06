@@ -149,7 +149,7 @@ class OverviewTest(unittest.TestCase):
         # Category bar from the page's labels; judge card from report.json; graph embedded.
         self.assertIn('aria-label="Agent labels: Exploiter 1, Convert 1, Tempted 1, Unaware / honest 1"', page)
         self.assertIn('src="analysis/storymap/graph.html?embed=1&amp;t=end"', page)  # opens on the end state
-        self.assertIn('nav.tabs{display:flex;flex-wrap:nowrap;overflow-x:auto', page)  # one swipeable row on phones
+        self.assertIn('#ov-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto', page)  # one swipeable row on phones
         self.assertIn('<span>submitted</span>', page)
         notable = re.findall(r'href="analysis/storymap/agents/(agent-\d+)\.html"', page)
         self.assertEqual(notable, ['agent-002', 'agent-003', 'agent-006', 'agent-001'])
@@ -159,6 +159,35 @@ class OverviewTest(unittest.TestCase):
         for kept in ('conference-view/index.html', 'inspect-view/index.html', '<h2>Agents</h2>', 'href="#report"'):
             self.assertIn(kept, page)
         self.assertEqual(site_layout.apply(f'{RUN_ID}/results.html', page, read=self.read(files)), page)
+
+    def test_tabs_switch_panels_in_place(self):
+        """Owner, November 6, 2026: one page whose tabs switch panels instead of leaving the page."""
+        page = site_layout.apply(f'{RUN_ID}/results.html', RUN_PAGE)
+        nav = re.search(r'<nav class="tabs" id="ov-tabs"[^>]*>(.*?)</nav>', page, re.S)[1]
+        self.assertEqual(re.findall(r'data-ov="([^"]+)"', nav), ['overview', 'report'])  # the page's own panels
+        # The other tabs keep their exact markup (simple_judge_site / storymap_site find them by it); the script
+        # keys their panels by href prefix.
+        self.assertIn('<a data-tab="storymap" href="analysis/storymap/index.html">Story map</a>', nav)
+        for prefix in ('judge:"analysis/simple_judge/"', '"judge-rubric":"analysis/judge/"', 'inspect:"inspect-view/"'):
+            self.assertIn(prefix, page)
+        # Real hrefs kept: without JavaScript (or with a modifier click) the tabs are plain links.
+        for href in ('#overview', 'analysis/simple_judge/report.html', 'analysis/storymap/index.html',
+                     'conference-view/index.html', 'analysis/incident/report.html', '#report', 'inspect-view/index.html'):
+            self.assertIn(f'href="{href}"', nav)
+        # Tab bar outside the header card (sticky over the whole page), then the overview row, the panel, the
+        # script and the end marker that the panel CSS hides the report body after.
+        order = [page.index(x) for x in ('class="ov-head"', 'id="ov-tabs"', 'class="ov-row"', 'id="ov-panel" hidden',
+                                         'history.pushState', 'id="ov-end"', site_layout.OV_END)]
+        self.assertEqual(order, sorted(order))
+        self.assertIn('html[data-ov-tab]:not([data-ov-tab="report"]) #ov-end~*:not(.site-theme-toggle){display:none}',
+                      page)
+        self.assertNotIn('data-ov-tab', page.split('<body', 1)[1].split('<script>', 1)[0])  # no JS: all visible
+        self.assertEqual(site_layout.apply(f'{RUN_ID}/results.html', page), page)  # idempotent
+        # A rubric-3.1 judge tab gets its own panel next to the behavior judge.
+        rubric = RUN_PAGE.replace('Behavior judge</a>', 'Behavior judge</a><a data-tab="judge-rubric-3-1" '
+                                  'href="analysis/judge/report.html">Behavior judge (rubric 3.1)</a>')
+        self.assertIn('Behavior judge</a><a data-tab="judge-rubric-3-1" href="analysis/judge/report.html">',
+                      site_layout.apply('results.html', rubric))
 
     def test_without_graph_or_judge_and_page_only(self):
         no_map = RUN_PAGE.replace('<a data-tab="storymap" href="analysis/storymap/index.html">Story map</a>', '')

@@ -122,7 +122,7 @@ def apply(name, document, read=None, overview=True):
                 document = _results_markup(document)
                 if overview:
                     document = _overview(document, read)
-                    css = css + (OVERVIEW_CSS if OV_START in document else '')
+                    css = css + (OVERVIEW_CSS + TABS_CSS if OV_START in document else '')
             return _insert_style(document, css)
     return document
 
@@ -175,7 +175,6 @@ OVERVIEW_CSS = (
     '.ov-bar>.ab-unlabelled{box-shadow:inset 0 0 0 1.5px currentColor}'
     '.ov-key{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;color:var(--muted);margin:0}'
     '.ov-key span{white-space:nowrap}.ov-key .ab{margin-right:4px}.ov-key strong{color:var(--fg)}'
-    '.ov-head nav.tabs{margin:14px 0 0}'
     '.ov-row{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,1fr);gap:14px;margin:14px 0 0;'
     'align-items:stretch}'
     '.ov-pane{border:1px solid var(--line);border-radius:14px;background:var(--card);min-width:0;'
@@ -201,9 +200,7 @@ OVERVIEW_CSS = (
     '.ov-judge .ov-src{font-size:12px;color:var(--muted);margin:4px 14px 10px;max-width:none}'
     '.ov-judge .ov-more{margin:auto 14px 10px;font-size:13px;font-weight:600}'
     '@media (max-width:900px){.ov-row{grid-template-columns:minmax(0,1fr)}}'
-    + _PHONE + f'.ov-head{{padding:14px 14px 12px}}.ov-head nav.tabs{{display:flex;flex-wrap:nowrap;overflow-x:auto;'
-    f'-webkit-overflow-scrolling:touch;scrollbar-width:none;margin-right:-14px;padding-right:14px}}'
-    f'.ov-head nav.tabs::-webkit-scrollbar{{display:none}}.ov-head nav.tabs>*{{flex:none;white-space:nowrap}}.ov-graph iframe{{height:min({GRAPH_HEIGHT}px,72vh)}}'
+    + _PHONE + f'.ov-head{{padding:14px 14px 12px}}.ov-graph iframe{{height:min({GRAPH_HEIGHT}px,72vh)}}'
     '.ov-bar{height:26px}}'
 )
 
@@ -231,11 +228,11 @@ def _tab_key(item):
 def _tabs(nav):
     """The run-page tab bar in the overview order: Overview (this page) first, the old Report tab as Report
     details (#report), every other link kept as it was."""
-    opening = re.match(r'<nav[^>]*>', nav)[0]
-    items = [m for m in _TAB_LINK.findall(nav)
-             if _tab_key(m) not in ('overview', 'details', 'report')]
-    items += ['<a class="current" aria-current="page" data-tab="overview" href="#overview">Overview</a>',
-              '<a data-tab="details" href="#report">Report details</a>']
+    opening = '<nav class="tabs" id="ov-tabs" aria-label="Run records">'
+    items = [m for m in _TAB_LINK.findall(nav) if _tab_key(m) not in ('overview', 'details', 'report')]
+    # Other tabs keep their exact markup (other generators find them by it); the page script keys them by href.
+    items += ['<a class="current" aria-current="page" data-tab="overview" data-ov="overview" href="#overview">'
+              'Overview</a>', '<a data-tab="details" data-ov="report" href="#report">Report details</a>']
     rank = {k: i for i, k in enumerate(_TAB_ORDER)}
     items.sort(key=lambda m: rank.get(_tab_key(m), rank['judge'] if _tab_key(m).startswith('judge') else len(rank)))
     return opening + ''.join(items) + '</nav>'
@@ -488,9 +485,99 @@ def _overview(document, read=None):
              f'<p class="ov-title" role="heading" aria-level="1">{html.escape(title)}</p>'
              f'<p class="ov-id">{html.escape(run)}</p>'
              '<ul class="ov-chips">' + ''.join(f'<li><b>{html.escape(k)}</b>{html.escape(v)}</li>' for k, v in chips)
-             + '</ul>' + bar + _tabs(nav) + '</div>'
-             f'<div class="ov-row"{"" if judged else " style=grid-template-columns:1fr"}>{row}</div>'
-             f'</section>{OV_END}')
+             + '</ul>' + bar + '</div></section>' + _tabs(nav)
+             + f'<div class="ov-row"{"" if judged else " style=grid-template-columns:1fr"}>{row}</div>'
+             '<div id="ov-panel" hidden><div class="ov-pbar"><strong id="ov-ptitle"></strong>'
+             '<a id="ov-popen" href="#" target="_blank" rel="noopener">Open in new tab ↗</a></div>'
+             f'<div id="ov-frames"></div></div>{TABS_JS}<i id="ov-end" hidden></i>{OV_END}')
     crumbs = re.search(r'<p class="crumbs">.*?</p>', document, re.S)
     at = crumbs.end() if crumbs else document.find('>', document.find('<body')) + 1
     return document[:at] + block + document[at:]
+
+
+# ------------------------------------------------------------------------------------------- in-page tabs
+# Owner request, November 6, 2026: "make that one page so it cleanly tabs to those instead of redirecting".
+# The tab bar switches panels in place: Overview (the overview row only), Report details (the report body below
+# the overview) and, loaded lazily into a same-origin iframe that fills the viewport below the sticky tab bar,
+# Behavior judge, the rubric-3.1 judge, Story map, Conference, Incident report and Inspect. The hash selects the
+# tab (#overview, #report, #judge, #judge-rubric, #storymap, #conference, #incident, #inspect) and back/forward
+# works; tabs keep their real hrefs (middle-click / cmd-click open the page, and without JavaScript they are plain
+# links). Target pages are unchanged on disk: on each load inside the panel their own back-link line is hidden
+# when it only repeats the run's navigation, links back to the run page or the library open at the top, and links
+# to another tab's pages switch to that tab. Links in the overview to a tab's pages (story-map agents, the judge
+# report) open in that tab's panel.
+
+TABS_CSS = (
+    '#ov-tabs{position:sticky;top:0;z-index:30;background:var(--bg);margin:10px 0 0;padding:6px 0 0;'
+    'box-shadow:0 1px 0 var(--line)}'
+    '#ov-panel{margin:0}#ov-panel[hidden]{display:none}'
+    '.ov-pbar{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:6px 2px;'
+    'font-size:13px}.ov-pbar strong{font-size:14px}.ov-pbar a{font-weight:600;text-decoration:none;white-space:nowrap}'
+    '#ov-frames iframe{display:block;width:100%;height:calc(100vh - var(--ov-top,56px) - 36px);'
+    'height:calc(100dvh - var(--ov-top,56px) - 36px);min-height:360px;border:1px solid var(--line);'
+    'border-radius:10px;background:var(--bg)}'
+    'html[data-ov-tab]:not([data-ov-tab="report"]) #ov-end~*:not(.site-theme-toggle){display:none}'
+    'html[data-ov-tab]:not([data-ov-tab="overview"]) .ov-row{display:none}'
+    + _PHONE + '#ov-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;'
+    'scrollbar-width:none;margin-left:-16px;margin-right:-16px;padding-left:16px;padding-right:16px}'
+    '#ov-tabs::-webkit-scrollbar{display:none}#ov-tabs>*{flex:none;white-space:nowrap}}'
+)
+
+# Inline, right after the panel: runs before the rest of the page is parsed, so the chosen tab shows without a
+# flash of the other content. ES5, no globals, no network beyond the panel pages themselves.
+TABS_JS = r'''<script>(function(){
+var R=document.documentElement,nav=document.getElementById("ov-tabs"),panel=document.getElementById("ov-panel");
+if(!nav||!panel||!window.history||!history.replaceState)return;
+var frames=document.getElementById("ov-frames"),title=document.getElementById("ov-ptitle"),
+open=document.getElementById("ov-popen"),base=location.href.replace(/[#?].*$/,"").replace(/[^\/]*$/,""),
+tabs={},order=[],cur=null,
+PRE={judge:"analysis/simple_judge/","judge-rubric":"analysis/judge/",storymap:"analysis/storymap/",
+conference:"conference-view/",incident:"analysis/incident/",inspect:"inspect-view/"};
+function abs(u){try{return new URL(u,base).href;}catch(e){return null;}}
+function keyOf(u){if(!u||u.indexOf(base)!==0)return null;var rel=u.slice(base.length);
+ for(var k in PRE)if(rel.indexOf(PRE[k])===0)return k;return null;}
+function tabOf(u){var k=keyOf(u);return k&&tabs[k]?k:null;}
+[].forEach.call(nav.querySelectorAll("a[href]"),function(a){var k=a.getAttribute("data-ov")||keyOf(abs(a.getAttribute("href")));
+ if(!k||tabs[k])return;a.setAttribute("data-ov",k);tabs[k]={a:a,href:a.getAttribute("href"),label:a.textContent};order.push(k);});
+function top(){var h=nav.getBoundingClientRect().height;R.style.setProperty("--ov-top",Math.ceil(h)+"px");return h;}
+function fix(f){var d,k=f.getAttribute("data-ov");try{d=f.contentDocument;}catch(e){return;}if(!d||!d.body)return;
+ var t=R.getAttribute("data-theme");if(t)d.documentElement.setAttribute("data-theme",t);
+ else d.documentElement.removeAttribute("data-theme");
+ if(!d.getElementById("ov-embed")){var s=d.createElement("style");s.id="ov-embed";
+  s.textContent=".site-theme-toggle{display:none!important}";(d.head||d.body).appendChild(s);}
+ [].forEach.call(d.querySelectorAll("p,nav"),function(p){var as=p.querySelectorAll("a");if(!as.length||p.closest("main article"))return;
+  var txt=p.textContent,own=0;[].forEach.call(as,function(a){var u=abs(a.href);txt=txt.replace(a.textContent,"");
+   if(u&&(u.indexOf(base)!==0||/results\.html$/.test(u)||/^(?:inspect-view|conference-view)\/(?:index\.html)?$/.test(u.slice(base.length))||(tabOf(u)&&tabOf(u)!==k)))own++;});
+  if(own===as.length&&!/[^\s·|\/-]/.test(txt)&&p.offsetTop<400)p.style.display="none";});
+ if(!d.__ovClicks){d.__ovClicks=1;d.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[href]");
+  if(!a||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||a.target)return;
+  var u=abs(a.href),here=f.contentWindow.location.href.replace(/#.*$/,"");if(!u||u.replace(/#.*$/,"")===here)return;
+  var j=tabOf(u);if(j&&j!==k){e.preventDefault();go(j,u,true);}
+  else if(!j&&(u.indexOf(location.origin)!==0||u.indexOf(base)!==0||/results\.html(?:#.*)?$/.test(u))){e.preventDefault();
+   window.location.href=u;}},true);}}
+function frame(k,u){var t=tabs[k];if(!t.f){t.f=document.createElement("iframe");t.f.title=t.label;
+ t.f.setAttribute("data-ov",k);t.f.src=u||t.href;t.f.addEventListener("load",function(){fix(t.f);});frames.appendChild(t.f);}
+ else if(u&&abs(u)!==t.f.src){try{t.f.contentWindow.location.replace(abs(u));}catch(e){t.f.src=u;}}return t.f;}
+function show(k,u){if(!tabs[k])k="overview";cur=k;R.setAttribute("data-ov-tab",k);
+ order.forEach(function(x){var a=tabs[x].a;if(x===k){a.classList.add("current");a.setAttribute("aria-current","page");}
+  else{a.classList.remove("current");a.removeAttribute("aria-current");}});
+ if(nav.scrollWidth>nav.clientWidth){var at=tabs[k].a;if(at.offsetLeft<nav.scrollLeft||at.offsetLeft+at.offsetWidth>nav.scrollLeft+nav.clientWidth)nav.scrollLeft=at.offsetLeft-16;}
+ var p=PRE[k]!==undefined;panel.hidden=!p;
+ [].forEach.call(frames.children,function(f){f.hidden=f.getAttribute("data-ov")!==k;});
+ if(p){var f=frame(k,u);title.textContent=tabs[k].label;open.href=u||tabs[k].href;
+  try{var w=f.contentWindow.location.href;if(w&&w!=="about:blank"&&!u)open.href=w;}catch(e){}}}
+function go(k,u,push){var h="#"+k;if(push&&location.hash!==h)history.pushState({ov:k,u:u||null},"",h);
+ else history.replaceState({ov:k,u:u||null},"",h);show(k,u);
+ if(k!=="overview"){var y=window.pageYOffset+nav.getBoundingClientRect().top-0;top();
+  if(Math.abs(nav.getBoundingClientRect().top)>2&&(k!=="report"||push))window.scrollTo(0,y);}}
+function fromHash(){var h=location.hash.slice(1);return tabs[h]?h:"overview";}
+nav.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-ov]");
+ if(!a||e.button||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;e.preventDefault();go(a.getAttribute("data-ov"),null,true);});
+document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("#overview a[href],.ov-row a[href]");
+ if(!a||a.target||e.button||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;var k=tabOf(abs(a.getAttribute("href")));
+ if(k){e.preventDefault();go(k,a.getAttribute("href"),true);}});
+window.addEventListener("popstate",function(e){var s=e.state||{};show(s.ov||fromHash(),s.u||null);});
+window.addEventListener("resize",top);
+new MutationObserver(function(){[].forEach.call(frames.children,fix);}).observe(R,{attributes:true,attributeFilter:["data-theme"]});
+var h=location.hash.slice(1);if(tabs[h]){history.replaceState({ov:h},"",location.href);show(h);}else show("overview");
+top();})();</script>'''
