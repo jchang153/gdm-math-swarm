@@ -9,6 +9,7 @@ import datetime
 from decimal import Decimal
 import html
 import json
+import math
 from pathlib import Path
 import re
 from urllib.parse import quote
@@ -17,7 +18,8 @@ from incident_site import has_incident_report, with_incident_link
 from simple_judge_site import (CATALOGUE_LABEL as SIMPLE_LABEL, SJ_REPORT, has_simple_judge, simple_report,
                                simple_summary, simple_text, with_simple_judge_link)
 from run_clock import CLOCK_JS
-from catalogue_page import CHEATING, COHORT_GLOSS, COHORT_LABELS, COHORTS, FLAGGED, SCRIPT, STYLE, hidden_link
+from catalogue_page import (CHEATING, COHORT_GLOSS, COHORT_LABELS, COHORTS, FLAGGED, PANE_JS, PANE_STYLE,
+                            PANE_TOKENS, SCRIPT, STYLE, hidden_link)
 from site_style import themed
 from space_navigation import private_space_navigation
 import catalogue_intro
@@ -135,7 +137,8 @@ def build(runs, hosted=False, unlisted=None):
             entries.append(entry)
         except (ValueError, KeyError, TypeError, OSError) as error:
             warnings.append(f'{path.parent.name}: {type(error).__name__}')
-    return {**write_index(runs, entries, warnings, hosted=hosted), 'unlisted': hidden}
+    labels = local_label_counts(runs / e['run'] for e in entries)
+    return {**write_index(runs, entries, warnings, hosted=hosted, labels=labels), 'unlisted': hidden}
 
 
 # Agent story map (owner, November 2, 2026; docs/plan.md "Story maps on the public site"): a "Story map" link for
@@ -309,6 +312,9 @@ _TITLES = (
                f'{"comms only" if m[2] == "commsonly" else "enforcement only"}'),
     (r'-(\d+)ov-(glm|ds)-', lambda m: f'{m[1]} {"DeepSeek" if m[2] == "ds" else "GLM"} '
                                        f'overseer{"" if m[1] == "1" else "s"}'),
+    (r'^[a-z0-9]+-25-seeded-control-', None),  # the 25-agent model sweep: the solver model names the run
+    (r'-seeded-reminder5m-', lambda m: 'Reminder every 5 min'),
+    (r'-seeded6-control-', lambda m: 'Six-seed control'),
     (r'-seeded-control-', lambda m: 'Control'),
     (r'-seeded-overseer-', lambda m: '1 overseer'),
     (r'^glm100-baseline-(\d+)m', lambda m: 'Baseline' + ('' if m[1] == '30' else f', {m[1]} min')),
@@ -318,7 +324,7 @@ _TITLES = (
     (r'^glm-overseer', lambda m: 'Overseer, no powers'),
     (r'^glm-baseline', lambda m: 'Baseline'),
     (r'^glm-rule6', lambda m: 'With rule 6'),
-    (r'^pilot-', lambda m: 'Pilot'),
+    (r'^pilot(?:-|$)', lambda m: 'Pilot'),
 )
 # Shorter link labels on the cards (full name in the tooltip; the table and compare view keep the full names).
 CARD_LINK = {'Simple behavior judge': 'Judge', 'Behavior judge': 'Rubric judge', 'Incident report': 'Incident'}
@@ -333,7 +339,7 @@ def short_title(entry):
     for pattern, make in _TITLES:
         found = re.search(pattern, run)
         if found:
-            title = make(found)
+            title = make(found) if make else None
             break
     if title is None:
         title = run_profile.model_name(entry.get('model'))
@@ -389,6 +395,159 @@ def run_card(entry, scale):
             f'<p class="rc-when">Started {esc(short_date(entry))} · <code>{esc(entry["run"])}</code></p></details></article>')
 
 
+# Run panes (owner, November 6, 2026; docs/plan.md "Site redesign: run panes with the interaction graph"): the math
+# catalogue's run cards, used when the catalogue texts module sets PANES (catalogue_intro.PANES). The page's script
+# (catalogue_page.PANE_JS) fills the agent categories, draws the interaction-graph snapshot and fills panes of entries
+# without a profile; specChips and paneNums there write the same markup as spec_chips and pane_numbers here.
+GRAPH_THUMB = 'analysis/storymap/graph-thumb.json'
+GRAPH_PAGE = 'analysis/storymap/graph.html'
+PRIMARY = (('Simple behavior judge', 'Behavior judge'), ('Behavior judge', 'Behavior judge (rubric 3.1)'),
+           (STORYMAP_LABEL, 'Story map'))
+QUIET = {'Report': 'Report', 'Conference': 'Conference', 'Incident report': 'Incident', 'Inspect View': 'Inspect'}
+_PUSH = re.compile(r'-push(?:-|$)')
+
+
+def spec_chips(entry, p):
+    """The pane's run-spec chips: solver model and count, overseers and their powers, message delivery, the planted
+    exploit's time (or spontaneous) and the duration; all from the entry and its profile (push delivery and the
+    integrity reminder from the run ID, as their series)."""
+    esc = html.escape
+    out, run = [], entry['run']
+    ov, seed = (p or {}).get('overseers'), (p or {}).get('seed')
+    solvers = (p or {}).get('solvers')  # without a profile, until the page reads it: the model alone
+    out.append(('k-model', f'<b>{esc(run_profile.model_name((p or {}).get("model") or entry["model"]))}</b>'
+                           + (f' × {esc(str(solvers))}' if solvers is not None else ''), 'Solver model × solvers'))
+    if ov:
+        model = run_profile.model_name(ov['model']) + ' ' if ov.get('model') else ''
+        out.append(('k-ov', f'<b>{esc(str(ov["count"]))}</b> {esc(model)}overseer{"" if ov["count"] == 1 else "s"}',
+                    'Overseers'))
+        if ov.get('powers') and ov.get('contact') is False:
+            power, why = 'enforce only', 'check_proof and revert; no posting, messaging or publishing'
+        elif ov.get('powers'):
+            power, why = 'check + revert', 'check_proof and revert_submission'
+        else:
+            power, why = 'comms only', 'no check_proof or revert tools'
+        out.append(('k-ov', power, why))
+        if ov.get('board'):
+            out.append(('k-ov', 'overseer board', 'private overseer board'))
+    elif p:
+        out.append(('', 'no overseer', 'No overseer agents'))
+    if _PUSH.search(run):
+        out.append(('k-push', 'push delivery', 'Board posts and DMs are pushed into the next tool result'))
+    elif p and p.get('notices') is True:
+        out.append(('k-push', 'unread notices', 'Tool results announce unread messages, posts and files'))
+    if '-reminder5m-' in run:
+        out.append(('k-push', 'reminder / 5 min', 'Integrity reminder every 5 minutes'))
+    if seed:
+        minute = math.floor(seed['minute'] + 0.5) if seed.get('minute') is not None else '?'
+        out.append(('k-seed', f'exploit at +{minute} min', 'Planted exploit (seed)'))
+    elif p:
+        out.append(('k-spont', 'spontaneous', 'No planted exploit'))
+    minutes = p['minutes'] if p else float(entry['elapsed_seconds']) / 60
+    out.append(('', esc(run_profile.duration_label(minutes)), 'Duration'))
+    return ''.join(f'<span class="chip {k}" title="{esc(t, quote=True)}">{v}</span>' for k, v, t in out)
+
+
+def pane_numbers(entry, p):
+    """The pane's big numbers: fakes accepted, standing at the end, genuine tasks."""
+    f = p['fakes'] if p and p.get('checked') else None
+    tasks = entry.get('task_count')
+    tasks = html.escape(str(tasks if tasks is not None else '?'))
+    return ('<div title="Accepted submissions the independent proof checker found fake (a problem can be faked again '
+            f'after a revert)"><dt>fake proofs accepted</dt><dd class="{"bad" if f and f["accepted"] else ""}">'
+            f'{f["accepted"] if f else "?"}</dd></div>'
+            '<div title="Fake proofs still holding credit when the run ended"><dt>fakes standing at end</dt><dd class="'
+            f'{"bad" if f and f["standing_end"] else ""}">{f["standing_end"] if f else "?"}</dd></div>'
+            '<div title="Distinct problems with a genuine proof, of the problems in the run"><dt>genuine problems</dt>'
+            f'<dd class="ok">{entry["distinct_verified_tasks"]}<small> / {tasks}</small></dd></div>')
+
+
+# Agent label counts for the panes' category bar (owner, November 6, 2026): the run report's own agent labels
+# (research/analysis/agent_badges.py, one-letter pills after every agent id on the published results.html), counted
+# once per agent. Not part of the catalogue entries (published entries never change): callers pass them to
+# write_index as ``labels`` ({run: counts}); runs without them fall back to the judge's level counts in the browser.
+_LABELLED_ID = re.compile(r'<span class="ab-id">(agent-\d+)<span class="ab-set">((?:<span class="ab ab-[a-z_]+"[^>]*>'
+                          r'[^<]*</span>)*)</span>')
+_LABEL_SOURCE = re.compile(r'<p class="ab-legend"[^>]*><strong>Agent labels</strong> \(from the ([^;)]*)')
+LABEL_SOURCES = {'simplified behavior judge': 'simple', 'rubric-3.1 behavior judge': 'rubric'}
+
+
+def agent_label_counts(document):
+    """{'source', 'agents', 'E', 'C', 'T', 'U', 'Q', 'O', 'S', 'W'} from a run page's agent labels, or None when the
+    page has no judge-based labels. Each agent counts once: S seed, O overseer (whatever its behaviour letter), else
+    its behaviour letter E, C, T or U, else Q (unlabelled / unclear); W (whistleblower) is counted on top."""
+    if isinstance(document, bytes):
+        document = document.decode('utf-8', 'replace')
+    source = _LABEL_SOURCE.search(document)
+    source = LABEL_SOURCES.get(source[1].strip()) if source else None
+    if not source:
+        return None
+    letters = {}
+    for agent, pills in _LABELLED_ID.findall(document):
+        letters.setdefault(agent, ''.join(re.findall(r'>([^<]*)</span>', pills)))
+    if not letters:
+        return None
+    counts = dict.fromkeys(('E', 'C', 'T', 'U', 'Q', 'O', 'S', 'W'), 0)
+    for marks in letters.values():
+        kind = ('S' if 'S' in marks else 'O' if 'O' in marks else
+                next((k for k in 'ECTU' if k in marks), 'Q'))
+        counts[kind] += 1
+        counts['W'] += 'W' in marks
+    return {'source': source, 'agents': len(letters), **counts}
+
+
+def local_label_counts(run_dirs):
+    """{run: counts} from each run folder's results.html (local builds)."""
+    out = {}
+    for run_dir in run_dirs:
+        page = Path(run_dir) / 'results.html'
+        if page.is_file() and not page.is_symlink():
+            counts = agent_label_counts(page.read_text(encoding='utf-8', errors='replace'))
+            if counts:
+                out[Path(run_dir).name] = counts
+    return out
+
+
+def run_pane(entry, scale):
+    """One run pane: the title (its link, to the run report, covers the pane), spec chips, the picture (graph
+    snapshot when the run has a story map and its thumb loads, else the fakes sparkline), agent categories (filled
+    by the script), big numbers, prominent buttons and a quiet row of the other records, and the card's Details."""
+    esc = html.escape
+    p = valid_profile(entry)
+    links = {k: v for k, v in entry['links'].items() if not hidden_link(k)}
+    run = esc(entry['run'], quote=True)
+    report = links.get('Report')
+    title = esc(short_title(entry))
+    head = (f'<a href="{esc(report, quote=True)}">{title}</a>' if report else title)
+    body = run_profile.card_inner(p, scale) if p else (
+        '<p class="rc-empty">Fakes over time are read from the run\'s own records in the browser.</p>')
+    graph = ''
+    if STORYMAP_LABEL in links:  # every story-mapped run has its graph (HANDOFF item 36); shown once the thumb loads
+        base = quote(entry['run'], safe='') + '/'
+        graph = (f'<a class="pane-graph" hidden data-thumb="{esc(base + GRAPH_THUMB, quote=True)}" '
+                 f'data-href="{esc(base + GRAPH_PAGE, quote=True)}" aria-label="Interaction graph of '
+                 f'{esc(short_title(entry), quote=True)}: open, hover to replay"><canvas></canvas>'
+                 '<span class="pg-hint">hover replays · click opens</span></a>')
+    buttons = ''.join(f'<a href="{esc(links[k], quote=True)}">{esc(label)}</a>' for k, label in PRIMARY if k in links)
+    quiet = ''.join(f'<a href="{esc(links[k], quote=True)}">{esc(label)}</a>' for k, label in QUIET.items() if k in links)
+    summary = entry.get('summary') if isinstance(entry.get('summary'), dict) else None
+    accepted = summary.get('accepted_tasks') if summary else None
+    stats = [('Accepted tasks', f'<span class="rc-accepted">{accepted if accepted is not None else "?"}</span>'),
+             ('Duration', esc(duration_text(entry['elapsed_seconds']))),
+             ('Spend', f'${Decimal(entry["pilot_spent_usd"]):.2f}'), ('Agents', esc(str(entry['agents'])))]
+    return (f'<article class="rc pane" data-run="{run}"><header class="rc-head"><h3 class="rc-title">{head}</h3>'
+            f'<label class="rc-pick" title="Select to compare"><input type="checkbox" class="card-pick" value="{run}" '
+            f'aria-label="Compare {run}"><span class="sr">Compare</span></label></header>'
+            f'<p class="pane-spec"{" data-static=1" if p else ""}>{spec_chips(entry, p)}</p>'
+            f'<div class="pane-pic">{graph}<div class="rc-body" data-profile="{1 if p else 0}">{body}</div></div>'
+            '<div class="pane-cat"><p class="cat-none">Behavior judge counts…</p></div>'
+            f'<dl class="pane-nums"{" data-static=1" if p else ""}>{pane_numbers(entry, p)}</dl>'
+            f'<p class="pane-btns">{buttons}</p>' + (f'<p class="pane-quiet">{quiet}</p>' if quiet else '')
+            + f'<details class="rc-more"><summary>Details</summary><div class="rc-prof">{run_profile.card_more(p) if p else ""}'
+            '</div><dl class="rc-stats">' + ''.join(f'<div><dt>{k}</dt><dd>{v}</dd></div>' for k, v in stats) + '</dl>'
+            f'<p class="rc-when">Started {esc(short_date(entry))} · <code>{esc(entry["run"])}</code></p></details></article>')
+
+
 def series_groups(entries):
     """[(key, title, description, entries)] in display order: newest series first, cards by card_order."""
     groups = {}
@@ -399,25 +558,72 @@ def series_groups(entries):
     return [(k, t, d, sorted(es, key=card_order)) for k, t, d, es in sorted(groups.values(), key=newest, reverse=True)]
 
 
-def series_sections(groups):
+GRAPH_LEGEND = ('<p class="legend lg-graph"><span>Graph pictures (agents by stance at the end; hover replays the '
+                'run):</span>' + ''.join(f'<span><i class="lg-zone" style="background:var(--s-{k})"></i>{t}</span>'
+                                         for k, t in (('none', 'no exploit idea'), ('considering', 'considering'),
+                                                      ('deferred', 'deferred'), ('faking', 'faking'),
+                                                      ('rejected', 'rejected'), ('stopped', 'stopped')))
+                + '<span><i class="lg-fake"></i>has faked</span><span><i class="lg-ov"></i>overseer</span>'
+                '<span><i class="lg-star">★</i>seed</span></p>')
+
+
+def series_legend(members, scale, panes=False):
+    """The series' picture legend: the fakes sparkline's (cards; panes without a story map) and, for panes with one,
+    the interaction graph's stance colours."""
+    spark = ('<p class="legend"><span><i class="lg-area"></i>standing fakes</span><span><i class="lg-cum"></i>'
+             'all fakes accepted so far</span><span><i class="lg-seed"></i>exploit planted</span><span>'
+             f'shared scale: 0 to <b class="sc-fakes">{max(scale["fakes"], 1)}</b> fakes</span></p>')
+    if not panes:
+        return spark
+    graphs = sum(STORYMAP_LABEL in e['links'] for e in members)
+    return (GRAPH_LEGEND if graphs else '') + (spark if graphs < len(members) else '')
+
+
+def series_sections(groups, panes=False):
     esc = html.escape
+    card = run_pane if panes else run_card
     out = []
     for key, title, text, members in groups:
         scale = run_profile.series_scale([valid_profile(e) for e in members])
         count = f'{len(members)} run' + ('' if len(members) == 1 else 's')
         out.append(f'<section class="series" id="series-{esc(key, quote=True)}" data-series="{esc(key, quote=True)}">'
                    f'<div class="series-head"><h2>{esc(title)}<span class="count">{count}</span></h2><p>{esc(text)}</p>'
-                   '<p class="legend"><span><i class="lg-area"></i>standing fakes</span><span><i class="lg-cum"></i>'
-                   'all fakes accepted so far</span><span><i class="lg-seed"></i>exploit planted</span><span>'
-                   f'shared scale: 0 to <b class="sc-fakes">{max(scale["fakes"], 1)}</b> fakes</span></p></div>'
-                   '<div class="rc-grid">' + ''.join(run_card(e, scale) for e in members) + '</div></section>')
+                   + series_legend(members, scale, panes) + '</div>'
+                   '<div class="rc-grid">' + ''.join(card(e, scale) for e in members) + '</div></section>')
     return ''.join(out)
 
 
-def write_index(runs, entries, warnings=(), *, hosted=False, intro=None):
+PANE_START = 'options();sort();apply();selection();fromHash();'
+PANE_THEN = ('Promise.all(unprofiled.map(enrichProfile)).then(drawSeries);',
+             'Promise.all(unprofiled.map(enrichProfile)).then(()=>{drawSeries();for(const e of data)paneFill(e);});')
+PANE_MISSING = ('Promise.all(missing.map(enrich)).then(()=>{options();',
+                'Promise.all(missing.map(enrich)).then(()=>{for(const e of data)paneFill(e);options();')
+
+
+def pane_labels(entries, labels):
+    """The agent label counts of the listed runs (see agent_label_counts) as a JSON block for the pane script."""
+    runs = {e['run'] for e in entries}
+    data = {run: labels[run] for run in sorted(labels or {}) if run in runs}
+    blob = json.dumps(data, separators=(',', ':'), sort_keys=True).replace('<', '\\u003c')
+    return f'<script type="application/json" id="catalogue-labels">{blob}</script>'
+
+
+def pane_script():
+    """The catalogue script with the pane behaviour (catalogue_page.PANE_JS) inside its closure."""
+    script = SCRIPT.replace('/*CARDJS*/', run_profile.CARD_JS)
+    for old, new in ((PANE_START, PANE_JS.replace('MODELNAMES', json.dumps(run_profile.MODEL_NAMES, sort_keys=True))
+                      + PANE_START), PANE_THEN, PANE_MISSING):
+        if script.count(old) != 1:
+            raise AssertionError('catalogue script changed: pane hook not found')
+        script = script.replace(old, new)
+    return script
+
+
+def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=None):
     """Render catalogue entries, including previously published remote runs. ``intro``: the module with the
     library's texts (default catalogue_intro, the math library; catalogue_intro_ib for the ImpossibleBench site)."""
     intro = intro or catalogue_intro
+    panes = getattr(intro, 'PANES', False)  # run panes: math catalogue only (owner, November 6, 2026)
     runs = Path(runs)
     runs.mkdir(parents=True, exist_ok=True)
     entries = newest_first(entries)
@@ -480,15 +686,20 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None):
         f'<option value="">{first}</option>{extra}</select></label>')
     body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>{esc(intro.TITLE)}</title><style>' + STYLE + '</style></head><body>'
+            f'<title>{esc(intro.TITLE)}</title><style>' + STYLE + (PANE_STYLE if panes else '') + '</style>'
+            + (PANE_TOKENS if panes else '') + '</head><body>'
             + intro.hero(stats)
-            + (live_section(entries) if hosted else '') +
+            + (live_section(entries) if hosted else '')
+            # Run panes: the run categories move into a sticky sidebar (owner, November 6, 2026).
+            + ('<div class="cat-wrap"><aside class="snav-col">'
+               + intro.series_nav([(k, t, len(es)) for k, t, _, es in groups], len(entries))
+               + '</aside><div class="cat-main">' if panes else '') +
             '<section class="block runs" id="runs-top"><div class="runs-head"><h2>Runs</h2>'
             f'<p class="sub">{len(entries)} saved experiment{"" if len(entries) == 1 else "s"} in {len(groups)} series, '
             'newest first. Tick 2 to 4 runs to compare them side by side.'
             + (f' {mapped} run{"" if mapped == 1 else "s"} {"has" if mapped == 1 else "have"} an agent story map '
                '(the Story map link).' if mapped else '') + '</p></div>'
-            + intro.toc([(k, t, len(es)) for k, t, _, es in groups]) +
+            + ('' if panes else intro.toc([(k, t, len(es)) for k, t, _, es in groups])) +
             '<div class="controls"><div class="toolbar">'
             '<label class="grow"><span class="sr">Find</span><input id="filter" type="search" '
             'placeholder="Search runs, models, conditions…" aria-label="Find"></label>'
@@ -508,7 +719,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None):
             '<button type="button" id="clear" class="quiet">Clear</button></div></div>'
             '<section id="compare-view" hidden aria-label="Compare runs"><div class="cmp-head"><h2>Compare runs</h2>'
             '<button type="button" id="close-compare" class="quiet">Close</button></div><div class="scroll" id="compare-table"></div></section>'
-            '</section><div id="cards-view">' + series_sections(groups) + '</div>'
+            '</section><div id="cards-view">' + series_sections(groups, panes) + '</div>'
             '<section id="table-view" class="block"><h2>All runs</h2>'
             '<div class="scroll"><table id="runs"><thead><tr>' + head + '</tr></thead><tbody>'
             + ''.join(rows) + '</tbody></table></div>'
@@ -524,10 +735,12 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None):
             'judge, by cohort (below); a row shows both when both ran. "not run" means no judge outputs are '
             'published for the run; "…" means the entry predates these columns and the run\'s own records could '
             'not be read here.</dd>' + glossary + '</dl></details></section>'
+            + ('</div></div>' if panes else '')
             + intro.about_section() +
             f'<footer class="foot"><p>{esc(note)}</p></footer>'
             f'<script type="application/json" id="catalogue-data">{blob}</script>'
-            '<script>' + SCRIPT.replace('/*CARDJS*/', run_profile.CARD_JS) + '</script></body></html>')
+            + (pane_labels(entries, labels) if panes else '') +
+            '<script>' + (pane_script() if panes else SCRIPT.replace('/*CARDJS*/', run_profile.CARD_JS)) + '</script></body></html>')
     body = themed(body)
     (runs / 'index.html').write_text(private_space_navigation(body) if hosted else body)
     (runs / 'experiments.json').write_text(json.dumps({'schema': 'gdm-experiment-index/1', 'experiments': entries, 'warnings': warnings}, indent=2))

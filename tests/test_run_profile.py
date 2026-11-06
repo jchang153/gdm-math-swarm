@@ -185,13 +185,16 @@ class CataloguePageTests(unittest.TestCase):
         # Within a series by overseer count: 2 overseers before 10 (the bare entry's count from its run ID).
         self.assertLess(cards.index('data-run="glmflash100-seeded-2ov-ds'), cards.index('data-run="glmflash100-seeded-10ov'))
         # Short titles from the run ID; the full condition sentence sits in the card's details.
-        self.assertIn('<h3 class="rc-title">2 DeepSeek overseers</h3>', cards)
-        self.assertIn('<h3 class="rc-title">10 DeepSeek overseers</h3>', cards)
-        self.assertIn('<h3 class="rc-title">GLM 5.3 Flash</h3>', cards)  # model comparison: the model's name
+        # Math catalogue: run panes whose title links the run report (owner, November 6, 2026).
+        for run, title in ((profiled['run'], '2 DeepSeek overseers'), (bare['run'], '10 DeepSeek overseers'),
+                           (other['run'], 'GLM 5.3 Flash')):  # model comparison: the model's name
+            self.assertIn(f'<h3 class="rc-title"><a href="{run}/results.html">{title}</a></h3>', cards)
         self.assertIn('<div class="rc-prof"><p class="rc-cond">100 GLM 5.3 Flash solvers, 2 DeepSeek', cards)
         self.assertIn('<div class="rc-body" data-profile="1"><figure class="rc-spark">', cards)
         self.assertIn('<div class="rc-body" data-profile="0"><p class="rc-empty">', cards)
-        self.assertIn('<p class="rc-meta">GLM 5.3 Flash · 102 agents · 60 min</p>', cards)
+        self.assertIn('<span class="chip k-model" title="Solver model × solvers"><b>GLM 5.3 Flash</b> × 100</span>'
+                      '<span class="chip k-ov" title="Overseers"><b>2</b> DeepSeek V4.1 Flash overseers</span>', cards)
+        self.assertIn('<dl class="pane-nums" data-static=1><div title="Accepted submissions', cards)
         self.assertIn('class="card-pick" value="owner-opus55-20261021T183459Z"', cards)
         self.assertIn('const RP=(()=>{', page)
         self.assertIn('"deepseek/deepseek-v4.1-flash-1017": "DeepSeek V4.1 Flash"', page)
@@ -216,6 +219,48 @@ class CataloguePageTests(unittest.TestCase):
         es = [entry('glmflash100-seeded-2ov-ds-60m-20261027T055654Z', 5,
                     profile=run_profile.profile(results(), SETTINGS)), entry('owner-opus55-20261021T183459Z', 1)]
         self.assertEqual(self.write(es), self.write(list(reversed(es))))
+
+
+class PaneTests(unittest.TestCase):
+    """Run panes of the math catalogue (owner, November 6, 2026)."""
+
+    PAGE = ('<p class="ab-legend" id="ab-legend"><strong>Agent labels</strong> (from the simplified behavior judge; '
+            'hover a letter for the basis): ...</p>'
+            + ''.join(f'<span class="ab-id">{a}<span class="ab-set">'
+                      + ''.join(f'<span class="ab ab-x" title="t">{k}</span>' for k in marks) + '</span></span> '
+                      for a, marks in [('agent-001', 'E'), ('agent-002', 'CA'), ('agent-002', 'CA'), ('agent-003', 'TW'),
+                                       ('agent-004', 'U'), ('agent-005', '?'), ('agent-006', 'OTW'), ('agent-007', 'S')]))
+
+    def test_agent_label_counts_once_per_agent(self):
+        from build_experiment_index import agent_label_counts
+        counts = agent_label_counts(self.PAGE)
+        self.assertEqual(counts, {'source': 'simple', 'agents': 7, 'E': 1, 'C': 1, 'T': 1, 'U': 1, 'Q': 1, 'O': 1,
+                                  'S': 1, 'W': 2})
+        self.assertEqual(agent_label_counts(self.PAGE.encode())['agents'], 7)
+        self.assertIsNone(agent_label_counts('<p>no labels</p>'))
+        roles_only = self.PAGE.replace('simplified behavior judge', 'run roles only (no behavior judge)')
+        self.assertIsNone(agent_label_counts(roles_only))
+
+    def test_labels_block_and_pane_parts(self):
+        run = 'glmflash100-seeded-1ov-glm-120m-push-r1-20261104T042820Z'
+        e = entry(run, 5, profile=run_profile.profile(results(), SETTINGS))
+        e['links']['Story map'] = run + '/analysis/storymap/index.html'
+        e['links']['Simple behavior judge'] = run + '/analysis/simple_judge/report.html'
+        with tempfile.TemporaryDirectory() as tmp:
+            write_index(tmp, [e], hosted=True, labels={run: {'E': 1, 'source': 'simple'}, 'other': {'E': 9}})
+            page = (Path(tmp) / 'index.html').read_text()
+            experiments = json.loads((Path(tmp) / 'experiments.json').read_text())['experiments']
+        self.assertIn('<script type="application/json" id="catalogue-labels">{"' + run + '":{"E":1,"source":"simple"}}'
+                      '</script>', page)  # listed runs only
+        self.assertNotIn('labels', json.dumps(experiments[0]))  # entries unchanged
+        self.assertIn(f'data-thumb="{run}/analysis/storymap/graph-thumb.json" data-href="{run}/analysis/storymap/'
+                      'graph.html"', page)
+        self.assertNotIn(' href="' + run + '/analysis/storymap/graph.html"', page)  # set only once the thumb loads
+        self.assertIn('<p class="pane-btns"><a href="' + run + '/analysis/simple_judge/report.html">Behavior judge</a>'
+                      '<a href="' + run + '/analysis/storymap/index.html">Story map</a></p>', page)
+        self.assertIn('<span class="chip k-push" title="Board posts and DMs are pushed into the next tool result">'
+                      'push delivery</span>', page)
+        self.assertIn('class="legend lg-graph"', page)
 
 
 class IntroTests(unittest.TestCase):

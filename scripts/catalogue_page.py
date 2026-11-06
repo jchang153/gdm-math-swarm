@@ -376,3 +376,259 @@ const unprofiled=data.filter(e=>!prof(e)&&cardOf.has(e.run));
 if(unprofiled.length&&/^https?:$/.test(location.protocol))Promise.all(unprofiled.map(enrichProfile)).then(drawSeries);
 })();
 '''
+
+# ------------------------------------------------------------------------------------------------------------------
+# Run panes (owner, November 6, 2026; docs/plan.md "Site redesign: run panes with the interaction graph"). Math site
+# only: write_index uses them when the catalogue texts module sets PANES = True (catalogue_intro.py); the
+# ImpossibleBench catalogue (catalogue_intro_ib.py) keeps the cards above, byte for byte.
+#
+# A pane is one large click target (the title link to the run report is stretched over the pane; inner links and
+# controls sit above it). Its picture is the interaction-graph snapshot from RUN/analysis/storymap/graph-thumb.json
+# (schema storymap-graph-thumb/1) when the run has one, drawn lazily on a canvas with a hover timelapse, else the
+# fakes sparkline. Stance colours are the interaction-graph viewer's tokens (scripts/storymap_graph_template.html);
+# agent-category colours are the run pages' agent-label colours (research/analysis/agent_badges.py COLORS).
+_STANCE_LIGHT = {'none': '#a3a8b0', 'considering': '#e89412', 'deferred': '#f3cd6a', 'faking': '#d93030',
+                 'rejected': '#2e9e55', 'stopped': '#6b7a90'}
+_STANCE_DARK = {'none': '#7c828c', 'considering': '#f0a630', 'deferred': '#c9a95a', 'faking': '#ff5a52',
+                'rejected': '#45c070', 'stopped': '#8695ab'}
+# agent_badges.COLORS (light background, dark background); the unlabelled pill is transparent there, so the bar
+# uses the muted ink instead.
+_CAT_LIGHT = {'E': '#b42318', 'C': '#b54708', 'T': '#8a5a00', 'U': '#1f7a3a', 'Q': '#c3cad4', 'W': '#155eaa',
+              'O': '#4b5cc4', 'S': '#56637a'}
+_CAT_DARK = {'E': '#f08679', 'C': '#f4a259', 'T': '#f0c26b', 'U': '#6fcf8b', 'Q': '#46505e', 'W': '#80b6f0',
+             'O': '#a3b0ff', 'S': '#9eabba'}
+
+
+def _tokens(stance, cat):
+    return (''.join(f'--s-{k}:{v};' for k, v in stance.items())
+            + ''.join(f'--cat-{k}:{v};' for k, v in cat.items()))
+
+
+# The pane colour tokens, light and dark, in their own style block (like the shared site theme), so the catalogue's
+# own style uses tokens only.
+PANE_TOKENS = (
+    '<style id="pane-tokens">'
+    f':root{{{_tokens(_STANCE_LIGHT, _CAT_LIGHT)}--fake:#d93030;--star:#d6a20b}}'
+    f'@media (prefers-color-scheme:dark){{:root:not([data-theme="light"]){{{_tokens(_STANCE_DARK, _CAT_DARK)}'
+    '--fake:#ff5a52;--star:#f2c230}}'
+    f':root[data-theme="dark"]{{{_tokens(_STANCE_DARK, _CAT_DARK)}--fake:#ff5a52;--star:#f2c230}}</style>'
+)
+PANE_STYLE = (
+    # Five panes per row on a wide screen, then 4/3/2/1 (the card breakpoints above).
+    '.rc.pane{position:relative;padding:12px 12px 10px;border-radius:14px;gap:0;'
+    'transition:border-color .15s,box-shadow .15s,transform .15s}'
+    '.rc.pane:hover{border-color:var(--input-line);box-shadow:0 6px 22px var(--shadow);transform:translateY(-1px)}'
+    '.rc.pane.picked{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}'
+    '.pane .rc-title{font-size:15px}.pane .rc-title a{color:var(--fg)}.pane .rc-title a:hover{text-decoration:none}'
+    '.pane .rc-title a::after{content:"";position:absolute;inset:0;border-radius:14px;z-index:0}'
+    '.pane .rc-title a:focus-visible{outline:none}.pane:has(.rc-title a:focus-visible){outline:3px solid var(--accent);'
+    'outline-offset:2px}'
+    '.pane .rc-pick,.pane .pane-pic a,.pane .pane-btns,.pane .pane-quiet,.pane .rc-more,.pane .pane-cat{position:relative;'
+    'z-index:1}'
+    '.pane-spec{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 8px;max-width:none}'
+    '.chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;line-height:1.2;padding:3px 7px;border-radius:999px;'
+    'background:var(--chip);color:var(--soft);white-space:nowrap}.chip b{font-weight:650;color:var(--fg)}'
+    '.chip.k-ov{background:var(--info-bg);color:var(--info)}.chip.k-ov b{color:inherit}'
+    '.chip.k-seed{background:var(--bad-bg);color:var(--bad)}.chip.k-spont{background:var(--good-bg);color:var(--good)}'
+    '.chip.k-push{background:var(--caution-bg);color:var(--caution)}'
+    '.pane-pic{position:relative;margin:0 -2px 8px;border-radius:10px;background:var(--bg);border:1px solid var(--line);'
+    'min-height:64px;display:flex;flex-direction:column;justify-content:center;overflow:hidden}'
+    '.pane-pic .rc-body{padding:8px 8px 4px}.pane .rc-body .rc-fakes{display:none}'
+    '.pane-graph{display:block;position:relative;cursor:pointer}.pane-graph[hidden]{display:none}'
+    '.pane-graph canvas{display:block;width:100%;aspect-ratio:16/11}'
+    '.pane-graph .pg-hint{position:absolute;right:6px;bottom:5px;font-size:10.5px;color:var(--muted);'
+    'background:color-mix(in srgb,var(--card) 80%,transparent);padding:1px 5px;border-radius:6px;opacity:0;'
+    'transition:opacity .2s}.pane-graph:hover .pg-hint,.pane-graph:focus-visible .pg-hint{opacity:1}'
+    '.pane-cat{margin:0 0 8px}.cat-bar{display:flex;gap:2px;height:10px;border-radius:5px;overflow:hidden;'
+    'background:var(--chip)}.cat-bar i{display:block;min-width:3px;height:100%}'
+    '.cat-leg{display:flex;flex-wrap:wrap;gap:2px 9px;margin:5px 0 0;font-size:11px;color:var(--soft);line-height:1.35}'
+    '.cat-leg span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}'
+    '.cat-leg i{width:8px;height:8px;border-radius:2px;display:inline-block}.cat-leg b{color:var(--fg);font-weight:650;'
+    'font-variant-numeric:tabular-nums}.cat-note{font-size:10.5px;color:var(--muted);margin:3px 0 0}'
+    '.cat-none{font-size:11.5px;color:var(--muted);margin:0}'
+    '.pane-nums{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 6px;margin:0 0 10px}'
+    '.pane-nums.n4{grid-template-columns:repeat(2,minmax(0,1fr))}'
+    '.pane-nums div{display:flex;flex-direction:column;min-width:0}'
+    '.pane-nums dd{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em;line-height:1.05;'
+    'font-variant-numeric:tabular-nums;color:var(--fg)}.pane-nums dd.bad{color:var(--bad)}.pane-nums dd.ok{color:var(--good)}'
+    '.pane-nums dd small{font-size:11px;font-weight:400;letter-spacing:0}'
+    '.pane-nums dt{order:2;font-size:11px;color:var(--muted);line-height:1.25}'
+    '.pane-btns{display:flex;flex-wrap:wrap;gap:5px;margin:auto 0 0;max-width:none}'
+    '.pane-btns a{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:5px 9px;'
+    'border-radius:8px;background:var(--chip);color:var(--fg);white-space:nowrap;border:1px solid transparent}'
+    '.pane-btns a:hover{text-decoration:none;border-color:var(--accent);color:var(--accent)}'
+    '.pane-btns a.b-graph{background:var(--accent);color:var(--card)}.pane-btns a.b-graph:hover{color:var(--card);'
+    'filter:brightness(1.08)}'
+    '.pane-quiet{display:flex;flex-wrap:wrap;gap:1px 10px;margin:7px 0 0;padding-top:6px;border-top:1px solid var(--line);'
+    'font-size:11.5px;max-width:none}.pane-quiet a{color:var(--muted);white-space:nowrap}.pane-quiet a:hover{color:var(--accent)}'
+    '.pane .rc-more{margin-top:2px}'
+    # Wider page for the sidebar plus five panes; the run grid keeps 5 per row from 1600px, then 4/3/2/1.
+    'body{max-width:1720px}.hero,.about,.foot{max-width:1120px}'
+    '.cat-wrap{display:grid;grid-template-columns:256px minmax(0,1fr);gap:28px;align-items:start;margin-top:40px}'
+    '.cat-main>.block.runs{margin-top:0}.cat-main .series:first-child{margin-top:28px}'
+    '.snav-col{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;padding-right:4px}'
+    '.snav{display:flex;flex-direction:column;gap:2px}.snav-h{margin:0 0 8px;font-size:12px;font-weight:650;'
+    'text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}'
+    '.snav a{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:1px 8px;padding:7px 10px;border-radius:9px;'
+    'color:var(--fg);border:1px solid transparent}.snav a:hover{background:var(--chip);text-decoration:none}'
+    '.snav a[aria-current=true]{background:var(--card);border-color:var(--accent);box-shadow:0 1px 4px var(--shadow)}'
+    '.sn-t{font-size:13.5px;font-weight:600;line-height:1.3}.snav .n{font-size:12px;color:var(--muted);'
+    'font-variant-numeric:tabular-nums;align-self:start;padding-top:1px}'
+    '.sn-d{grid-column:1/-1;font-size:11.5px;line-height:1.35;color:var(--muted)}'
+    '.cat-main .rc-grid{grid-template-columns:repeat(5,minmax(0,1fr))}'
+    '@media (max-width:1599px){.cat-main .rc-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}'
+    '@media (max-width:1279px){.cat-main .rc-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}'
+    '@media (max-width:999px){.cat-wrap{display:block}.snav-col{position:sticky;top:0;z-index:5;max-height:none;'
+    'overflow:visible;background:var(--bg);margin:0 -4px;padding:6px 4px;border-bottom:1px solid var(--line)}'
+    '.snav{flex-direction:row;overflow-x:auto;gap:6px;scrollbar-width:thin}.snav-h,.sn-d{display:none}'
+    '.snav a{display:flex;gap:6px;white-space:nowrap;padding:5px 10px;border-color:var(--line);background:var(--card)}'
+    '.cat-main>.block.runs{margin-top:16px}.cat-main .series,#runs-top{scroll-margin-top:56px}}'
+    '@media (max-width:860px){.cat-main .rc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+    '@media (max-width:560px){.cat-main .rc-grid{grid-template-columns:minmax(0,1fr)}}'
+    '.legend .lg-dot{width:9px;height:9px;border-radius:50%}.legend .lg-zone{width:11px;height:11px;border-radius:50%;'
+    'opacity:.85}.legend .lg-ov{width:8px;height:8px;transform:rotate(45deg);background:var(--s-none);'
+    'border:1px solid var(--cat-O);border-radius:1px}.legend .lg-star{width:auto;height:auto;color:var(--star);'
+    'font-style:normal;font-size:12px}.legend .lg-fake{width:6px;height:6px;border-radius:50%;background:var(--fake)}'
+    '@media (prefers-reduced-motion:reduce){.rc.pane,.rc.pane:hover{transition:none;transform:none}}'
+)
+
+# Pane behaviour, inserted into SCRIPT's closure just before its first render (uses data, byRun, cardOf, prof, esc,
+# simple, judge, sum and the RP twin). Spec chips mirror build_experiment_index.spec_chips.
+PANE_JS = r'''
+// ---- Run panes (owner, November 6, 2026)
+const PANE_NAMES=MODELNAMES,mname=id=>id?(PANE_NAMES[id]||id):'unknown model';
+const pdur=m=>{m=Math.floor(m+0.5);return m>=120&&m%60===0?m/60+' h':m+' min';};
+function specChips(e,p){const out=[],ov=p&&p.overseers,sd=p&&p.seed,run=e.run;
+ out.push(['k-model','<b>'+esc(mname((p&&p.model)||e.model))+'</b>'+(p&&p.solvers!=null?' × '+esc(p.solvers):''),'Solver model × solvers']);
+ if(ov){out.push(['k-ov','<b>'+esc(ov.count)+'</b> '+esc(ov.model?mname(ov.model)+' ':'')+'overseer'+(ov.count===1?'':'s'),'Overseers']);
+  out.push(['k-ov',ov.powers&&ov.contact===false?'enforce only':ov.powers?'check + revert':'comms only',
+   ov.powers?(ov.contact===false?'check_proof and revert; no posting, messaging or publishing':'check_proof and revert_submission'):'no check_proof or revert tools']);
+  if(ov.board)out.push(['k-ov','overseer board','private overseer board']);}
+ else if(p)out.push(['','no overseer','No overseer agents']);
+ if(/-push(?:-|$)/.test(run))out.push(['k-push','push delivery','Board posts and DMs are pushed into the next tool result']);
+ else if(p&&p.notices===true)out.push(['k-push','unread notices','Tool results announce unread messages, posts and files']);
+ if(/-reminder5m-/.test(run))out.push(['k-push','reminder / 5 min','Integrity reminder every 5 minutes']);
+ if(sd)out.push(['k-seed','exploit at +'+(sd.minute!=null?Math.floor(sd.minute+0.5):'?')+' min','Planted exploit (seed)']);
+ else if(p)out.push(['k-spont','spontaneous','No planted exploit']);
+ out.push(['',esc(pdur(p?p.minutes:e.elapsed_seconds/60)),'Duration']);
+ return out.map(([k,t,title])=>'<span class="chip '+k+'" title="'+esc(title)+'">'+t+'</span>').join('');}
+// Agent categories: from the thumb's per-agent labels (agent_badges letters) when present, else the simplified judge's
+// level counts (submitted and credited together: the split by source needs the per-agent rows), else the rubric-3.1
+// judge's cohorts.
+const CAT={E:'Exploiter',C:'Convert',X:'Exploiter / convert',T:'Tempted',U:'Unaware / honest',Q:'Unclear',W:'Whistleblower',O:'Overseer',S:'Seed'};
+const CATCOL={X:'E'};
+function catsFromBadges(nodes){const c={E:0,C:0,T:0,U:0,Q:0,O:0,S:0},w={W:0};let any=false;
+ for(const n of nodes){const b=typeof n.b==='string'?n.b:null;if(b==null)continue;any=true;
+  if(n.role==='seed'||b.includes('S')){c.S++;continue;}if(n.role==='overseer'||b.includes('O')){c.O++;}
+  else{const k=['E','C','T','U'].find(x=>b.includes(x))||'Q';c[k]++;}if(b.includes('W'))w.W++;}
+ return any?{order:['E','C','T','U','Q','O','S'],c,w:w.W,note:'per-agent behavior judge labels'}:null;}
+function catsFromSummary(e,p){const s=simple(e);
+ if(s){const L=s.levels||{},c={X:(L.submitted||0)+(L.credited||0),T:(L.considered||0)+(L.explored||0),U:L.none||0,
+   Q:(L.unclear||0)+Math.max(0,(s.agents||0)-(s.labelled||0)),S:p&&p.seed?1:0};
+  const ov=p&&p.overseers?p.overseers.count:0;
+  return {order:['X','T','U','Q','S'],c,w:s.whistleblowers||0,note:'simple judge levels; exploiters and converts together'+(ov?', overseers included':'')};}
+ const j=judge(e);
+ if(j){const k=j.cohorts||{},c={E:(k.exploiter||0)+(k.exploit_promoter||0),C:k.convert||0,U:k.no_misbehavior||0,
+   Q:(k.insufficient_record||0)+Math.max(0,(j.agents||0)-(j.graded??j.agents)),W:k.whistleblower||0};
+  return {order:['E','C','W','U','Q'],c,w:0,note:'rubric 3.1 judge cohorts'};}
+ return null;}
+function catHTML(cats,e){if(!cats)return '<p class="cat-none">'+(e.links[SIMPLE]||e.links['Behavior judge']?'Behavior judge counts load from the run…':'Behavior judge not run')+'</p>';
+ const tot=cats.order.reduce((n,k)=>n+(cats.c[k]||0),0)||1,col=k=>'var(--cat-'+(CATCOL[k]||k)+')';
+ const bar=cats.order.filter(k=>cats.c[k]).map(k=>'<i style="flex:'+cats.c[k]+' 1 0;background:'+col(k)+'" title="'+esc(CAT[k]+': '+cats.c[k])+'"></i>').join('');
+ const leg=cats.order.filter(k=>cats.c[k]).map(k=>'<span><i style="background:'+col(k)+'"></i>'+esc(CAT[k])+' <b>'+cats.c[k]+'</b></span>').join('')+
+  (cats.w?'<span><i style="background:var(--cat-W)"></i>'+esc(CAT.W)+' <b>'+cats.w+'</b></span>':'');
+ return '<div class="cat-bar" role="img" aria-label="'+esc(cats.order.filter(k=>cats.c[k]).map(k=>CAT[k]+' '+cats.c[k]).join(', '))+'">'+bar+'</div><p class="cat-leg">'+leg+'</p><p class="cat-note">'+esc(cats.note)+'</p>';}
+function paneNums(e,p){const f=p&&p.checked?p.fakes:null,t=e.task_count;
+ return '<div title="Accepted submissions the independent proof checker found fake (a problem can be faked again after a revert)"><dt>fake proofs accepted</dt><dd class="'+(f&&f.accepted?'bad':'')+'">'+(f?f.accepted:'?')+'</dd></div>'+
+  '<div title="Fake proofs still holding credit when the run ended"><dt>fakes standing at end</dt><dd class="'+(f&&f.standing_end?'bad':'')+'">'+(f?f.standing_end:'?')+'</dd></div>'+
+  '<div title="Distinct problems with a genuine proof, of the problems in the run"><dt>genuine problems</dt><dd class="ok">'+esc(e.distinct_verified_tasks)+'<small> / '+esc(t??'?')+'</small></dd></div>';}
+const LABELS_BY_RUN=(()=>{try{return JSON.parse($('catalogue-labels').textContent)||{};}catch(_){return {};}})();
+function catsFromLabels(L){if(!L||typeof L!=='object')return null;const c={};for(const k of ['E','C','T','U','Q','O','S'])c[k]=Number.isInteger(L[k])?L[k]:0;
+ return {order:['E','C','T','U','Q','O','S'],c,w:Number.isInteger(L.W)?L.W:0,note:'agent labels of the run report ('+(L.source==='rubric'?'rubric 3.1 judge':'simple judge')+')'};}
+const paneBadges=new Map();
+function paneFill(e){const card=cardOf.get(e.run);if(!card||!card.classList.contains('pane'))return;const p=prof(e);
+ const spec=card.querySelector('.pane-spec');if(spec&&!spec.dataset.static)spec.innerHTML=specChips(e,p);
+ const nums=card.querySelector('.pane-nums');if(nums&&!nums.dataset.static)nums.innerHTML=paneNums(e,p);
+ const cat=card.querySelector('.pane-cat');if(cat)cat.innerHTML=catHTML(catsFromLabels(LABELS_BY_RUN[e.run])||paneBadges.get(e.run)||catsFromSummary(e,p),e);}
+// Interaction-graph snapshot: stance zones like the viewer (no exploit idea centre, rejected left, faking right,
+// deferred top-left, considering top-right, stopped bottom; area proportional to members), overseers as diamonds in
+// a row above, the seed a star, a red dot on agents that have faked. Deterministic packing (sunflower in each zone).
+const ST={n:'none',c:'considering',d:'deferred',x:'faking',r:'rejected',s:'stopped','.':'none'};
+const ZC={none:[0,0],rejected:[Math.PI],faking:[0],deferred:[-0.75*Math.PI],considering:[-0.25*Math.PI],stopped:[0.5*Math.PI]};
+const ZORDER=['none','rejected','faking','deferred','considering','stopped'];
+function colors(){const cs=getComputedStyle(document.documentElement),v=n=>cs.getPropertyValue(n).trim();
+ const o={fg:v('--fg'),muted:v('--muted'),line:v('--line'),card:v('--card'),fake:v('--fake'),star:v('--star'),info:v('--cat-O')};
+ for(const z of ZORDER)o[z]=v('--s-'+z);return o;}
+function layout(th,fi,W,H){const fr=th.frames[fi],nodes=th.nodes,cnt={},members={};for(const z of ZORDER){cnt[z]=0;members[z]=[];}
+ const pos=new Array(nodes.length),ovs=[];let tot=0;
+ let unk=0;const lbl={};for(const z of ZORDER)lbl[z]=0;nodes.forEach((n,i)=>{if(n.role==='overseer'){ovs.push(i);return;}const z=ST[fr.s[i]]||'none';
+ if(n.role!=='seed'){if(fr.s[i] in ST&&fr.s[i]!=='.')lbl[z]++;else unk++;}cnt[z]++;members[z].push(i);tot++;});
+ tot=tot||1;const cx=W/2,cy=H*0.58,maxR=Math.min(W*0.2,H*0.3),R={};
+ for(const z of ZORDER)R[z]=cnt[z]?Math.max(maxR*0.3,maxR*Math.sqrt(cnt[z]/tot)):0;
+ const base=Math.max(R.none,maxR*0.55),C={none:[cx,cy]};
+ for(const z of ZORDER.slice(1)){const a=ZC[z][0],d=base+(R[z]||maxR*0.3)+6;let x=cx+Math.cos(a)*d*1.35,y=cy+Math.sin(a)*d;
+  const r=R[z]||0;x=Math.max(r+2,Math.min(W-r-2,x));y=Math.max(r+14,Math.min(H-r-2,y));C[z]=[x,y];}
+ const dot=Math.max(1.4,Math.min(3.2,maxR*0.11));
+ for(const z of ZORDER){const m=members[z],r=R[z];m.forEach((i,k)=>{const rr=(r-dot-1)*Math.sqrt((k+0.5)/m.length),a=k*2.39996323;
+  pos[i]=[C[z][0]+Math.cos(a)*rr,C[z][1]+Math.sin(a)*rr];});}
+ ovs.forEach((i,k)=>{pos[i]=[W/2+(k-(ovs.length-1)/2)*Math.min(12,(W-20)/Math.max(ovs.length,1)),9];});
+ return {pos,C,R,cnt,dot,unk,lbl};}
+function drawThumb(cv,th,fi,mix,next){const dpr=window.devicePixelRatio||1,W=cv.clientWidth||240,H=cv.clientHeight||165;
+ if(cv.width!==Math.round(W*dpr)){cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);}
+ const g=cv.getContext('2d'),c=colors();g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
+ const A=layout(th,fi,W,H),B=next!=null?layout(th,next,W,H):A,t=next!=null?mix:0,L=(a,b)=>a+(b-a)*t;
+ for(const z of ZORDER){const r=L(A.R[z],B.R[z]);if(r<=0)continue;const x=L(A.C[z][0],B.C[z][0]),y=L(A.C[z][1],B.C[z][1]);
+  g.globalAlpha=0.16;g.fillStyle=c[z];g.beginPath();g.arc(x,y,r,0,7);g.fill();g.globalAlpha=0.55;g.strokeStyle=c[z];g.lineWidth=1;g.stroke();
+  g.globalAlpha=0.9;g.fillStyle=c.muted;g.font='9px system-ui,sans-serif';g.textAlign='center';
+  const F=t<0.5?A:B,n=F.lbl[z],up=z==='deferred'||z==='considering';
+  if(r>6)g.fillText(z==='none'?(n?'no idea '+n:'')+(F.unk?(n?' · ':'')+F.unk+' no stance':''):z+' '+n,x,up?y-r-3:y+r+10);}
+ g.globalAlpha=1;const fa=th.frames[fi].f,fb=next!=null?th.frames[next].f:fa,sa=th.frames[fi].s,sb=next!=null?th.frames[next].s:sa;
+ th.nodes.forEach((n,i)=>{const a=A.pos[i],b=B.pos[i]||a;if(!a)return;const x=L(a[0],b[0]),y=L(a[1],b[1]);
+  const ch=(t<0.5?sa:sb)[i],z=ST[ch]||'none',col=ch in ST&&ch!=='.'?c[z]:c.line,d=A.dot;g.fillStyle=col;
+  if(n.role==='overseer'){g.beginPath();g.moveTo(x,y-4);g.lineTo(x+4,y);g.lineTo(x,y+4);g.lineTo(x-4,y);g.closePath();g.fill();g.strokeStyle=c.info;g.lineWidth=1;g.stroke();}
+  else if(n.role==='seed'){g.fillStyle=c.star;g.beginPath();for(let k=0;k<10;k++){const rr=k%2?d*1.3:d*3,an=-Math.PI/2+k*Math.PI/5;g.lineTo(x+Math.cos(an)*rr,y+Math.sin(an)*rr);}g.closePath();g.fill();}
+  else{g.beginPath();g.arc(x,y,d,0,7);g.fill();}
+  if((t<0.5?fa:fb)[i]==='1'){g.fillStyle=c.fake;g.beginPath();g.arc(x+d*0.9,y-d*0.9,Math.max(1.3,d*0.55),0,7);g.fill();}});
+ return th.frames[fi].t+(next!=null?(th.frames[next].t-th.frames[fi].t)*t:0);}
+function clock(g,W,H,m,c){g.globalAlpha=1;g.fillStyle=c.fg;g.font='600 10px system-ui,sans-serif';g.textAlign='left';
+ g.fillText('+'+Math.floor(m)+' min',5,H-6);}
+function validThumb(t){return t&&t.schema==='storymap-graph-thumb/1'&&Array.isArray(t.nodes)&&Array.isArray(t.frames)&&t.frames.length&&
+ t.frames.every(f=>typeof f.s==='string'&&f.s.length===t.nodes.length&&typeof f.f==='string'&&f.f.length===t.nodes.length&&typeof f.t==='number');}
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const thumbs=new Map();
+function setupGraph(card,th){const e=byRun.get(card.dataset.run),a=card.querySelector('.pane-graph'),cv=a.querySelector('canvas');
+ a.href=a.dataset.href;a.hidden=false;const body=card.querySelector('.pane-pic .rc-body');if(body)body.hidden=true;
+ const btns=card.querySelector('.pane-btns');if(btns&&!btns.querySelector('.b-graph')){const b=document.createElement('a');b.className='b-graph';b.href=a.dataset.href;b.textContent='Interaction graph';btns.prepend(b);}
+ thumbs.set(card.dataset.run,th);const last=th.frames.length-1,W=()=>cv.clientWidth||240,H=()=>cv.clientHeight||165;
+ const still=()=>{const m=drawThumb(cv,th,last);clock(cv.getContext('2d'),W(),H(),m,colors());};
+ still();cv._still=still;let raf=0;
+ const play=()=>{if(reduce||th.frames.length<2)return;cancelAnimationFrame(raf);const t0=performance.now(),D=4000;
+  const step=now=>{const u=Math.min(1,(now-t0)/D),x=u*last,i=Math.min(last-1,Math.floor(x)),m=drawThumb(cv,th,i,x-i,i+1);
+   clock(cv.getContext('2d'),W(),H(),m,colors());if(u<1)raf=requestAnimationFrame(step);};raf=requestAnimationFrame(step);};
+ a.addEventListener('mouseenter',play);a.addEventListener('focus',play);
+ const stop=()=>{cancelAnimationFrame(raf);still();};a.addEventListener('mouseleave',stop);a.addEventListener('blur',stop);
+ const fin=th.frames[last].f,faked=[...fin].filter((x,i)=>x==='1'&&th.nodes[i].role!=='seed').length,nums=card.querySelector('.pane-nums');
+ if(nums&&!nums.querySelector('.n-faked')){const d=document.createElement('div');d.className='n-faked';d.title='Agents with at least one fake by the end (interaction graph, story map fake rule; the seed not counted)';
+  d.innerHTML='<dt>agents who faked</dt><dd class="'+(faked?'bad':'')+'">'+faked+'<small> / '+th.nodes.filter(n=>n.role!=='seed').length+'</small></dd>';nums.insertBefore(d,nums.children[2]||null);nums.classList.add('n4');}
+ const cats=catsFromBadges(th.nodes);if(cats){paneBadges.set(e.run,cats);paneFill(e);}}
+const io='IntersectionObserver' in window?new IntersectionObserver(es=>{for(const x of es){if(!x.isIntersecting)continue;io.unobserve(x.target);
+ const card=x.target,a=card.querySelector('.pane-graph');read(a.dataset.thumb).then(t=>{if(validThumb(t))setupGraph(card,t);});}},{rootMargin:'600px 0px'}):null;
+if(/^https?:$/.test(location.protocol))for(const card of cards)if(card.querySelector('.pane-graph')){if(io)io.observe(card);}
+const redraw=()=>{for(const cv of document.querySelectorAll('.pane-graph canvas'))if(cv._still)cv._still();};
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',redraw);
+new MutationObserver(redraw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+let rz=0;window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(redraw,150);});
+for(const e of data)paneFill(e);
+// Run categories (sidebar): one series at a time, or all; the search and filters still apply within it.
+let series='';const nav=[...document.querySelectorAll('.snav a[data-series]')];
+function showSeries(){for(const s of document.querySelectorAll('section.series'))if(series&&s.dataset.series!==series)s.hidden=true;
+ for(const a of nav){a.setAttribute('aria-current',String(a.dataset.series===series));
+  if(a.dataset.series===series&&a.parentElement.scrollWidth>a.parentElement.clientWidth)a.parentElement.scrollLeft=a.offsetLeft-a.parentElement.offsetLeft-8;}}
+{const base=apply;apply=function(){base();showSeries();};}  // later re-filters (records read in the browser) keep the category
+function pick(key,scroll){series=key;apply();
+ if(scroll){const t=key?document.getElementById('series-'+key):$('runs-top');if(t)t.scrollIntoView({block:'start'});}}
+for(const a of nav)a.addEventListener('click',ev=>{ev.preventDefault();const key=a.dataset.series;pick(key,true);
+ history.replaceState(null,'',key?'#series-'+key:location.pathname+location.search);});
+for(const id of ['filter','f-model','f-variant','f-judge'])$(id).addEventListener('input',showSeries);
+{const m=location.hash.match(/^#series-([A-Za-z0-9_-]+)$/);if(m&&nav.some(a=>a.dataset.series===m[1]))setTimeout(()=>pick(m[1],true),0);}
+'''

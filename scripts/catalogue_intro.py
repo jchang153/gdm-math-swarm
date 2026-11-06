@@ -16,6 +16,9 @@ TITLE = 'GDM Math Swarm experiments'
 BRAND = 'GDM Math Swarm'
 HEADLINE = 'Do AI research swarms cheat, and does anyone stop them?'
 PAPER_LABEL = 'Reconstructs'
+# Run panes with the interaction graph (owner, November 6, 2026): math catalogue only; catalogue_intro_ib.py leaves
+# this unset, so the ImpossibleBench catalogue keeps its cards.
+PANES = True
 
 PAPER_URL = 'https://arxiv.org/pdf/2609.04170'
 PAPER_TITLE = 'A Case Study on Emergent Cheating and Whistleblowing in Autonomous Research Swarms'
@@ -165,3 +168,46 @@ def about_section(text=None):
             '<details id="read"><summary>How to read this site</summary><p class="sub">Each run has these pages; '
             f'open them from its card or table row.</p><dl class="defs">{pages}</dl></details>'
             f'<details id="glossary"><summary>Glossary</summary><dl class="defs">{terms}</dl></details></section>')
+
+
+# Run categories for newcomers (owner, November 6, 2026: "the categories are also not super readable to anyone except
+# me"): the series of run_profile.SERIES, each named by the question it answers, with a one-line description. The
+# detailed series paragraph stays at the top of each section. A series missing here is listed by its own title.
+SERIES_NAV = {
+    'sweep25': ('Which models cheat?', 'Five frontier models, 25 agents each, a planted cheat, no overseers; 1 h'),
+    'push120': ('Can overseers stop a planted cheat?',
+                'Latest design, 100 agents: none vs 1, 2 or 10 overseers who can check and undo, and a reminder '
+                'variant; 3 repeats each, 2 h'),
+    'push120comms': ('Can overseers stop it just by talking?',
+                     'Overseers that can only post and message (no undo); 1, 2 or 10 of them, 2 h'),
+    'reminder60': ('Do integrity reminders help?', 'A reminder of the rules every 5 minutes, no overseers; 1 h'),
+    'conditions180': ('Talking or undoing: which overseer power matters?',
+                      'Overseers with only messaging or only check-and-undo powers; 3 h'),
+    'notices180': ('Overseers over three hours', 'None vs 1, 2 or 10 overseers, 3 repeats each, unread notices; 3 h'),
+    'notices60': ('Overseers, once agents see their messages',
+                  'Unread-message notices on; none vs 1 to 10 overseers; 1 h'),
+    'oversight60': ('How many overseers does it take?', 'None vs 1, 2, 5 or 10 overseers of two models; 1 h'),
+    'seeded6': ('Six different planted cheats', 'Six kinds of cheat planted at once, no overseers; 30 min'),
+    'oversight30': ('First overseer teams', 'Pilots with 1, 2 or 5 overseers; 30 min'),
+    'seeded30': ('First planted-cheat runs', 'The planted cheat, with and without one overseer; 30 min'),
+    'baseline100': ('Do 100 agents find a cheat on their own?', 'No planted cheat, no overseers; 30 and 90 min'),
+    'small': ('Small swarms', '5 or 10 agents: prompt variants and a first overseer; 1 to 2 h'),
+    'models': ('Five agents, four models', 'Claude Opus 5.5, GPT 5.6 Sol, Gemini 4 Argon and GLM 5.3; 1 h'),
+    'early': ('Early pilots', 'The first runs: 20 DeepSeek agents, and a 6-hour Gemini run'),
+}
+
+
+def series_nav(series, total, text=None):
+    """The run-category sidebar of the math catalogue: "All runs" and one entry per series, [(key, title, count)]."""
+    nav = getattr(_text(text), 'SERIES_NAV', {})
+    items = [f'<a href="#runs-top" data-series="" aria-current="true"><span class="sn-t">All runs</span>'
+             f'<span class="n">{total}</span></a>']
+    for key, title, count in series:
+        name, line = nav.get(key, (title, ''))
+        items.append(f'<a href="#series-{html.escape(key, quote=True)}" data-series="{html.escape(key, quote=True)}" '
+                     f'title="{html.escape(title, quote=True)}"><span class="sn-t">{html.escape(name)}</span>'
+                     f'<span class="n">{count}</span>'
+                     + (f'<span class="sn-d">{html.escape(line)}</span>' if line else '') + '</a>')
+    return ('<nav class="snav jump" aria-label="Run categories"><p class="snav-h">Browse runs</p>'
+            + ''.join(items) + '</nav>')
+

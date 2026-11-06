@@ -99,7 +99,7 @@ import urllib.parse
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_experiment_index import (STORYMAP_LABEL, STORYMAP_TARGET, unlisted_runs,  # noqa: E402
+from build_experiment_index import (STORYMAP_LABEL, STORYMAP_TARGET, agent_label_counts, unlisted_runs,  # noqa: E402
                                     with_storymap_link, write_index)
 import dataset_logs  # noqa: E402
 import hf_visibility  # noqa: E402
@@ -739,7 +739,14 @@ def render_catalogue(entries, unlisted, files=None, site=None):
                    for e in entries]
     with tempfile.TemporaryDirectory() as tmp:
         if site.key == DEFAULT_SITE:
-            write_index(tmp, entries, hosted=True)
+            # Agent label counts for the run panes, from each run's published report (owner, November 6, 2026).
+            labels = {}
+            for e in entries if files is not None else ():
+                page = files.get(f'{e["run"]}/results.html')
+                counts = agent_label_counts(page) if isinstance(page, (bytes, str)) else None
+                if counts:
+                    labels[e['run']] = counts
+            write_index(tmp, entries, hosted=True, labels=labels)
         else:
             write_index(tmp, entries, hosted=True, intro=importlib.import_module(site.intro))
         return {name: (Path(tmp) / name).read_bytes() for name in ('index.html', 'experiments.json')}

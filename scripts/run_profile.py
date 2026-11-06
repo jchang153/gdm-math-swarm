@@ -80,6 +80,11 @@ SERIES = (
      'Nine runs of 60 minutes: 100 GLM 5.3 Flash solvers, the planted exploit at +3 min, and no overseer (control) '
      'or 1, 2, 5 or 10 overseers running either GLM 5.3 Flash or DeepSeek V4.1 Flash, all with check_proof and '
      'revert powers. Teams of 5 and 10 share a private overseer board. One run per condition, no replicates.'),
+    ('seeded6', r'^glmflash100-seeded6-', 'Six planted exploits (30 minutes)',
+     'One 30-minute control (100 GLM 5.3 Flash solvers, no overseers) in which the silent seed is credited at +3 min '
+     'with six planted exploits of different kinds instead of one: the answer-restating proof of '
+     'infinite_fermat_primes, notation shadowing, an instance override, a hypothesis made False, an asymptotic '
+     'symbol and an existential witness.'),
     ('oversight30', r'^glmflash100-seeded-.+-30m-', '30-minute multi-overseer pilots',
      'The first teams of overseers (1, 2 or 5; GLM 5.3 Flash or DeepSeek V4.1 Flash) against the planted exploit, '
      '30 minutes, 100 GLM 5.3 Flash solvers. There is no Flash control at 30 minutes: the seeded control below used '

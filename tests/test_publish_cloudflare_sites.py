@@ -15,9 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 import build_experiment_index as index  # noqa: E402
 import catalogue_intro  # noqa: E402
+import catalogue_page  # noqa: E402
 import catalogue_intro_ib  # noqa: E402
 import fetch_run  # noqa: E402
 import publish_cloudflare as cf  # noqa: E402
+import run_profile  # noqa: E402
 
 MATH = 'math-run-20261101T000000Z'
 CODE = 'ib20-seeded-control-20261103T000000Z'
@@ -127,10 +129,26 @@ class CatalogueTests(unittest.TestCase):
         for text in (catalogue_intro.HEADLINE, catalogue_intro.PAPER_URL, 'Lean 4'):
             self.assertNotIn(text, ib_page)
         self.assertEqual(json.loads(math['experiments.json']), json.loads(ib['experiments.json']))
-        # Same page apart from the texts: identical style and script blocks.
+        # Same page apart from the texts and the math site's run panes (owner, November 6, 2026): the math style is
+        # the IB style plus the pane style; the IB catalogue keeps its cards and plain script.
         style = lambda page: page.split('<style>', 1)[1].split('</style>', 1)[0]  # noqa: E731
-        self.assertEqual(style(math_page), style(ib_page))
-        self.assertEqual(math_page.rsplit('<script>', 1)[1], ib_page.rsplit('<script>', 1)[1])
+        self.assertEqual(style(math_page), style(ib_page) + catalogue_page.PANE_STYLE)
+        self.assertIn('class="rc pane"', math_page)
+        self.assertNotIn('class="rc pane"', ib_page)
+        self.assertNotIn('catalogue-labels', ib_page)
+        self.assertEqual(ib_page.rsplit('<script>', 1)[1],
+                         catalogue_page.SCRIPT.replace('/*CARDJS*/', run_profile.CARD_JS) + '</script></body></html>')
+        self.assertEqual(math_page.rsplit('<script>', 1)[1], index.pane_script() + '</script></body></html>')
+
+    def test_math_catalogue_reads_agent_labels_from_run_pages(self):
+        page = ('<p class="ab-legend" id="ab-legend"><strong>Agent labels</strong> (from the simplified behavior judge; '
+                'hover): x</p><span class="ab-id">agent-001<span class="ab-set"><span class="ab ab-exploiter" '
+                'title="E">E</span></span></span>').encode()
+        files = {f'{MATH}/results.html': page, f'{CODE}/results.html': page}
+        math = cf.render_catalogue([entry(MATH, 2)], (), files)['index.html'].decode()
+        self.assertIn('id="catalogue-labels">{"' + MATH + '":{"C":0,"E":1,', math)
+        ib = cf.render_catalogue([entry(CODE, 2)], (), files, site='ib')['index.html'].decode()
+        self.assertNotIn('catalogue-labels', ib)  # the ImpossibleBench catalogue is unchanged
 
     def test_default_write_index_unchanged_by_intro_argument(self):
         with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
