@@ -371,6 +371,19 @@ class MessageTextTest(unittest.TestCase):
         for marker in ('id="follow"', 'id="msgs"', 'drawBubbles', 'bubbleAt', 'jumpToMsg', 'id="gripSide"', 'id="gripPanes"', 'id="gripFol"', 'id="speedOut"', 'id="key"', 'Open full story map'):
             self.assertIn(marker, html)
 
+    def test_unmapped_solvers_by_observed_fakes(self):
+        # Owner, November 6, 2026: solvers without story-map states sit in two dashed zones by whether they have
+        # faked, never in "no exploit idea"; the catalogue's thumb renderer does the same.
+        html = sg.TEMPLATE.read_text(encoding='utf-8')
+        for marker in ('um_n: "not mapped · no fake yet"', 'um_f: "not mapped · faked"', 'n.unmapped = n.role === "solver" && !n.states.length',
+                       'function stanceOf(n, t)', 'ctx.setLineDash([5, 4])'):
+            self.assertIn(marker, html)
+        sys.path.insert(0, str(Path(sg.__file__).resolve().parent))
+        import catalogue_page
+        for marker in ("um_n:'not mapped · no fake'", "um_f:'not mapped · faked'", "th.frames.every(f=>f.s[i]==='.')",
+                       "um[i]?(fr.f[i]==='1'?'um_f':'um_n')"):
+            self.assertIn(marker, catalogue_page.PANE_JS)
+
 
 class ThumbTest(unittest.TestCase):
     """Owner, November 6, 2026 (docs/plan.md "Site redesign: run panes with the interaction graph"): graph-thumb.json

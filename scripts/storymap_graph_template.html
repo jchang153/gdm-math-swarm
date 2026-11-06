@@ -204,6 +204,7 @@ html.embed #stage { min-height: 0; }
     <div class="row"><svg class="shape" viewBox="-8 -8 16 16"><circle r="4.5" fill="var(--s-none)"/><circle r="7" fill="none" stroke="var(--trick)" stroke-width="1.3"/></svg>has the trick (ring)</div>
     <div class="row"><svg class="shape" viewBox="-8 -8 16 16"><circle r="5.5" fill="var(--s-none)"/><circle cx="4.2" cy="-4.2" r="2.8" fill="var(--fake)" stroke="var(--bg)" stroke-width="1"/></svg>red dot: has faked at least once by now</div>
     <div class="row"><svg class="shape" viewBox="-8 -8 16 16"><path d="M0-7L6 0 0 7-6 0Z" fill="var(--s-none)"/></svg>overseer</div>
+    <div class="row"><svg class="shape" viewBox="-8 -8 16 16"><circle r="6.5" fill="none" stroke="var(--muted)" stroke-width="1.3" stroke-dasharray="3 2"/><circle r="3.5" fill="var(--faint)"/></svg>dashed zone: solvers without a story map, by whether they have faked (no stance)</div>
     <div class="row"><svg class="shape" viewBox="-8 -8 16 16"><path id="starpath" fill="var(--s-none)"/></svg>seed agent</div>
     <h2>Edges (decay, half-life <span id="hl">10</span> min)</h2>
     <div id="edgeToggles"></div>
@@ -244,13 +245,18 @@ const ANIM_SEC = 1.1;            // real seconds an event pop lasts
 const MAX_ANIMS = 450;
 const LINK_MIN_W = 0.06;
 const STANCES = ["none", "considering", "deferred", "faking", "rejected", "stopped"];
-const STANCE_LABEL = { none: "no exploit idea", considering: "considering", deferred: "deferred", faking: "faking", rejected: "rejected", stopped: "stopped" };
+// Solvers without story-map states (e.g. a run mapped for a sample of solvers) are not given a stance: they sit in
+// two dashed, neutral zones by observed behaviour, "not mapped · faked" (a fake submission by now) and "not mapped · no
+// fake yet", and are never counted as "no exploit idea" (owner, November 6, 2026).
+const UNMAPPED = ["um_n", "um_f"];
+const ZONE_KEYS = STANCES.concat(UNMAPPED);
+const STANCE_LABEL = { none: "no exploit idea", considering: "considering", deferred: "deferred", faking: "faking", rejected: "rejected", stopped: "stopped", um_n: "not mapped · no fake yet", um_f: "not mapped · faked" };
 // zone targets as fractions of the stage (x, y): rejected left, faking right, none centre.
 // "no exploit idea" in the centre; the other zones on a ring around it whose radius follows the centre zone's size
 // (rejected left, faking right, deferred top-left, considering top-right, stopped below); overseers in a row above.
 // Each zone is a container sized by its current members (area ∝ count). ZONES holds the live centres (fractions).
-const ANGLE = { rejected: Math.PI, faking: 0, deferred: -0.75 * Math.PI, considering: -0.25 * Math.PI, stopped: 0.5 * Math.PI };
-const ZONES = { none: [0.5, 0.56], considering: [0.66, 0.36], deferred: [0.34, 0.36], faking: [0.86, 0.56], rejected: [0.14, 0.56], stopped: [0.5, 0.86] };
+const ANGLE = { rejected: Math.PI, faking: 0, deferred: -0.75 * Math.PI, considering: -0.25 * Math.PI, stopped: 0.5 * Math.PI, um_n: 0.75 * Math.PI, um_f: 0.25 * Math.PI };
+const ZONES = { none: [0.5, 0.56], considering: [0.66, 0.36], deferred: [0.34, 0.36], faking: [0.86, 0.56], rejected: [0.14, 0.56], stopped: [0.5, 0.86], um_n: [0.3, 0.84], um_f: [0.7, 0.84] };
 const zoneR = {}, zoneN = {}, zoneLbl = {};   // animated radius (px), member count, solver count
 const EDGE_TYPES = [
   { key: "dm", label: "DMs", v: "--e-dm" },
@@ -294,6 +300,13 @@ for (const e of events) {
   if (e.type === "submit" || (a.role === "seed" && e.type === "library_publish")) a.firstFake = e.t;
 }
 for (const n of nodes) n.credT = Float64Array.from(n.credT);
+for (const n of nodes) n.unmapped = n.role === "solver" && !n.states.length;
+const hasUnmapped = nodes.some((n) => n.unmapped);
+// a node's zone key at time t: its story-map stance, or for an unmapped solver whether it has faked by t
+function stanceOf(n, t) {
+  if (n.unmapped) return n.firstFake !== undefined && n.firstFake <= t ? "um_f" : "um_n";
+  const s = stateAt(n, t); return s ? s.stance : "none";
+}
 
 let tMin = 0, tMax = +GRAPH.minutes || 0;
 if (events.length) { tMin = Math.min(tMin, evT[0]); tMax = Math.max(tMax, evT[evT.length - 1]); }
@@ -314,6 +327,7 @@ function readColors() {
   C = { accent: g("--accent"), fg: g("--fg"), muted: g("--muted"), faint: g("--faint"), line: g("--line"), grid: g("--grid"), bg: g("--bg"),
     gold: g("--gold"), fake: g("--fake"), trick: g("--trick"), nodeEdge: g("--node-edge"), stance: {}, edge: {} };
   for (const s of STANCES) C.stance[s] = g("--s-" + s);
+  for (const s of UNMAPPED) C.stance[s] = g("--faint");
   for (const et of EDGE_TYPES) C.edge[et.key] = g(et.v);
   drawSpark(); renderStanceLegend(true);
 }
@@ -382,7 +396,7 @@ function zoneOf(n) {
   return ZONES[n.stance] || ZONES.none;
 }
 for (const n of nodes) {
-  const s = stateAt(n, tNow); n.stance = s ? s.stance : "none";
+  n.stance = stanceOf(n, tNow);
   const z = zoneOf(n); n.x = z[0] * 800 + (Math.random() - 0.5) * 200; n.y = z[1] * 600 + (Math.random() - 0.5) * 200;
   n.r = 5;
 }
@@ -397,6 +411,7 @@ function placeZones() {
   const mx = zoneMax(), cx = 0.5 * W, cy = 0.56 * H, base = Math.max(zoneR.none || mx, 0.75 * mx), top = 0.1 * H;
   ZONES.none = [0.5, 0.56];
   for (const s of Object.keys(ANGLE)) {
+    if (!hasUnmapped && UNMAPPED.includes(s)) continue;
     const R = zoneR[s] || mx * 0.3, d = base + R + 18;
     let x = cx + d * Math.cos(ANGLE[s]), y = cy + d * Math.sin(ANGLE[s]);
     x = Math.min(W - R - 4, Math.max(R + 4, x)); y = Math.min(H - R - 4, Math.max(top + R + 14, y));
@@ -408,11 +423,11 @@ function zoneTarget(s) {
   return (zoneN[s] || 0) ? Math.max(mx * 0.3, mx * Math.sqrt(zoneN[s] / tot)) : mx * 0.22;
 }
 function countZones() {
-  for (const s of STANCES) { zoneN[s] = 0; zoneLbl[s] = 0; }
+  for (const s of ZONE_KEYS) { zoneN[s] = 0; zoneLbl[s] = 0; }
   for (const n of nodes) if (n.role !== "overseer") { const s = ZONES[n.stance] ? n.stance : "none"; zoneN[s]++; if (n.role === "solver") zoneLbl[s]++; }
 }
 function animZones(k) {
-  for (const s of STANCES) { const t = zoneTarget(s); zoneR[s] = zoneR[s] === undefined ? t : zoneR[s] + (t - zoneR[s]) * k; }
+  for (const s of ZONE_KEYS) { const t = zoneTarget(s); zoneR[s] = zoneR[s] === undefined ? t : zoneR[s] + (t - zoneR[s]) * k; }
   placeZones(); fx.x(fx.x()); fy.y(fy.y());
 }
 // containment: a soft wall keeps each node inside its zone (stronger than links); a node outside (just changed
@@ -449,7 +464,7 @@ function rebuildLinks() {
 function updateNodes() {
   let changed = false;
   for (const n of nodes) {
-    const s = stateAt(n, tNow); const st = s ? s.stance : "none";
+    const s = stateAt(n, tNow); const st = stanceOf(n, tNow);
     if (st !== n.stance) { n.stance = st; changed = true; }
     n.state = s; n.cred = credAt(n, tNow);
     const r = Math.min(14, (n.role === "solver" ? 4.5 : 6.5) + 1.6 * Math.sqrt(n.cred));
@@ -614,7 +629,7 @@ function renderTip() {
   const s = n.state, th = thoughtAt(n, tNow);
   const key = n.id + "|" + (s ? s.t_from : "") + "|" + (th ? th.t : "") + "|" + n.cred + "|" + (n.firstFake !== undefined && n.firstFake <= tNow);
   if (key === tipKey && tip.style.display === "block") { const cv = tip.querySelector("canvas.mini"); if (cv) drawMini(n, cv); return; } tipKey = key;
-  const st = s ? s.stance : "none";
+  const st = n.stance;
   let h = `<div class="id">${esc(n.id)}</div><div class="meta">${esc(n.role)} · <span class="pill" style="background:${C.stance[st] || C.faint}">${esc(STANCE_LABEL[st] || st)}</span>`;
   if (s && s.has_trick) h += " · has the trick";
   h += `<br>believes judge: ${esc(s ? s.believes_judge : "unknown")} · credited: ${n.cred}${n.firstFake !== undefined && n.firstFake <= tNow ? ` · <b style="color:${C.fake}">first fake at ${fmtT(n.firstFake)}</b>` : ""}</div>`;
@@ -681,7 +696,7 @@ function renderFollow() {
   const key = (s ? s.t_from : "") + "|" + (th ? th.t : "") + "|" + n.cred + "|" + faked + "|" + C.bg;
   if (key !== folKey) {
     folKey = key; folEvKey = -2;
-    const st = s ? s.stance : "none", mm = maps[n.id];
+    const st = n.stance, mm = maps[n.id];
     let h = `<div class="fh"><span class="id">${esc(n.id)}</span><span class="tag">following</span><button class="x" type="button" title="Stop following (Esc)" aria-label="Stop following">×</button></div>`;
     h += `<div class="meta">${esc(n.role)} · <span class="pill" style="background:${C.stance[st] || C.faint}">${esc(STANCE_LABEL[st] || st)}</span>${s && s.has_trick ? " · has the trick" : ""}`;
     h += `<br>believes judge: ${esc(s ? s.believes_judge : "unknown")} · credited: ${n.cred}${faked ? ` · <b style="color:${C.fake}">first fake at ${fmtT(n.firstFake)}</b>` : ""}</div>`;
@@ -804,16 +819,17 @@ let legendKey = "";
 const stanceRows = {};
 function renderStanceLegend(force) {
   const box = $("stances");
-  if (!box.childElementCount) for (const s of STANCES) {
+  if (!box.childElementCount) for (const s of hasUnmapped ? ZONE_KEYS : STANCES) {
     const d = document.createElement("div"); d.className = "row";
-    d.innerHTML = `<span class="sw" style="background:var(--s-${s})"></span><span>${STANCE_LABEL[s]}</span><span class="n"></span>`;
+    const sw = UNMAPPED.includes(s) ? "background:transparent;border:1.5px dashed var(--muted)" : `background:var(--s-${s})`;
+    d.innerHTML = `<span class="sw" style="${sw}"></span><span>${STANCE_LABEL[s]}</span><span class="n"></span>`;
     box.appendChild(d); stanceRows[s] = d.lastChild;
   }
   const cnt = {}; let trick = 0;
   for (const n of nodes) if (n.role === "solver") { cnt[n.stance] = (cnt[n.stance] || 0) + 1; if (n.state && n.state.has_trick) trick++; }
-  const key = STANCES.map((s) => cnt[s] || 0).join(",");
+  const keys = hasUnmapped ? ZONE_KEYS : STANCES, key = keys.map((s) => cnt[s] || 0).join(",");
   if (key === legendKey && !force) return; legendKey = key;
-  for (const s of STANCES) stanceRows[s].textContent = cnt[s] || 0;
+  for (const s of keys) stanceRows[s].textContent = cnt[s] || 0;
 }
 const TYPE_LABEL = { dm: "DM", board_post: "board post", board_read: "board read", library_publish: "library publish", library_read: "library read", submit: "submit", credited: "credited", revert: "revert", check: "check", ov_board_post: "overseer post", ov_board_read: "overseer read" };
 let feedKey = -2;
@@ -914,11 +930,14 @@ function shape(n, r) {
 }
 function drawZones() {
   ctx.save(); ctx.font = "600 11px system-ui, sans-serif"; ctx.textAlign = "center";
-  for (const s of STANCES) {
+  for (const s of ZONE_KEYS) {
+    const um = UNMAPPED.includes(s);
+    if (um && !hasUnmapped) continue;
     const [zx, zy] = ZONES[s], R = zoneR[s] || 40;
     ctx.beginPath(); ctx.arc(zx * W, zy * H, R, 0, 2 * Math.PI);
-    ctx.globalAlpha = 0.16; ctx.fillStyle = C.stance[s]; ctx.fill();
-    ctx.globalAlpha = 0.85; ctx.lineWidth = 1.5; ctx.strokeStyle = C.stance[s]; ctx.stroke();
+    ctx.globalAlpha = um ? 0.07 : 0.16; ctx.fillStyle = um ? C.muted : C.stance[s]; ctx.fill();
+    ctx.globalAlpha = 0.85; ctx.lineWidth = 1.5; ctx.strokeStyle = um ? C.muted : C.stance[s];
+    if (um) ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
     ctx.globalAlpha = 0.9; ctx.fillStyle = C.fg;
     ctx.fillText(`${STANCE_LABEL[s]} · ${zoneLbl[s] || 0}`, zx * W, zy * H - R - 6);
   }

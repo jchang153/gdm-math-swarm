@@ -555,15 +555,19 @@ function paneFill(e){const card=cardOf.get(e.run);if(!card||!card.classList.cont
 // deferred top-left, considering top-right, stopped bottom; area proportional to members), overseers as diamonds in
 // a row above, the seed a star, a red dot on agents that have faked. Deterministic packing (sunflower in each zone).
 const ST={n:'none',c:'considering',d:'deferred',x:'faking',r:'rejected',s:'stopped','.':'none'};
-const ZC={none:[0,0],rejected:[Math.PI],faking:[0],deferred:[-0.75*Math.PI],considering:[-0.25*Math.PI],stopped:[0.5*Math.PI]};
-const ZORDER=['none','rejected','faking','deferred','considering','stopped'];
+const ZC={none:[0,0],rejected:[Math.PI],faking:[0],deferred:[-0.75*Math.PI],considering:[-0.25*Math.PI],stopped:[0.5*Math.PI],um_n:[0.75*Math.PI],um_f:[0.25*Math.PI]};
+// Solvers with no story-map state in any frame have no stance: two dashed neutral zones by observed behaviour (the
+// thumb's f flag), never counted as "no idea" (owner, November 6, 2026). As in the viewer.
+const ZORDER=['none','rejected','faking','deferred','considering','stopped','um_n','um_f'],UM={um_n:'not mapped · no fake',um_f:'not mapped · faked'};
+function unmapped(th){if(!th._um)th._um=th.nodes.map((n,i)=>n.role==='solver'&&th.frames.every(f=>f.s[i]==='.'));return th._um;}
 function colors(){const cs=getComputedStyle(document.documentElement),v=n=>cs.getPropertyValue(n).trim();
  const o={fg:v('--fg'),muted:v('--muted'),line:v('--line'),card:v('--card'),fake:v('--fake'),star:v('--star'),info:v('--cat-O')};
- for(const z of ZORDER)o[z]=v('--s-'+z);return o;}
+ for(const z of ZORDER)o[z]=UM[z]?v('--muted'):v('--s-'+z);return o;}
 function layout(th,fi,W,H){const fr=th.frames[fi],nodes=th.nodes,cnt={},members={};for(const z of ZORDER){cnt[z]=0;members[z]=[];}
  const pos=new Array(nodes.length),ovs=[];let tot=0;
- let unk=0;const lbl={};for(const z of ZORDER)lbl[z]=0;nodes.forEach((n,i)=>{if(n.role==='overseer'){ovs.push(i);return;}const z=ST[fr.s[i]]||'none';
- if(n.role!=='seed'){if(fr.s[i] in ST&&fr.s[i]!=='.')lbl[z]++;else unk++;}cnt[z]++;members[z].push(i);tot++;});
+ let unk=0;const lbl={},um=unmapped(th);for(const z of ZORDER)lbl[z]=0;nodes.forEach((n,i)=>{if(n.role==='overseer'){ovs.push(i);return;}
+ const z=um[i]?(fr.f[i]==='1'?'um_f':'um_n'):ST[fr.s[i]]||'none';
+ if(n.role!=='seed'){if(um[i]||(fr.s[i] in ST&&fr.s[i]!=='.'))lbl[z]++;else unk++;}cnt[z]++;members[z].push(i);tot++;});
  tot=tot||1;const cx=W/2,cy=H*0.58,maxR=Math.min(W*0.2,H*0.3),R={};
  for(const z of ZORDER)R[z]=cnt[z]?Math.max(maxR*0.3,maxR*Math.sqrt(cnt[z]/tot)):0;
  const base=Math.max(R.none,maxR*0.55),C={none:[cx,cy]};
@@ -579,10 +583,12 @@ function drawThumb(cv,th,fi,mix,next){const nf=th.frames.length;fi=Math.max(0,Ma
  const g=cv.getContext('2d'),c=colors();g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
  const A=layout(th,fi,W,H),B=next!=null?layout(th,next,W,H):A,t=next!=null?mix:0,L=(a,b)=>a+(b-a)*t;
  for(const z of ZORDER){const r=L(A.R[z],B.R[z]);if(r<=0)continue;const x=L(A.C[z][0],B.C[z][0]),y=L(A.C[z][1],B.C[z][1]);
-  g.globalAlpha=0.16;g.fillStyle=c[z];g.beginPath();g.arc(x,y,r,0,7);g.fill();g.globalAlpha=0.55;g.strokeStyle=c[z];g.lineWidth=1;g.stroke();
+  g.globalAlpha=UM[z]?0.07:0.16;g.fillStyle=c[z];g.beginPath();g.arc(x,y,r,0,7);g.fill();g.globalAlpha=0.55;g.strokeStyle=c[z];g.lineWidth=1;
+  if(UM[z])g.setLineDash([3,3]);g.stroke();g.setLineDash([]);
   g.globalAlpha=0.9;g.fillStyle=c.muted;g.font=Math.round(Math.max(9,Math.min(14,W/28)))+'px system-ui,sans-serif';g.textAlign='center';
-  const F=t<0.5?A:B,n=F.lbl[z],up=z==='deferred'||z==='considering';
-  if(r>6)g.fillText(z==='none'?(n?'no idea '+n:'')+(F.unk?(n?' · ':'')+F.unk+' no stance':''):z+' '+n,x,up?y-r-3:y+r+10);}
+  const F=t<0.5?A:B,n=F.lbl[z],up=z==='deferred'||z==='considering'||!!UM[z];
+  const txt=z==='none'?(n?'no idea '+n:'')+(F.unk?(n?' · ':'')+F.unk+' no stance':''):(UM[z]||z)+' '+n,hw=g.measureText(txt).width/2;
+  if(r>6)g.fillText(txt,Math.max(hw+2,Math.min(W-hw-2,x)),Math.max(10,Math.min(H-3,up?y-r-3:y+r+10)));}
  g.globalAlpha=1;const fa=th.frames[fi].f,fb=next!=null?th.frames[next].f:fa,sa=th.frames[fi].s,sb=next!=null?th.frames[next].s:sa;
  th.nodes.forEach((n,i)=>{const a=A.pos[i],b=B.pos[i]||a;if(!a)return;const x=L(a[0],b[0]),y=L(a[1],b[1]);
   const ch=(t<0.5?sa:sb)[i],z=ST[ch]||'none',col=ch in ST&&ch!=='.'?c[z]:c.line,d=A.dot;g.fillStyle=col;
