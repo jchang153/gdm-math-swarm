@@ -5,7 +5,9 @@ pages of research/analysis/storymap/view.py are published. Only the pages and th
 RUN/analysis/storymap/index.html, events.html, validation.html, validation.md, taxonomy.html and agents/<agent>.html;
 with overseer story maps (owner, November 5, 2026) also taxonomy_overseer.html, from the public overseer codebook
 research/analysis/storymap/taxonomy_overseer.md (overseer pages are agents/<overseer>.html; the overseer prompts,
-private/.../prompts_overseer.md, are screened like the solver prompts).
+private/.../prompts_overseer.md, are screened like the solver prompts). The experimental interaction graph (owner, November 5,
+2026; docs/plan.md "Story-map interaction graph") is graph.html, built by scripts/storymap_graph.py from the same
+public readings plus conference records, and screened like the other pages.
 Owner, November 2, 2026 (docs/plan.md): the taxonomy (codes, names, definitions, examples) is public; its committed
 copy research/analysis/storymap/taxonomy.md is rendered as taxonomy.html and its names appear on every page. Everything
 else in the folder stays local: the stage-0 timelines (timeline/, a private category), stage1/-stage3/, units/,
@@ -23,7 +25,7 @@ from incident_site import _insert
 
 STORYMAP_DIR = 'analysis/storymap'
 STORYMAP_FILES = ('index.html', 'events.html', 'validation.html', 'validation.md', 'taxonomy.html',
-                  'taxonomy_overseer.html')
+                  'taxonomy_overseer.html', 'graph.html')
 AGENT_PAGE = re.compile(r'agents/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.html')
 STORYMAP_INDEX = STORYMAP_DIR + '/index.html'
 STORYMAP_LABEL = 'Story map'

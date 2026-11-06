@@ -2184,3 +2184,19 @@ the run's conference records and its existing story map (same time origin, run m
 by the story map fake rule) and inlines it into the front-end template `scripts/storymap_graph_template.html`, writing
 `RUN/analysis/storymap/graph.html`. `graph.html` joins the story-map publication allowlist (`scripts/storymap_site.py`)
 and is screened like the other story-map pages.
+
+**Follow-up owner requests (chat, November 5, 2026, about 17:30 PT; relayed by the coordinating agent), verbatim:**
+- "hovering over the agents should give a miniature version of their story map". Implemented as a hover card: a
+  small canvas with the agent's stage-3 position strip (node colours) and turning points, lanes for its thoughts
+  (by code group), what it saw (library, board and DMs, reverts received) and did (submissions, fake ones in red,
+  credits, posts and DMs; overseers: checks and reverts), a cursor at the current time, the stage-3 story (clipped)
+  and the current summary and quote. `graph.json` carries `maps` (phases, turning points, story), all already shown on
+  the published story-map pages.
+- "can you make the speed default 5x real time, but also allow real time option". Speed is now a multiple of real
+  time (1x = one run second per second): 1x, 5x (default), 15x, 60x, 300x, 1800x; event pops last about one
+  wall-clock second at any speed, and fewer run at once at 300x and above.
+
+**Reading note (pilot).** Node colour is the story map's current reading of each agent's position (stage-3 phases,
+as on the index), not whether it ever faked. In the pilot, at minute 35 the solvers read rejected 47, stopped 37,
+faking 8, although 36 had submitted a fake by then (30 of them between minutes 25 and 35, only 14 after minute 35):
+most fakers stopped after the overseer's reverts and warnings. The page legend says so.

@@ -1271,8 +1271,25 @@ def stance_title(frm, to, st, label):
             + (f" · {label}" if label else ""))
 
 
-def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css=""):
-    """``extra`` / ``css``: the overseer block and its styles (view_overseer.py); empty = the solver page as before."""
+# The experimental interaction graph (docs/plan.md, "Story-map interaction graph (November 5, 2026)"): the owner wants
+# it discreet, so the index gains only this one small muted link, and only when graph.html exists for the run
+# (written next to index.html by scripts/storymap_graph.py). Without it the index is byte-identical to before.
+GRAPH_PAGE = "graph.html"
+GRAPH_LINK_TEXT = "Interaction graph (experimental) ↗"
+
+
+def graph_link(on):
+    """The index's one small, muted link to graph.html ('' when ``on`` is false)."""
+    if not on:
+        return ""
+    return (f'<p class="muted" style="font-size:.85em;margin:.2em 0 .6em"><a href="{GRAPH_PAGE}" style="color:inherit" '
+            f'title="Experimental: agents as nodes and their interactions over run time, coloured by the story map\'s '
+            f'readings">{esc(GRAPH_LINK_TEXT)}</a></p>')
+
+
+def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css="", graph=False):
+    """``extra`` / ``css``: the overseer block and its styles (view_overseer.py); empty = the solver page as before.
+    ``graph``: add the discreet link to the experimental interaction graph (graph.html)."""
     rows, counts = [], Counter()
     push_seen = False
     sources = sorted({str(((a["stage3"] or {}).get("final") or {}).get("source", "unknown"))
@@ -1327,7 +1344,7 @@ def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css=""):
                + '<button type="button" id="reset">Reset</button> <span id="shown" class="muted"></span></div>')
     summary = "".join(tbadge(f"{source_label(k)}: {v}", SOURCE_HINT) for k, v in sorted(counts.items()))
     run = pipeline.get("run_id") or ""
-    body = (f"{nav}<h1>Story map{(': ' + esc(run)) if run else ''}</h1>"
+    body = (f"{nav}<h1>Story map{(': ' + esc(run)) if run else ''}</h1>{graph_link(graph)}"
             f'{banner(model_names(pipeline))}'
             f"{legend_bar('index', push=push_seen)}"
             f'<p class="muted">{len(agents)} agents. {SOURCE_TITLE}: {summary}. Time axis: minutes from run start '
@@ -1339,12 +1356,13 @@ def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css=""):
     return page(f"Story map {run}".strip(), body, LEGEND_JS + FILTER_JS, css=css)
 
 
-def overseer_only_index(ov, tmax, nav):
+def overseer_only_index(ov, tmax, nav, graph=False):
     """index.html of a run whose overseers are mapped but whose solvers are not (no solver story map was made): the
     overseer strip and run panel only (storymap/view_overseer.py)."""
     run = (ov.pipeline or {}).get("run_id") or ""
     block, css = ov.index_block()
-    body = (f"{nav}<h1>Story map{(': ' + esc(run)) if run else ''}</h1>{banner(model_names(ov.pipeline))}"
+    body = (f"{nav}<h1>Story map{(': ' + esc(run)) if run else ''}</h1>{graph_link(graph)}"
+            f"{banner(model_names(ov.pipeline))}"
             f'<p class="muted">Overseers only: no solver story map was made for this run, so solvers appear only in '
             f'the run-level fake counts below. Time axis: minutes from run start (0–{int(tmax)}).</p>{block}')
     return page(f"Story map {run}".strip(), body, css=css)
@@ -2207,14 +2225,16 @@ def nav_html(prefix="", has_val=False, has_tax=False):
 # ------------------------------------------------------------------ main
 
 def build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, domain=None, evidence=True, minutes=None,
-          overseer_map=None, overseer_timeline=None):
+          overseer_map=None, overseer_timeline=None, graph=None):
     """Write index.html, events.html and agents/<agent>.html; return the list of written paths. ``domain``
     (default: recorded in pipeline.json or timeline/domain.json, else lean) selects coding wording and, when the
     default taxonomy is asked for, the public coding taxonomy (storymap/domain.py); Lean maps are unchanged.
     ``evidence`` False leaves out the embedded timeline behind the reasoning chains; ``minutes`` sets the time axis
     (default: the run's configured length, else from the data). ``overseer_map`` / ``overseer_timeline``: an overseer
     story map (pipeline --overseer) to add as overseer pages, the index's overseer strip and run panel and
-    taxonomy_overseer.html (storymap/view_overseer.py); without them the output is exactly as before."""
+    taxonomy_overseer.html (storymap/view_overseer.py); without them the output is exactly as before. ``graph``:
+    link the index to the experimental interaction graph (True / False; None, the default: when graph.html exists in
+    the output folder); without a graph the output is exactly as before."""
     from . import domain as domain_mod
     domain = domain or domain_mod.map_domain(map_dir, timeline)
     if domain == domain_mod.CODE and taxonomy and Path(taxonomy) == DEFAULT_TAXONOMY:
@@ -2222,16 +2242,18 @@ def build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, domain=No
     with domain_mod.view_overrides(sys.modules[__name__], domain):
         EVIDENCE["on"] = bool(evidence)
         try:
-            return _build(map_dir, timeline, out, taxonomy, minutes, overseer_map, overseer_timeline)
+            return _build(map_dir, timeline, out, taxonomy, minutes, overseer_map, overseer_timeline, graph)
         finally:
             EVIDENCE["on"] = True
 
 
 def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=None, overseer_map=None,
-           overseer_timeline=None):
+           overseer_timeline=None, graph=None):
     """Write index.html, events.html and agents/<agent>.html; return the list of written paths."""
     agents, pipeline = load(map_dir, timeline)
     out = Path(out or map_dir)
+    if graph is None:
+        graph = (out / GRAPH_PAGE).is_file()
     (out / "agents").mkdir(parents=True, exist_ok=True)
     names = load_taxonomy(taxonomy) if taxonomy else {}
     if names and "E" not in names and any(c[:1] == "E" for c in names):  # E codes describe reactions (stage 2)
@@ -2258,10 +2280,10 @@ def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=
         ov = view_overseer.prepare(overseer_map, overseer_timeline, tmax, has_val, has_tax,
                                    view_module=sys.modules[__name__])
     if ov is not None and not agents:  # a run with overseer maps but no solver story map
-        write(out / "index.html", overseer_only_index(ov, tmax, nav))
+        write(out / "index.html", overseer_only_index(ov, tmax, nav, graph))
     else:
         write(out / "index.html", index_page(agents, pipeline, tmax, nav, names,
-                                             *(ov.index_block() if ov else ("", ""))))
+                                             *(ov.index_block() if ov else ("", "")), graph=graph))
     write(out / "events.html", events_page(agents, tmax, models, nav, names))
     if has_val:
         write(out / "validation.html", validation_page(validation.read_text(encoding="utf-8"), models, nav))
@@ -2291,9 +2313,13 @@ def main(argv=None):
     ap.add_argument("--overseer-map", help="overseer story map dir (pipeline --overseer): adds overseer pages")
     ap.add_argument("--overseer-timeline", help="overseer stage-0 dir (extract --overseers; holds "
                     "overseer_context.json)")
+    ap.add_argument("--graph-link", action=argparse.BooleanOptionalAction, default=None,
+                    help="link the index to the experimental interaction graph (graph.html; default: when it exists "
+                         "in the output dir)")
     args = ap.parse_args(argv)
     written = build(args.map, args.timeline, args.out, args.taxonomy, evidence=not args.no_evidence,
-                    minutes=args.minutes, overseer_map=args.overseer_map, overseer_timeline=args.overseer_timeline)
+                    minutes=args.minutes, overseer_map=args.overseer_map, overseer_timeline=args.overseer_timeline,
+                    graph=args.graph_link)
     print(f"wrote {len(written)} pages to {Path(args.out or args.map)}")
     return 0
 
