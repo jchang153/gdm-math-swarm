@@ -169,7 +169,7 @@ class CataloguePageTests(unittest.TestCase):
         for term in ('Fake-minutes', 'Seed readers', 'Standing fake', 'Overseer', 'Revert', 'Genuine'):
             self.assertIn(f'<dt>{term}</dt>', page)
         # The existing table and filters are kept; the compare view is gone (owner, November 6, 2026).
-        for control in ('id="runs"', 'id="filter"', 'id="per-row"'):
+        for control in ('id="runs"', 'id="filter"'):
             self.assertIn(control, page)
 
     def test_series_cards_with_and_without_profile(self):
@@ -263,7 +263,7 @@ class PaneTests(unittest.TestCase):
         self.assertIn('<span class="chip k-push" title="Board posts and DMs are pushed into the next tool result">'
                       'push delivery</span>', page)
         self.assertIn('class="legend lg-graph"', page)
-        self.assertIn('<input id="per-row" type="range" min="0" max="8" step="1" value="0"', page)  # 0 = Auto
+        self.assertNotIn('id="per-row"', page)  # the slider was removed again (owner, November 6, 2026)
         # Series sidebar by the series titles; the one-line summary under the heading and as the hover title.
         line = catalogue_intro.SERIES_LINES['push120']
         self.assertIn(f'<a href="#series-push120" data-series="push120" title="{line}"><span class="sn-t">'

@@ -484,11 +484,7 @@ PANE_STYLE = (
     '.snav a{display:flex;gap:6px;white-space:nowrap;padding:5px 10px;border-color:var(--line);background:var(--card)}'
     '.cat-main>.block.runs{margin-top:16px}.cat-main .series,#runs-top{scroll-margin-top:56px}}'
     '@media (max-width:860px){.cat-main .rc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}'
-    '#cards-view.fixed-cols .rc-grid{grid-template-columns:repeat(var(--cols),minmax(0,1fr))}'
-    '.pane-graph canvas{max-height:70vh}'
-    '.per-row{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--soft)}'
-    '.per-row input{width:110px;accent-color:var(--accent)}.per-row output{min-width:34px;font-variant-numeric:tabular-nums;'
-    'color:var(--fg);font-weight:600}'
+
     '@media (max-width:560px){.cat-main .rc-grid{grid-template-columns:minmax(0,1fr)}}'
     '.legend .lg-dot{width:9px;height:9px;border-radius:50%}.legend .lg-zone{width:11px;height:11px;border-radius:50%;'
     'opacity:.85}.legend .lg-ov{width:8px;height:8px;transform:rotate(45deg);background:var(--s-none);'
@@ -624,14 +620,6 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change',redraw);
 new MutationObserver(redraw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
 let rz=0;window.addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(redraw,150);});
 for(const e of data)paneFill(e);
-// Panes per row (owner, November 6, 2026): a per-browser convenience in localStorage; 0 = Auto; phones cap at 2.
-{const R=$('per-row'),V=$('per-row-v'),grid=$('cards-view'),KEY='gdm-catalogue-per-row',phone=matchMedia('(max-width: 560px)');
- if(R&&grid){let n=0;try{n=Number(localStorage.getItem(KEY))||0;}catch(_){}n=Math.max(0,Math.min(8,Math.round(n)));R.value=String(n);
-  const set=save=>{n=Number(R.value)||0;const cols=n&&phone.matches?Math.min(n,2):n;V.textContent=n?String(n):'Auto';
-   grid.classList.toggle('fixed-cols',!!cols);if(cols)grid.style.setProperty('--cols',String(cols));else grid.style.removeProperty('--cols');
-   if(save)try{n?localStorage.setItem(KEY,String(n)):localStorage.removeItem(KEY);}catch(_){}
-   requestAnimationFrame(redraw);};
-  R.addEventListener('input',()=>set(true));phone.addEventListener('change',()=>set(false));set(false);}}
 // Run categories (sidebar): one series at a time, or all; the search and filters still apply within it.
 let series='';const nav=[...document.querySelectorAll('.snav a[data-series]')];
 function showSeries(){for(const s of document.querySelectorAll('section.series'))if(series&&s.dataset.series!==series)s.hidden=true;

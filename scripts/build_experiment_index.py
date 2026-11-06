@@ -729,11 +729,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
             + '</select></label><button type="button" id="direction" aria-label="Sort direction">Newest first ↓</button>'
             '<span class="seg" role="group" aria-label="View">'
             '<button type="button" id="view-cards" aria-pressed="true">Cards</button>'
-            '<button type="button" id="view-table" aria-pressed="false">Table</button></span>'
-            # Panes per row (owner, November 6, 2026): 0 = Auto (the responsive rule), else 1 to 8; phones cap at 2.
-            + ('<label class="per-row" title="Panes per row"><span>Per row</span><input id="per-row" type="range" '
-               'min="0" max="8" step="1" value="0" aria-label="Panes per row (0 is automatic)">'
-               '<output id="per-row-v" for="per-row">Auto</output></label>' if panes else '') + '</div>'
+            '<button type="button" id="view-table" aria-pressed="false">Table</button></span></div>'
             '<div class="actions"><span id="shown" aria-live="polite"></span>'
             + ('</div></div>' if panes else
                '<button type="button" id="compare" disabled>Compare selected (0)</button>'
