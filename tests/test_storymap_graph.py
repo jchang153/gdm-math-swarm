@@ -215,7 +215,9 @@ class AutoGraphOnRenderTest(unittest.TestCase):
         cli = Path(self.tmp.name) / 'cli' / 'graph.html'
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(sg.main(['--run-dir', str(self.run_dir), '--out', str(cli)]), 0)
-        self.assertEqual(page, cli.read_text(encoding='utf-8'))  # same output as the unchanged CLI
+        self.assertEqual(page, cli.read_text(encoding='utf-8'))  # same output as the CLI
+        self.assertEqual((self.out / 'graph.json').read_text(), cli.with_name('graph.json').read_text())
+        self.assertEqual(page, sg.shell())
         self.assertEqual((self.out / 'index.html').read_text().count('<a href="graph.html"'), 1)
 
     def test_explicit_run_dir(self):
@@ -262,6 +264,90 @@ class AutoGraphOnRenderTest(unittest.TestCase):
     @staticmethod
     def log_to(lines):
         return lines.append
+
+
+class SharedViewerTest(unittest.TestCase):
+    """Owner, November 6, 2026: one shared viewer (_graph/viewer.js, viewer.css) built from the template; per run a
+    stable shell graph.html that fetches graph.json beside it; --inline keeps the single-file page."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.run_dir, _ = write_run(cls.tmp.name)
+        cls.template = sg.TEMPLATE.read_text(encoding='utf-8')
+        cls.files = sg.viewer_files(cls.template)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_viewer_carries_the_template(self):
+        parts = sg.template_parts(self.template)
+        js, css = self.files['viewer.js'].decode(), self.files['viewer.css'].decode()
+        self.assertIn(parts['main'], js)
+        self.assertIn(json.dumps(parts['d3']), js)
+        self.assertIn(parts['css'], css)
+        self.assertNotIn(sg.PLACEHOLDER, js)
+        self.assertNotIn('</script', js.lower())
+        self.assertIn('id=\\"graph\\"', js)  # the body markup, JSON-encoded
+        self.assertIn('fetch(', js)
+
+    def test_viewer_is_valid_javascript(self):
+        import shutil
+        import subprocess
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node not installed')
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'viewer.js'
+            path.write_bytes(self.files['viewer.js'])
+            self.assertEqual(subprocess.run([node, '--check', str(path)], capture_output=True).returncode, 0)
+
+    def test_shell_is_stable_and_data_free(self):
+        page = sg.shell()
+        self.assertIn('<script src="../../../_graph/viewer.js" data-graph="graph.json"></script>', page)
+        self.assertIn('<link rel="stylesheet" href="../../../_graph/viewer.css">', page)
+        self.assertNotIn('agent-', page)
+
+    def test_cli_modes(self):
+        out = Path(self.tmp.name) / 'cli'
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(sg.main(['--run-dir', str(self.run_dir), '--out', str(out / 'graph.html')]), 0)
+        graph = sg.build_graph(self.run_dir, self.run_dir / 'analysis' / 'storymap', None)
+        self.assertEqual(json.loads((out / 'graph.json').read_text()), graph)
+        self.assertEqual((out / 'graph.html').read_text(), sg.shell())
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(sg.main(['--run-dir', str(self.run_dir), '--out', str(out / 'graph.html'),
+                                      '--inline']), 0)
+        self.assertEqual((out / 'graph.html').read_text(), sg.inline(self.template, graph))
+        self.assertFalse((out / 'graph.json').exists())  # no stale data beside an inline page
+        site = Path(self.tmp.name) / 'site' / '_graph'
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(sg.main(['--viewer-dir', str(site)]), 0)
+        self.assertEqual({p.name: p.read_bytes() for p in site.iterdir()}, self.files)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            sg.main([])
+
+    def test_site_allowlist_and_screens(self):
+        import storymap_site
+        folder = Path(self.tmp.name) / 'public'
+        folder.mkdir()
+        (folder / 'index.html').write_text('<a href="graph.html">g</a>')
+        (folder / 'graph.html').write_text(sg.shell())
+        (folder / 'graph.json').write_text('{"schema": "storymap-graph/1"}')
+        files = storymap_site.public_files(folder, ())
+        self.assertIn('graph.json', files)
+        self.assertIn('graph.html', files)
+        (folder / 'graph.html').write_text('<script src="../../../elsewhere.js"></script>')
+        with self.assertRaises(ValueError):
+            storymap_site.public_files(folder, ())
+        (folder / 'index.html').write_text('<script src="../../../_graph/viewer.js"></script>')  # only the shell
+        (folder / 'graph.html').write_text(sg.shell())
+        with self.assertRaises(ValueError):
+            storymap_site.public_files(folder, ())
+        self.assertEqual(storymap_site.graph_assets(['r/analysis/storymap/index.html']), {})
+        assets = storymap_site.graph_assets(['r/analysis/storymap/graph.html'])
+        self.assertEqual(assets, {'_graph/' + k: v for k, v in self.files.items()})
 
 
 if __name__ == '__main__':

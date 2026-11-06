@@ -349,6 +349,33 @@ class PackTests(unittest.TestCase):
         self.assertEqual(restored, {f'{RUN}/analysis/storymap/agents/agent-001.html': b'<html>new</html>'})
         self.assertNotIn(f'{RUN}/analysis/storymap/agents/agent-002.html', out)
 
+    @patch.object(cf, 'render_catalogue', side_effect=fake_catalogue)
+    def test_storymap_graph_shell_gets_the_shared_viewer(self, _):
+        """Owner, November 6, 2026: graph.html is a shell + graph.json per run; the site serves one shared viewer
+        (_graph/), which is not a run, is refreshed on deployment and satisfies the shell's links."""
+        import storymap_graph as sg
+        page = (b'<html><nav class="tabs"><a href="inspect-view/index.html">Inspect</a></nav>'
+                b'<a href="results.json">r</a></html>')
+        base = {**site(RUN), f'{RUN}/results.html': page}
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, 'index.html').write_text('<a href="graph.html">g</a>')
+            Path(tmp, 'graph.html').write_text(sg.shell())
+            Path(tmp, 'graph.json').write_text('{"schema": "storymap-graph/1", "nodes": []}')
+            with patch.object(cf.storymap_site, 'prompt_lines', return_value=frozenset()):
+                files, plan = cf.plan_storymap(base, (), {RUN: tmp})
+        self.assertIn(f'{RUN}/analysis/storymap/graph.json', files)
+        out, manifest = cf.finish(files, {}, plan)
+        for name in ('_graph/viewer.js', '_graph/viewer.css'):
+            self.assertIn(name, out)
+            self.assertIn(name, manifest['files'])
+        self.assertEqual(manifest['runs'], [RUN])  # _graph is not a run
+        self.assertEqual(cf.broken_links(cf.unpack_site(out), [f'{RUN}/analysis/storymap/graph.html']), [])
+        stale = {**out, '_graph/viewer.js': b'old'}
+        again, _ = cf.finish({n: d for n, d in stale.items() if n not in cf.GENERATED}, {}, {'source': {}})
+        self.assertEqual(again['_graph/viewer.js'], out['_graph/viewer.js'])  # refreshed from the template
+        plain, _ = cf.finish(site(RUN), {}, {'source': {}})
+        self.assertFalse(any(n.startswith('_graph/') for n in plain))  # no graph on the site: no viewer
+
     def test_unpack_refuses_conflicting_copies(self):
         out, _ = cf.finish({**site(RUN), **agent_files(RUN)}, {}, {'source': {}})
         name = next(iter(agent_files(RUN)))

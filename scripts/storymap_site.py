@@ -7,7 +7,10 @@ with overseer story maps (owner, November 5, 2026) also taxonomy_overseer.html, 
 research/analysis/storymap/taxonomy_overseer.md (overseer pages are agents/<overseer>.html; the overseer prompts,
 private/.../prompts_overseer.md, are screened like the solver prompts). The experimental interaction graph (owner, November 5,
 2026; docs/plan.md "Story-map interaction graph") is graph.html, built by scripts/storymap_graph.py from the same
-public readings plus conference records, and screened like the other pages.
+public readings plus conference records, and screened like the other pages. Since November 6, 2026 (owner) graph.html
+is a shell loading the site's one shared viewer, _graph/viewer.js and _graph/viewer.css at the site root
+(``graph_assets``, built from scripts/storymap_graph_template.html), and fetching graph.json beside it; both per-run
+files are on the allowlist and screened.
 Owner, November 2, 2026 (docs/plan.md): the taxonomy (codes, names, definitions, examples) is public; its committed
 copy research/analysis/storymap/taxonomy.md is rendered as taxonomy.html and its names appear on every page. Everything
 else in the folder stays local: the stage-0 timelines (timeline/, a private category), stage1/-stage3/, units/,
@@ -25,7 +28,12 @@ from incident_site import _insert
 
 STORYMAP_DIR = 'analysis/storymap'
 STORYMAP_FILES = ('index.html', 'events.html', 'validation.html', 'validation.md', 'taxonomy.html',
-                  'taxonomy_overseer.html', 'graph.html')
+                  'taxonomy_overseer.html', 'graph.html', 'graph.json')
+GRAPH_PAGE = 'graph.html'
+VIEWER_DIR = '_graph'  # site-root folder of the shared interaction-graph viewer (scripts/storymap_graph.py)
+VIEWER_FILES = ('viewer.js', 'viewer.css')
+# The only links out of the story-map folder: the graph shell's shared viewer (RUN/analysis/storymap -> site root).
+SHARED_LINKS = {GRAPH_PAGE: frozenset(f'../../../{VIEWER_DIR}/{n}' for n in VIEWER_FILES)}
 AGENT_PAGE = re.compile(r'agents/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.html')
 STORYMAP_INDEX = STORYMAP_DIR + '/index.html'
 STORYMAP_LABEL = 'Story map'
@@ -133,6 +141,8 @@ def page_problems(relative, data, names, taxonomy=(), prompts=None):
         for url in HREF.findall(text):
             if not url or re.match(r'[a-z][a-z0-9+.-]*:|//', url, re.I):
                 continue
+            if url in SHARED_LINKS.get(relative, ()):
+                continue  # the site's shared viewer, added by graph_assets()
             parts = []
             for part in (folder + url).split('/'):
                 if part == '..':
@@ -169,6 +179,20 @@ def public_files(folder, taxonomy=()):
     if problems:
         raise ValueError('Story map not publishable:\n  ' + '\n  '.join(problems[:20]))
     return files
+
+
+def graph_assets(files=None):
+    """{site path: bytes} of the shared interaction-graph viewer (_graph/viewer.js, _graph/viewer.css), built from
+    the template; with ``files`` (site paths), {} when no run's story map has graph.html. Screened like the pages."""
+    if files is not None and not any(n.endswith(f'/{STORYMAP_DIR}/{GRAPH_PAGE}') for n in files):
+        return {}
+    import storymap_graph
+    out = {f'{VIEWER_DIR}/{name}': data for name, data in
+           storymap_graph.viewer_files(storymap_graph.TEMPLATE.read_text(encoding='utf-8')).items()}
+    for name, data in out.items():
+        if HOST_PATH.search(data) or PRIVATE_PATH.search(data) or SECRET.search(data):
+            raise ValueError(f'Shared graph viewer not publishable: {name}')
+    return out
 
 
 def add_storymap_tab(document):

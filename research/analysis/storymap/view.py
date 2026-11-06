@@ -2326,9 +2326,10 @@ def infer_run_dir(map_dir):
     return map_dir.parents[1] if map_dir.parent.name == "analysis" and len(map_dir.parents) > 1 else None
 
 
-def ensure_graph(map_dir, out, run_dir=None, overseer_map=None, log=None):
-    """Build the experimental interaction graph (graph.html) into ``out`` with scripts/storymap_graph.py, offline
-    (owner, November 6, 2026: every story-map render includes the graph). ``run_dir`` defaults to RUN for a map
+def ensure_graph(map_dir, out, run_dir=None, overseer_map=None, log=None, inline=False):
+    """Build the experimental interaction graph into ``out`` with scripts/storymap_graph.py, offline (owner,
+    November 6, 2026: every story-map render includes the graph): the publishing form, graph.html (a shell loading
+    the site's shared viewer, _graph/) plus graph.json, or with ``inline`` the self-contained graph.html. ``run_dir`` defaults to RUN for a map
     folder RUN/analysis/storymap; ``overseer_map`` to storymap_graph's own default (RUN/analysis/storymap-overseer
     when it has stage records). Skips with one log line, leaving ``out`` untouched, when the run folder, its
     conference database or the story map records are missing, or the build fails. Returns the graph.html path or
@@ -2353,6 +2354,8 @@ def ensure_graph(map_dir, out, run_dir=None, overseer_map=None, log=None):
     argv = ["--run-dir", str(run_dir), "--map", str(map_dir), "--out", str(target)]
     if om is not None:
         argv += ["--overseer-map", str(om)]
+    if inline:
+        argv.append("--inline")
     try:
         import contextlib
         import io
@@ -2387,9 +2390,12 @@ def main(argv=None):
                          "dir by scripts/storymap_graph.py when the run's conference records are at hand")
     ap.add_argument("--run-dir", help="run folder for the interaction graph (default: RUN for --map "
                     "RUN/analysis/storymap)")
+    ap.add_argument("--graph-inline", action="store_true",
+                    help="write the self-contained graph.html (for previews from disk) instead of the publishing "
+                         "form (shell graph.html + graph.json; the site serves the shared viewer _graph/)")
     args = ap.parse_args(argv)
     if args.graph_link is not False:
-        ensure_graph(args.map, args.out or args.map, args.run_dir, args.overseer_map)
+        ensure_graph(args.map, args.out or args.map, args.run_dir, args.overseer_map, inline=args.graph_inline)
     written = build(args.map, args.timeline, args.out, args.taxonomy, evidence=not args.no_evidence,
                     minutes=args.minutes, overseer_map=args.overseer_map, overseer_timeline=args.overseer_timeline,
                     graph=args.graph_link)

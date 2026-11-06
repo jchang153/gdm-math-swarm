@@ -2219,3 +2219,12 @@ most fakers stopped after the overseer's reverts and warnings. The page legend s
   `scripts/run_storymap.py` and the public-copy render of docs/experiment-library.md) first rebuilds `graph.html` into
   the output folder with `scripts/storymap_graph.py` (offline, unchanged CLI and output) and so links it; a missing
   run folder, conference database or story-map records skips the graph with one log line; `--no-graph-link` opts out.
+- Owner decision, November 6, 2026 (relayed by the coordinating agent): split the graph into one shared viewer plus
+  per-run data, so a design change is one edit to `scripts/storymap_graph_template.html` and a deploy, with no per-run
+  rebuild. The site root serves `_graph/viewer.js` and `_graph/viewer.css`, both generated from the template
+  (`storymap_site.graph_assets`, refreshed by `publish_cloudflare.py` `finish` whenever a run has `graph.html`;
+  `_graph` is not a run). Per run, `RUN/analysis/storymap/graph.html` is a stable shell that loads
+  `../../../_graph/viewer.*`, a relative path that also works under the custom-domain path prefix, and fetches
+  `graph.json` (`storymap-graph/1`) from the same folder. Both files are on the story-map allowlist; they are not
+  packed. `storymap_graph.py --inline` (or `view --graph-inline`) keeps the self-contained single file for previews
+  opened from disk.

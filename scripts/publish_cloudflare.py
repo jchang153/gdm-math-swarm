@@ -184,7 +184,7 @@ def check_domains(files, site=None):
     """Refuse a site holding a run of another domain (a coding run on the math site, a math run on the
     ImpossibleBench site). Returns {run: domain}."""
     site = site_of(site)
-    runs = sorted({run_of(n) for n in files if run_of(n) and run_of(n) != 'live'})
+    runs = sorted({run_of(n) for n in files if run_of(n) and run_of(n) not in NON_RUN})
     domains = {run: settings_domain(files.get(f'{run}/settings.json')) for run in runs}
     wrong = sorted(run for run, domain in domains.items() if domain != site.domain)
     if wrong:
@@ -719,6 +719,11 @@ def catalogue(files):
     return index['experiments']
 
 
+# Top-level folders that are not runs: live mirrors, and the shared interaction-graph viewer (owner, November 6,
+# 2026; storymap_site.graph_assets, refreshed from the template on every deployment that has a graph.html).
+NON_RUN = frozenset({'live', storymap_site.VIEWER_DIR})
+
+
 def run_of(name):
     return name.split('/')[0] if '/' in name else None
 
@@ -855,6 +860,7 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
             if new != old:
                 raise ValueError('Immutable site run file differs: ' + run + '/' + PACK_FOLDER)
     pages = [n for n in files if run_of(n) in selected and n.endswith('.html')]
+    files.update(storymap_site.graph_assets(files))  # graph.html shells load the site's shared viewer
     files, repointed = repoint_private_links(files, pages)
     broken = broken_links(files, pages)
     if broken:  # a page of the bundle links a file the site would not serve
@@ -884,7 +890,7 @@ def plan_restyle(base_files, unlisted, runs=None, site=None):
     files, replaced, legacy = dict(base_files), [], []
     for name in sorted(base_files):
         run = run_of(name)
-        if not run or run == 'live' or (runs and run not in runs) or site_layout.kind(name) is None:
+        if not run or run in NON_RUN or (runs and run not in runs) or site_layout.kind(name) is None:
             continue
         old = base_files[name]
         if site_style.MARKER.encode() not in old:  # a page from before the shared theme: left as served
@@ -1136,13 +1142,14 @@ def finish(files, base_manifest, plan, project=None, site=None):
     files, packed = pack_site(files)
     if packed:
         plan['packed_runs'] = packed
+    files.update(storymap_site.graph_assets(files))  # the one shared graph viewer, current with the template
     files[NOT_FOUND] = not_found_page()
     files[PRIVATE_PAGE] = private_page()
     for name, data in files.items():
         site_gate(name, data)
     entries = catalogue(files)
     listed = [e['run'] for e in entries]
-    runs = listed + sorted({run_of(n) for n in files if run_of(n) and run_of(n) != 'live'} - set(listed))
+    runs = listed + sorted({run_of(n) for n in files if run_of(n) and run_of(n) not in NON_RUN} - set(listed))
     history = list(base_manifest.get('history', []))[-49:]
     history.append({'utc': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
                     **{k: plan[k] for k in ('source',)}})
@@ -1163,7 +1170,7 @@ def summary(files, base_files, plan, base, site=None):
             'files': len(files), 'bytes': sum(len(d) for d in files.values()),
             'largest_file_bytes': max(len(d) for d in files.values()),
             'new_or_changed': sum(1 for n, d in files.items() if base_files.get(n) != d and n != SITE_MANIFEST),
-            'runs': len({run_of(n) for n in files if run_of(n)})}
+            'runs': len({run_of(n) for n in files if run_of(n) and run_of(n) not in NON_RUN})}
 
 
 # --- deploy --------------------------------------------------------------------------------------------------
