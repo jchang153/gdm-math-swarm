@@ -82,7 +82,8 @@ def _validity(run):
             if line.strip():
                 record = json.loads(line)
                 out[record.get('source_sha256')] = record.get('validity')
-    return out
+    from research.analysis import validity_corrections  # owner decisions (data/validity-corrections.json)
+    return validity_corrections.corrected(run, out)
 
 
 def _run_minutes(run, start, db):

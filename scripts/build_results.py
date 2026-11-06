@@ -486,6 +486,14 @@ def evaluate(run, accepted):
     latest = {}
     for record in json_lines(path):
         latest[record['submission']['submission_id']] = record
+    # Owner-decided verdict corrections (data/validity-corrections.json); the evaluator records stay as written.
+    from research.analysis import validity_corrections
+    fixes = validity_corrections.corrections(validity_corrections.run_id(run))
+    applied = []
+    for serial, record in list(latest.items()):
+        fix = fixes.get(record['source_sha256'])
+        if fix and record['validity'] == fix['evaluator_validity']:
+            latest[serial] = {**record, 'validity': fix['validity'], '_correction': fix}
     used, unresolved = [], []
     for row in accepted:
         record = latest.get(row['_serial'])
@@ -497,6 +505,11 @@ def evaluate(run, accepted):
         details = (record.get('evidence') or {}).get('details')
         row.update(independent_validity=record['validity'], evaluator_reason=record['reason'],
                    evaluator_details=details)
+        if record.get('_correction'):
+            fix = record['_correction']
+            row['correction'] = {k: fix[k] for k in ('evaluator_validity', 'validity', 'decision', 'reason')}
+            applied.append({'submission': row['submission'], 'source_sha256': row['source_sha256'],
+                            **row['correction']})
         if record['validity'] != 'genuine':
             unresolved.append({'submission': row['submission'], 'agent': row['agent'], 'task': row['task'],
                                'validity': record['validity'], 'source_sha256': row['source_sha256'],
@@ -509,6 +522,7 @@ def evaluate(run, accepted):
             'by_validity': dict(sorted(collections.Counter(r['validity'] for r in used).items())),
             'distinct_verified_tasks': len({r['task'] for r in accepted if r['independent_validity'] == 'genuine'}),
             'not_genuine': unresolved,
+            **({'corrections': sorted(applied, key=lambda c: c['submission'])} if applied else {}),
             'validation_records': [{'path': ('data/validation/' + p.split('/data/validation/', 1)[1]
                                              if '/data/validation/' in p else p or None), 'sha256': h}
                                    for p, h in validations],

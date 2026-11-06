@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from research.analysis import roles as roles_mod
+from research.analysis import validity_corrections
 from research.analysis.storymap import domain as domain_mod
 from research.analysis.storymap.fake_rule import classify, is_fake
 
@@ -175,6 +176,7 @@ class RunContext:
                 if line.strip():
                     e = json.loads(line)
                     self.validity[e.get("source_sha256")] = e.get("validity")
+        self.validity = validity_corrections.corrected(self.run_dir, self.validity)  # owner decisions (data/)
         self.subs, self.sub_by_public = {}, {}
         for r in db.execute("select * from submissions"):
             d = dict(r)
