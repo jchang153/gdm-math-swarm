@@ -191,6 +191,15 @@ OVERVIEW_CSS = (
     'border-bottom:1px solid var(--line)}.ov-pane>header h2{margin:0;font-size:1rem}'
     '.ov-pane>header a{font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}'
     f'.ov-graph iframe{{display:block;width:100%;height:{GRAPH_HEIGHT}px;border:0;background:var(--bg)}}'
+    '.ov-gwrap{position:relative}.ov-pane>header a.ov-full,a.ov-full{display:inline-flex;align-items:center;gap:7px;'
+    'padding:7px 15px 7px 13px;border:1px solid var(--accent);border-radius:999px;background:var(--accent);'
+    'color:var(--card);font-weight:700;font-size:13.5px;line-height:1.2;text-decoration:none;'
+    'box-shadow:0 2px 10px -2px color-mix(in srgb,var(--accent) 55%,transparent)}'
+    '.ov-pane>header a.ov-full:hover,a.ov-full:hover{background:color-mix(in srgb,var(--accent) 86%,var(--fg));'
+    'border-color:color-mix(in srgb,var(--accent) 86%,var(--fg));color:var(--card);text-decoration:none}'
+    'a.ov-full:focus-visible{outline:3px solid var(--fg);outline-offset:2px}'
+    '.ov-full-float{position:absolute;top:12px;right:12px;z-index:2;font-size:12.5px;padding:6px 12px 6px 10px}'
+    '.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}'
     '.ov-graph .ov-note{font-size:12px;color:var(--muted);margin:0;padding:6px 14px;'
     'border-top:1px solid var(--line)}.ov-fakes{padding:12px 14px}.ov-fakes figure{margin:0;max-width:none}'
     '.ov-fakes .spark{display:block;width:100%;height:220px}.ov-fakes figcaption{font-size:12px;color:var(--muted)}'
@@ -384,7 +393,7 @@ def _why(kinds, agent, order):
     return labels, first
 
 
-def _judge_card(document, agents, counts, report, storymap, judge=None):
+def _judge_card(document, agents, counts, report, storymap, judge=None, has_page=None):
     levels = ((report or {}).get('counts') or {}).get('cheating_level') or {}
     c = (report or {}).get('counts') or {}
     labelled = c.get('labelled') if isinstance(c.get('labelled'), int) else sum(counts[k] for k in _PRIMARY)
@@ -416,7 +425,8 @@ def _judge_card(document, agents, counts, report, storymap, judge=None):
         items = []
         for agent in notable:
             labels, first = _why(agents[agent], agent, order)
-            href = f'analysis/storymap/agents/{agent}.html' if storymap else judge
+            href = (f'analysis/storymap/agents/{agent}.html' if storymap and (has_page is None or has_page(agent))
+                    else judge)  # a sampled story map has pages for some agents only (verify, November 6, 2026)
             items.append('<li>' + (f'<a href="{href}"><code>{agent}</code></a> ' if href else f'<code>{agent}</code> ') + ''.join(
                 f'<span class="ab ab-{k}" title="{n}">{_letter(k)}</span>' for n, k in labels) + ' <small>'
                 + ', '.join(n.lower() for n, _ in labels) + '</small></li>')
@@ -429,18 +439,27 @@ def _judge_card(document, agents, counts, report, storymap, judge=None):
 # The embedded viewer follows the system theme by itself; a theme forced with the page's toggle (data-theme on
 # <html>, scripts/site_style.py) is passed on as &theme= so both match.
 _THEME_SYNC = ('<script>(function(){var f=document.getElementById("ov-graph"),r=document.documentElement;'
-               'function s(){var t=r.getAttribute("data-theme"),u="analysis/storymap/graph.html?embed=1&t=end"+'
+               'function s(){var t=r.getAttribute("data-theme"),u="analysis/storymap/graph.html?embed=1&play=1"+'
                '(t==="light"||t==="dark"?"&theme="+t:"");if(f.getAttribute("src")!==u)f.setAttribute("src",u);}'
                's();new MutationObserver(s).observe(r,{attributes:true,attributeFilter:["data-theme"]});})();'
                '</script>')
 
 
+_EXPAND = ('<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><path d="M2 6V2h4M14 6V2h-4'
+           'M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" '
+           'stroke-linejoin="round"/></svg>')
+
+
 def _graph_pane(document, has_graph):
     if has_graph:
         return ('<section class="ov-pane ov-graph" aria-label="Interaction graph"><header><h2>Interaction graph</h2>'
-                f'<a href="{GRAPH}" target="_blank" rel="noopener">Full screen ↗</a></header>'
-                f'<iframe id="ov-graph" src="{GRAPH}?embed=1&amp;t=end" title="Interaction graph of this run" loading="lazy">'
-                '</iframe>' + _THEME_SYNC +
+                f'<a class="ov-full" href="{GRAPH}" target="_blank" rel="noopener">{_EXPAND}Open full-screen graph '
+                '<span aria-hidden="true">↗</span><span class="sr"> (opens in a new tab)</span></a></header>'
+                f'<div class="ov-gwrap"><iframe id="ov-graph" src="{GRAPH}?embed=1&amp;play=1" title="Interaction graph '
+                'of this run (playing at 5x)" loading="lazy"></iframe>'
+                f'<a class="ov-full ov-full-float" href="{GRAPH}" target="_blank" rel="noopener">{_EXPAND}Full screen '
+                '<span aria-hidden="true">↗</span><span class="sr"> (opens in a new tab)</span></a></div>'
+                + _THEME_SYNC +
                 '<p class="ov-note">Agents and the messages, files and submissions between them over the run; '
                 'click a bubble to open it. Each agent links to its <a href="analysis/storymap/index.html">story '
                 'map</a>.</p></section>')
@@ -494,9 +513,11 @@ def _overview(document, read=None):
     agents = _agents(document)
     title, chips = _spec(document, run)
     judge = _judge_page(nav)
+    # Agent story-map pages: checked one by one when the run's story-map files are readable, else assumed.
+    has_page = (lambda agent: load(f'analysis/storymap/agents/{agent}.html') is not None) if graph else None
     bar, counts = _bar(agents, judge)
     judged = bool(report) or any(counts[k] for k in _PRIMARY)
-    row = _graph_pane(document, has_graph) + (_judge_card(document, agents, counts, report, storymap, judge) if judged
+    row = _graph_pane(document, has_graph) + (_judge_card(document, agents, counts, report, storymap, judge, has_page) if judged
                                                else '')
     block = (f'{OV_START}<section class="ov" id="overview" aria-label="Run overview"><div class="ov-head">'
              '<p class="ov-kicker">Run overview</p>'

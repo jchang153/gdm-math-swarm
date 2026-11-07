@@ -144,7 +144,8 @@ class OverviewTest(unittest.TestCase):
     def test_overview_header_tabs_and_judge_card(self):
         import json
         files = {'analysis/simple_judge/report.json': json.dumps(REPORT).encode(),
-                 'analysis/storymap/graph.html': b'<!doctype html>'}
+                 'analysis/storymap/graph.html': b'<!doctype html>',
+                 **{f'analysis/storymap/agents/agent-00{i}.html': b'x' for i in range(1, 7)}}
         page = site_layout.apply(f'{RUN_ID}/results.html', RUN_PAGE, read=self.read(files))
         self.assertEqual(page.count(site_layout.OV_START), 1)
         self.assertLess(page.index(site_layout.OV_START), page.index(f'<h1>{RUN_ID}</h1>'))
@@ -157,7 +158,11 @@ class OverviewTest(unittest.TestCase):
                                   'Report details', 'Inspect'])
         # Category bar from the page's labels; judge card from report.json; graph embedded.
         self.assertIn('aria-label="Agent labels: Exploiter 1, Convert 1, Tempted 1, Unaware / honest 1"', page)
-        self.assertIn('src="analysis/storymap/graph.html?embed=1&amp;t=end"', page)  # opens on the end state
+        self.assertIn('src="analysis/storymap/graph.html?embed=1&amp;play=1"', page)  # plays from t=0 at 5x
+        # The full-screen graph: a primary button in the card header and one over the graph, both new-tab links.
+        self.assertEqual(page.count('<a class="ov-full'), 2)
+        self.assertIn('<a class="ov-full ov-full-float" href="analysis/storymap/graph.html" target="_blank"', page)
+        self.assertIn('Open full-screen graph', page)
         self.assertIn('#ov-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto', page)  # one swipeable row on phones
         self.assertIn('<span>submitted</span>', page)
         notable = re.findall(r'href="analysis/storymap/agents/(agent-\d+)\.html"', page)
@@ -218,6 +223,15 @@ class OverviewTest(unittest.TestCase):
         hrefs = set(re.findall(r'href="([^"#]+)', page.split(site_layout.OV_END)[0]))
         self.assertFalse({h for h in hrefs if 'judge' in h})
 
+    def test_sampled_story_map_links_only_mapped_agents(self):
+        """A story map of a sample of agents (verify, November 6, 2026): the others link to the judge page."""
+        files = {'analysis/storymap/graph.html': b'<!doctype html>', 'analysis/storymap/agents/agent-002.html': b'x'}
+        page = site_layout.apply('results.html', RUN_PAGE, read=files.get)
+        card = page.split('Agents to read first', 1)[1].split('</ul>', 1)[0]
+        self.assertIn('href="analysis/storymap/agents/agent-002.html"', card)
+        self.assertNotIn('agents/agent-001.html', card)
+        self.assertIn('<a href="analysis/simple_judge/report.html"><code>agent-001</code></a>', card)
+
     def test_without_graph_or_judge_and_page_only(self):
         no_map = RUN_PAGE.replace('<a data-tab="storymap" href="analysis/storymap/index.html">Story map</a>', '')
         page = site_layout.apply('results.html', no_map)
@@ -263,7 +277,10 @@ class OverviewTest(unittest.TestCase):
         template = (ROOT / 'scripts' / 'storymap_graph_template.html').read_text(encoding='utf-8')
         self.assertIn('html.embed header, html.embed aside { display: none; }', template)
         self.assertIn('q.get("embed") === "1"', template)
-        self.assertIn('setTime(new URLSearchParams(location.search).get("t") === "end" ? tMax : tMin)', template)
+        self.assertIn('setTime(startQ.get("t") === "end" ? tMax : tMin); updateNodes(); animZones(1); rebuildLinks();',
+                      template)
+        self.assertIn('if (startQ.get("play") === "1" && !matchMedia("(prefers-reduced-motion: reduce)").matches) '
+                      '{ setSpeed(5); togglePlay(true); }', template)
         self.assertIn('if (playing && tNow >= tMax) setTime(tMin);', template)  # Play from the end rewinds
 
     def test_restyle_reads_run_files_and_respects_site(self):

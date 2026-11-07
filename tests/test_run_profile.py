@@ -255,11 +255,13 @@ class PaneTests(unittest.TestCase):
         self.assertIn('<script type="application/json" id="catalogue-labels">{"' + run + '":{"E":1,"source":"simple"}}'
                       '</script>', page)  # listed runs only
         self.assertNotIn('labels', json.dumps(experiments[0]))  # entries unchanged
-        self.assertIn(f'data-thumb="{run}/analysis/storymap/graph-thumb.json" data-href="{run}/analysis/storymap/'
-                      'graph.html"', page)
-        self.assertNotIn(' href="' + run + '/analysis/storymap/graph.html"', page)  # set only once the thumb loads
-        self.assertIn('<p class="pane-btns"><a href="' + run + '/analysis/simple_judge/report.html">Behavior judge</a>'
-                      '<a href="' + run + '/analysis/storymap/index.html">Story map</a></p>', page)
+        # Pane links open the run page's in-page tabs (owner, November 6, 2026).
+        self.assertIn(f'data-thumb="{run}/analysis/storymap/graph-thumb.json" data-href="{run}/results.html#overview"',
+                      page)
+        self.assertNotIn(' href="' + run + '/results.html#overview"', page)  # set only once the thumb loads
+        self.assertIn('<p class="pane-btns"><a href="' + run + '/results.html#judge">Behavior judge</a>'
+                      '<a href="' + run + '/results.html#storymap">Story map</a></p>', page)
+        self.assertIn('<a href="' + run + '/results.html#report">Report</a>', page)
         self.assertIn('<span class="chip k-push" title="Board posts and DMs are pushed into the next tool result">'
                       'push delivery</span>', page)
         self.assertIn('class="legend lg-graph"', page)
@@ -285,9 +287,9 @@ class PaneGraphTests(unittest.TestCase):
 
     def test_known_graph(self):
         run, page = self.render({run_key := 'glmflash100-seeded-1ov-glm-120m-push-r1-20261104T042820Z'})
-        self.assertIn(f'<a class="pane-graph known" href="{run}/analysis/storymap/graph.html" data-thumb=', page)
+        self.assertIn(f'<a class="pane-graph known" href="{run}/results.html#overview" data-thumb=', page)
         self.assertIn('<div class="rc-body" hidden data-profile="1">', page)  # the sparkline only as the fallback
-        self.assertIn(f'<p class="pane-btns"><a class="b-graph" href="{run}/analysis/storymap/graph.html">'
+        self.assertIn(f'<p class="pane-btns"><a class="b-graph" href="{run}/results.html#overview">'
                       'Interaction graph</a>', page)
         self.assertIn('class="legend lg-graph"', page)
         self.assertNotIn('<p class="legend"><span><i class="lg-area">', page)

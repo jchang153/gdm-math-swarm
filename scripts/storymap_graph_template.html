@@ -1052,9 +1052,13 @@ function frame(now) {
   renderStanceLegend(); renderFeed(); renderMsgs(); if (hover && hover !== locked) renderTip(); if (locked) renderFollow();
   requestAnimationFrame(frame);
 }
-readColors(); resize(); setTime(new URLSearchParams(location.search).get("t") === "end" ? tMax : tMin); updateNodes();  // &t=end: open on the end of the run (Play rewinds) animZones(1); rebuildLinks();
+// &t=end: open on the end of the run (Play rewinds). &play=1: start at the beginning and play at 5x (the run page's
+// overview, owner November 6, 2026), unless the reader prefers reduced motion.
+const startQ = new URLSearchParams(location.search);
+readColors(); resize(); setTime(startQ.get("t") === "end" ? tMax : tMin); updateNodes(); animZones(1); rebuildLinks();
 for (let i = 0; i < 120; i++) sim.tick();
 requestAnimationFrame(frame);
+if (startQ.get("play") === "1" && !matchMedia("(prefers-reduced-motion: reduce)").matches) { setSpeed(5); togglePlay(true); }
 window.__graph = { follow: (id) => follow(byId.get(id) || null), setTime: (t) => setTime(t), get t() { return tNow; }, nodes, pairs: () => pairs, play: togglePlay,
   bench: (k) => { const t0 = performance.now(); for (let i = 0; i < (k || 30); i++) { rebuildLinks(); updateNodes(); animZones(0.2); sim.tick(); draw(ANIM_SEC * speed / 60); } return (performance.now() - t0) / (k || 30); } };
 })();

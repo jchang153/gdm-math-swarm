@@ -406,6 +406,10 @@ GRAPH_PAGE = 'analysis/storymap/graph.html'
 PRIMARY = (('Simple behavior judge', 'Behavior judge'), ('Behavior judge', 'Behavior judge (rubric 3.1)'),
            (STORYMAP_LABEL, 'Story map'))
 QUIET = {'Report': 'Report', 'Conference': 'Conference', 'Incident report': 'Incident', 'Inspect View': 'Inspect'}
+# Pane links open the run page's in-page tab (owner, November 6, 2026: "it should open up the tab version not the
+# full page version"; scripts/site_layout.py TABS_JS hashes). The graph and its picture open the overview.
+TAB_HASH = {'Simple behavior judge': 'judge', 'Behavior judge': 'judge-rubric', STORYMAP_LABEL: 'storymap',
+            'Conference': 'conference', 'Incident report': 'incident', 'Inspect View': 'inspect', 'Report': 'report'}
 _PUSH = re.compile(r'-push(?:-|$)')
 
 
@@ -529,15 +533,18 @@ def run_pane(entry, scale, graphs=None):
     body = run_profile.card_inner(p, scale) if p else (
         '<p class="rc-empty">Fakes over time are read from the run\'s own records in the browser.</p>')
     graph, known, base = '', graphs is not None and entry['run'] in graphs, quote(entry['run'], safe='') + '/'
+
+    def tab(key):  # the run page's tab for a record link, else the record itself
+        return f'{report}#{TAB_HASH[key]}' if report and key in TAB_HASH else links[key]
     if known or (graphs is None and STORYMAP_LABEL in links):
-        target = esc(base + GRAPH_PAGE, quote=True)
+        target = esc(f'{report}#overview' if report else base + GRAPH_PAGE, quote=True)
         graph = (f'<a class="pane-graph{" known" if known else ""}"' + (f' href="{target}"' if known else ' hidden')
                  + f' data-thumb="{esc(base + GRAPH_THUMB, quote=True)}" data-href="{target}" aria-label="Interaction '
                  f'graph of {esc(short_title(entry), quote=True)}: open, hover to replay"><canvas></canvas>'
                  '<span class="pg-hint">hover replays · click opens</span></a>')
-    buttons = (f'<a class="b-graph" href="{esc(base + GRAPH_PAGE, quote=True)}">Interaction graph</a>' if known
-               else '') + ''.join(f'<a href="{esc(links[k], quote=True)}">{esc(label)}</a>' for k, label in PRIMARY if k in links)
-    quiet = ''.join(f'<a href="{esc(links[k], quote=True)}">{esc(label)}</a>' for k, label in QUIET.items() if k in links)
+    buttons = (f'<a class="b-graph" href="{target}">Interaction graph</a>' if known
+               else '') + ''.join(f'<a href="{esc(tab(k), quote=True)}">{esc(label)}</a>' for k, label in PRIMARY if k in links)
+    quiet = ''.join(f'<a href="{esc(tab(k), quote=True)}">{esc(label)}</a>' for k, label in QUIET.items() if k in links)
     summary = entry.get('summary') if isinstance(entry.get('summary'), dict) else None
     accepted = summary.get('accepted_tasks') if summary else None
     stats = [('Accepted tasks', f'<span class="rc-accepted">{accepted if accepted is not None else "?"}</span>'),
