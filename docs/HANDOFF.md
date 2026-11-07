@@ -1658,6 +1658,31 @@ is being merged into main via `collab-env`.
    - Local iteration: build the shared viewer from a scratch template copy with `--template COPY --viewer-dir
      SITE/_graph` and serve SITE with a static server; never edit the repo template while a deploy is running.
 
+37. **IN PROGRESS 2026-11-06/07: site redesign (math site), Gemini correction, more story maps** (owner requests and
+   budgets in docs/plan.md, "Site redesign: run panes with the interaction graph (November 6, 2026)" and the entries
+   after it).
+   - **Live:** redesign `3a91998d` (catalogue: series sidebar with one-liners, run panes with graph snapshot +
+     hover timelapse from `graph-thumb.json`, exact label counts, no compare; run pages: overview with embedded graph
+     + behavior-judge card, in-place tabs; site look: self-hosted fonts in `_assets/fonts`, pill buttons), thumbs
+     `25780448`, judge-link fixes `2262cd8d` and `9098595c` (also restores gemini4argon's overview, viewer fix
+     5074bc3). Code: 5f55956, 229138e (thumbs); 19c57c8, dfadb98, 0c5e2ea, a23a8cb, 8440228, 24c47ab (catalogue);
+     36069ba, 41c3b4d, 60fc8e7, 39249cb, 528bb55, 908b3f3, 421d309 (run page, look, deploy lock).
+   - **Gemini 4 Argon sweep run corrected** (c28642f, 8f22103; deploys `fe85dbca`, `7edde932`): the two
+     `C6_size` submissions are genuine; per-run correction in `data/validity-corrections.json` read by extract,
+     faking_heatmap and build_results; story map re-run for agent-002/011 ($0.18): 0 of 25 fakers.
+   - **Deploy lock:** every `publish_cloudflare.py --commit` takes `$GDM_CF_DEPLOY_LOCK` (421d309) after two deploys
+     interleaved and one reverted the other. Known gaps: SIGTERM leaves the lock (fix requested), and the final
+     `site_gate` credential screen hung for hours on content from the comms-only maps (regex slowness; fix in
+     progress by the run-page agent). Pending deploy: e49167f batch (graph autoplay at 5x from t=0 via `&play=1`,
+     catalogue buttons open run-page tabs, prominent full-screen button, story-map links only where pages exist).
+   - **Story maps (paid, per-run budgets in plan.md):** nine push comms-only runs, full 100-solver maps done, $624.49
+     total (4 runs stopped at their caps in the last retry pass), rendered, awaiting deploy. 180-min notices series:
+     9 of 11 jobs done (~$400); control r2 solver and 2ov r1 overseer+solver maps stalled by Mac sleep (battery);
+     10ov r2/r3 overseer maps hit $20 (5/10 and 2/10 overseers; owner asked whether to raise to $40). Public copies
+     in the operator scratchpad (`smp/pub`, `sm180/pub`); deploy scripts `sm180/deploy.sh`.
+   - Ledger costs of all story maps so far (pilot vs map) were reported to the owner: typical 100-agent 120-min
+     solver map $12-29; reminder push maps ~$100 (pushed reminders multiply stage-2 events); 180-min maps $23-79.
+
 ## Next steps / open items
 
 - **VM HF upload token (item 16):** confirmed working on the owner's first VM (item 17). `vm_hf_setup.py` failed on
