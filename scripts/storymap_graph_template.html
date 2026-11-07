@@ -39,7 +39,7 @@ html, body { margin: 0; height: 100%; }
 body {
   background: var(--bg); color: var(--fg);
   font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  display: flex; flex-direction: column; min-height: 100vh;
+  display: flex; flex-direction: column; height: 100vh;
 }
 a { color: var(--accent); }
 header { padding: 10px 16px 8px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; }
@@ -54,8 +54,8 @@ main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) var(--side-
 aside { position: relative; border-left: 1px solid var(--line); background: var(--panel); padding: 12px 14px 8px; font-size: 12px; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 #stances { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
 #stances .row { margin: 1px 0; }
-.live { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
-.pane { position: relative; min-height: 80px; overflow-y: auto; border-top: 1px solid var(--line); }
+.live { flex: 1 1 auto; min-height: 190px; display: flex; flex-direction: column; gap: 4px; margin-top: 4px; overflow: hidden; }
+.pane { position: relative; min-height: 64px; overflow-y: auto; border-top: 1px solid var(--line); }
 .grip { position: absolute; z-index: 8; touch-action: none; }
 .grip::after { content: ""; position: absolute; background: var(--accent); opacity: 0; transition: opacity .12s; }
 .grip:hover::after, .grip.on::after { opacity: .55; }
@@ -71,7 +71,8 @@ body.resizing, body.resizing * { user-select: none; }
 #paneEvents { flex: 1 1 0; }
 .pane h2 { position: sticky; top: 0; background: var(--panel); margin: 0 !important; padding: 8px 0 5px; z-index: 1; }
 .pane h2 .sub { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--faint); }
-#key { flex: none; border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; max-height: 48%; overflow-y: auto; }
+#key { flex: 0 1 auto; min-height: 0; max-height: 45%; border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; overflow-y: auto; }
+#key:not([open]) { flex: none; }
 #key summary { cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
 #key .kn { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
 aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; font-weight: 600; }
@@ -163,6 +164,8 @@ html.embed #stage { min-height: 0; }
   .grip, .grip-h { display: none; }
   main { grid-template-columns: 1fr !important; }
   #key { max-height: none; }
+  body { height: auto; min-height: 100vh; }
+  .live { min-height: 0; overflow: visible; }
   header, footer { padding-left: 16px; padding-right: 16px; }
 }
 </style>
@@ -657,7 +660,7 @@ function applySizes() {
   const root = document.documentElement.style;
   if (sizes.side) root.setProperty("--side-w", clamp(sizes.side, 220, Math.max(240, innerWidth * 0.6)) + "px"); else root.removeProperty("--side-w");
   if (sizes.fol) root.setProperty("--fol-w", clamp(sizes.fol, 260, Math.max(280, stage.clientWidth * 0.75)) + "px"); else root.removeProperty("--fol-w");
-  $("paneMsgs").style.flex = sizes.msgs ? `0 0 ${sizes.msgs}px` : "";
+  $("paneMsgs").style.flex = sizes.msgs ? `0 1 ${sizes.msgs}px` : "";
 }
 function grip(el, move, key) {
   el.addEventListener("pointerdown", (e) => {
