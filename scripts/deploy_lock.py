@@ -16,13 +16,15 @@ as soon as it is free; nothing needs a manual step:
   runs inside that hold instead of waiting for itself;
 - a holder that no longer runs (its pid is gone), or a lock without ``owner.json`` older than STALE_SECONDS:
   removed as stale (logged), then taken.
-The lock is released on exit, including on errors.
+The lock is released on exit, including on errors, Ctrl-C (SIGINT), SIGTERM and SIGHUP; only SIGKILL leaves it
+behind, and the next command then removes it as stale (dead holder pid).
 """
 from contextlib import contextmanager
 import datetime
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
@@ -148,6 +150,18 @@ def held(lock=None, poll=15, what='deploy'):
             _log(f'{what}: waiting for {lock}, held by {holder} (waited {now - started:.0f} s)')
             logged = now
         time.sleep(poll)
+    # SIGTERM (or SIGHUP) ends the command through SystemExit, so the lock is released like on any other exit
+    # (SIGINT already raises KeyboardInterrupt). Production, November 6, 2026: a SIGTERM-stopped deploy left
+    # owner.json behind; shell wrappers that only know the mkdir lock then waited on it.
+    previous = {}
+
+    def stop(signum, _frame):
+        raise SystemExit(128 + signum)
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            previous[sig] = signal.signal(sig, stop)
+        except (ValueError, OSError):  # not the main thread: the holder's own handlers stay
+            pass
     (lock / OWNER).write_text(json.dumps({
         'pid': os.getpid(), 'started': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
         'command': ' '.join(sys.argv)}))
@@ -157,3 +171,5 @@ def held(lock=None, poll=15, what='deploy'):
     finally:
         _remove(lock)
         _log(f'{what}: released {lock}')
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)

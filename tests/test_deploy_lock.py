@@ -54,6 +54,21 @@ class LockTest(unittest.TestCase):
         self.assertGreater(waited, 0.5)
         self.assertEqual(holder.wait(), 0)
 
+    def test_released_on_sigterm_and_sigint(self):
+        """Production, November 6, 2026: a SIGTERM-stopped deploy left owner.json behind."""
+        import signal
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            ready = Path(self.tmp.name) / f'ready-{sig}'
+            holder = subprocess.Popen([sys.executable, '-c', HOLD, str(ROOT / 'scripts'), str(self.lock), str(ready),
+                                       '30'], stderr=subprocess.PIPE, text=True)
+            while not ready.exists():
+                time.sleep(0.02)
+            holder.send_signal(sig)
+            _, err = holder.communicate(timeout=20)
+            self.assertNotEqual(holder.returncode, 0)
+            self.assertIn('released', err)
+            self.assertFalse(self.lock.exists())
+
     def test_stale_locks_are_taken_over(self):
         self.lock.mkdir()
         dead = subprocess.Popen([sys.executable, '-c', 'pass'])
