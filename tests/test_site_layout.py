@@ -161,7 +161,7 @@ class OverviewTest(unittest.TestCase):
         self.assertIn('src="analysis/storymap/graph.html?embed=1&amp;play=1"', page)  # plays from t=0 at 5x
         # The full-screen graph: one primary button in the card header (owner: no second one over the graph).
         self.assertEqual(page.count('<a class="ov-full'), 1)
-        self.assertIn('<a class="ov-full" href="analysis/storymap/graph.html" target="_blank"', page)
+        self.assertIn('<a class="ov-full" href="analysis/storymap/graph.html">', page)  # same tab (owner, Nov 7)
         self.assertIn('Open full-screen graph', page)
         self.assertIn('#ov-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto', page)  # one swipeable row on phones
         self.assertIn('<span>submitted</span>', page)
@@ -285,6 +285,13 @@ class OverviewTest(unittest.TestCase):
         self.assertIn('let tMin = 0, tMax', template)
         self.assertNotIn('tMin = Math.min(', template)
         self.assertEqual(template.count('const tm = timeChip(e.t);'), 3)
+        # Back to the run (same-tab full screen), Esc goes back when nothing is followed; paused bubbles stay;
+        # the key sits at the top of the sidebar (owner, November 7, 2026).
+        self.assertIn('<a id="back" class="back" href="../../results.html#overview"', template)
+        self.assertIn('if (e.key === "Escape" && !root0.classList.contains("embed")) { e.preventDefault(); goBack();',
+                      template)
+        self.assertIn('const paused = !playing, Dm = paused ? PAUSE_MIN :', template)
+        self.assertLess(template.index('<details id="key">'), template.index('<h2>Stance now (solvers)</h2>'))
         self.assertIn('const go = (ev) => { ev.stopPropagation(); ev.preventDefault(); togglePlay(false); setTime(t); };',
                       template)
         self.assertIn('if (playing && tNow >= tMax) setTime(tMin);', template)  # Play from the end rewinds

@@ -452,8 +452,7 @@ _EXPAND = ('<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" f
 def _graph_pane(document, has_graph):
     if has_graph:
         return ('<section class="ov-pane ov-graph" aria-label="Interaction graph"><header><h2>Interaction graph</h2>'
-                f'<a class="ov-full" href="{GRAPH}" target="_blank" rel="noopener">{_EXPAND}Open full-screen graph '
-                '<span aria-hidden="true">↗</span><span class="sr"> (opens in a new tab)</span></a></header>'
+                f'<a class="ov-full" href="{GRAPH}">{_EXPAND}Open full-screen graph</a></header>'
                 f'<div class="ov-gwrap"><iframe id="ov-graph" src="{GRAPH}?embed=1&amp;play=1" title="Interaction graph '
                 'of this run (playing at 5x)" loading="lazy"></iframe></div>'
                 + _THEME_SYNC +

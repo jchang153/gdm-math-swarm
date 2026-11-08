@@ -47,6 +47,8 @@ header h1 { font-size: 15px; margin: 0; font-weight: 600; }
 header .note { color: var(--muted); font-size: 12px; }
 header .spacer { flex: 1; }
 header button { font: inherit; font-size: 12px; }
+header .back { align-self: center; display: inline-flex; align-items: center; padding: 5px 12px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-weight: 600; font-size: 13px; text-decoration: none; }
+header .back:hover, header .back:focus-visible { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) var(--side-w, 270px); min-height: 0; }
 #stage { position: relative; min-height: 420px; overflow: hidden; }
 #graph { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
@@ -71,7 +73,7 @@ body.resizing, body.resizing * { user-select: none; }
 #paneEvents { flex: 1 1 0; }
 .pane h2 { position: sticky; top: 0; background: var(--panel); margin: 0 !important; padding: 8px 0 5px; z-index: 1; }
 .pane h2 .sub { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--faint); }
-#key { flex: 0 1 auto; min-height: 0; max-height: 45%; border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; overflow-y: auto; }
+#key { flex: 0 1 auto; min-height: 0; max-height: 45%; border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 8px; overflow-y: auto; }   /* top of the sidebar (owner, November 7, 2026) */
 #key:not([open]) { flex: none; }
 #key summary { cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
 #key .kn { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
@@ -174,6 +176,7 @@ html.embed #stage { min-height: 0; }
 </head>
 <body>
 <header>
+  <a id="back" class="back" href="../../results.html#overview" title="Back to the run page (Esc)">← Back to run</a>
   <h1 id="title">Interaction graph</h1>
   <span class="note">Experimental — built from the story-map labels; see the <a href="./index.html">story map</a> for the full record.</span>
   <span class="spacer"></span>
@@ -188,19 +191,6 @@ html.embed #stage { min-height: 0; }
   </div>
   <aside>
     <div class="grip grip-v" id="gripSide" title="Drag to resize; double-click to reset"></div>
-    <h2>Stance now (solvers)</h2>
-    <div id="stances"></div>
-    <div class="live">
-      <section class="pane" id="paneMsgs">
-        <h2>Board posts and DMs <span class="sub">click to read</span></h2>
-        <ul id="msgs"></ul>
-      </section>
-      <div class="grip-h" id="gripPanes" title="Drag to resize; double-click to reset"></div>
-      <section class="pane" id="paneEvents">
-        <h2>Recent events</h2>
-        <ul id="feed"></ul>
-      </section>
-    </div>
     <details id="key">
       <summary>Key and settings</summary>
       <p class="kn">Colour = the agent's current position as read by the story map (stage 3), not whether it ever faked; agents that faked and then stopped show 'stopped'.</p>
@@ -224,6 +214,19 @@ html.embed #stage { min-height: 0; }
       <label class="row"><input type="checkbox" id="tgBubbles" checked>message text on the graph</label>
     <div class="hint">Hover a node for its labels; click it to follow it in a side panel (Esc to stop), where its full story map opens. Click a message bubble to open it in the board posts and DMs list. Drag the panel edges to resize them (double-click an edge to reset). Drag to pan, scroll to zoom, double-click to reset. Space plays / pauses; ← / → step 5 run-seconds (Shift: 1 minute); j / k step 10 seconds.</div>
     </details>
+    <h2>Stance now (solvers)</h2>
+    <div id="stances"></div>
+    <div class="live">
+      <section class="pane" id="paneMsgs">
+        <h2>Board posts and DMs <span class="sub">click to read</span></h2>
+        <ul id="msgs"></ul>
+      </section>
+      <div class="grip-h" id="gripPanes" title="Drag to resize; double-click to reset"></div>
+      <section class="pane" id="paneEvents">
+        <h2>Recent events</h2>
+        <ul id="feed"></ul>
+      </section>
+    </div>
   </aside>
 </main>
 <footer>
@@ -325,6 +328,15 @@ function stateAt(n, t) { const i = upto(n.stFrom, t); return i >= 0 ? n.states[i
 function thoughtAt(n, t) { const i = upto(n.thT, t); return i >= 0 ? n.thoughts[i] : null; }
 function credAt(n, t) { return upto(n.credT, t) + 1; }
 
+// ---------- back to the run (owner, November 7, 2026): the full graph opens in the same tab ----------
+const root0 = document.documentElement;
+function goBack() {
+  const run = new URL("../../results.html", location.href).pathname;
+  let ref = null; try { ref = document.referrer ? new URL(document.referrer) : null; } catch (e) {}
+  if (ref && ref.origin === location.origin && ref.pathname === run && history.length > 1) history.back();
+  else location.href = "../../results.html#overview";
+}
+$("back").addEventListener("click", (ev) => { if (ev.button || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return; ev.preventDefault(); goBack(); });
 // ---------- theme ----------
 let C = {};
 function readColors() {
@@ -781,6 +793,7 @@ setSpeed(speed);
 scrub.addEventListener("input", () => setTime(tMin + (tMax - tMin) * scrub.value / 1000, true));
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && locked) { e.preventDefault(); follow(null); return; }
+  if (e.key === "Escape" && !root0.classList.contains("embed")) { e.preventDefault(); goBack(); return; }
   if (e.target.tagName === "SELECT" || e.target.id === "speed" || e.target.tagName === "INPUT" && e.target.type !== "range" && e.target.type !== "checkbox") return;
   if (e.code === "Space") { e.preventDefault(); togglePlay(); }
   else if (e.key === "ArrowRight") { e.preventDefault(); setTime(tNow + (e.shiftKey ? 1 : 5 / 60)); }
@@ -904,33 +917,45 @@ function renderMsgs() {
 }
 // snippet bubbles: a DM's text rides from sender to recipient, a post's rises from its author; drawn in screen space
 const MSG_SEC = 5;   // real seconds a bubble stays up
+const PAUSE_MIN = 2;   // run minutes of messages kept on the graph while paused
 let bubbleHits = [];   // screen rects of the bubbles drawn last frame: {x, y, w, h, i}
 function drawBubbles() {
-  const Dm = MSG_SEC * Math.max(playing ? speed : 5, 1) / 60, hi = upto(msgT, tNow);
+  // Playing: each message's bubble lives MSG_SEC real seconds. Paused (owner, November 7, 2026): the latest
+  // messages of the last PAUSE_MIN run minutes stay up, settled and unfaded. Bubbles are stacked so they do not
+  // cover one another, and the newest is drawn on top.
+  const paused = !playing, Dm = paused ? PAUSE_MIN : MSG_SEC * Math.max(speed, 1) / 60, hi = upto(msgT, tNow);
   bubbleHits = [];
   ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.font = "12px system-ui, -apple-system, sans-serif"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
-  let shown = 0;
-  for (let j = hi; j >= 0 && shown < 4; j--) {
+  const items = [];
+  for (let j = hi; j >= 0 && items.length < 4; j--) {
     const e = events[msgIdx[j]], age = tNow - e.t; if (age > Dm) break;
-    const a = byId.get(e.src); if (!a) continue; const b = e.dst ? byId.get(e.dst) : null; shown++;
-    const p = Dm > 0 ? age / Dm : 1, q = Math.min(1, p / 0.45);
-    const ease = q * q * (3 - 2 * q);
+    const a = byId.get(e.src); if (!a) continue; const b = e.dst ? byId.get(e.dst) : null;
+    const p = paused ? 1 : (Dm > 0 ? age / Dm : 1), q = Math.min(1, p / 0.45);
+    const ease = paused ? 1 : q * q * (3 - 2 * q);
     const x = b ? a.x + (b.x - a.x) * ease : a.x, y = b ? a.y + (b.y - a.y) * ease : a.y - 10 * ease;
     const [sx, sy] = zt.apply([x, y]);
     let txt = e.text.replace(/\s+/g, " "); if (txt.length > 64) txt = txt.slice(0, 63) + "…";
     const head = MSG_TYPES[e.type] + " · " + e.src.replace(/^agent-/, "") + (e.dst ? " → " + e.dst.replace(/^agent-/, "") : "");
     const w = Math.min(330, Math.max(ctx.measureText(txt).width, ctx.measureText(head).width) + 16), h = 36;
-    let bx = sx - w / 2, by = sy - h - 14 - shown * 2; bx = Math.max(4, Math.min(W - w - 4, bx)); by = Math.max(4, by);
-    ctx.globalAlpha = p > 0.8 ? (1 - p) / 0.2 : Math.min(1, p / 0.06);
-    bubbleHits.push({ x: bx, y: by, w, h, i: msgIdx[j] });
-    ctx.fillStyle = C.panel || C.bg; ctx.strokeStyle = msgColor(e); ctx.lineWidth = openMsgs.has(msgIdx[j]) ? 2.5 : 1.5;
+    let bx = Math.max(4, Math.min(W - w - 4, sx - w / 2)), by = Math.max(4, sy - h - 14);
+    const hits = (r) => items.some((o) => r.x < o.bx + o.w && o.bx < r.x + w && r.y < o.by + o.h + 4 && o.by < r.y + h + 4);
+    for (let k = 0; k < 8 && hits({ x: bx, y: by }); k++) by = by - h - 6 < 4 ? by + (h + 6) * (k + 1) : by - h - 6;
+    const alpha = paused ? 1 : (p > 0.8 ? (1 - p) / 0.2 : Math.min(1, p / 0.06));
+    items.push({ e, i: msgIdx[j], sx, sy, bx, by, w, h, txt, head, alpha });
+  }
+  for (const it of items.slice().reverse()) {   // oldest first, so the newest ends on top
+    const { e, i, sx, sy, bx, by, w, h, txt, head, alpha } = it;
+    ctx.globalAlpha = alpha;
+    bubbleHits.push({ x: bx, y: by, w, h, i });
+    ctx.fillStyle = C.panel || C.bg; ctx.strokeStyle = msgColor(e); ctx.lineWidth = openMsgs.has(i) ? 2.5 : 1.5;
     ctx.beginPath(); ctx.roundRect(bx, by, w, h, 7); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(sx - 5, by + h); ctx.lineTo(sx, Math.min(by + h + 7, sy - 3)); ctx.lineTo(sx + 5, by + h); ctx.fill();
+    if (sy > by + h) { ctx.beginPath(); ctx.moveTo(sx - 5, by + h); ctx.lineTo(sx, Math.min(by + h + 7, sy - 3)); ctx.lineTo(sx + 5, by + h); ctx.fill(); }
     ctx.fillStyle = msgColor(e); ctx.font = "600 10px system-ui, -apple-system, sans-serif"; ctx.fillText(head, bx + 8, by + 11);
     ctx.fillStyle = C.fg; ctx.font = "12px system-ui, -apple-system, sans-serif";
     ctx.save(); ctx.beginPath(); ctx.rect(bx + 6, by, w - 12, h); ctx.clip(); ctx.fillText(txt, bx + 8, by + 25); ctx.restore();
   }
+  bubbleHits.reverse();   // hit-test the topmost (newest) first
   ctx.restore();
 }
 
