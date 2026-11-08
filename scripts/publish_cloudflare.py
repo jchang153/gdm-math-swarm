@@ -342,10 +342,17 @@ def unpack_run(run, files):
 
 def packed_run_text(name, data):
     """Every entry of a run file pack, decoded (the credential screen reads the exact original bytes)."""
+    return b'\n'.join(packed_run_entries(name, data))
+
+
+def packed_run_entries(name, data):
+    """Each entry of a run file pack, decoded, one at a time (no pack-sized joined copy; memory, November 7,
+    2026); nothing for any other file. No credential pattern spans a newline, so screening the entries one by one
+    finds exactly what screening ``packed_run_text`` does."""
     if not is_pack_file(name):
-        return b''
-    pack = json.loads(data)
-    return b'\n'.join(_entry_bytes(e) for e in pack['files'].values())
+        return
+    for entry in json.loads(data)['files'].values():
+        yield _entry_bytes(entry)
 
 
 def unpack_site(files):
@@ -369,10 +376,13 @@ def unpack_site(files):
     return files
 
 
-def pack_site(files):
+def pack_site(files, consume=False):
     """Pack every run's pack groups (packs already present are unpacked first). Returns (files, record);
-    refuses any loss of content."""
-    files = unpack_site(files)
+    refuses any loss of content. ``consume``: the caller hands its dict over (it is emptied), so each run's
+    originals are freed once packed instead of staying alive in the caller's copy (peak memory)."""
+    source, files = files, unpack_site(files)
+    if consume:
+        source.clear()
     runs = sorted({run_of(n) for n in files if packable(n)})
     record = {}
     for run in runs:
@@ -482,7 +492,8 @@ def site_gate(name, data):
     path = safe_path(name)  # no dot-folders, no traversal, no credential file names
     if path.name.lower() in {'.env', 'host.env'} or path.parts[0] == 'functions' or path.name in PAGES_SPECIAL:
         raise ValueError('Pages special or host-only file refused: ' + name)
-    if SECRET.search(data) or SECRET.search(packed_text(name, data)) or SECRET.search(packed_run_text(name, data)):
+    if (SECRET.search(data) or SECRET.search(packed_text(name, data))
+            or any(SECRET.search(entry) for entry in packed_run_entries(name, data))):
         raise ValueError('Credential-like content; deploy refused: ' + name)
     if private_category(name) is not None:
         raise ValueError(f'{name} is private ({private_category(name)}) and is never deployed to the public site')
@@ -1169,19 +1180,21 @@ def plan_repack(base_files):
     return dict(base_files), {'source': {'kind': 'repack', 'runs': pending}}
 
 
-def finish(files, base_manifest, plan, project=None, site=None):
+def finish(files, base_manifest, plan, project=None, site=None, consume=False):
     """Add the generated pages and the site manifest; gate every file, every run's domain (``check_domains``)
-    and the deployment limits."""
+    and the deployment limits. ``consume``: ``files`` is a one-item list [plan files] that finish takes over."""
     site = site_of(site)
     project = project or site.project
     if project != site.project:
         raise ValueError(f'Project {project} is not the {site.key} site\'s ({site.project})')
+    if consume:  # ``files`` is a one-item list holding the caller's plan: taken over, so the caller keeps no
+        files = files.pop()  # reference to the unpacked site while it is packed again (peak memory)
     files = {n: d for n, d in files.items() if n not in GENERATED}
     check_domains(files, site)
     files, repointed = repoint_private_links(unpack_site(files))
     if repointed:
         plan['repointed_private_links'] = repointed
-    files, packed = pack_site(files)
+    files, packed = pack_site(files, consume=True)
     if packed:
         plan['packed_runs'] = packed
     files.update(storymap_site.graph_assets(files))  # the one shared graph viewer, current with the template
@@ -1210,10 +1223,15 @@ def finish(files, base_manifest, plan, project=None, site=None):
 
 
 def summary(files, base_files, plan, base, site=None):
+    """``base_files``: the served site, {name: bytes} or {name: SHA-256 hex} (its manifest's digests, so the
+    served bytes need not stay in memory)."""
+    def changed(name, data):
+        old = base_files.get(name)
+        return old != (sha256(data) if isinstance(old, str) else data)
     return {**plan, 'project': site_of(site).project, 'base_deployment': base,
             'files': len(files), 'bytes': sum(len(d) for d in files.values()),
             'largest_file_bytes': max(len(d) for d in files.values()),
-            'new_or_changed': sum(1 for n, d in files.items() if base_files.get(n) != d and n != SITE_MANIFEST),
+            'new_or_changed': sum(1 for n, d in files.items() if n != SITE_MANIFEST and changed(n, d)),
             'runs': len({run_of(n) for n in files if run_of(n) and run_of(n) not in NON_RUN})}
 
 
@@ -1513,6 +1531,9 @@ def main(argv=None):
         base = current[0] if current else None
         base_manifest, served = load_site(base['url'] if base else None, cache=site.cache)
         base_files = unpack_site(served)  # plans see every file; finish packs again
+        # Peak memory (November 7, 2026): the served packs are dropped once unpacked; the summary compares by the
+        # manifest's digests (load_site checked every served file against them).
+        served = {n: r['sha256'] for n, r in base_manifest.get('files', {}).items()}
         unlisted = unlisted_runs()
         if args.command == 'mirror-space':
             if args.snapshot:
@@ -1559,7 +1580,9 @@ def main(argv=None):
             files, plan = plan_bundle(base_files, args.bundle, unlisted, args.dataset_commit, args.replace_pages,
                                       site=site)
             message = 'Publish ' + ', '.join(plan['source']['runs'])
-        files, manifest = finish(files, base_manifest, plan, site=site)
+        handoff = [files]  # finish takes the plan over (peak memory, November 7, 2026)
+        del base_files, files
+        files, manifest = finish(handoff, base_manifest, plan, site=site, consume=True)
         result = {**summary(files, served, plan, base, site=site), 'committed': False}
         if args.commit:
             remember(files, cache=site.cache)
