@@ -198,7 +198,6 @@ OVERVIEW_CSS = (
     '.ov-pane>header a.ov-full:hover,a.ov-full:hover{background:color-mix(in srgb,var(--accent) 86%,var(--fg));'
     'border-color:color-mix(in srgb,var(--accent) 86%,var(--fg));color:var(--card);text-decoration:none}'
     'a.ov-full:focus-visible{outline:3px solid var(--fg);outline-offset:2px}'
-    '.ov-full-float{position:absolute;top:12px;right:12px;z-index:2;font-size:12.5px;padding:6px 12px 6px 10px}'
     '.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}'
     '.ov-graph .ov-note{font-size:12px;color:var(--muted);margin:0;padding:6px 14px;'
     'border-top:1px solid var(--line)}.ov-fakes{padding:12px 14px}.ov-fakes figure{margin:0;max-width:none}'
@@ -456,9 +455,7 @@ def _graph_pane(document, has_graph):
                 f'<a class="ov-full" href="{GRAPH}" target="_blank" rel="noopener">{_EXPAND}Open full-screen graph '
                 '<span aria-hidden="true">↗</span><span class="sr"> (opens in a new tab)</span></a></header>'
                 f'<div class="ov-gwrap"><iframe id="ov-graph" src="{GRAPH}?embed=1&amp;play=1" title="Interaction graph '
-                'of this run (playing at 5x)" loading="lazy"></iframe>'
-                f'<a class="ov-full ov-full-float" href="{GRAPH}" target="_blank" rel="noopener">{_EXPAND}Full screen '
-                '<span aria-hidden="true">↗</span><span class="sr"> (opens in a new tab)</span></a></div>'
+                'of this run (playing at 5x)" loading="lazy"></iframe></div>'
                 + _THEME_SYNC +
                 '<p class="ov-note">Agents and the messages, files and submissions between them over the run; '
                 'click a bubble to open it. Each agent links to its <a href="analysis/storymap/index.html">story '

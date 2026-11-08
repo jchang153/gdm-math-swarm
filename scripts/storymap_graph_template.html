@@ -138,7 +138,9 @@ footer { border-top: 1px solid var(--line); background: var(--panel); padding: 8
 #follow .mhint { color: var(--faint); font-size: 10px; }
 @media (max-width: 820px) { #follow { width: auto; left: 10px; max-height: 55%; } #follow canvas.mini { width: 100%; } }
 #msgs { list-style: none; margin: 0; padding: 0; }
-#feed li { cursor: default; }
+#feed li { cursor: pointer; }
+.tm.jump { cursor: pointer; border-radius: 6px; padding: 0 4px; margin-left: -4px; color: var(--accent) !important; }
+.tm.jump:hover, .tm.jump:focus-visible { background: color-mix(in srgb, var(--accent) 14%, transparent); text-decoration: underline; }
 #msgs li, #follow li.msg { padding: 4px 0; border-bottom: 1px solid var(--grid); color: var(--muted); cursor: pointer; }
 #msgs li .hd, #follow li.msg .hd { display: flex; gap: 6px; align-items: baseline; }
 #msgs li .tm { font-variant-numeric: tabular-nums; color: var(--faint); }
@@ -312,8 +314,9 @@ function stanceOf(n, t) {
 }
 
 let tMin = 0, tMax = +GRAPH.minutes || 0;
-if (events.length) { tMin = Math.min(tMin, evT[0]); tMax = Math.max(tMax, evT[evT.length - 1]); }
-for (const n of nodes) if (n.states.length) tMin = Math.min(tMin, n.states[0].t_from);
+// The timeline starts at 0:00, the run's common start (owner, November 7, 2026): activity stamped slightly
+// before it (an agent's first reasoning) is shown at 0:00, and states that begin earlier apply from 0:00.
+if (events.length) tMax = Math.max(tMax, evT[evT.length - 1]);
 if (tMax <= tMin) tMax = tMin + 1;
 
 // last index i with arr[i] <= t, or -1
@@ -731,7 +734,7 @@ function renderFollow() {
   for (const e of evs) {
     if (MSG_TYPES[e.type] && e.text) { ul.appendChild(msgItem(events.indexOf(e), false)); continue; }
     const li = document.createElement("li"); if (e.fake) li.className = "fake"; li.title = "Jump to " + fmtT(e.t);
-    const tm = document.createElement("span"); tm.className = "tm"; tm.textContent = fmtT(e.t);
+    const tm = timeChip(e.t);
     const who = document.createElement("b"); who.textContent = e.src === n.id ? (e.dst ? "→ " + e.dst : "") : "from " + e.src;
     const ty = document.createElement("b"); ty.className = "ty"; ty.textContent = " " + (TYPE_LABEL[e.type] || e.type) + (e.fake ? " (fake)" : "");
     li.append(tm, who, ty);
@@ -792,7 +795,7 @@ let bins = null, fakeBins = null;
 (function () {
   const nb = Math.max(20, Math.min(240, Math.ceil(tMax - tMin)));
   bins = new Float64Array(nb); fakeBins = new Float64Array(nb);
-  for (const e of events) { const b = Math.min(nb - 1, Math.floor((e.t - tMin) / (tMax - tMin) * nb)); bins[b]++; if (e.fake) fakeBins[b]++; }
+  for (const e of events) { const b = Math.max(0, Math.min(nb - 1, Math.floor((e.t - tMin) / (tMax - tMin) * nb))); bins[b]++; if (e.fake) fakeBins[b]++; }
 })();
 function sizeSpark() {
   const r = spark.getBoundingClientRect();
@@ -836,14 +839,25 @@ function renderStanceLegend(force) {
 }
 const TYPE_LABEL = { dm: "DM", board_post: "board post", board_read: "board read", library_publish: "library publish", library_read: "library read", submit: "submit", credited: "credited", revert: "revert", check: "check", ov_board_post: "overseer post", ov_board_read: "overseer read" };
 let feedKey = -2;
+// A clickable time (owner, November 7, 2026): jumps the replay to that moment and pauses; in a message it does not
+// open or close the message.
+function timeChip(t) {
+  const tm = document.createElement("span"); tm.className = "tm jump"; tm.textContent = fmtT(t);
+  tm.title = "Jump to " + fmtT(t); tm.setAttribute("role", "button"); tm.tabIndex = 0;
+  const go = (ev) => { ev.stopPropagation(); ev.preventDefault(); togglePlay(false); setTime(t); };
+  tm.addEventListener("click", go);
+  tm.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") go(ev); });
+  return tm;
+}
 function renderFeed() {
   const hi = upto(evT, tNow);
   if (hi === feedKey) return; feedKey = hi;
   const ul = $("feed"); ul.textContent = "";
   for (let i = hi, k = 0; i >= 0 && k < 40; i--) {
     const e = events[i]; if (e.type === "board_read" || e.type === "ov_board_read") continue; k++;
-    const li = document.createElement("li"); if (e.fake) li.className = "fake";
-    const tm = document.createElement("span"); tm.className = "tm"; tm.textContent = fmtT(e.t);
+    const li = document.createElement("li"); if (e.fake) li.className = "fake"; li.title = "Jump to " + fmtT(e.t);
+    const tm = timeChip(e.t);
+    li.onclick = () => { togglePlay(false); setTime(e.t); };
     const who = document.createElement("b"); who.textContent = e.src + (e.dst ? " → " + e.dst : "");
     const ty = document.createElement("b"); ty.className = "ty"; ty.textContent = " " + (TYPE_LABEL[e.type] || e.type) + (e.fake ? " (fake)" : "");
     li.append(tm, who, ty);
@@ -862,7 +876,7 @@ function msgColor(e) { return e.type === "dm" ? C.edge.dm : e.type === "ov_board
 function msgItem(i, fresh) {
   const e = events[i], li = document.createElement("li"); li.className = "msg" + (openMsgs.has(i) ? " open" : "") + (fresh ? " fresh" : ""); li.dataset.i = i;
   const hd = document.createElement("div"); hd.className = "hd";
-  const tm = document.createElement("span"); tm.className = "tm"; tm.textContent = fmtT(e.t);
+  const tm = timeChip(e.t);
   const k = document.createElement("span"); k.className = "kind"; k.style.background = msgColor(e); k.textContent = MSG_TYPES[e.type];
   const who = document.createElement("b"); who.textContent = e.src + (e.dst ? " → " + e.dst : "");
   hd.append(tm, k, who);

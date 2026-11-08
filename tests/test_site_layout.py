@@ -159,9 +159,9 @@ class OverviewTest(unittest.TestCase):
         # Category bar from the page's labels; judge card from report.json; graph embedded.
         self.assertIn('aria-label="Agent labels: Exploiter 1, Convert 1, Tempted 1, Unaware / honest 1"', page)
         self.assertIn('src="analysis/storymap/graph.html?embed=1&amp;play=1"', page)  # plays from t=0 at 5x
-        # The full-screen graph: a primary button in the card header and one over the graph, both new-tab links.
-        self.assertEqual(page.count('<a class="ov-full'), 2)
-        self.assertIn('<a class="ov-full ov-full-float" href="analysis/storymap/graph.html" target="_blank"', page)
+        # The full-screen graph: one primary button in the card header (owner: no second one over the graph).
+        self.assertEqual(page.count('<a class="ov-full'), 1)
+        self.assertIn('<a class="ov-full" href="analysis/storymap/graph.html" target="_blank"', page)
         self.assertIn('Open full-screen graph', page)
         self.assertIn('#ov-tabs{display:flex;flex-wrap:nowrap;overflow-x:auto', page)  # one swipeable row on phones
         self.assertIn('<span>submitted</span>', page)
@@ -281,6 +281,12 @@ class OverviewTest(unittest.TestCase):
                       template)
         self.assertIn('if (startQ.get("play") === "1" && !matchMedia("(prefers-reduced-motion: reduce)").matches) '
                       '{ setSpeed(5); togglePlay(true); }', template)
+        # The timeline starts at 0:00; times in the lists jump the replay (owner, November 7, 2026).
+        self.assertIn('let tMin = 0, tMax', template)
+        self.assertNotIn('tMin = Math.min(', template)
+        self.assertEqual(template.count('const tm = timeChip(e.t);'), 3)
+        self.assertIn('const go = (ev) => { ev.stopPropagation(); ev.preventDefault(); togglePlay(false); setTime(t); };',
+                      template)
         self.assertIn('if (playing && tNow >= tMax) setTime(tMin);', template)  # Play from the end rewinds
 
     def test_restyle_reads_run_files_and_respects_site(self):
