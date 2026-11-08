@@ -1658,7 +1658,7 @@ is being merged into main via `collab-env`.
    - Local iteration: build the shared viewer from a scratch template copy with `--template COPY --viewer-dir
      SITE/_graph` and serve SITE with a static server; never edit the repo template while a deploy is running.
 
-37. **IN PROGRESS 2026-11-06/07: site redesign (math site), Gemini correction, more story maps** (owner requests and
+37. **DONE 2026-11-07 (~17:25 PT; started 11-06): site redesign (math site), Gemini correction, more story maps** (owner requests and
    budgets in docs/plan.md, "Site redesign: run panes with the interaction graph (November 6, 2026)" and the entries
    after it).
    - **Live:** redesign `3a91998d` (catalogue: series sidebar with one-liners, run panes with graph snapshot +
@@ -1682,6 +1682,14 @@ is being merged into main via `collab-env`.
      in the operator scratchpad (`smp/pub`, `sm180/pub`); deploy scripts `sm180/deploy.sh`.
    - Ledger costs of all story maps so far (pilot vs map) were reported to the owner: typical 100-agent 120-min
      solver map $12-29; reminder push maps ~$100 (pushed reminders multiply stage-2 events); 180-min maps $23-79.
+   - **Finished 2026-11-07:** comms-only full solver maps live `5402ea34` ($624.49); 180-min notices maps live
+     `cd2e78ea` (11 runs, new spend $525.42; 10ov r2/r3 overseer maps partial 5/10 and 2/10 at their $20 caps,
+     noted on their indexes); design batches `8b5941db` (graph autoplay at 5x from 0:00, catalogue buttons open
+     run-page tabs, story-map links only where pages exist), `bfbe0ac7` (one full-screen button, timeline from 0:00,
+     clickable times) and `d73e6246` (full screen in the same tab, "Back to run", paused bubbles stay, Key at the
+     top; post-deploy verify failed on connection resets: re-run `publish_cloudflare.py verify`). Low-memory
+     publisher ee72157 (deploy peaks 5.7-7.5 GB RSS, up to 12.6 GB footprint; next step if needed: stream files from
+     disk). The live catalogue shows 44 graph thumbs.
 
 ## Next steps / open items
 
