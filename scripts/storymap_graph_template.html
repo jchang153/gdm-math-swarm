@@ -160,6 +160,9 @@ li.fresh { animation: fresh 1.6s ease-out; }
 html.embed header, html.embed aside { display: none; }
 html.embed main { grid-template-columns: minmax(0, 1fr) !important; }
 html.embed #stage { min-height: 0; }
+/* Expanded over the run page (the run page drops embed and sets overlay; its own close button sits top right). */
+html.overlay #back { display: none; }
+html.overlay header { padding-right: 64px; }
 @media (max-width: 820px) {
   main { grid-template-columns: 1fr; }
   #stage { min-height: 62vh; }
@@ -331,6 +334,7 @@ function credAt(n, t) { return upto(n.credT, t) + 1; }
 // ---------- back to the run (owner, November 7, 2026): the full graph opens in the same tab ----------
 const root0 = document.documentElement;
 function goBack() {
+  if (root0.classList.contains("overlay") && parent !== window) { parent.postMessage("graph-close", location.origin); return; }
   const run = new URL("../../results.html", location.href).pathname;
   let ref = null; try { ref = document.referrer ? new URL(document.referrer) : null; } catch (e) {}
   if (ref && ref.origin === location.origin && ref.pathname === run && history.length > 1) history.back();

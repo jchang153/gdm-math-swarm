@@ -198,6 +198,13 @@ OVERVIEW_CSS = (
     '.ov-pane>header a.ov-full:hover,a.ov-full:hover{background:color-mix(in srgb,var(--accent) 86%,var(--fg));'
     'border-color:color-mix(in srgb,var(--accent) 86%,var(--fg));color:var(--card);text-decoration:none}'
     'a.ov-full:focus-visible{outline:3px solid var(--fg);outline-offset:2px}'
+    '.ov-gwrap.ov-open{position:fixed;inset:0;z-index:1000;background:var(--bg)}'
+    '.ov-gwrap.ov-open iframe{width:100%;height:100%}html.ov-lock{overflow:hidden}'
+    '#ov-close{position:absolute;top:10px;right:12px;z-index:2;width:38px;height:38px;border-radius:50%;'
+    'border:1px solid var(--line);background:var(--card);color:var(--fg);font-size:18px;line-height:1;cursor:pointer;'
+    'box-shadow:0 2px 10px -2px color-mix(in srgb,var(--fg) 35%,transparent)}#ov-close[hidden]{display:none}'
+    '#ov-close:hover{background:var(--accent);border-color:var(--accent);color:var(--card)}'
+    '#ov-close:focus-visible{outline:3px solid var(--fg);outline-offset:2px}'
     '.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}'
     '.ov-graph .ov-note{font-size:12px;color:var(--muted);margin:0;padding:6px 14px;'
     'border-top:1px solid var(--line)}.ov-fakes{padding:12px 14px}.ov-fakes figure{margin:0;max-width:none}'
@@ -444,6 +451,26 @@ _THEME_SYNC = ('<script>(function(){var f=document.getElementById("ov-graph"),r=
                '</script>')
 
 
+# "Open full-screen graph" expands the embedded viewer over the page in place (owner, November 8, 2026): browser
+# full screen where available, else a fixed overlay; the same replay keeps playing, with the full sidebar. The
+# close button, Esc (leaving browser full screen) or the viewer's own Esc returns to the run page.
+_FULL_JS = ('<button id="ov-close" type="button" aria-label="Close full screen" title="Close full screen (Esc)" hidden>'
+            '&#x2715;</button><script>(function(){var a=document.querySelector("a.ov-full"),w=document.querySelector('
+            '".ov-gwrap"),f=document.getElementById("ov-graph"),x=document.getElementById("ov-close"),r=document.'
+            'documentElement,open=false;if(!a||!w||!f||!x)return;w.appendChild(x);function mode(){try{var d=f.'
+            'contentDocument.documentElement;d.classList.toggle("embed",!open);d.classList.toggle("overlay",open);}'
+            'catch(e){}}f.addEventListener("load",mode);function show(){if(open)return;open=true;w.classList.add('
+            '"ov-open");r.classList.add("ov-lock");x.hidden=false;mode();if(w.requestFullscreen)w.requestFullscreen()'
+            '.catch(function(){});x.focus();}function hide(){if(!open)return;open=false;w.classList.remove("ov-open");'
+            'r.classList.remove("ov-lock");x.hidden=true;mode();if(document.fullscreenElement)document.exitFullscreen()'
+            '.catch(function(){});a.focus();}a.addEventListener("click",function(e){if(e.button||e.metaKey||e.ctrlKey||'
+            'e.shiftKey||e.altKey)return;e.preventDefault();show();});x.addEventListener("click",hide);document.'
+            'addEventListener("fullscreenchange",function(){if(!document.fullscreenElement)hide();});document.'
+            'addEventListener("keydown",function(e){if(e.key==="Escape"&&open){e.preventDefault();hide();}});'
+            'addEventListener("message",function(e){if(e.origin===location.origin&&e.data==="graph-close")hide();});'
+            '})();</script>')
+
+
 _EXPAND = ('<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><path d="M2 6V2h4M14 6V2h-4'
            'M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" '
            'stroke-linejoin="round"/></svg>')
@@ -455,7 +482,7 @@ def _graph_pane(document, has_graph):
                 f'<a class="ov-full" href="{GRAPH}">{_EXPAND}Open full-screen graph</a></header>'
                 f'<div class="ov-gwrap"><iframe id="ov-graph" src="{GRAPH}?embed=1&amp;play=1" title="Interaction graph '
                 'of this run (playing at 5x)" loading="lazy"></iframe></div>'
-                + _THEME_SYNC +
+                + _THEME_SYNC + _FULL_JS +
                 '<p class="ov-note">Agents and the messages, files and submissions between them over the run; '
                 'click a bubble to open it. Each agent links to its <a href="analysis/storymap/index.html">story '
                 'map</a>.</p></section>')
