@@ -1690,6 +1690,11 @@ is being merged into main via `collab-env`.
      top; post-deploy verify failed on connection resets: re-run `publish_cloudflare.py verify`). Low-memory
      publisher ee72157 (deploy peaks 5.7-7.5 GB RSS, up to 12.6 GB footprint; next step if needed: stream files from
      disk). The live catalogue shows 44 graph thumbs.
+   - **Finished 2026-11-08:** "Open full-screen graph" now expands the embedded viewer in place over the run page
+     (browser full screen where allowed, else a fixed overlay; full sidebar; round close X or Esc returns, replay keeps
+     its place; no navigation) (75fd7aa). Live as `913579d4` via `restyle --commit` (96 run pages + `_graph` viewer;
+     verify ok). Deploy note: a root-owned folder in `~/.npm` breaks npx; run deploys with `npm_config_cache` set to a
+     scratch folder until the owner fixes the ownership.
 
 ## Next steps / open items
 
