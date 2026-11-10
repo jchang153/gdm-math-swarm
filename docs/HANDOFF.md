@@ -1697,6 +1697,8 @@ is being merged into main via `collab-env`.
      scratch folder until the owner fixes the ownership.
    - **2026-11-09:** the expanded graph no longer requests browser full screen; it fills the window in the same tab
      (owner) (3bbe0c9). Live as `50f0e53b` (`restyle --commit`, verify ok).
+     Fix 7c95737: on the live site the run-page tab switcher also caught the expand click (switched to the Story
+     map tab and left the page scroll-locked); live as `db2cabd6`, checked on the served page.
 
 ## Next steps / open items
 
