@@ -1695,6 +1695,8 @@ is being merged into main via `collab-env`.
      its place; no navigation) (75fd7aa). Live as `913579d4` via `restyle --commit` (96 run pages + `_graph` viewer;
      verify ok). Deploy note: a root-owned folder in `~/.npm` breaks npx; run deploys with `npm_config_cache` set to a
      scratch folder until the owner fixes the ownership.
+   - **2026-11-09:** the expanded graph no longer requests browser full screen; it fills the window in the same tab
+     (owner) (3bbe0c9). Live as `50f0e53b` (`restyle --commit`, verify ok).
 
 ## Next steps / open items
 
