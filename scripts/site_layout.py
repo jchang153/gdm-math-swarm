@@ -451,21 +451,20 @@ _THEME_SYNC = ('<script>(function(){var f=document.getElementById("ov-graph"),r=
                '</script>')
 
 
-# "Open full-screen graph" expands the embedded viewer over the page in place (owner, November 8, 2026): browser
-# full screen where available, else a fixed overlay; the same replay keeps playing, with the full sidebar. The
-# close button, Esc (leaving browser full screen) or the viewer's own Esc returns to the run page.
+# "Open full-screen graph" expands the embedded viewer over the page in place (owner, November 8, 2026): a fixed
+# overlay filling the window, never browser full screen (owner, November 9, 2026); the same replay keeps playing,
+# with the full sidebar. The close button or Esc returns to the run page.
 _FULL_JS = ('<button id="ov-close" type="button" aria-label="Close full screen" title="Close full screen (Esc)" hidden>'
             '&#x2715;</button><script>(function(){var a=document.querySelector("a.ov-full"),w=document.querySelector('
             '".ov-gwrap"),f=document.getElementById("ov-graph"),x=document.getElementById("ov-close"),r=document.'
             'documentElement,open=false;if(!a||!w||!f||!x)return;w.appendChild(x);function mode(){try{var d=f.'
             'contentDocument.documentElement;d.classList.toggle("embed",!open);d.classList.toggle("overlay",open);}'
             'catch(e){}}f.addEventListener("load",mode);function show(){if(open)return;open=true;w.classList.add('
-            '"ov-open");r.classList.add("ov-lock");x.hidden=false;mode();if(w.requestFullscreen)w.requestFullscreen()'
-            '.catch(function(){});x.focus();}function hide(){if(!open)return;open=false;w.classList.remove("ov-open");'
-            'r.classList.remove("ov-lock");x.hidden=true;mode();if(document.fullscreenElement)document.exitFullscreen()'
-            '.catch(function(){});a.focus();}a.addEventListener("click",function(e){if(e.button||e.metaKey||e.ctrlKey||'
+            '"ov-open");r.classList.add("ov-lock");x.hidden=false;mode();x.focus();}'
+            'function hide(){if(!open)return;open=false;w.classList.remove("ov-open");'
+            'r.classList.remove("ov-lock");x.hidden=true;mode();a.focus();}'
+            'a.addEventListener("click",function(e){if(e.button||e.metaKey||e.ctrlKey||'
             'e.shiftKey||e.altKey)return;e.preventDefault();show();});x.addEventListener("click",hide);document.'
-            'addEventListener("fullscreenchange",function(){if(!document.fullscreenElement)hide();});document.'
             'addEventListener("keydown",function(e){if(e.key==="Escape"&&open){e.preventDefault();hide();}});'
             'addEventListener("message",function(e){if(e.origin===location.origin&&e.data==="graph-close")hide();});'
             '})();</script>')
