@@ -464,7 +464,7 @@ _FULL_JS = ('<button id="ov-close" type="button" aria-label="Close full screen" 
             'function hide(){if(!open)return;open=false;w.classList.remove("ov-open");'
             'r.classList.remove("ov-lock");x.hidden=true;mode();a.focus();}'
             'a.addEventListener("click",function(e){if(e.button||e.metaKey||e.ctrlKey||'
-            'e.shiftKey||e.altKey)return;e.preventDefault();show();});x.addEventListener("click",hide);document.'
+            'e.shiftKey||e.altKey)return;e.preventDefault();e.stopPropagation();show();});x.addEventListener("click",hide);document.'
             'addEventListener("keydown",function(e){if(e.key==="Escape"&&open){e.preventDefault();hide();}});'
             'addEventListener("message",function(e){if(e.origin===location.origin&&e.data==="graph-close")hide();});'
             '})();</script>')
@@ -643,7 +643,7 @@ function fromHash(){var h=location.hash.slice(1);return tabs[h]?h:"overview";}
 nav.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a[data-ov]");
  if(!a||e.button||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;e.preventDefault();go(a.getAttribute("data-ov"),null,true);});
 document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("#overview a[href],.ov-row a[href]");
- if(!a||a.target||e.button||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;var k=tabOf(abs(a.getAttribute("href")));
+ if(!a||a.target||e.defaultPrevented||e.button||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;var k=tabOf(abs(a.getAttribute("href")));
  if(k){e.preventDefault();go(k,a.getAttribute("href"),true);}});
 window.addEventListener("popstate",function(e){var s=e.state||{};show(s.ov||fromHash(),s.u||null);});
 window.addEventListener("resize",top);
