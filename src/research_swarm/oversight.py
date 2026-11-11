@@ -104,11 +104,16 @@ def overseer_model_config(config):
 
 def role_model_configs(config) -> dict:
     """{role: config-shaped dict} for every distinct model a run calls: always ``"solver"`` (the run
-    config itself) and ``"overseer"`` when the overseers have their own model."""
+    config itself), ``"overseer"`` when the overseers have their own model and ``"red_team"`` when the
+    designated red-team solver has its own (research_swarm.red_team ``red_team.model``)."""
     result = {SOLVER_ROLE: config}
     model = overseer_model_config(config)
     if model is not None:
         result[OVERSEER_ROLE] = model
+    from . import red_team
+    model = red_team.model_config(config)
+    if model is not None:
+        result[red_team.RED_TEAM_ROLE] = model
     return result
 
 
@@ -171,22 +176,27 @@ def _multi_problems(config, value):
         problems.append(f"{OVERSEER_KEY}.contact false requires powers (an overseer needs some way to act)")
     model = value.get("model")
     if model is not None:
-        if not isinstance(model, dict) or set(model) - MODEL_KEYS:
-            problems.append(f"{OVERSEER_KEY}.model must be an object with candidate_model_id, provider_route and "
-                            "provider_settings")
-        else:
-            from .provider import KNOWN_MODEL_IDS, settings_from_config
-            try:
-                settings = settings_from_config(model)
-            except (TypeError, ValueError) as ex:
-                problems.append(f"{OVERSEER_KEY}.model provider settings are invalid ({ex})")
-            else:
-                if model.get("candidate_model_id") != settings.model_id:
-                    problems.append(f"{OVERSEER_KEY}.model.candidate_model_id must equal its provider_settings.model_id")
-                if settings.model_id not in KNOWN_MODEL_IDS:
-                    problems.append(f"{OVERSEER_KEY}.model {settings.model_id!r} is not a known model")
-                if not settings.provider_route:
-                    problems.append(f"{OVERSEER_KEY}.model needs an explicit provider_route")
+        problems += model_block_problems(model, f"{OVERSEER_KEY}.model")
+    return problems
+
+
+def model_block_problems(model, label) -> list[str]:
+    """Check of a per-role model block (``overseer.model``, ``red_team.model``): a config-shaped dict
+    with a known model, an explicit route and a candidate id equal to its provider settings' id."""
+    if not isinstance(model, dict) or set(model) - MODEL_KEYS:
+        return [f"{label} must be an object with candidate_model_id, provider_route and provider_settings"]
+    from .provider import KNOWN_MODEL_IDS, settings_from_config
+    try:
+        settings = settings_from_config(model)
+    except (TypeError, ValueError) as ex:
+        return [f"{label} provider settings are invalid ({ex})"]
+    problems = []
+    if model.get("candidate_model_id") != settings.model_id:
+        problems.append(f"{label}.candidate_model_id must equal its provider_settings.model_id")
+    if settings.model_id not in KNOWN_MODEL_IDS:
+        problems.append(f"{label} {settings.model_id!r} is not a known model")
+    if not settings.provider_route:
+        problems.append(f"{label} needs an explicit provider_route")
     return problems
 
 
@@ -410,6 +420,31 @@ def build_overseer_prompt(agent_id, solver_ids, task_listing, variant, powers=Fa
     if found:
         raise ValueError(f"The overseer prompt contains a word the neutral environment forbids ({found.group(0)!r})")
     return prompt
+
+
+def platform_sections(task_listing, variant) -> list[str]:
+    """The sections after the introduction that a plain overseer's prompt has (contact, no oversight
+    tools, no overseer board), in the same order and bytes: problems, submissions, environment,
+    communication, the rules given to the other agents, private notes and pace. Used by the red-team
+    standalone prompt (research_swarm.red_team), which describes the platform as the overseer's does."""
+    if not prompts.neutral_environment(variant):
+        raise ValueError("The platform sections require a neutral collaboration variant")
+    edited = prompts.variant_sections(variant)
+    rules = edited["INTEGRITY_PROMPT"]
+    if not rules:
+        raise ValueError(f"Prompt variant {variant!r} has no rules block")
+    paging = edited["COMMUNICATION"].split("\n\n")[-1]
+    if not paging.startswith("The listing tools"):
+        raise ValueError("Paging paragraph not found")
+    return [
+        prompts._problem_listing(task_listing, edited["PROBLEM_COUNT"]) + "\n\n" + _PROBLEMS_FOOTER,
+        _SUBMISSIONS,
+        _ENVIRONMENT,
+        _COMMUNICATION + "\n\n" + paging,
+        "## Rules given to the other agents\n\nFor reference, every other agent received these rules:\n\n" + rules,
+        _NOTES,
+        _PACE,
+    ]
 
 
 def overseer_extra_definitions(overseer, domain="lean") -> list[dict]:

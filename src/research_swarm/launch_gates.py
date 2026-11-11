@@ -666,17 +666,19 @@ class _Gates:
             drift[MAX_CONNECTIONS_KEY] = {"config": self.config.get(MAX_CONNECTIONS_KEY),
                                           "approved": "equal to agent_count"}
         problems += connections
-        overseer_model = role_configs(self.config).get("overseer")
-        if overseer_model is not None:
-            # The overseers' own model (research_swarm.oversight): one of the track's models.
+        for role, role_model in role_configs(self.config).items():
+            if role == "solver":
+                continue
+            # The overseers' or the red-team agent's own model (research_swarm.oversight.role_model_configs):
+            # one of the track's models.
             allowed = TRACK_MODEL_IDS.get(track, (MODEL_ID,)) if track is not None else ()
             try:
-                own = settings_from_config(overseer_model).model_id
+                own = settings_from_config(role_model).model_id
             except (TypeError, ValueError):
                 own = None
             if own not in allowed:
-                drift["overseer.model"] = {"config": own, "approved": list(allowed)}
-                problems.append(f"overseer.model {own!r} is not a model of budget track {track!r} "
+                drift[f"{role}.model"] = {"config": own, "approved": list(allowed)}
+                problems.append(f"{role}.model {own!r} is not a model of budget track {track!r} "
                                 "(provider.TRACK_MODEL_IDS; a per-role model needs a budget track)")
         if PROMPT_CACHE_NORMALIZATION_KEY in self.config:
             from .prompt_cache import TOKEN_COUNTER_NORMALIZATION_VERSION
@@ -1075,9 +1077,11 @@ def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy
     gates.run("prompt_variant", gates.prompt_variant)
     gates.run("persona_reviewing", gates.persona_reviewing)
     gates.run("route_pricing", gates.route_pricing)
-    overseer_model = role_configs(config).get("overseer")
-    if overseer_model is not None:  # the overseers' own model (research_swarm.oversight ``overseer.model``)
-        gates.run("route_pricing_overseer", lambda: gates.route_pricing(overseer_model, "route_pricing_overseer"))
+    # Per-role models (research_swarm.oversight.role_model_configs): the overseers' ``overseer.model`` and
+    # the red-team agent's ``red_team.model``; each gets its own route-pricing and compatibility gate.
+    own_models = [(role, model) for role, model in role_configs(config).items() if role != "solver"]
+    for role, model in own_models:
+        gates.run(f"route_pricing_{role}", lambda r=role, m=model: gates.route_pricing(m, f"route_pricing_{r}"))
     for prefix, required, optional in EVIDENCE_GATES:
         if config.get("domain") == "code" and prefix in CODE_SKIPPED_EVIDENCE:
             # No Lean judge or comparator in the coding domain: informational, never blocking.
@@ -1091,9 +1095,9 @@ def evaluate(config, repo_root, *, validation_dir=None, ledger_path=None, legacy
         state["snapshot"] = gates.ledger(ledger_path, legacy)
     gates.run("ledger", ledger_gate)
     gates.run("compatibility", lambda: gates.compatibility(ledger_path))
-    if overseer_model is not None:
-        gates.run("compatibility_overseer",
-                  lambda: gates.compatibility(ledger_path, overseer_model, "compatibility_overseer"))
+    for role, model in own_models:
+        gates.run(f"compatibility_{role}",
+                  lambda r=role, m=model: gates.compatibility(ledger_path, m, f"compatibility_{r}"))
     gates.run("provider_limit", gates.provider_limit)
     gates.run("credential_presence", gates.credentials)
     blockers = [f"{name}: {result['reason']}" for name, result in gates.results.items() if not result["passed"]]

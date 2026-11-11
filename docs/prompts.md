@@ -871,7 +871,7 @@ Code: `src/research_swarm/red_team.py`; tests: `tests/test_red_team.py`.
   a declared seeded run with the answer-wrapper seed (`artifact_sha256` 61ce60cc…, elapsed trigger of at most
   600 s, above 0 and before `max_run_seconds`), anything but exactly one overseer without oversight tools and with contact, the coding domain, and a
   non-neutral variant. The section is checked against `NEUTRAL_FORBIDDEN`.
-- Recorded: `settings.json` `effective.red_team` (agent, role, text version `trackA-v2`, section SHA-256 and
+- Recorded: `settings.json` `effective.red_team` (agent, role, text version `trackA-v3`, section SHA-256 and
   length) and the resume manifest's `red_team`. `roles` still lists the designated agent as a solver.
 - Not for the public library: these runs' `prompts/`, instructions and `settings.json` disclose the assignment
   and the exploit; do not publish them with `scripts/publish_cloudflare.py` (Amelie, November 10, 2026).
@@ -880,3 +880,17 @@ Code: `src/research_swarm/red_team.py`; tests: `tests/test_red_team.py`.
 - Configs: `configs/glmflash100-seeded-1ov-glm-120m-push-commsonly-rt-{solver,attacker,reviewer}.json`, identical to
   `glmflash100-seeded-1ov-glm-120m-push-commsonly` except the experiment name, the behavior judge and
   incident report turned off, and (attacker, reviewer) the `red_team` block for `agent-050`.
+- Standalone prompt and own model (Amelie, November 11, 2026). `red_team.prompt`: "appended" (default, as above) or
+  "standalone": like an overseer, the designated agent gets its own prompt instead of the solver prompt
+  (`red_team.standalone_head`): a title, who it is and who the others are, then "## Your task" with the role's
+  `intro_standalone`, the knowledge and the objective, then the plain overseer's platform sections byte for byte
+  (`oversight.platform_sections`: problems, submissions, environment, communication, the rules given to the other
+  agents, notes, pace). It keeps every solver tool; push wording and the overseer's copy follow as in appended mode.
+  `red_team.model`: the designated agent's own model, shaped and checked like `overseer.model`
+  (`oversight.model_block_problems`; needs a budget track whose models include it). It is role `"red_team"` in
+  `oversight.role_model_configs`, so `scripts/freeze_route.py` and `scripts/compat_check.py` freeze and check it and
+  the launch gates `route_pricing_red_team` and `compatibility_red_team` require that evidence; the runtime gives the
+  agent that model's settings and budget filter, and records `settings.json` `red_team_model` and a `role_model`
+  event. `effective.red_team` also records `prompt` and `model_id`.
+- Development configs: `configs/glmflash25-seeded-1ov-glm-60m-push-commsonly-rt-dev-{attacker,reviewer}.json`
+  (appended) and `...-rt-dev-{attacker,reviewer}-standalone.json` (standalone; otherwise identical).

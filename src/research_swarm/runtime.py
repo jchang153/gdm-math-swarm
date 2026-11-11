@@ -577,12 +577,21 @@ def make_prompt_for(config, *, overseer, solver_ids, seed, listing, variant, dom
     The run uses this function and tests/test_red_team.py calls it too, so the tests check the real
     assembly. Order: the role's prompt, then push wording (docs/plan.md, "Push delivery of board
     posts and DMs"), then for the designated red-team solver (research_swarm.red_team; checked by
-    preflight) the section that embeds the overseer's final prompt and restart message."""
+    preflight) the section that embeds the overseer's final prompt and restart message. With
+    ``red_team.prompt`` "standalone", the designated agent's own prompt (the role, then the overseer's
+    platform sections) replaces its solver prompt; push wording and the overseer's copy follow as above."""
     from . import oversight, red_team
     from .prompts import build_prompt, push_wording
     code = domain == "code"
+    block = red_team.red_team_config(config)
+    standalone = bool(block) and red_team.prompt_mode(block) == "standalone"
+    ov_id = oversight.overseer_ids(overseer)[0] if block else None
 
     def base(agent, persona):
+        if standalone and red_team.designated(agent, block):
+            others = [a for a in solver_ids + ([seed] if seed else []) if a != agent]
+            own = red_team.role_text(block["role"], ov_id, config["seeded"]["task_id"], standalone=True)
+            return red_team.standalone_head(agent, others, own, listing, variant)
         if oversight.is_overseer(agent, overseer):
             # The seed is one more "other agent" to the overseer, like to everyone else.
             return oversight.prompt_for(agent, overseer, solver_ids + ([seed] if seed else []), listing, variant,
@@ -596,16 +605,18 @@ def make_prompt_for(config, *, overseer, solver_ids, seed, listing, variant, dom
         text = base(agent, persona)
         return push_wording(text) if push else text
 
-    block = red_team.red_team_config(config)
-    section = None
+    section = copy = None
     if block:
-        ov_id = oversight.overseer_ids(overseer)[0]
-        section = red_team.section_for(block["role"], ov_id, final(ov_id, None),
-                                       _continue_for(ov_id, overseer, neutral, push), config["seeded"]["task_id"])
+        ov_prompt, ov_continue = final(ov_id, None), _continue_for(ov_id, overseer, neutral, push)
+        section = red_team.section_for(block["role"], ov_id, ov_prompt, ov_continue, config["seeded"]["task_id"],
+                                       standalone=standalone)
+        # Appended: the whole section follows the solver prompt. Standalone: the role text is already
+        # in the agent's own prompt, so only the overseer's copy follows.
+        copy = red_team.overseer_copy(ov_prompt, ov_continue) if standalone else section
 
     def prompt_for(agent, persona):
         text = final(agent, persona)
-        return red_team.append_section(text, section) if red_team.designated(agent, block) else text
+        return red_team.append_section(text, copy) if red_team.designated(agent, block) else text
 
     return prompt_for, section
 
@@ -1946,6 +1957,10 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     # Per-role model (docs/plan.md, "Multi-overseer seeded runs, October 26, 2026"): the overseers'
     # own OpenRouter model, checked by the same route-pricing and compatibility gates; None: one model.
     overseer_settings = oversight.overseer_settings(config, pricing_verified=True, live_compatibility_verified=True)
+    # The designated red-team agent's own model (research_swarm.red_team ``red_team.model``), same gates.
+    from . import red_team as _red_team
+    red_team_settings = _red_team.model_settings(config, pricing_verified=True, live_compatibility_verified=True)
+    red_team_agent = (_red_team.red_team_config(config) or {}).get("agent_id")
     roles = oversight.roles(solver_ids, overseer, seed)
     from .dataset import task_set_of
     task_set = config.get("task_set") if code else task_set_of(config)
@@ -1991,6 +2006,14 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             record("role_model", None, {"role": oversight.OVERSEER_ROLE, "agents": overseer_ids,
                                         "model_id": overseer_settings.model_id,
                                         "provider_route": overseer_settings.provider_route})
+        red_team_model = None
+        if red_team_settings is not None:
+            red_team_model, _ = build_openrouter_model(
+                red_team_settings, repo_root, 1, run_budget_usd=budget, record=record,
+                check_limit=lambda key, limit: {"informational": True, "note": "recorded with the solvers' model"})
+            record("role_model", None, {"role": _red_team.RED_TEAM_ROLE, "agents": [red_team_agent],
+                                        "model_id": red_team_settings.model_id,
+                                        "provider_route": red_team_settings.provider_route})
         # Every prompt, push wording and the red-team section included (make_prompt_for, shared with the tests).
         from . import red_team
         red_team_block = red_team.red_team_config(config)
@@ -2048,6 +2071,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                                             "model": asdict(settings),
                                                             **({"overseer_model": asdict(overseer_settings)}
                                                                if overseer_settings is not None else {}),
+                                                            **({"red_team_model": asdict(red_team_settings)}
+                                                               if red_team_settings is not None else {}),
                                                             "personas": personas,
                                                             "tasks": listing, "budget": ledger.snapshot(),
                                                             "run_budget": ledger.run_snapshot(),
@@ -2064,10 +2089,16 @@ async def _run_pilot(config, repo_root, conference_factory=None):
         definitions = agent_tool_definitions(config, neutral)
 
         def filter_for(agent):
-            # Overseers with their own model reserve, request and settle with its settings.
-            own = overseer_settings is not None and oversight.is_overseer(agent, overseer)
-            return budget_filter(agent, ledger, overseer_settings if own else settings, barrier, record, "pilot",
-                                 archive, clock.stop, **neutral_args, model_override=overseer_model if own else None,
+            # Overseers (or the designated red-team agent) with their own model reserve, request and settle
+            # with its settings.
+            if overseer_settings is not None and oversight.is_overseer(agent, overseer):
+                own_settings, own_model = overseer_settings, overseer_model
+            elif red_team_settings is not None and agent == red_team_agent:
+                own_settings, own_model = red_team_settings, red_team_model
+            else:
+                own_settings, own_model = settings, None
+            return budget_filter(agent, ledger, own_settings, barrier, record, "pilot",
+                                 archive, clock.stop, **neutral_args, model_override=own_model,
                                  push=conference if push else None)
 
         solver = peer_solver(conference=conference, definitions=definitions, personas=personas,

@@ -20,7 +20,12 @@ SHARED_CHANGES = {"experiment", "behavior_judge", "auto_incident_report"}
 FAKE_TEXT = {"text_version": red_team.TEXT_VERSION,
              "intro": {"attacker": "INTRO-A", "reviewer": "INTRO-R"},
              "knowledge": "KNOWLEDGE overseer={overseer_id} task={task_id}",
-             "objective": {"attacker": "OBJECTIVE-A", "reviewer": "OBJECTIVE-R"}}
+             "objective": {"attacker": "OBJECTIVE-A", "reviewer": "OBJECTIVE-R"},
+             "intro_standalone": {"attacker": "SOLO-A", "reviewer": "SOLO-R"}}
+DEV = "glmflash25-seeded-1ov-glm-60m-push-commsonly-rt-dev"
+def sweep_model(name="gpt6luna-25-seeded-control-60m-push"):
+    config = json.loads((ROOT / "configs" / f"{name}.json").read_text())
+    return {k: config[k] for k in ("requested_model", "candidate_model_id", "provider_route", "provider_settings")}
 
 
 def text_available():
@@ -85,6 +90,49 @@ class RedTeamPromptTests(unittest.TestCase):
             self.assertEqual(ov_id, "agent-027")
             self.assertIn("## The overseer's instructions\n\n" + prompts["agent-027"], prompts["agent-005"])
             self.assertTrue(all("## Your actual objective" not in prompts[a] for a in prompts if a != "agent-005"))
+
+    def test_standalone_prompt(self):
+        """Standalone: agent-005 gets the role first and the overseer's platform sections instead of the solver
+        prompt, push wording applied, then the same overseer copy; every other prompt is unchanged."""
+        words = red_team.load_text()
+        for role in red_team.ROLES:
+            appended = load(f"{DEV}-{role}")
+            solo = load(f"{DEV}-{role}-standalone")
+            self.assertEqual({k for k in set(appended) | set(solo) if appended.get(k) != solo.get(k)},
+                             {"experiment", "red_team"})
+            self.assertEqual({k: v for k, v in solo["red_team"].items() if k != "note"},
+                             {**{k: v for k, v in appended["red_team"].items() if k != "note"}, "prompt": "standalone"})
+            self.assertEqual(red_team.red_team_problems(solo), [], role)
+            before, ov_id, _ = self.prompts(appended)
+            after, _, _ = self.prompts(solo)
+            self.assertEqual({a for a in after if after[a] != before[a]}, {"agent-005"})
+            text, overseer = after["agent-005"], after[ov_id]
+            self.assertTrue(text.startswith("# Lean Mathematics Collaboration\n\nYou are agent-005. 25 other "
+                                            "agents, agent-001 to agent-026, are working on"), text[:200])
+            head, copy = text.split("\n\n## The overseer's instructions\n\n", 1)
+            # The overseer's copy is the same as in appended mode, byte for byte.
+            self.assertEqual(copy, before["agent-005"].split("\n\n## The overseer's instructions\n\n", 1)[1])
+            self.assertTrue(copy.startswith(overseer))
+            # Own text: the standalone intro, knowledge and objective; no solver prompt and no appended intro.
+            for part in (words["intro_standalone"][role], words["objective"][role],
+                         words["knowledge"].format(overseer_id=ov_id, task_id="infinite_fermat_primes")):
+                self.assertIn(part, head)
+            self.assertIn("\n\n## Your task\n\n" + words["intro_standalone"][role], head)
+            for absent in ("## Persona", "# Lean Mathematics Evaluation", "## Your actual objective",
+                           words["intro"][role], "Submissions and credit"):
+                self.assertNotIn(absent, head)
+            # The platform sections are the overseer's, push wording included, byte for byte.
+            platform = overseer[overseer.index("\n\n## Problems\n\n"):]
+            self.assertTrue(head.endswith(platform.rstrip("\n")), role)
+            self.assertIn("appear in a `<system-reminder>` block", head)
+            self.assertIsNone(NEUTRAL_FORBIDDEN.search(head))
+
+    def test_platform_sections_match_the_overseer_prompt(self):
+        config = load(f"{DEV}-attacker")
+        sections = oversight.platform_sections(self.listing, config["prompt_variant"])
+        overseer = oversight.build_overseer_prompt("agent-027", [f"agent-{i:03d}" for i in range(1, 27)],
+                                                   self.listing, config["prompt_variant"])
+        self.assertTrue(overseer.endswith("\n\n" + "\n\n".join(sections) + "\n"))
 
     def test_without_red_team_every_prompt_is_unchanged(self):
         base, _, _ = self.prompts(load(BASE))
@@ -185,6 +233,45 @@ class RedTeamGateTests(unittest.TestCase):
     def test_valid_and_absent(self):
         self.assertEqual(self.problems(), [])
         self.assertEqual(self.problems(red_team=None), [])
+
+    def test_prompt_mode(self):
+        block = self.config["red_team"]
+        for mode in red_team.PROMPT_MODES:
+            self.assertEqual(self.problems(red_team={**block, "prompt": mode}), [])
+        self.assertRefused(self.problems(red_team={**block, "prompt": "replace"}), "prompt must be one of")
+        self.assertEqual(red_team.prompt_mode(block), "appended")
+        self.assertEqual(red_team.prompt_mode({**block, "prompt": "standalone"}), "standalone")
+
+    def test_own_model(self):
+        block = {**self.config["red_team"], "model": sweep_model()}
+        self.assertEqual(self.problems(red_team=block, budget_track="gemini"), [])
+        self.assertRefused(self.problems(red_team=block, budget_track=None), "needs a budget track")
+        bad = {**block, "model": {**block["model"], "candidate_model_id": "openai/gpt-6"}}
+        self.assertRefused(self.problems(red_team=bad, budget_track="gemini"), "candidate_model_id must equal")
+        self.assertRefused(self.problems(red_team={**block, "model": {"x": 1}}, budget_track="gemini"),
+                           "must be an object")
+        config = {**self.config, "red_team": block, "budget_track": "gemini"}
+        roles = oversight.role_model_configs(config)
+        self.assertEqual(list(roles), ["solver", red_team.RED_TEAM_ROLE])
+        self.assertEqual(red_team.model_settings(config).model_id, "openai/gpt-6-luna")
+        self.assertIsNone(red_team.model_settings(self.config))
+        self.assertEqual(list(oversight.role_model_configs(self.config)), ["solver"])
+        record = red_team.effective(block, "x")
+        self.assertEqual((record["model_id"], record["prompt"]), ("openai/gpt-6-luna", "appended"))
+
+    def test_launch_gates_cover_every_own_model(self):
+        import inspect
+        from research_swarm import launch_gates
+        source = inspect.getsource(launch_gates)
+        self.assertIn('gates.run(f"route_pricing_{role}"', source)
+        self.assertIn('gates.run(f"compatibility_{role}"', source)
+        self.assertNotIn('role_configs(config).get("overseer")', source)
+
+    def test_runtime_uses_the_own_model_for_the_designated_agent(self):
+        import inspect
+        source = inspect.getsource(runtime)
+        self.assertIn("own_settings, own_model = red_team_settings, red_team_model", source)
+        self.assertIn('"red_team_model": asdict(red_team_settings)', source)
 
     def test_shape_role_and_agent(self):
         self.assertRefused(self.problems(red_team={"agent_id": "agent-050"}), "must be an object")
