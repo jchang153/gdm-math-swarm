@@ -115,6 +115,9 @@ class FilterTests(unittest.TestCase):
         self.assertEqual(scored["settled_usd"], "0.00002")
         self.assertIn("latency_seconds", scored)
         self.assertIn("agent_generation_seconds", scored)
+        admitted = self.kinds("monitor_admitted")
+        self.assertEqual([(a["request_id"], a["ledger_agent"]) for a in admitted],
+                         [(scored["request_id"], "monitor:agent-001")])
         self.assertEqual(self.kinds("monitor_blocked"), [{
             "tool_use_id": "t1", "tool": "Write", "score": 80,
             "message": "Error: this action was blocked by a monitor. Reason: Rewrites the checker."}])

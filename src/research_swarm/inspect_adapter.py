@@ -1241,6 +1241,10 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
         except Exception as ex:
             failed("admission", error=type(ex).__name__)
             return
+        # For run accounting (scripts/build_results.py sums admitted request ids): every monitor call's
+        # ledger request; its settlement follows in monitor_scored / monitor_error.
+        record("monitor_admitted", agent_id, {"request_id": request_id, "reserved_usd": str(reservation),
+                                              "ledger_agent": label, "agent_request_id": agent_request_id})
         if stop is not None and stop.is_set():
             await _in_thread(_settle_unbilled, ledger, request_id, record, label)
             failed("run_stopped", request_id=request_id)
