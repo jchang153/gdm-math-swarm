@@ -1712,7 +1712,9 @@ is being merged into main via `collab-env`.
    agents), the calibrated threshold in all four configs, an OpenRouter credit check. VM readiness checked (12 VMs,
    one run per VM, all TERMINATED again); launch runbook and operator scripts in `HANDOFF.local.md` (host-only).
    - **LAUNCHED 2026-11-10 17:39-17:42 PT** (main e21350a, all 12 at once, one run per VM, owner "go"; supervisor with
-     retrieval wait; auto simple judge as for the controls; no story maps). Run ids (`glmflash100-seeded-monitor-` omitted):
+     retrieval wait; no story maps). **Post-run behavior judge and incident report turned OFF at 18:21 PT** (owner: no paid
+     analyses for now): `auto_behavior_judge`/`auto_incident_report` false in each run's phase `launch-config.json`, which
+     the supervisor re-reads after the pilot exits (original kept as `launch-config.orig.json`; experiment unchanged). Run ids (`glmflash100-seeded-monitor-` omitted):
      M1 actions-silent: `actions-silent-120m-push-r1-20261111T014006Z`, `-r2-20261111T014108Z`, `-r3-20261111T013947Z`;
      M2 actions-reason: `actions-reason-120m-push-r1-20261111T014002Z`, `-r2-20261111T014010Z`, `-r3-20261111T013952Z`;
      M3 full-silent: `full-silent-120m-push-r1-20261111T013954Z`, `-r2-20261111T013954Z`, `-r3-20261111T013940Z`;
