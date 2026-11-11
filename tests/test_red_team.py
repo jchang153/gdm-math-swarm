@@ -67,6 +67,25 @@ class RedTeamPromptTests(unittest.TestCase):
                 self.assertEqual(config["red_team"]["role"], cond)
                 self.assertEqual(config["red_team"]["agent_id"], "agent-050")
 
+    def test_development_configs(self):
+        dev_keys = {"experiment", "agent_count", "max_connections", "max_run_seconds", "run_budget_usd",
+                    "persona_counts", "seeded", "overseer", "red_team"}
+        for role in red_team.ROLES:
+            full = load(f"{BASE}-rt-{role}")
+            dev = load(f"glmflash25-seeded-1ov-glm-60m-push-commsonly-rt-dev-{role}")
+            diff = {k for k in set(full) | set(dev) if full.get(k) != dev.get(k)}
+            self.assertEqual(diff, dev_keys, role)
+            self.assertEqual({k for k in full["seeded"] if full["seeded"][k] != dev["seeded"][k]}, {"author"})
+            self.assertEqual({k for k in full["overseer"] if full["overseer"][k] != dev["overseer"][k]}, {"agent_ids"})
+            self.assertEqual((dev["agent_count"], dev["seeded"]["author"], dev["overseer"]["agent_ids"],
+                              dev["red_team"]["agent_id"], dev["red_team"]["role"]),
+                             (25, "agent-026", ["agent-027"], "agent-005", role))
+            self.assertEqual(red_team.red_team_problems(dev), [], role)
+            prompts, ov_id, _ = self.prompts(dev)
+            self.assertEqual(ov_id, "agent-027")
+            self.assertIn("## The overseer's instructions\n\n" + prompts["agent-027"], prompts["agent-005"])
+            self.assertTrue(all("## Your actual objective" not in prompts[a] for a in prompts if a != "agent-005"))
+
     def test_without_red_team_every_prompt_is_unchanged(self):
         base, _, _ = self.prompts(load(BASE))
         control, _, _ = self.prompts(load(f"{BASE}-rt-solver"))

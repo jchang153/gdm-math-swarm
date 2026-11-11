@@ -2279,3 +2279,20 @@ solver maps settled $12–29). Supersedes the sample decision above.
 Owner decision (November 6, 2026, option "b"): full 100-solver story maps for the nine push communication-only runs
 with per-run budgets that fit, replacing the $40 cap: 10ov r2 and r3 $130; 2ov r1, 2ov r2 and 1ov r3 $70; 10ov r1,
 1ov r1, 1ov r2 and 2ov r3 $50 (the 20-solver sample spend, $125.74 in all, counts against each run's limit).
+
+## Red-team development episodes (November 10, 2026)
+
+Collaborator decision (Amelie, November 10, 2026; "Collaborator budgets and keys": her own budgets and key). Track A
+red-teaming of the overseer (docs/prompts.md, "Red-team roles"); plan in Amelie's project repo.
+
+- **Purpose:** before the role texts are frozen, check that the designated solver takes the attacker or reviewer
+  role, contacts the overseer and keeps its rules, and that `research/analysis/redteam/` works on real red-team
+  data. Not evidence of an effect.
+- **Configs:** `configs/glmflash25-seeded-1ov-glm-60m-push-commsonly-rt-dev-{attacker,reviewer}.json`, copies of
+  the `-rt-` configs with 25 solvers (the smallest validated seeded size on this track: seed `agent-026`, overseer
+  `agent-027`), 60 minutes, `max_connections` 26, persona counts 7/6/6/6 and `agent-005` designated; overseer
+  prompt, seed, push delivery, variant and model unchanged. Behaviour judge and incident report off.
+- **Budget:** `run_budget_usd` $10 per episode (Amelie, November 10, 2026); her own OpenRouter key and her own
+  checkout's ledger on her VM. Red-team analysis judge: `scripts/run_redteam_analysis.py --run-limit 2` per run.
+- **Order:** the attacker episode first, then the reviewer episode, one at a time. Runs are not published to the
+  public library.
