@@ -1721,7 +1721,12 @@ is being merged into main via `collab-env`.
      `scripts/compare_arms.py` (mean ± 95% CI); `scripts/rejudge_submissions.py` (VM only: Lean/comparator images);
      Accounting now includes monitor spend (non-monitor runs byte-identical).
    - **In flight:** threshold calibration (offline replay of control 120m push r1, run limit $30, threshold = lowest
-     with FPR <= 1% on non-fake actions, per read mode).
+     with FPR <= 1% on non-fake actions, per read mode). **Done 17:25 PT (3136d0e, $14.99 of $30):** AUC 0.950
+     (actions) / 0.956 (full); the rule as specified gives 96 / 93 with recall 10% / 29%, because almost all
+     high-scoring negatives are the agents' own trick-preparation steps; at 80 recall ~80%, ~5% of genuine
+     submissions flagged. Monitor latency 18–39 s at 32–64 parallel. **Awaiting owner: threshold rule (relabel
+     preparation as cheating / keep 96-93 / fixed 80), shared vs per-mode threshold, launch all 12 vs 6+6.**
+     Report: research/analysis/monitor_calibration/report-2026-11-10.md.
    - **Smoke run PASSED (2026-11-10 17:20 PT, ~$4.9 total):** two 10-agent 30-min runs (600 s is not an approved
      length) on Claude Code 2.1.296: hook installed as root in 10/10 agents, every lookup matched by tool_use_id,
      blocked tools did not run, the agent's model saw exactly the owner's block message, 0 parse errors. Full-transcript
