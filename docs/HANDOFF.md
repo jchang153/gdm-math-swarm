@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-11 01:10 PT by Claude (Opus 5.5) site deploy agent (item 39 merged into main; item 38 done).
+Last updated: 2026-11-11 01:55 PT by Claude (Opus 5.5) site deploy agent (item 39 live: deployment 1e24d786).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1776,7 +1776,7 @@ is being merged into main via `collab-env`.
      threshold 5 to block at all and then drifted upward (its window contains earlier block messages). Monitor latency
      4.8 s (full) / 6.8 s (actions) per call; cost ~$0.0025 / ~$0.0007 per call. e2ca257 adds `monitor_lookup_allowed`.
 
-39. **IN CODE 2026-11-10 (branch `worktree-agent-aa17329ed85272ec7`, not merged, not deployed): user-facing site with
+39. **LIVE 2026-11-11 (merged to main in 8164903; deployed as Cloudflare deployment `1e24d786` ~01:31 PT): user-facing site with
     Explore, Experiments and About pages** (owner requests, November 10, 2026: "make the website more user-facing ...
     an "explore" page which is the main page, then "experiments" page which lists all of them"; "Also include a
     separate about page"). Root pages of the math site: `index.html` = Explore (`scripts/explore_page.py`, with stories
@@ -1790,6 +1790,16 @@ is being merged into main via `collab-env`.
     Offline plan on the 2026-11-10 site (97 runs): 571 run pages re-rendered (96 results, 97 conference, 92 incident,
     83 simplified judge, 203 story map pages), index.html replaced, experiments.html and about.html added, 0 broken
     links; 6,732 files of the 20,000 limit.
+    **Deployed 2026-11-11 (`restyle --commit`, deployment `1e24d786-5356-4323-96c5-3bfbd5bcb17b`, ~01:31 PT,
+    base `5404a614`):** 595 run pages re-rendered across all 109 runs (incl. the 12 monitor runs), root pages
+    re-rendered (Explore, experiments.html, about.html); 7,328 files. The built-in post-deploy verify hit a read
+    timeout; a separate `publish_cloudflare.py verify` passed all 9 checks (0 broken links, no private files;
+    receipt `runs/phase-b/cloudflare/receipts/restyle-explore-20261111-verify.json`; the restyle receipt there is the
+    preview, since the commit run stopped before writing it). Spot checks: `/`, `/experiments.html`, `/about.html` and
+    a monitor run page serve the new look; the Explore monitor slot lists all 12 monitor runs (no catalogue re-render
+    needed); `/#series-sweep25` forwards to `experiments#series-sweep25`. Known, pre-existing on main (not from the
+    merge): `tests/test_run_clock_maintenance.py` IncidentWithoutBundleTests.test_commit_changes_exactly_the_planned_files
+    fails (HF-only path: the HF bundle preparer applies the site look/top bar, the runs-dir HF path does not).
 
 ## Next steps / open items
 
