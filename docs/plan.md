@@ -2327,3 +2327,21 @@ its own ledger). Known cost of the override (as in "Run alongside hers"): CPU co
 120 s, and a run's post-run evaluator refuses while another run is live (rerun later). Measured during run 1: 14 of 251 GB in
 use, load about 16 of 64 CPUs. Batch B follows: `...-rt-dev-attacker-gpt61sol`, and the tactics attacker once its
 text is approved.
+
+## Red-team episodes at full size (November 11, 2026)
+
+Collaborator decision (Amelie, chat, November 11, 2026): "I think we should stick to 100 agent runs for consistency,
+so please try to resize the VM", and the order "the order you gave. That way, if the standalone attacker is a lot
+more successful than the previous attacker, then we could make the GPT and tactics attackers standalone as well".
+Supersedes batch A of the second development round (not launched).
+
+- **Runs, one at a time, 100 solvers, 120 minutes** (as Jonathan's `1ov commsonly` runs, which serve as the no-role
+  baseline; their agents' prompts are byte-identical to `-rt-solver`): 1. `...-rt-attacker` (text `trackA-v3`),
+  2. `...-rt-reviewer`, 3. `...-rt-attacker-standalone`, 4. `...-rt-reviewer-standalone`, 5. `...-rt-attacker-gpt61sol`
+  ($120 run budget for the stronger model), 6. the tactics attacker (text to be approved). After run 4 Amelie decides
+  whether 5 and 6 use the standalone prompt. Configs `configs/glmflash100-seeded-1ov-glm-120m-push-commsonly-rt-*.json`
+  (agent-050 designated). $100 run budget each otherwise; her key and ledger; not published.
+- **No contact delay** for runs 1–2 (comparable with the November 10–11 development episodes); a delay of the
+  designated agent's first contact can be added from run 3 on.
+- **VM:** her `agent-swarm-1` is resized from n2-standard-64 to n2d-highmem-96 (96 CPUs, 768 GB) for these runs, as
+  Jonathan does for his 100-agent runs, and back to n2-standard-64 afterwards. Quota checked: N2D CPUs 0 of 3,000.

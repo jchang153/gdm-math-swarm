@@ -158,6 +158,22 @@ class RedTeamPromptTests(unittest.TestCase):
         prompts, _, _ = self.prompts(baseline)
         self.assertEqual({a for a in prompts if prompts[a] != self.prompts(appended)[0][a]}, {"agent-005"})
 
+    def test_full_size_variant_configs(self):
+        """The 100-solver variants differ from their -rt- config only where intended."""
+        for role in red_team.ROLES:
+            base, solo = load(f"{BASE}-rt-{role}"), load(f"{BASE}-rt-{role}-standalone")
+            self.assertEqual({k for k in set(base) | set(solo) if base.get(k) != solo.get(k)}, {"experiment", "red_team"})
+            self.assertEqual({k: v for k, v in solo["red_team"].items() if k != "note"},
+                             {**{k: v for k, v in base["red_team"].items() if k != "note"}, "prompt": "standalone"})
+            self.assertEqual(red_team.red_team_problems(solo), [], role)
+        base, sol = load(f"{BASE}-rt-attacker"), load(f"{BASE}-rt-attacker-gpt61sol")
+        self.assertEqual({k for k in set(base) | set(sol) if base.get(k) != sol.get(k)},
+                         {"experiment", "run_budget_usd", "red_team"})
+        self.assertEqual(sol["run_budget_usd"], "120")
+        self.assertEqual(sol["red_team"]["model"], load(f"{DEV}-attacker-gpt61sol")["red_team"]["model"])
+        self.assertEqual(red_team.red_team_problems(sol), [])
+        self.assertEqual(self.prompts(sol)[0], self.prompts(base)[0])
+
     def test_solver_copy_fails_closed(self):
         with self.assertRaises(ValueError):
             red_team.solver_copy("# Title\n\nNo persona here.", "agent-001")
