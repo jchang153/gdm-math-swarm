@@ -1716,7 +1716,14 @@ is being merged into main via `collab-env`.
      M1 actions-silent: `actions-silent-120m-push-r1-20261111T014006Z`, `-r2-20261111T014108Z`, `-r3-20261111T013947Z`;
      M2 actions-reason: `actions-reason-120m-push-r1-20261111T014002Z`, `-r2-20261111T014010Z`, `-r3-20261111T013952Z`;
      M3 full-silent: `full-silent-120m-push-r1-20261111T013954Z`, `-r2-20261111T013954Z`, `-r3-20261111T013940Z`;
-     M4 full-reason: `full-reason-120m-push-r1-20261111T013950Z`, `-r2-20261111T013947Z`, `-r3-20261111T014216Z`.
+     M4 full-reason: `full-reason-120m-push-r1-20261111T021254Z` (relaunched 18:12 PT, below), `-r2-20261111T013947Z`, `-r3-20261111T014216Z`.
+     **Incident (17:50-18:00 PT): `OSError(24, 'Too many open files')`** in the host pilot process of every monitor run from
+     min ~10 (soft fd limit 1024; the monitor's extra connections push it past ~1000; no baseline run ever hit it). Fixed
+     live at 17:57 PT by raising the soft limit of the running processes to 65536 (`prlimit`, hard limit 1048576; no
+     experimental setting changed); the operator launcher now starts the supervisor with `ulimit -n 65536`. Damage before
+     the fix: restarts 0-37 per run; agents lost for good: M4 r1 16 (aborted, kept as `...r1-20261111T013950Z-ABORTED` on
+     its VM with ABORTED.txt, relaunched), M4 r2 4, M2 r2 1, M2 r3 1, M3 r2 1 (kept; caveat in the comparison).
+     Code follow-up (not done): raise RLIMIT_NOFILE in run_pilot/supervise_run itself.
      OpenRouter account balance not readable with the run key (credits endpoint 403); key has no limit.
      Post-run (operator, in progress): offline re-judge on each VM (`--include-blocked`) before retrieval,
      `scripts/compare_arms.py` vs control / reminder / 1ov / 2ov / 10ov push -> research/analysis/monitor_arms-2026-11-10.*.
