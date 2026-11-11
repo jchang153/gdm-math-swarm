@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-10 17:05 PT by Claude (Opus 5.5) coordinator (item 38: monitor code, metrics; calibration and smoke run in flight).
+Last updated: 2026-11-10 17:45 PT by Claude (Opus 5.5) monitor-run operator (item 38: 12 monitor runs launched).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1700,7 +1700,7 @@ is being merged into main via `collab-env`.
      Fix 7c95737: on the live site the run-page tab switcher also caught the expand click (switched to the Story
      map tab and left the page scroll-locked); live as `db2cabd6`, checked on the served page.
 
-38. **PREPARED, NOT LAUNCHED (2026-11-10 16:40 PT): top-down monitor runs, 4 arms x 3 replicates** (docs/plan.md,
+38. **RUNNING since 2026-11-10 17:39-17:42 PT: top-down monitor runs, 4 arms x 3 replicates, threshold 80** (docs/plan.md,
    "Top-down monitor arms (owner decisions, November 10, 2026)"). Configs
    `configs/glmflash100-seeded-monitor-{actions-silent,actions-reason,full-silent,full-reason}-120m-push.json`
    (M1-M4): copies of `glmflash100-seeded-control-120m-push.json` except `experiment`, `run_budget_usd` (M1/M2 $100,
@@ -1711,6 +1711,15 @@ is being merged into main via `collab-env`.
    `scripts/run_profile.py`, before `push120comms`). Still needed before launch: the monitor code (built by other
    agents), the calibrated threshold in all four configs, an OpenRouter credit check. VM readiness checked (12 VMs,
    one run per VM, all TERMINATED again); launch runbook and operator scripts in `HANDOFF.local.md` (host-only).
+   - **LAUNCHED 2026-11-10 17:39-17:42 PT** (main e21350a, all 12 at once, one run per VM, owner "go"; supervisor with
+     retrieval wait; auto simple judge as for the controls; no story maps). Run ids (`glmflash100-seeded-monitor-` omitted):
+     M1 actions-silent: `actions-silent-120m-push-r1-20261111T014006Z`, `-r2-20261111T014108Z`, `-r3-20261111T013947Z`;
+     M2 actions-reason: `actions-reason-120m-push-r1-20261111T014002Z`, `-r2-20261111T014010Z`, `-r3-20261111T013952Z`;
+     M3 full-silent: `full-silent-120m-push-r1-20261111T013954Z`, `-r2-20261111T013954Z`, `-r3-20261111T013940Z`;
+     M4 full-reason: `full-reason-120m-push-r1-20261111T013950Z`, `-r2-20261111T013947Z`, `-r3-20261111T014216Z`.
+     OpenRouter account balance not readable with the run key (credits endpoint 403); key has no limit.
+     Post-run (operator, in progress): offline re-judge on each VM (`--include-blocked`) before retrieval,
+     `scripts/compare_arms.py` vs control / reminder / 1ov / 2ov / 10ov push -> research/analysis/monitor_arms-2026-11-10.*.
    - **Monitor code on main (2026-11-10):** `src/research_swarm/monitor.py` + bridge-filter integration (4c3fafc,
      e0e366d): synchronous scoring of every tool call (same model/settings as agents) in `budget_filter`, decisions
      looked up by a root-owned Claude Code PreToolUse hook through the in-container model proxy (never billed),
