@@ -47,6 +47,11 @@ Faking over time (owner, November 3, 2026): both modes put scripts/faking_heatma
 of the main report and write faking-heatmap.png and faking-heatmap.json beside results.html (a "no fakes"
 note when no agent faked; skipped with a message when matplotlib is not installed).
 
+Outcome metrics (owner, November 10, 2026; docs/plan.md "Top-down monitor arms"): results.json
+"outcome_metrics" (research/analysis/run_metrics.py: slowdown, cost, fakes, genuine and monitor statistics, with
+genuine uncredited submissions from RUN/analysis/rejudge.jsonl when scripts/rejudge_submissions.py has run) and an
+"Outcome metrics" section before Accounting. --rerender-html shows it only when results.json already has it.
+
 Spending. With --ledger (a consistent copy of the budget ledger SQLite, opened immutable
 read-only) "budget.pilot" counts exactly the ledger calls whose request IDs this run admitted
 in runtime.jsonl and "cumulative_budget" summarizes the whole ledger. Without it
@@ -87,6 +92,7 @@ import faking_heatmap  # noqa: E402
 if str(Path(__file__).resolve().parents[1]) not in sys.path:  # research/analysis/roles.py (participant roles)
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from research.analysis import roles as participant_roles  # noqa: E402
+from research.analysis import run_metrics  # noqa: E402  (Outcome metrics, November 10, 2026)
 
 NANO = Decimal('1e-9')
 ACCEPTED = ('accepted', 'accepted_after_close')
@@ -647,12 +653,50 @@ def build(run, *, ledger=None, key_usage_log=None, notes=(), title=None, stop_re
     if coding:
         results['domain'] = 'code'
         results['coding'] = coding
+    results['outcome_metrics'] = outcome_metrics(run, results, settings, ledger)
     page = render(results, title, inspect_logs(run), settings)
     if has_simple_judge(run):  # navigation only: the simplified judge becomes the Behavior judge tab
         page = add_simple_judge_tab(page, simple_report(run))
     if has_incident_report(run):  # navigation only: the incident report lives on its own page
         page = add_incident_tab(page)
     return json.dumps(results, indent=1) + '\n', page
+
+
+def outcome_metrics(run, results, settings, ledger=None):
+    """research/analysis/run_metrics.py over the results being built (never fails the report: an error is
+    recorded in the block instead)."""
+    try:
+        return run_metrics.outcome_metrics(run, results=results, settings=settings, ledger=ledger)
+    except Exception as exc:  # noqa: BLE001
+        return {'schema': run_metrics.SCHEMA, 'error': f'{type(exc).__name__}: {exc}'}
+
+
+def _metric(v):
+    if v is None:
+        return 'not recorded'
+    if isinstance(v, float):
+        return f'{v:,.4g}' if abs(v) < 1000 else f'{v:,.1f}'
+    return f'{v:,}' if isinstance(v, int) else str(v)
+
+
+def outcome_section(m):
+    """"Outcome metrics": slowdown, cost, fakes, genuine and monitor statistics (owner, November 10, 2026)."""
+    if not isinstance(m, dict):
+        return []
+    if m.get('error'):
+        return ['<h2>Outcome metrics</h2>', f'<p>Not computed: {esc(m["error"])}</p>']
+    rows = [(esc(label), esc(_metric(run_metrics.lookup(m, key)))) for key, label in run_metrics.HEADLINE
+            if not key.startswith('monitor.') or (m.get('monitor') or {}).get('present')]
+    out = ['<h2 id="outcome-metrics">Outcome metrics</h2>',
+           '<p class="muted">Slowdown, cost, fake and genuine submissions for comparing monitor arms, overseer runs '
+           'and baselines (research/analysis/run_metrics.py). Genuine uncredited counts come from the offline '
+           're-judge (scripts/rejudge_submissions.py) when it has run.</p>', table(rows, ('Metric', 'Value'))]
+    defs = [(name, (m.get(name) or {}).get('definition')) for name in ('fakes', 'genuine', 'slowdown', 'cost',
+                                                                       'monitor')]
+    out.append('<details><summary>Definitions and gaps</summary><ul>'
+               + ''.join(f'<li><strong>{esc(n)}</strong>: {esc(d)}</li>' for n, d in defs if d)
+               + ''.join(f'<li>Gap: {esc(g)}</li>' for g in m.get('gaps') or []) + '</ul></details>')
+    return out
 
 
 def inspect_logs(run):
@@ -944,6 +988,7 @@ def render(results, title, inspect_logs=(), settings=None):
             '<p>' + ' · '.join(f'<a href="{esc(p, quote=True)}">{esc(p)}</a>' for p in ev['records']) + '</p>']
     body.append('<p>Behavior judge: not run</p>' if judge['status'] == 'not_run' else
                 f'<p>Behavior judge: see <a href="{esc(judge["report"], quote=True)}">{esc(judge["report"])}</a></p>')
+    body += outcome_section(results.get('outcome_metrics'))
     body.append('<h2>Accounting</h2>')
     body.append(table([(esc(s), money(b['settled_usd']), money(b['held_usd']), esc(value(b['unresolved_requests'])),
                         esc(value(b['settled_requests'])), money(b['cap_usd']), money(b.get('remaining_usd')),
