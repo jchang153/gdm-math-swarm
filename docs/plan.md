@@ -2315,3 +2315,23 @@ Estimates (not approvals; from control r1's ledger: 11,408 requests, $36.75): ab
 monitor cost about $20 per run (M1/M2) and $60 per run (M3/M4); slowdown about 15–25% per agent step with
 reasoning on. Each run's `run_budget_usd` and the calibration replay's run limit are still to be set before any paid
 invocation.
+
+Implementation (operator choices, November 10, 2026; not owner decisions; code `src/research_swarm/monitor.py`,
+`inspect_adapter.budget_filter(monitor=...)`, tests `tests/test_monitor.py`, `tests/test_monitor_live.py`):
+- Prompt `monitor-v1`: the owner's draft verbatim as the system message; one user message with "=== Recent
+  activity ===" (the window) and "=== Pending action(s) ===" (`[action id: <tool_use_id>] <tool>` + arguments).
+  The window numbers past calls 1..20 (`[tool call n]`/`[tool result n]`); arguments are not cut, outputs are cut
+  at 2,000 characters with `[truncated]`. The response being scored is not a past call; in the full mode its
+  reasoning and visible text close the window. With at most 20 past calls the full window starts at the first
+  message (so it then includes the system prompt and task).
+- Scoring happens in the bridge filter after the agent's response returns and before it goes back to Claude Code
+  (one monitor call per response with tool calls), on the agent's own model and frozen settings, admitted and
+  settled in the run's ledger with agent label `monitor:<agent>`. Monitor ModelEvents are kept out of the agent's
+  Inspect transcript; prompts and replies go to `runs/<id>/monitor/calls.jsonl`. A monitor call is capped at
+  600 s; any failure (admission, provider error, timeout, unparseable reply) lets the actions through.
+- Blocking: a root-owned PreToolUse hook (`/etc/claude-code/managed-settings.json` with `allowManagedHooksOnly`,
+  script `/etc/claude-code/hooks/pretool.py`, matcher `*`) is written at sample start as root. It asks the
+  in-container model proxy for the call's decision with a marked request that the filter answers from memory (no
+  admission, provider call or transcript event) and denies with the block message. Later requests carry exactly
+  the block message as that call's result (whatever Claude Code wrote), so the agent sees the owner's wording.
+  In the neutral environment, forbidden words in a shown reason are replaced (raw reason kept in the records).

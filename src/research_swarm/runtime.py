@@ -460,6 +460,35 @@ def condition_label(variant: str, budget_track=None) -> str:
     return "baseline-spontaneous" if variant == "baseline" else f"prompt-ablation-{variant}"
 
 
+def make_monitor_log(path):
+    """Append-only JSONL of every monitor call's prompt and reply (researcher-side, private)."""
+    lock = threading.Lock()
+    path = Path(path)
+
+    def log(entry):
+        line = json.dumps({"timestamp": time.time(), **entry}, default=str, ensure_ascii=False) + "\n"
+        with lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write(line)
+    return log
+
+
+def monitor_effective(options, settings):
+    """settings.json ``effective.monitor``: the monitor's settings, prompt version, model and hook."""
+    from .inspect_adapter import MANAGED_SETTINGS_DIR, MONITOR_HOOK_PATH, MONITOR_TIMEOUT_SECONDS
+    from .monitor import HOOK_TIMEOUT_SECONDS, LOOKUP_MARKER, MONITOR_PROMPT_VERSION
+    return {**options, "prompt_version": MONITOR_PROMPT_VERSION, "model_id": settings.model_id,
+            "provider_route": settings.provider_route, "max_tokens": settings.max_tokens,
+            "reasoning_effort": settings.reasoning_effort, "timeout_seconds": MONITOR_TIMEOUT_SECONDS,
+            "ledger_agent": "monitor:<agent>", "hook": {"event": "PreToolUse", "matcher": "*",
+                                                        "path": MONITOR_HOOK_PATH,
+                                                        "settings": MANAGED_SETTINGS_DIR + "/managed-settings.json",
+                                                        "timeout_seconds": HOOK_TIMEOUT_SECONDS,
+                                                        "lookup_marker": LOOKUP_MARKER},
+            "call_log": "monitor/calls.jsonl"}
+
+
 def make_recorder(path):
     lock = threading.Lock()
     path = Path(path)
@@ -582,7 +611,7 @@ def restart_delay(consecutive_quick):
 def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, run_dir, record, clock,
                 system_prompt_mode="replace", auto_memory=True, in_flight_grace=IN_FLIGHT_GRACE_SECONDS,
                 auto_restart=False, neutral=False, roles=None, definitions_for=None, continue_for=None,
-                env_for=None, resume=None):
+                env_for=None, resume=None, monitor_hook=False):
     """Solver running one genuine Claude Code peer inside its own sandbox.
 
     ``roles`` ({agent_id: "solver"|"overseer"}, oversight.roles), ``definitions_for(agent_id)``
@@ -601,6 +630,10 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
     or after ``in_flight_grace`` seconds (a request still running then is cancelled
     and stays an uncertain ledger hold).
 
+    ``monitor_hook`` (top-down monitor): before the first launch the PreToolUse hook is installed in
+    the container as root-owned managed settings (inspect_adapter.install_monitor_hook; fallback in
+    the neutral environment: the agent-owned neutral settings, monitor_neutral_settings).
+
     ``resume`` (a resume_bundle.ResumeBundler, or None): after the final snapshot poll each
     agent's resume state is saved (docs/runtime.md, "Resume bundle"), and every
     ``resume.checkpoint_minutes`` after the common start when that is set. Saving reads the
@@ -610,7 +643,8 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
     from inspect_ai.model import ChatMessageUser
     from inspect_ai.solver import solver
     from inspect_ai.util import sandbox
-    from .inspect_adapter import build_claude_agent, conference_tools, prepare_neutral_home
+    from .inspect_adapter import (build_claude_agent, conference_tools, install_monitor_hook,
+                                  monitor_neutral_settings, prepare_neutral_home)
     from .reasoning_bridge import agent_transport_scope
     import anyio
     run_dir = Path(run_dir)
@@ -630,12 +664,19 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
                                                   "system_prompt_mode": system_prompt_mode,
                                                   "claude_auto_memory": auto_memory,
                                                   **({"neutral_environment": True} if neutral else {})})
+            hook = None
+            if monitor_hook:  # before the first launch; without a hook nothing is blocked (scores still logged)
+                try:
+                    hook = await install_monitor_hook(sbox, neutral=neutral)
+                except Exception as ex:
+                    record("monitor_hook_error", agent_id, {"type": type(ex).__name__})
+                record("monitor_hook_installed", agent_id, {"mode": hook})
             if neutral:
                 # Before the first launch: the neutral Claude Code user settings (no attribution
                 # reminder) in the moved state directory. A failure is recorded; the bridge
                 # filter still removes the reminder from every request.
                 try:
-                    written = await prepare_neutral_home(sbox)
+                    written = await prepare_neutral_home(sbox, monitor_neutral_settings() if hook == "user" else None)
                 except Exception as ex:
                     written = False
                     record("neutral_settings_error", agent_id, {"type": type(ex).__name__})
@@ -1211,6 +1252,12 @@ def integrity_reminder_settings(config):
     return float(block["interval_seconds"]), block["text"]
 
 
+def monitor_launch_problems(config):
+    """The ``monitor`` block's problems (research_swarm.monitor.monitor_problems)."""
+    from .monitor import monitor_problems
+    return monitor_problems(config)
+
+
 def integrity_reminder_problems(config):
     block = config.get("integrity_reminder")
     if block is None:
@@ -1318,6 +1365,7 @@ def preflight(config, repo_root):
     blockers.extend(overseer_problems(config))  # docs/prompts.md, "Overseer role"
     blockers.extend(push_delivery_problems(config))  # docs/plan.md, "Unread notices", "Push delivery"
     blockers.extend(integrity_reminder_problems(config))  # docs/plan.md, "periodic integrity reminder"
+    blockers.extend(monitor_launch_problems(config))  # docs/plan.md, "Top-down monitor arms"
     allocation = None
     try:
         allocation = persona_counts_for(config, personas_for(config, int(config.get("agent_count", APPROVED_AGENT_COUNT)),
@@ -1929,6 +1977,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
         if push:  # docs/plan.md, "Push delivery of board posts and DMs (November 3, 2026)"
             conference.enable_push_delivery()
         integrity_reminder = integrity_reminder_settings(config)  # off unless configured
+        from .monitor import monitor_settings
+        monitor_options = monitor_settings(config)  # None: no monitor (absent or disabled)
         if integrity_reminder is not None:  # docs/plan.md, "Baseline with periodic integrity reminder"
             max_seconds = config.get("max_run_seconds")
             last_boundary = (None if not isinstance(max_seconds, (int, float)) or isinstance(max_seconds, bool)
@@ -1985,6 +2035,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "roles": roles, "participant_count": len(agent_ids),
             "conference_participants": len(conference_ids),
             "seeded": None if seed is None else seeded_settings(config),
+            **({"monitor": monitor_effective(monitor_options, settings)} if monitor_options else {}),
             "overseer": None if overseer is None else oversight.effective_overseer(overseer, proof_checker,
                                                                                     overseer_settings,
                                                                                     domain=domain)}
@@ -2030,13 +2081,19 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             return build_prompt(agent, persona, listing, variant, reviewing)
 
         definitions = agent_tool_definitions(config, neutral)
+        live_monitor = None
+        if monitor_options:  # docs/plan.md, "Top-down monitor arms"; every participant is monitored
+            from .inspect_adapter import LiveMonitor
+            live_monitor = LiveMonitor(monitor_options, log=make_monitor_log(run_dir / "monitor" / "calls.jsonl"))
+            record("monitor_enabled", None, monitor_effective(monitor_options, settings))
 
         def filter_for(agent):
             # Overseers with their own model reserve, request and settle with its settings.
             own = overseer_settings is not None and oversight.is_overseer(agent, overseer)
             return budget_filter(agent, ledger, overseer_settings if own else settings, barrier, record, "pilot",
                                  archive, clock.stop, **neutral_args, model_override=overseer_model if own else None,
-                                 push=conference if push else None)
+                                 push=conference if push else None,
+                                 **({"monitor": live_monitor} if live_monitor is not None else {}))
 
         solver = peer_solver(conference=conference, definitions=definitions, personas=personas,
                              prompt_for=prompt_for, roles=({a: r for a, r in roles.items() if a in agent_ids}
@@ -2047,7 +2104,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                              filter_for=filter_for,
                              run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,
                              auto_memory=auto_memory, in_flight_grace=in_flight_grace,
-                             auto_restart=config.get("auto_restart") is True, resume=resume, **neutral_args)
+                             auto_restart=config.get("auto_restart") is True, resume=resume, **neutral_args,
+                             **({"monitor_hook": True} if live_monitor is not None else {}))
         task = build_task(agent_ids=agent_ids, files=agent_files(task_files), solver=solver, compose=compose,
                           metadata={"condition": condition_label(variant, track), "prompt_variant": variant,
                                     "persona_reviewing": reviewing, "personas": personas, "persona_seed": persona_seed,

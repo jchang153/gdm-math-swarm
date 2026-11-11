@@ -567,6 +567,14 @@ def _short(value, limit=600):
     return text[:limit]
 
 
+def _reasoning_text(output):
+    """The reasoning text of an output's first choice ("" when none or redacted)."""
+    if output is None or not output.choices or isinstance(output.message.content, str):
+        return ""
+    return "\n".join(getattr(p, "reasoning", "") or "" for p in output.message.content
+                     if getattr(p, "type", None) == "reasoning" and not getattr(p, "redacted", False))
+
+
 # Response headers that may carry an OpenRouter generation id on an error response.
 _GENERATION_ID_HEADERS = ("x-generation-id", "x-openrouter-generation-id")
 
@@ -933,8 +941,127 @@ async def push_request(push, agent_id, messages, request_seq, sent=None):
     return messages, {"anchor": anchor, "delivered": delivered, "pins_applied": applied}
 
 
+# ---------------------------------------------------------------------------
+# Top-down monitor (docs/plan.md, "Top-down monitor arms (owner decisions, November 10, 2026)")
+
+# Researcher-side monitor calls never enter the agent's Inspect transcript as ModelEvents (the
+# behaviour judge, timelines and calibration read those as agent steps); their text is kept in the
+# run's own monitor call log and the runtime events instead. Usage accounting is unaffected.
+class _DroppedModelEvents:
+    def on_pending(self, event):
+        return None
+
+    def on_complete(self, event):
+        return None
+
+
+# Upper bound on one monitor call; past it the call is cancelled (an uncertain ledger hold) and the
+# pending actions are let through, like any monitor failure.
+MONITOR_TIMEOUT_SECONDS = 600
+
+# The hook is installed as root-owned Claude Code managed settings (read whatever CLAUDE_CONFIG_DIR is;
+# the agent user cannot change or remove them), with a root-owned script beside them.
+MANAGED_SETTINGS_DIR = "/etc/claude-code"
+MONITOR_HOOK_PATH = MANAGED_SETTINGS_DIR + "/hooks/pretool.py"
+# Fallback when the root write fails (neutral environment only): the agent-owned neutral settings.
+MONITOR_USER_HOOK_PATH = NEUTRAL_CONFIG_DIR + "/hooks/pretool.py"
+
+
+def monitor_ledger_agent(agent_id):
+    """Ledger ``agent`` label of a monitor call scoring ``agent_id``'s actions (separable spend)."""
+    return f"monitor:{agent_id}"
+
+
+class LiveMonitor:
+    """One run's live monitor: settings (``monitor.monitor_settings``), the shared decision store and an
+    optional ``log(entry)`` that keeps every monitor call's request and reply researcher-side."""
+
+    def __init__(self, settings, store=None, log=None):
+        from .monitor import DecisionStore
+        self.settings = dict(settings)
+        self.store = store if store is not None else DecisionStore()
+        self.log = log
+
+
+def apply_block_results(messages, blocked):
+    """(messages, count): every tool result of a blocked call carries exactly its block message (as the
+    result text and the error), identically on every request, whatever text the CLI reported for the
+    denied call. Never mutates ``messages``."""
+    if not blocked:
+        return messages, 0
+    from inspect_ai.model import ChatMessageTool
+    from inspect_ai.tool import ToolCallError
+    effective, count = None, 0
+    for index, message in enumerate(messages):
+        if isinstance(message, ChatMessageTool) and message.tool_call_id in blocked:
+            text = blocked[message.tool_call_id]
+            if effective is None:
+                effective = list(messages)
+            effective[index] = message.model_copy(update={"content": text,
+                                                          "error": ToolCallError(type="unknown", message=text)})
+            count += 1
+    return (messages if effective is None else effective), count
+
+
+# Runs as root in the agent's container: writes the hook script (0644) and merges the hook into the
+# managed settings file (0644), both root-owned in root-owned 0755 directories.
+_MANAGED_HOOK_SCRIPT = r"""
+import json, os, sys
+script_path, script, settings_path, fragment = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4])
+for d in (os.path.dirname(script_path), os.path.dirname(settings_path)):
+    os.makedirs(d, mode=0o755, exist_ok=True)
+    os.chmod(d, 0o755)
+with open(script_path, "w") as f:
+    f.write(script)
+os.chmod(script_path, 0o644)
+settings = {}
+if os.path.exists(settings_path):
+    try:
+        settings = json.load(open(settings_path))
+    except ValueError:
+        settings = {}
+settings.update(fragment)
+with open(settings_path, "w") as f:
+    json.dump(settings, f, sort_keys=True)
+os.chmod(settings_path, 0o644)
+"""
+
+
+async def install_monitor_hook(sbox, neutral=False):
+    """Install the PreToolUse hook in the agent's own container.
+
+    Preferred: root-owned managed settings (``/etc/claude-code/managed-settings.json``, plus
+    ``allowManagedHooksOnly``) and script, written as root. Returns ``"managed"``. When that write
+    fails and ``neutral``, the script goes to the agent-owned neutral config directory and the caller
+    writes ``monitor_neutral_settings()`` (returns ``"user"``); otherwise ``None`` (no blocking)."""
+    from .monitor import HOOK_SCRIPT, hook_settings
+    fragment = {**hook_settings(MONITOR_HOOK_PATH), "allowManagedHooksOnly": True}
+    try:
+        result = await sbox.exec(["python3", "-I", "-c", _MANAGED_HOOK_SCRIPT, MONITOR_HOOK_PATH, HOOK_SCRIPT,
+                                  MANAGED_SETTINGS_DIR + "/managed-settings.json", json.dumps(fragment)],
+                                 user="root", timeout=30)
+        if result.success:
+            return "managed"
+    except Exception:
+        pass
+    if not neutral:
+        return None
+    script = ('import os, sys\n'
+              'p = sys.argv[1]\n'
+              'os.makedirs(os.path.dirname(p), mode=0o700, exist_ok=True)\n'
+              'open(p, "w").write(sys.argv[2])\n')
+    result = await sbox.exec(["python3", "-I", "-c", script, MONITOR_USER_HOOK_PATH, HOOK_SCRIPT], timeout=30)
+    return "user" if result.success else None
+
+
+def monitor_neutral_settings(path=MONITOR_USER_HOOK_PATH):
+    """NEUTRAL_SETTINGS plus the PreToolUse hook (the fallback when managed settings cannot be written)."""
+    from .monitor import hook_settings
+    return {**NEUTRAL_SETTINGS, **hook_settings(path)}
+
+
 def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", archive=None, stop=None,
-                  neutral=False, model_override=None, push=None):
+                  neutral=False, model_override=None, push=None, monitor=None):
     """Bridge GenerateFilter: barrier, admission, frozen settings, settlement.
 
     The returned coroutine function carries ``.state`` which the solver reads at
@@ -959,6 +1086,14 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     posts, direct messages and the due integrity reminder are delivered in one block appended to the
     request's trailing tool result, and every earlier block is re-applied to its own tool result
     (``push_request``; docs/plan.md, "Push delivery of board posts and DMs (November 3, 2026)").
+
+    ``monitor`` (a LiveMonitor, or None: unchanged behaviour): after a response with tool calls, the
+    same model scores them in one monitor call (admitted and settled in the same run budget, ledger
+    agent ``monitor:<agent>``) before the response returns to the CLI, and the decisions are stored by
+    tool_use_id. The CLI's PreToolUse hook asks for each call's decision through the in-container
+    proxy (a request that is ``monitor.parse_lookup``); it is answered here from the store, before the
+    barrier, with no admission, provider call or transcript event. Every later request carries each
+    blocked call's result as exactly its block message (``apply_block_results``).
     """
     from inspect_ai.model import Model
     from inspect_ai.util import LimitExceededError
@@ -970,14 +1105,23 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     state = {"requests": 0, "finished": 0, "last_stop_reason": None, "consecutive_truncations": 0,
              "truncated_responses": 0, "unbilled_errors": 0, "uncertain": 0, "in_flight": 0,
              "last_request_outcome": None, "last_denial": None, "last_error": None, "last_output_kind": None}
+    if monitor is not None:  # absent without a monitor: the state (agent_exit records) is unchanged
+        state.update(monitor_calls=0, monitor_errors=0, monitor_parse_errors=0, monitor_blocked=0,
+                     monitor_blocks_enforced=0, monitor_lookup_misses=0, monitor_seconds=0.0)
 
     sent_tool_ids: set = set()  # push delivery: tool results already sent (never a new anchor)
+    block_results_seen: set = set()  # monitor: blocked calls whose CLI result text was recorded
 
     def deny(reason, payload=None):
         state["last_request_outcome"], state["last_denial"] = "not_admitted", reason
         record("inference_not_admitted", agent_id, {"reason": reason, **(payload or {})})
 
     async def intercept(model: Model, messages, tools, tool_choice, config):
+        if monitor is not None:
+            from .monitor import parse_lookup
+            lookup = parse_lookup(messages)
+            if lookup is not None:
+                return _answer_lookup(model, lookup)
         if archive is not None:
             archive.observe(agent_id, messages, tools)
         neutralized = None
@@ -989,6 +1133,15 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
         # them as system messages breaks provider prefix caching; preserve their
         # text and chronological position without mutating the scaffold history.
         messages, normalized_counters = normalize_token_counters(messages)
+        if monitor is not None:
+            blocked = monitor.store.blocked(agent_id)
+            for message in messages:  # what the CLI reported for a blocked call, recorded once
+                if getattr(message, "tool_call_id", None) in blocked and message.tool_call_id not in block_results_seen:
+                    block_results_seen.add(message.tool_call_id)
+                    record("monitor_block_result", agent_id, {
+                        "tool_use_id": message.tool_call_id, "cli_text": _short(message.text, 2000),
+                        "cli_error": message.error is not None, "replaced_with": blocked[message.tool_call_id]})
+            messages, _ = apply_block_results(messages, blocked)
         await barrier.ready(agent_id)
         if stop is not None and stop.is_set():
             deny("run_stopped")
@@ -1023,10 +1176,139 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
         state["requests"] += 1
         state["in_flight"] += 1
         try:
-            return await _generate(model_override or model, messages, tools, tool_choice, config, request, request_id, reservation,
-                                   normalized_counters, neutralized, pushed)
+            import time
+            began = time.monotonic()
+            output = await _generate(model_override or model, messages, tools, tool_choice, config, request, request_id,
+                                     reservation, normalized_counters, neutralized, pushed)
+            if monitor is not None and output.choices and output.message.tool_calls:
+                # Synchronous: the CLI receives the response only after its calls are scored.
+                await _score(model_override or model, messages, output, request_id, time.monotonic() - began)
+            return output
         finally:
             state["in_flight"] -= 1
+
+    def _answer_lookup(model, lookup):
+        from inspect_ai.model import ModelOutput
+        from .monitor import lookup_reply
+        tool_input = lookup.get("tool_input")
+        tool_use_id, decision, matched = monitor.store.lookup(
+            agent_id, lookup.get("tool_use_id") if isinstance(lookup.get("tool_use_id"), str) else None,
+            lookup.get("tool_name") if isinstance(lookup.get("tool_name"), str) else None, tool_input)
+        if decision is None:
+            state["monitor_lookup_misses"] += 1
+            record("monitor_lookup_miss", agent_id, {"tool_use_id": tool_use_id, "tool": lookup.get("tool_name")})
+        elif decision.get("block"):
+            state["monitor_blocks_enforced"] += 1
+            record("monitor_block_enforced", agent_id, {"tool_use_id": tool_use_id, "tool": decision.get("tool"),
+                                                        "matched_by": matched})
+        return ModelOutput.from_content(model=getattr(model, "name", None) or "bridge", content=lookup_reply(decision))
+
+    async def _score(model, messages, output, agent_request_id, generation_seconds):
+        """Score the response's tool calls in one monitor call and store the decisions (failure: allow)."""
+        import time
+        import anyio
+        from inspect_ai.model import ChatMessageSystem, ChatMessageUser, GenerateConfig
+        from inspect_ai.model._model import use_model_event_sink
+        from . import monitor as monitor_module
+        options = monitor.settings
+        read = options["read"]
+        pending = monitor_module.pending_calls(output.message)
+        base = {"tool_use_ids": [c["id"] for c in pending], "tools": [c["name"] for c in pending], "read": read,
+                "prompt_version": monitor_module.MONITOR_PROMPT_VERSION, "agent_request_id": agent_request_id}
+        began = time.monotonic()
+
+        def failed(stage, **payload):
+            state["monitor_errors"] += 1
+            elapsed = time.monotonic() - began
+            state["monitor_seconds"] += elapsed
+            record("monitor_error", agent_id, {**base, "stage": stage, "latency_seconds": round(elapsed, 3),
+                                               "agent_generation_seconds": round(generation_seconds, 3), **payload})
+
+        try:
+            window = monitor_module.build_window([*messages, output.message], read, options["lookback"],
+                                                 options["max_output_chars"])
+            prompt = monitor_module.build_monitor_request(window, pending, read)
+        except Exception as ex:  # an unexpected message shape: never block on a monitor fault
+            failed("window", error=type(ex).__name__, detail=_short(str(ex), 300))
+            return
+        inputs = [ChatMessageSystem(content=prompt[0]["content"]), ChatMessageUser(content=prompt[1]["content"])]
+        serialized = json.dumps({"messages": [m.model_dump(mode="json") for m in inputs], "tools": []},
+                                ensure_ascii=False)
+        reservation = settings.reservation(serialized)
+        label = monitor_ledger_agent(agent_id)
+        try:
+            request_id = await _reserve(ledger, scope, label, reservation, record)
+        except Exception as ex:
+            failed("admission", error=type(ex).__name__)
+            return
+        if stop is not None and stop.is_set():
+            await _in_thread(_settle_unbilled, ledger, request_id, record, label)
+            failed("run_stopped", request_id=request_id)
+            return
+        frozen = GenerateConfig(max_tokens=settings.max_tokens, max_retries=0,
+                                reasoning_effort=settings.reasoning_effort, reasoning_history="all", cache=False,
+                                extra_body=settings.request_options())
+        state["monitor_calls"] += 1
+        try:
+            with use_model_event_sink(_DroppedModelEvents()), anyio.fail_after(MONITOR_TIMEOUT_SECONDS):
+                result = await model.generate(input=inputs, tools=[], tool_choice=None, config=frozen)
+        except Exception as ex:  # includes the timeout; a cancellation (BaseException) settles and propagates
+            info = classify_generate_error(ex)
+            if info["billing"] == "unbilled_error":
+                billing = await _in_thread(_settle_unbilled, ledger, request_id, record, label)
+            else:
+                await _in_thread(ledger.settle, request_id, None)
+                billing = "uncertain"
+            failed("timeout" if isinstance(ex, TimeoutError) else "generate", request_id=request_id, billing=billing,
+                   **{k: info[k] for k in ("reason", "status", "error", "provider_generation_id")})
+            return
+        except BaseException:
+            ledger.settle(request_id, None)  # synchronous: this path may run inside a cancelled scope
+            raise
+        if _rejected_without_generation(result):
+            cost, basis = None, await _in_thread(_settle_unbilled, ledger, request_id, record, label)
+        else:
+            cost, basis = settlement(settings, result)
+            if cost is None:
+                await _in_thread(ledger.settle, request_id, None)
+            else:
+                await _in_thread(ledger.settle, request_id, cost, basis)
+        latency = time.monotonic() - began
+        state["monitor_seconds"] += latency
+        text = result.completion if result.choices else ""
+        scores = monitor_module.parse_scores(text, pending)
+        shown = [{**s, "reason": monitor_module.neutral_reason(s["reason"])} for s in scores] if neutral else scores
+        decisions = monitor_module.decide(shown, options["threshold"], options["show_reason"])
+        monitor.store.put(agent_id, pending, decisions)
+        metadata = result.metadata or {}
+        usage = {"request_id": request_id, "settled_usd": "0" if basis == "unbilled_error" else (
+                     None if cost is None else str(cost)), "basis": basis,
+                 "usage": result.usage.model_dump(mode="json") if result.usage else None,
+                 "provider_usage": metadata.get("openrouter_usage"),
+                 "provider_generation_id": metadata.get("openrouter_generation_id"),
+                 "provider_name": metadata.get("openrouter_provider"), "stop_reason": result.stop_reason}
+        record("monitor_scored", agent_id, {
+            **base, "scores": [s["score"] for s in scores], "reasons": [s["reason"] for s in scores],
+            "errors": [s["error"] for s in scores], "blocked": [decisions[c["id"]]["block"] for c in pending],
+            "threshold": options["threshold"], "show_reason": options["show_reason"],
+            "latency_seconds": round(latency, 3), "agent_generation_seconds": round(generation_seconds, 3),
+            "window_chars": len(window), **usage})
+        if any(s["error"] for s in scores):
+            state["monitor_parse_errors"] += 1
+        for call, entry in zip(pending, scores):
+            if decisions[call["id"]]["block"]:
+                state["monitor_blocked"] += 1
+                record("monitor_blocked", agent_id, {"tool_use_id": call["id"], "tool": call["name"],
+                                                     "score": entry["score"],
+                                                     "message": decisions[call["id"]]["message"]})
+        if monitor.log is not None:
+            try:
+                monitor.log({"agent": agent_id, "request_id": request_id, "agent_request_id": agent_request_id,
+                             "read": read, "prompt_version": monitor_module.MONITOR_PROMPT_VERSION,
+                             "pending": pending, "system": prompt[0]["content"], "user": prompt[1]["content"],
+                             "response": text, "reasoning": _reasoning_text(result), "scores": scores})
+            except Exception as ex:
+                record("monitor_log_error", agent_id, {"error": type(ex).__name__})
 
     async def _generate(model, messages, tools, tool_choice, config, request, request_id, reservation,
                         normalized_counters, neutralized=None, pushed=None):
