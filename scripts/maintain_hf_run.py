@@ -2064,6 +2064,13 @@ def prune_run(api, download, *, run, runs_dir, commit=False, repo=DEFAULT_REPO, 
 CONFERENCE_PAGE = CONFERENCE_PREFIX + 'index.html'
 CONFERENCE_MANIFEST = CONFERENCE_PREFIX + 'manifest.json'
 _BODY_START = '<p><a href="../../index.html">'
+# Since November 10, 2026 the conference view links the catalogue at experiments.html (scripts/site_nav.py).
+_BODY_STARTS = (_BODY_START, '<p><a href="../../experiments.html">')
+
+
+def _body_start(page):
+    return max(page.find(start) for start in _BODY_STARTS)
+
 # Published head blocks a re-rendered page must keep verbatim (pages published before the October 21 site
 # look lack the theme; they get the current one, as with --scope site).
 _HEAD_BLOCKS = re.compile(r'<style id="dataset-file-note">.*?</style>|<script id="private-space-navigation">.*?</script>',
@@ -2085,7 +2092,9 @@ def hosted_page(document, run, archive, relative):
     import dataset_logs
     from site_style import themed
     from space_navigation import private_space_navigation
-    page = private_space_navigation(themed(document), [])
+    import site_nav
+    # The Space has no Explore / Experiments / About pages (Cloudflare only, November 10, 2026).
+    page = private_space_navigation(themed(site_nav.for_hf_space(document)), [])
     prefix = run + '/'
     by_commit = {}
     for name, record in sorted((archive.get('dataset_files') or {}).items()):
@@ -2199,8 +2208,8 @@ def maintain_conference(api, download, *, runs=None, commit=False, repo=DEFAULT_
         if export_conference.published_data(page) != data \
                 or data['records'] != [r for r in old_data['records'] if r['category'] != 'activity']:
             raise ValueError('Re-rendered conference records differ from the published ones: ' + run)
-        head = old_page.find(_BODY_START)
-        old_head, new_head = old_page[:head], page[:page.find(_BODY_START)]
+        head = _body_start(old_page)
+        old_head, new_head = old_page[:head], page[:_body_start(page)]
         kept = _HEAD_BLOCKS.findall(old_head)
         if head < 0 or not kept or any(block not in new_head for block in kept) or SITE_THEME_MARKER not in new_head:
             raise ValueError('The re-rendered page head drops the published Space navigation or dataset note, or '
@@ -2401,8 +2410,8 @@ def _check_rerendered(run, old_page, page, datasets, location, remote, extra=())
     same-site link resolving in ``remote`` (plus ``extra`` files the same commit adds)."""
     import dataset_logs
     import export_conference
-    head = old_page.find(_BODY_START)
-    old_head, new_head = old_page[:head], page[:page.find(_BODY_START)]
+    head = _body_start(old_page)
+    old_head, new_head = old_page[:head], page[:_body_start(page)]
     kept = _HEAD_BLOCKS.findall(old_head)
     if head < 0 or not kept or any(block not in new_head for block in kept) or SITE_THEME_MARKER not in new_head:
         raise ValueError('The re-rendered page head drops the published Space navigation or dataset note, or '

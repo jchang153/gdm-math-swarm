@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-10 17:45 PT by Claude (Opus 5.5) monitor-run operator (item 38: 12 monitor runs launched).
+Last updated: 2026-11-10 20:45 PT by Claude (Opus 5.5) site-plumbing worktree agent (item 39: Explore / Experiments / About, not deployed).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1751,6 +1751,20 @@ is being merged into main via `collab-env`.
      monitor at threshold 30 blocked the seeded exploit 9 times (all 9 agents changed course); actions monitor needed
      threshold 5 to block at all and then drifted upward (its window contains earlier block messages). Monitor latency
      4.8 s (full) / 6.8 s (actions) per call; cost ~$0.0025 / ~$0.0007 per call. e2ca257 adds `monitor_lookup_allowed`.
+
+39. **IN CODE 2026-11-10 (branch `worktree-agent-aa17329ed85272ec7`, not merged, not deployed): user-facing site with
+    Explore, Experiments and About pages** (owner requests, November 10, 2026: "make the website more user-facing ...
+    an "explore" page which is the main page, then "experiments" page which lists all of them"; "Also include a
+    separate about page"). Root pages of the math site: `index.html` = Explore (`scripts/explore_page.py`, designed
+    separately; a placeholder stub on this branch), `experiments.html` = the catalogue, `about.html` = the former
+    About section; top bar Explore | Experiments | About on every generated page (`scripts/site_nav.py`); old
+    catalogue deep links on `index.html` forward to `experiments.html` (or `about.html` for the About anchors).
+    Visual skin hook: `catalogue_intro.SKIN` + `scripts/site_skin.py` (not yet on the branch). ImpossibleBench site
+    unchanged. Details: docs/experiment-library.md, "Root pages". **Deploy (one at a time, after the 12 monitor runs
+    are published):** merge, then `publish_cloudflare.py restyle` (plan) and `restyle --commit`, then `verify`.
+    Offline plan on the 2026-11-10 site (97 runs): 571 run pages re-rendered (96 results, 97 conference, 92 incident,
+    83 simplified judge, 203 story map pages), index.html replaced, experiments.html and about.html added, 0 broken
+    links; 6,732 files of the 20,000 limit.
 
 ## Next steps / open items
 

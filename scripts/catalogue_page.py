@@ -172,6 +172,17 @@ STYLE = (
     '@media (max-width:420px){.topnav .brand{font-size:13px}.tn-links{gap:12px;font-size:13px}}'
 )
 
+# about.html of the math library (owner, November 10, 2026): the former About section, every part open, with a jump
+# bar; on top of STYLE (scripts/build_experiment_index.about_page).
+ABOUT_STYLE = (
+    '.about-hero{padding:40px 0 28px}.about-hero .paper{margin-top:20px}.about-jump{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0 0}'
+    '.about-jump a{padding:6px 14px;border:1px solid var(--line);border-radius:999px;font-size:13.5px;'
+    'text-decoration:none;color:var(--fg);background:var(--card)}.about-jump a:hover{border-color:var(--accent)}'
+    '.about.about-page{margin:0;padding:0;border-top:0}'
+    '.about-page section{padding:32px 0;border-top:1px solid var(--line);scroll-margin-top:16px}'
+    '.about-page h2{margin:0 0 16px}.about-link{margin-top:48px}'
+)
+
 # Sorting, filtering, the compare view (2-4 ticked runs, shareable as #compare=RUN,RUN) and, for
 # entries published before the summary columns existed, reading the same fields from the run's
 # own published results.json and judge report.json (same-origin fetch; nothing is sent elsewhere); entries that

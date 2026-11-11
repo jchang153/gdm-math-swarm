@@ -14,6 +14,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_profile  # noqa: E402
+import build_experiment_index  # noqa: E402
 from build_experiment_index import short_title, write_index  # noqa: E402
 import catalogue_intro  # noqa: E402
 
@@ -166,11 +167,17 @@ class CataloguePageTests(unittest.TestCase):
         self.assertIn(f'href="{catalogue_intro.PAPER_URL}" target="_blank" rel="noopener noreferrer">'
                       f'<cite>{catalogue_intro.PAPER_TITLE}</cite></a>', page)
         self.assertIn('Paglieri et al.', page)
-        for anchor in ('id="about"', 'id="experiment"', 'id="how"', 'id="read"', 'id="glossary"', 'id="cards-view"', 'id="table-view"',
+        for anchor in ('id="about"', 'href="about.html"', 'id="cards-view"', 'id="table-view"',
                        'id="view-cards"', 'id="view-table"', 'href="#series-small"'):
             self.assertIn(anchor, page)
+        # The explanations moved to about.html (owner, November 10, 2026); the catalogue links it.
+        about = build_experiment_index.about_page()
+        for anchor in ('id="experiment"', 'id="how"', 'id="read"', 'id="glossary"', 'Paglieri et al.',
+                       '<a href="about.html" aria-current="page">About</a>'):
+            self.assertIn(anchor, about)
         for term in ('Fake-minutes', 'Seed readers', 'Standing fake', 'Overseer', 'Revert', 'Genuine'):
-            self.assertIn(f'<dt>{term}</dt>', page)
+            self.assertIn(f'<dt>{term}</dt>', about)
+            self.assertNotIn(f'<dt>{term}</dt>', page)
         # The existing table and filters are kept; the compare view is gone (owner, November 6, 2026).
         for control in ('id="runs"', 'id="filter"'):
             self.assertIn(control, page)
@@ -320,7 +327,7 @@ class IntroTests(unittest.TestCase):
         self.assertIn('2 fakes accepted, 1 reverted, 1 standing at the end, 47 fake-minutes; 1 accepted submission '
                       'unresolved', page)
         self.assertIn('The Oversight section lists every revert', page)
-        self.assertIn('href="../index.html#glossary"', page)
+        self.assertIn('href="../about.html#glossary"', page)
         self.assertEqual(run_profile.add_intro(page, results(), SETTINGS), page)  # idempotent
         newer = run_profile.add_intro(page, results(), None)  # replaced as a whole
         self.assertEqual(newer.count(run_profile.INTRO_START), 1)

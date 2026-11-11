@@ -35,6 +35,39 @@ kept as they are and work only while that dataset exists.
 that about 400), so roughly 130 more such runs fit; past that, share the Inspect View assets or move to Workers
 static assets on a paid plan (100,000 files). `publish_cloudflare.py` refuses a deployment over either limit.
 
+**Root pages: Explore, Experiments, About (owner request, November 10, 2026: "make the website more user-facing";
+"Also include a separate about page").** The math site has three root pages: `index.html` is the **Explore** page
+(a few highlighted runs with large graphs; `scripts/explore_page.py`, `render_explore(entries, files, site)`),
+`experiments.html` is the catalogue formerly served as `index.html` (short intro plus the browsable run list;
+`build_experiment_index.write_index`), and `about.html` holds the explanations formerly collapsed at the bottom of
+the catalogue (objective, the reconstructed paper, the experiment, how a run works, how to read the site, the
+glossary including the rubric-3.1 cohorts; `build_experiment_index.about_page`, texts in `catalogue_intro.py`).
+`experiments.json` is unchanged. Every generated page of the math site (the three root pages, run reports,
+conference views, story map pages, simplified judge and incident reports) carries one top bar
+**Explore | Experiments | About** with the current page highlighted (`scripts/site_nav.py`, idempotent
+`<nav id="site-nav">` plus `<style id="site-nav-style">`, relative paths from the page's place in its run folder).
+On run pages the old library links ("All experiments", "Experiment library", "library glossary") now point at
+`experiments.html` and `about.html#glossary`. The Explore page forwards catalogue-style deep links: `?page=...`,
+`#series-...`, `#compare=...`, `#RUN` and any hash naming no element of the Explore page go to `experiments.html`
+with the same query and hash; `#about`, `#experiment`, `#how`, `#read` and `#glossary` go to `about.html`.
+
+- Every command that renders the catalogue (`publish`, `catalogue`, `restyle`, `withdraw`, `mirror-space`, `correct
+  --entry`) writes all three root pages through `render_catalogue`; `mirror-space` now always re-renders them (the
+  Space's own catalogue is never served as the Explore page). `publish` renders them before its broken-link check,
+  because new run pages link `experiments.html` and `about.html`. `catalogue` lists every changed root page;
+  `verify` checks every root page and every same-site link, so a run page's top bar must resolve.
+- Existing run pages get the top bar through `restyle` (the `site_layout.apply` path, which now also calls
+  `site_nav.apply`). `storymap`, `heatmap`, `judge-labels` and `repack` neither add the bar nor re-render the root pages.
+- The ImpossibleBench site is unchanged: `render_explore` returns None for it, so its catalogue stays `index.html`,
+  no `experiments.html` or `about.html` is written and its pages get no top bar.
+- The local library (`runs/index.html`, `build_experiment_index.py`) stays a catalogue at `index.html`; it also
+  writes the same page as `runs/experiments.html` and `runs/about.html`, so a local run page's top bar works.
+- The former HF Space has no such pages: `maintain_hf_run.py`'s re-rendered run pages drop the bar and keep their
+  library links at `index.html` (`site_nav.for_hf_space`).
+- Visual skins: `catalogue_intro.SKIN` (default None, the current look) names a skin of `scripts/site_skin.py`
+  (`skin_css(name)`); its CSS is layered last (`<style id="site-skin">`) on `experiments.html` and `about.html`.
+  `write_index(..., skin=...)` overrides it.
+
 **ImpossibleBench site (owner decision, November 3, 2026).** The coding runs (ImpossibleBench
 Impossible-LiveCodeBench, `settings.json` domain `"code"`) are never published to the math site; they go to their
 own Pages project, `gdm-impossiblebench-experiments` (https://gdm-impossiblebench-experiments.pages.dev), built by

@@ -19,6 +19,10 @@ PAPER_LABEL = 'Reconstructs'
 # Run panes with the interaction graph (owner, November 6, 2026): math catalogue only; catalogue_intro_ib.py leaves
 # this unset, so the ImpossibleBench catalogue keeps its cards.
 PANES = True
+# Visual skin of the math site's experiments.html and about.html (owner, November 10, 2026: "explore more stylistic
+# options"): a name for scripts/site_skin.py's skin_css(name), layered on top of catalogue_page.STYLE; None keeps
+# the current look. Changing this one line restyles both pages on the next catalogue render.
+SKIN = None
 
 PAPER_URL = 'https://arxiv.org/pdf/2609.04170'
 PAPER_TITLE = 'A Case Study on Emergent Cheating and Whistleblowing in Autonomous Research Swarms'
@@ -133,13 +137,14 @@ def topnav(text=None):
             f'<a href="{t.PAPER_URL}" target="_blank" rel="noopener noreferrer">Paper</a></span></nav>')
 
 
-def hero(stats, text=None):
+def hero(stats, text=None, nav=True):
     """The page top: navigation, title, a two-sentence summary, headline numbers and the compact paper credit.
-    stats: [(label, number)]; ``text``: the module holding the site's texts (default: this one)."""
+    stats: [(label, number)]; ``text``: the module holding the site's texts (default: this one). ``nav=False``
+    leaves out the in-page jump bar (the math site has the site-wide top bar instead, scripts/site_nav.py)."""
     t = _text(text)
     tiles = ''.join(f'<div><dt>{html.escape(k)}</dt><dd>{_fmt(v) if isinstance(v, int) else html.escape(str(v))}</dd></div>'
                     for k, v in stats)
-    return (topnav(t) + '<header class="hero" id="top"><p class="eyebrow">Experiment library</p>'
+    return ((topnav(t) if nav else '') + '<header class="hero" id="top"><p class="eyebrow">Experiment library</p>'
             f'<h1>{html.escape(t.HEADLINE)}</h1>'
             f'<p class="lead">{html.escape(t.LEAD)}</p><dl class="stats">{tiles}</dl>'
             f'<p class="paper"><span class="paper-k">{html.escape(t.PAPER_LABEL)}</span> {t.PAPER}. '
@@ -206,3 +211,36 @@ def series_nav(series, total, text=None):
                      + (f' title="{html.escape(line, quote=True)}"' if line else '')
                      + f'><span class="sn-t">{html.escape(title)}</span><span class="n">{count}</span></a>')
     return ('<nav class="snav jump" aria-label="Series"><p class="snav-h">Series</p>' + ''.join(items) + '</nav>')
+
+
+def about_link():
+    """The catalogue's pointer to about.html (math site, November 10, 2026: the explanations moved there)."""
+    return ('<section class="about about-link" id="about"><h2>About this library</h2><p class="sub">The objective, the '
+            'paper this reconstructs, how a run works, how to read a run\'s pages and the glossary are on the '
+            '<a href="about.html">About page</a> (<a href="about.html#glossary">glossary</a>).</p></section>')
+
+
+def about_page_body(text=None, extra_terms=''):
+    """The body of about.html (math site, owner, November 10, 2026): the objective and the paper, then the
+    experiment, how a run works, how to read the site and the glossary, all open. ``extra_terms``: more glossary
+    entries as ready <div><dt>..</dt><dd>..</dd></div> markup (the rubric-3.1 judge cohorts)."""
+    x = _text(text)
+    exp = ''.join(f'<li><strong>{html.escape(t)}.</strong> {d}</li>' for t, d in x.EXPERIMENT)
+    steps = ''.join(f'<li><strong>{html.escape(t)}</strong><span>{html.escape(d)}</span></li>' for t, d in x.STEPS)
+    pages = ''.join(f'<div><dt>{html.escape(t)}</dt><dd>{html.escape(d)}</dd></div>' for t, d in x.PAGES)
+    terms = ''.join(f'<div><dt>{html.escape(t)}</dt><dd>{html.escape(d)}</dd></div>' for t, d in x.GLOSSARY)
+    jump = ''.join(f'<a href="#{k}">{html.escape(t)}</a>' for k, t in (
+        ('experiment', 'The experiment'), ('how', 'How a run works'), ('read', 'How to read this site'),
+        ('glossary', 'Glossary')))
+    return ('<header class="hero about-hero" id="top"><p class="eyebrow">About</p>'
+            f'<h1>{html.escape(x.HEADLINE)}</h1><p class="lead">{html.escape(x.LEAD)}</p>'
+            f'<p class="paper"><span class="paper-k">{html.escape(x.PAPER_LABEL)}</span> {x.PAPER}. '
+            f'<span class="muted">{html.escape(x.DISCLAIMER)}</span></p>'
+            f'<nav class="toc jump about-jump" aria-label="On this page">{jump}</nav></header>'
+            '<main class="about about-page">'
+            f'<section id="experiment"><h2>The experiment</h2><ul class="facts">{exp}</ul></section>'
+            f'<section id="how"><h2>How a run works</h2><ol class="steps">{steps}</ol></section>'
+            '<section id="read"><h2>How to read this site</h2><p class="sub">Each run has these pages; open them '
+            f'from its pane on the <a href="experiments.html">Experiments</a> page.</p><dl class="defs">{pages}</dl>'
+            '</section>'
+            f'<section id="glossary"><h2>Glossary</h2><dl class="defs">{terms}{extra_terms}</dl></section></main>')

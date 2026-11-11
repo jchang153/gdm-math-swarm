@@ -23,8 +23,9 @@ RESULTS = themed(
 
 
 def text(document):
-    """Visible text and link targets, without the layout's own style block."""
-    document = re.sub(r'<style id="site-(?:layout|look)">.*?</style>', '', document, flags=re.S)
+    """Visible text and link targets, without the layout's own style block and the site's top bar (site_nav)."""
+    document = re.sub(r'<style id="site-(?:layout|look|nav-style)">.*?</style>', '', document, flags=re.S)
+    document = re.sub(r'<nav id="site-nav".*?</nav>', '', document, flags=re.S)
     return re.sub(r'<(?!a )[^>]*>', '', document), re.findall(r'href="([^"]*)"', document)
 
 
@@ -93,7 +94,7 @@ class RestyleTest(unittest.TestCase):
         self.assertIn(b'id="site-look"', files['RUN/analysis/incident/report.html'])
         for name in ('RUN/results.json', 'OLD/results.html', 'OLD/results.json'):
             self.assertEqual(files[name], base[name])
-        self.assertEqual(set(files) - set(base), {'index.html'})
+        self.assertEqual(set(files) - set(base), {'index.html', 'experiments.html', 'about.html'})
         self.assertIn(site_layout.MARKER.encode(), files['RUN/results.html'])
         with self.assertRaisesRegex(ValueError, 'not on the site'):
             pc.plan_restyle(base, set(), ['NOPE'])

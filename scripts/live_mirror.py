@@ -564,7 +564,7 @@ def fix_links(document, page, available):
         target = posixpath.normpath(posixpath.join(base, path)) if path else page
         if target in available:
             return match[0]
-        if target == '../index.html':                     # the library catalogue (live/ is one level deeper)
+        if target in ('../index.html', '../experiments.html', '../about.html'):  # root pages (live/ is one level deeper)
             return f'<a href="{html.escape("../" + href, quote=True)}">{match[2]}</a>'
         return f'<span class="unavailable" title="Available once the run is published">{match[2]}</span>'
     return HREF.sub(replace, document)

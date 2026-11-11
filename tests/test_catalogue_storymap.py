@@ -44,12 +44,14 @@ class StorymapLinkTests(unittest.TestCase):
     def test_catalogue_subcommand_changes_only_the_catalogue(self):
         base = site()
         files, plan = cf.plan_catalogue(base, unlisted=())
-        self.assertEqual(sorted(n for n in files if files[n] != base.get(n)), ['experiments.json', 'index.html'])
+        # The root pages (November 10, 2026): Explore (index.html), the catalogue (experiments.html), About.
+        self.assertEqual(sorted(n for n in files if files[n] != base.get(n)),
+                         ['about.html', 'experiments.html', 'experiments.json', 'index.html'])
         self.assertEqual(plan['storymap_links'], [MAPPED])
         entries = {e['run']: e for e in json.loads(files['experiments.json'])['experiments']}
         self.assertIn('Story map', entries[MAPPED]['links'])
         self.assertNotIn('Story map', entries[PLAIN]['links'])
-        page = files['index.html'].decode()
+        page = files['experiments.html'].decode()
         self.assertIn(f'href="{MAPPED}/analysis/storymap/index.html"', page)
         self.assertIn('1 run has an agent story map', page)
         again, plan = cf.plan_catalogue(files, unlisted=())  # idempotent
