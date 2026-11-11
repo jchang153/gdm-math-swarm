@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-10 17:45 PT by Claude (Opus 5.5) monitor-run operator (item 38: 12 monitor runs launched).
+Last updated: 2026-11-11 01:05 PT by Claude (Opus 5.5) monitor-run operator (item 38 done: results, spend, publication).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1700,7 +1700,7 @@ is being merged into main via `collab-env`.
      Fix 7c95737: on the live site the run-page tab switcher also caught the expand click (switched to the Story
      map tab and left the page scroll-locked); live as `db2cabd6`, checked on the served page.
 
-38. **RUNNING since 2026-11-10 17:39-17:42 PT: top-down monitor runs, 4 arms x 3 replicates, threshold 80** (docs/plan.md,
+38. **DONE 2026-11-10 (launched 17:39-17:42 PT, all retrieved and VMs stopped by 22:15 PT): top-down monitor runs, 4 arms x 3 replicates, threshold 80** (docs/plan.md,
    "Top-down monitor arms (owner decisions, November 10, 2026)"). Configs
    `configs/glmflash100-seeded-monitor-{actions-silent,actions-reason,full-silent,full-reason}-120m-push.json`
    (M1-M4): copies of `glmflash100-seeded-control-120m-push.json` except `experiment`, `run_budget_usd` (M1/M2 $100,
@@ -1730,6 +1730,26 @@ is being merged into main via `collab-env`.
      ABORTED.txt on its VM) and relaunched 18:28 PT. Other runs logged 0-13 such ledger errors before the fix but kept running.
      Relaunches use the same config; the launcher sets the post-run judge off in their launch-config.
      Code follow-up (not done): raise RLIMIT_NOFILE in run_pilot/supervise_run itself.
+   - **Results (2026-11-10, `research/analysis/monitor_arms-2026-11-10.{json,md}`, compare_arms, n=3 per arm):**
+     fakers control 74.7 / reminder 80.7 / 1ov 15.3 / 2ov 2.0 / 10ov 0.3 vs M1 4.3 / M2 0 / M3 6.3 / M4 2.3; fake
+     submissions control 1,089 vs M1 10.3 / M2 0 / M3 35 / M4 6.7; genuine credited tasks 15.7 (control) vs 13.0 / 15.3 /
+     15.0 / 14.3; steps per solver 115 vs 85-91; median seconds per step 45 vs 61-63 (monitor ~20-24% of step time);
+     actions blocked per run M1 1,277 / M2 60 / M3 834 / M4 94 (reason arms block ~10x less). Blocked submit_solution
+     calls (0-58 per run) are unclassified: agents submit by file_path, which the re-judge cannot recover from the
+     monitor log. Re-judged genuine-uncredited exists only for M1-M4 (no baseline re-judge).
+   - **Spend (committed, agents / monitor):** M1 $43.57 ($31.07/$12.50), $42.82 ($30.47/$12.35), $43.62 ($31.26/$12.37);
+     M2 $46.18 ($33.72/$12.47), $46.54 ($33.64/$12.90), $46.72 ($33.44/$13.28); M3 $64.79 ($32.22/$32.57), $66.46
+     ($33.24/$33.22), $61.56 ($31.50/$30.06); M4 $70.34 ($34.44/$35.90), $65.41 ($31.77/$33.64), $67.73 ($33.19/$34.55).
+     Total ~$666 (agents ~$390, monitors ~$275) plus ~$16 for the two aborted first attempts; no judge, incident
+     report or story map (paid post-run judge turned off).
+   - **Post-run:** offline re-judge `--include-blocked` on each VM (RUN/analysis/rejudge.jsonl, 233-295 rows per run),
+     results rebuilt with it locally (runs/RUN/results.*). Raw runs are in the private logs dataset (supervisor upload);
+     the re-judge and rebuilt results are on the Mac only (a second upload was skipped for dataset storage; details
+     host-only). **Site (2026-11-10 21:48 - 11-11 01:03 PT):** the 12 runs are published from the supervisor's bundles
+     (pages without the re-judged counts), one deploy each, verify ok, catalogue series "Top-down monitors" (12 runs;
+     site 109 runs); last deployment 5404a614. Privacy: no monitor prompt, window or reasons in any published file
+     (RUN/monitor/calls.jsonl stays in the private dataset). M2 r3 deployed but its post-deploy verify timed out (no
+     receipt; a separate verify passed, receipts/RUN.verify-only.json).
      OpenRouter account balance not readable with the run key (credits endpoint 403); key has no limit.
      Post-run (operator, in progress): offline re-judge on each VM (`--include-blocked`) before retrieval,
      `scripts/compare_arms.py` vs control / reminder / 1ov / 2ov / 10ov push -> research/analysis/monitor_arms-2026-11-10.*.
@@ -1757,6 +1777,15 @@ is being merged into main via `collab-env`.
      4.8 s (full) / 6.8 s (actions) per call; cost ~$0.0025 / ~$0.0007 per call. e2ca257 adds `monitor_lookup_allowed`.
 
 ## Next steps / open items
+
+- **Logs dataset storage (2026-11-10 21:30 PT):** used_storage 90.2 GB of the org's 100 GB private limit (raw files
+  99.85 GB); new runs can still offload for now, about 7 runs of headroom. Owner decision 2026-11-10: do not delete
+  anything (resume bundles ~23 GB were considered; they feed story-map extraction, and squashing would break pinned
+  dataset links on the site). The owner decides tomorrow between upgrading the org and archive+squash; consider
+  gzipping large .jsonl before upload.
+- **Monitor-run follow-ups:** raise RLIMIT_NOFILE in the run code itself (the fd incident, item 38); blocked
+  submit_solution calls by file_path cannot be re-judged from the monitor log (needs the workspace snapshot);
+  republish the 12 monitor pages with the re-judged counts once their re-judge files are in the dataset.
 
 - **VM HF upload token (item 16):** confirmed working on the owner's first VM (item 17). `vm_hf_setup.py` failed on
   the other VMs with "cd: gdm-math-swarm: No such file or directory" (2026-10-29); check which ssh user it connects as.
