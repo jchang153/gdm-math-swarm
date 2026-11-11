@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-11 01:55 PT by Claude (Opus 5.5) site deploy agent (item 39 live: deployment 1e24d786).
+Last updated: 2026-11-11 12:20 PT by Claude (Opus 5.5) site deploy agent (item 39: slim Experiments, deployment 89b3af00).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1805,6 +1805,10 @@ is being merged into main via `collab-env`.
     compact editorial type (body 16px), text beside figures (one column below 760px), no heatmaps on Explore (the
     baseline story is now a text-and-number card), plain descriptive titles and headlines on Explore, About and
     Experiments.
+    **Slim Experiments + new Explore stories LIVE 2026-11-11 ~12:18 PT (commit 0bcf898, deployment `89b3af00`, only
+    index/experiments.html changed, verify 9/9 ok):** Experiments is a lean catalogue (heading, one line, list; series
+    details folded; About linked); Explore stories: 120m control, 1ov r1, 10ov r2, reminders, talk vs enforce (90m
+    baseline removed; numbers recomputed from saved records); "agent-hours of run time".
 
 ## Next steps / open items
 
