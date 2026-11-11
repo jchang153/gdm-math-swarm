@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-11 12:20 PT by Claude (Opus 5.5) site deploy agent (item 39: slim Experiments, deployment 89b3af00).
+Last updated: 2026-11-11 13:20 PT by Claude (Opus 5.5) site deploy agent (item 39: one top bar, deployment 8e1fc9be).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1809,6 +1809,11 @@ is being merged into main via `collab-env`.
     index/experiments.html changed, verify 9/9 ok):** Experiments is a lean catalogue (heading, one line, list; series
     details folded; About linked); Explore stories: 120m control, 1ov r1, 10ov r2, reminders, talk vs enforce (90m
     baseline removed; numbers recomputed from saved records); "agent-hours of run time".
+    **One top bar LIVE 2026-11-11 ~13:15 PT (commit 8bf3735, `restyle --commit`, deployment `8e1fc9be`, 595 run pages +
+    root pages, verify 9/9 ok):** clicking Experiments no longer moves the bar (Explore/About used `site_skin.nav`,
+    Experiments/run pages `site_nav.bar` inside their own body column); now `site_nav.bar`/`style` is the only bar,
+    full-width and identical on every page (live rect 0,0,1440x61 desktop, 0,0,375x53 phone on /, /experiments,
+    /about and run pages); phones show "Math Swarm" on one line; test `SameBarEverywhere` in tests/test_site_nav.py.
 
 ## Next steps / open items
 
