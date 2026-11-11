@@ -1717,7 +1717,7 @@ is being merged into main via `collab-env`.
      the supervisor re-reads after the pilot exits (original kept as `launch-config.orig.json`; experiment unchanged). Run ids (`glmflash100-seeded-monitor-` omitted):
      M1 actions-silent: `actions-silent-120m-push-r1-20261111T014006Z`, `-r2-20261111T014108Z`, `-r3-20261111T013947Z`;
      M2 actions-reason: `actions-reason-120m-push-r1-20261111T014002Z`, `-r2-20261111T014010Z`, `-r3-20261111T013952Z`;
-     M3 full-silent: `full-silent-120m-push-r1-20261111T013954Z`, `-r2-20261111T013954Z`, `-r3-20261111T013940Z`;
+     M3 full-silent: `full-silent-120m-push-r1-20261111T013954Z`, `-r2-20261111T022845Z` (relaunched 18:28 PT, below), `-r3-20261111T013940Z`;
      M4 full-reason: `full-reason-120m-push-r1-20261111T021254Z` (relaunched 18:12 PT, below), `-r2-20261111T013947Z`, `-r3-20261111T014216Z`.
      **Incident (17:50-18:00 PT): `OSError(24, 'Too many open files')`** in the host pilot process of every monitor run from
      min ~10 (soft fd limit 1024; the monitor's extra connections push it past ~1000; no baseline run ever hit it). Fixed
@@ -1725,6 +1725,10 @@ is being merged into main via `collab-env`.
      experimental setting changed); the operator launcher now starts the supervisor with `ulimit -n 65536`. Damage before
      the fix: restarts 0-37 per run; agents lost for good: M4 r1 16 (aborted, kept as `...r1-20261111T013950Z-ABORTED` on
      its VM with ABORTED.txt, relaunched), M4 r2 4, M2 r2 1, M2 r3 1, M3 r2 1 (kept; caveat in the comparison).
+     M3 r2 (first start `...r2-20261111T013954Z`) hung at min ~26 (no events for 20 min) after a budget-ledger settle failed
+     with `sqlite3.OperationalError: unable to open database file` (same fd cause); aborted 18:26 PT (kept -ABORTED with
+     ABORTED.txt on its VM) and relaunched 18:28 PT. Other runs logged 0-13 such ledger errors before the fix but kept running.
+     Relaunches use the same config; the launcher sets the post-run judge off in their launch-config.
      Code follow-up (not done): raise RLIMIT_NOFILE in run_pilot/supervise_run itself.
      OpenRouter account balance not readable with the run key (credits endpoint 403); key has no limit.
      Post-run (operator, in progress): offline re-judge on each VM (`--include-blocked`) before retrieval,
