@@ -214,6 +214,20 @@ def series_nav(series, total, text=None):
     return ('<nav class="snav jump" aria-label="Series"><p class="snav-h">Series</p>' + ''.join(items) + '</nav>')
 
 
+def slim_header(runs, series):
+    """The math catalogue's top (owner, November 11, 2026: a lean catalogue, "a short plain heading, one line of
+    context at most"): no hero, stats or explanations; definitions are on about.html."""
+    return ('<header class="cat-head" id="top"><h1>Experiments</h1><p class="cat-ctx">'
+            f'{runs} run{"" if runs == 1 else "s"} in {series} series, newest first. Terms are defined on the '
+            '<a href="about.html">About page</a>.</p></header>')
+
+
+def about_line():
+    """The math catalogue's footer pointer to about.html (its id="about" keeps old #about links landing)."""
+    return ('Definitions, how a run works and the paper: <a href="about.html">About</a> '
+            '(<a href="about.html#glossary">glossary</a>).')
+
+
 def about_link():
     """The catalogue's pointer to about.html (math site, November 10, 2026: the explanations moved there)."""
     return ('<section class="about about-link" id="about"><h2>About this library</h2><p class="sub">The objective, the '

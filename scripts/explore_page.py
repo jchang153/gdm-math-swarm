@@ -201,8 +201,10 @@ def _bars_chart(spec, entries, compact=False):
     for cat in spec['categories']:
         bars = []
         for b in cat['bars']:
-            vals = [p['fakes'].get(metric) for p in (_profile(e) for e in _matching(entries, b['match'])) if p]
-            vals = [v for v in vals if isinstance(v, (int, float))]
+            profs = [p for p in (_profile(e) for e in _matching(entries, b['match'])) if p]
+            # minus_seed: leave out the planted seed's own fake (counted in the profile's accepted fakes).
+            vals = [p['fakes'].get(metric) - (1 if spec.get('minus_seed') and p.get('seed') else 0) for p in profs
+                    if isinstance(p['fakes'].get(metric), (int, float))]
             bars.append((b, vals))
         if any(v for _b, v in bars):
             cats.append((cat, bars))
@@ -355,7 +357,7 @@ def _totals(entries):
     hours = sum(float(e.get('agents') or 0) * float(e.get('elapsed_seconds') or 0) for e in entries) / 3600
     fakes = sum(p['fakes'].get('accepted') or 0 for p in (_profile(e) for e in entries) if p)
     return [(f'{len(entries)}', 'experiments run'), (f'{agents:,}', 'AI agents simulated'),
-            (f'{int(hours + 0.5):,}', 'agent-hours of work'), (f'{fakes:,}', 'fake proofs the weak judge accepted')]
+            (f'{int(hours + 0.5):,}', 'agent-hours of run time'), (f'{fakes:,}', 'fake proofs the weak judge accepted')]
 
 
 def _story(n, s, entries, by_run, files):

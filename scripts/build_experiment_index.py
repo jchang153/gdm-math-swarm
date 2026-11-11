@@ -608,7 +608,9 @@ def series_sections(groups, panes=False, lines=None, graphs=None):
         out.append(f'<section class="series" id="series-{esc(key, quote=True)}" data-series="{esc(key, quote=True)}">'
                    f'<div class="series-head"><h2>{esc(title)}<span class="count">{count}</span></h2>'
                    + (f'<p class="series-line">{esc(lines[key])}</p>' if panes and lines.get(key) else '')
-                   + f'<p>{esc(text)}</p>'
+                   # Slim math catalogue (owner, November 11, 2026): the long description folds away under the line.
+                   + (f'<details class="series-more"><summary>Details</summary><p>{esc(text)}</p></details>'
+                      if panes and lines.get(key) else f'<p>{esc(text)}</p>')
                    + series_legend(members, scale, panes, graphs) + '</div>'
                    '<div class="rc-grid">' + ''.join(card(e, scale) for e in members) + '</div></section>')
     return ''.join(out)
@@ -748,17 +750,20 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(intro.TITLE)}</title><style>' + STYLE + (PANE_STYLE if panes else '') + '</style>'
             + (PANE_TOKENS + site_look.block() + skin_block(skin) if panes else '') + '</head><body>'
-            + (intro.hero(stats, nav=False) if panes else intro.hero(stats))
+            # The math catalogue is a lean list (owner, November 11, 2026: "it should not look like or repeat the
+            # Explore page"): a short heading and one line, no hero, stats or paper credit (Explore and About have them).
+            + (intro.slim_header(len(entries), len(groups)) if panes else intro.hero(stats))
             + (live_section(entries) if hosted else '')
             # Run panes: the run categories move into a sticky sidebar (owner, November 6, 2026).
             + ('<div class="cat-wrap"><aside class="snav-col">'
                + intro.series_nav([(k, t, len(es)) for k, t, _, es in groups], len(entries))
                + '</aside><div class="cat-main">' if panes else '') +
-            '<section class="block runs" id="runs-top"><div class="runs-head"><h2>Runs</h2>'
-            f'<p class="sub">{len(entries)} saved experiment{"" if len(entries) == 1 else "s"} in {len(groups)} series, '
-            + ('newest first.' if panes else 'newest first. Tick 2 to 4 runs to compare them side by side.')
-            + (f' {mapped} run{"" if mapped == 1 else "s"} {"has" if mapped == 1 else "have"} an agent story map '
-               '(the Story map link).' if mapped else '') + '</p></div>'
+            '<section class="block runs" id="runs-top">'
+            + ('' if panes else '<div class="runs-head"><h2>Runs</h2>'
+               f'<p class="sub">{len(entries)} saved experiment{"" if len(entries) == 1 else "s"} in {len(groups)} series, '
+               'newest first. Tick 2 to 4 runs to compare them side by side.'
+               + (f' {mapped} run{"" if mapped == 1 else "s"} {"has" if mapped == 1 else "have"} an agent story map '
+                  '(the Story map link).' if mapped else '') + '</p></div>')
             + ('' if panes else intro.toc([(k, t, len(es)) for k, t, _, es in groups])) +
             '<div class="controls"><div class="toolbar">'
             '<label class="grow"><span class="sr">Find</span><input id="filter" type="search" '
@@ -798,9 +803,10 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
             'published for the run; "…" means the entry predates these columns and the run\'s own records could '
             'not be read here.</dd>' + glossary + '</dl></details></section>'
             + ('</div></div>' if panes else '')
-            + (intro.about_link() if panes else intro.about_section()) +
-            f'<footer class="foot"><p>{esc(note)}</p></footer>'
-            f'<script type="application/json" id="catalogue-data">{blob}</script>'
+            + ('' if panes else intro.about_section())
+            + (f'<footer class="foot" id="about"><p>{intro.about_line()} {esc(note)}</p></footer>' if panes else
+               f'<footer class="foot"><p>{esc(note)}</p></footer>')
+            + f'<script type="application/json" id="catalogue-data">{blob}</script>'
             + (pane_labels(entries, labels) if panes else '') +
             '<script>' + (pane_script() if panes else SCRIPT.replace('/*CARDJS*/', run_profile.CARD_JS)) + '</script></body></html>')
     body = themed(body)

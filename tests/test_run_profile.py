@@ -161,12 +161,18 @@ class CataloguePageTests(unittest.TestCase):
             write_index(tmp, entries, hosted=hosted)
             return (Path(tmp) / 'index.html').read_text(), json.loads((Path(tmp) / 'experiments.json').read_text())
 
-    def test_newcomer_sections_and_paper(self):
+    def test_slim_catalogue_links_about(self):
+        # A lean catalogue (owner, November 11, 2026): a short heading and one line; no hero, stats, lead, paper
+        # credit or explanations, which Explore and About carry.
         page, _ = self.write([entry('glm-rule6-20261021T224441Z', 1)])
-        self.assertIn(f'<h1>{catalogue_intro.HEADLINE}</h1>', page)
-        self.assertIn(f'href="{catalogue_intro.PAPER_URL}" target="_blank" rel="noopener noreferrer">'
-                      f'<cite>{catalogue_intro.PAPER_TITLE}</cite></a>', page)
-        self.assertIn('Paglieri et al.', page)
+        self.assertIn('<header class="cat-head" id="top"><h1>Experiments</h1><p class="cat-ctx">1 run in 1 series, '
+                      'newest first. Terms are defined on the <a href="about.html">About page</a>.</p></header>', page)
+        self.assertEqual(page.count('<h1'), 1)
+        for gone in (catalogue_intro.HEADLINE, catalogue_intro.LEAD, catalogue_intro.PAPER_URL, 'Paglieri et al.',
+                     'class="hero"', 'class="stats"', 'class="about about-link"', 'Experiment library',
+                     '<h2>Runs</h2>', catalogue_intro.DISCLAIMER):
+            self.assertNotIn(gone, page)
+        self.assertIn('<footer class="foot" id="about">', page)
         for anchor in ('id="about"', 'href="about.html"', 'id="cards-view"', 'id="table-view"',
                        'id="view-cards"', 'id="view-table"', 'href="#series-small"'):
             self.assertIn(anchor, page)
@@ -280,7 +286,8 @@ class PaneTests(unittest.TestCase):
         line = catalogue_intro.SERIES_LINES['push120']
         self.assertIn(f'<a href="#series-push120" data-series="push120" title="{line}"><span class="sn-t">'
                       '120-minute runs with pushed messages</span><span class="n">1</span></a>', page)
-        self.assertIn(f'<span class="count">1 run</span></h2><p class="series-line">{line}</p><p>', page)
+        self.assertIn(f'<span class="count">1 run</span></h2><p class="series-line">{line}</p>'
+                      '<details class="series-more"><summary>Details</summary><p>', page)
 
 
 class PaneGraphTests(unittest.TestCase):

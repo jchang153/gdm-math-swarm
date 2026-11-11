@@ -53,7 +53,7 @@ class StorymapLinkTests(unittest.TestCase):
         self.assertNotIn('Story map', entries[PLAIN]['links'])
         page = files['experiments.html'].decode()
         self.assertIn(f'href="{MAPPED}/analysis/storymap/index.html"', page)
-        self.assertIn('1 run has an agent story map', page)
+        self.assertNotIn('agent story map', page)  # the slim catalogue has no intro sentence (November 11, 2026)
         again, plan = cf.plan_catalogue(files, unlisted=())  # idempotent
         self.assertEqual(plan['changed_files'], [])
         cf.finish(files, {}, plan)  # the site gate accepts the result

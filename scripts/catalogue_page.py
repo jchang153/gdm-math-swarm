@@ -415,6 +415,12 @@ PANE_TOKENS = (
     f':root[data-theme="dark"]{{{_tokens(_STANCE_DARK, _CAT_DARK)}--fake:#ff5a52;--star:#f2c230}}</style>'
 )
 PANE_STYLE = (
+    # The slim catalogue top and folded series details (owner, November 11, 2026).
+    '.cat-head{padding:20px 0 14px;border-bottom:1px solid var(--line)}.cat-head h1{font-size:clamp(1.5rem,2.6vw,2rem);'
+    'line-height:1.15;margin:0 0 4px;letter-spacing:-.02em}.cat-head .cat-ctx{margin:0;font-size:14.5px;color:var(--muted)}'
+    '.series-more{margin:4px 0 0;font-size:13.5px;color:var(--soft)}.series-more summary{cursor:pointer;color:var(--muted);'
+    'width:max-content}.series-more p{margin:6px 0 0;font-size:14px}'
+    '.cat-head~.cat-wrap{margin-top:18px}'
     # Five panes per row on a wide screen, then 4/3/2/1 (the card breakpoints above).
     '.rc.pane{position:relative;padding:12px 12px 10px;border-radius:14px;gap:0;'
     'transition:border-color .15s,box-shadow .15s,transform .15s}'

@@ -62,6 +62,24 @@ class HighlightsFile(unittest.TestCase):
         ids = [s['id'] for s in data['stories']] + [u['id'] for u in data['upcoming']]
         self.assertEqual(len(ids), len(set(ids)))
 
+    def test_story_order_and_runs(self):
+        """Owner, November 11, 2026: exactly this sequence after the overview chart; the 90-minute spontaneous
+        baseline story is gone."""
+        stories = highlights()['stories']
+        self.assertEqual([s['id'] for s in stories],
+                         ['control', 'one-overseer', 'ten-overseers', 'reminders', 'talk-vs-enforce'])
+        patterns = [r'^glmflash100-seeded-control-120m-push-r\d', r'^glmflash100-seeded-1ov-glm-120m-push-r\d',
+                    r'^glmflash100-seeded-10ov-glm-120m-push-r\d', r'^glmflash100-seeded-reminder5m-120m-push-r\d',
+                    r'^glmflash100-seeded-10ov-glm-180m-notices-(?:commsonly|enforceonly)-r\d']
+        for s, pattern in zip(stories, patterns):
+            self.assertRegex(s['run'], pattern)
+        text = json.dumps(highlights())
+        self.assertNotIn('baseline-90m', text)
+        self.assertNotIn('baseline100', text)
+        (talk,) = [s for s in stories if s['id'] == 'talk-vs-enforce']
+        self.assertEqual([n['value'] for n in talk['numbers']], ['41.7 vs 88.1', '≈25', '174 / 332 / 647'])
+        self.assertTrue(talk['figures'][0]['minus_seed'])
+
     def test_monitor_slot_has_no_numbers(self):
         (monitor,) = [u for u in highlights()['upcoming'] if u['id'] == 'monitors']
         self.assertEqual(monitor['status'], 'pending')
@@ -169,8 +187,27 @@ class RenderExplore(unittest.TestCase):
         self.assertIn('1 run published so far.', page)
         self.assertIn('experiments.html#series-monitor120', page)
 
+    def test_story_order_on_page_and_no_baseline(self):
+        page = explore_page.render_explore(self.entries, self.files)
+        at = [page.index(f'id="{i}"') for i in ('control', 'one-overseer', 'ten-overseers', 'reminders',
+                                                'talk-vs-enforce', 'monitors')]
+        self.assertEqual(at, sorted(at))
+        self.assertLess(page.index('class="sk-dots"'), at[0])  # the overview chart comes first
+        self.assertNotIn('90-minute', page)
+        self.assertNotIn('glm100-baseline-90m', page)
+        self.assertNotIn('id="copying"', page)
+
+    def test_bars_minus_seed(self):
+        spec = {'chart': 'bars', 'title': 't', 'minus_seed': True, 'categories': [
+            {'label': 'c', 'bars': [{'label': 'b', 'color': 1, 'match': '^x-'}]}]}
+        entries = [dict(entry('x-1'), profile=profile(accepted=26)), dict(entry('x-2'), profile=profile(accepted=24))]
+        self.assertIn('average 24</title>', explore_page._bars_chart(spec, entries))
+        self.assertIn('average 25</title>', explore_page._bars_chart(dict(spec, minus_seed=False), entries))
+
     def test_totals(self):
         page = explore_page.render_explore(self.entries, self.files)
+        self.assertIn('agent-hours of run time', page)
+        self.assertNotIn('agent-hours of work', page)
         self.assertIn(f'<dd>{len(self.entries)}</dd>', page)
         self.assertIn(f'<dd>{102 * len(self.entries):,}</dd>', page)
 
