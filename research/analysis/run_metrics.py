@@ -483,18 +483,26 @@ def _ledger_split(ledger, run_name, gaps):
 def cost_block(run, results, settings, runtime, calls, ledger, gaps):
     seeds, overseers = roles_of(settings)
     pilot = ((results or {}).get('budget') or {}).get('pilot') or {}
-    out = {'definition': 'USD; agent = results.json budget.pilot settled + held (the ledger calls of the requests '
-                         'admitted in runtime.jsonl: solvers and overseers; monitor calls have no inference_admitted '
-                         'and are not in it), else the settled inference_finished costs; solver/overseer split from '
-                         'runtime.jsonl; monitor = settled_usd of monitor_scored events, or the ledger rows labelled '
-                         'monitor:<agent> when a ledger copy is given; total = agent + monitor',
+    out = {'definition': 'USD; agent = results.json budget.pilot settled + held minus its monitor subtotal '
+                         '(budget.pilot.monitor: the monitor_admitted requests; runs built before it have no monitor '
+                         'calls in budget.pilot), else the settled inference_finished costs; solver/overseer split '
+                         'from runtime.jsonl; monitor = budget.pilot.monitor settled + held, else settled_usd of '
+                         'monitor_scored events; the ledger rows labelled monitor:<agent> when a ledger copy is '
+                         'given; total = agent + monitor',
            'total_usd': None, 'budget_pilot_usd': None, 'settled_usd': _number(pilot.get('settled_usd')),
            'held_usd': _number(pilot.get('held_usd')), 'solver_usd': None, 'overseer_usd': None,
            'agent_usd': None, 'monitor_usd': None, 'monitor_share': None, 'usd_per_solver': None,
            'agent_tokens': None, 'monitor_tokens': None, 'monitor_cost_source': None}
+    pilot_monitor = pilot.get('monitor') if isinstance(pilot.get('monitor'), dict) else None
+    monitor_in_pilot = None
+    if pilot_monitor is not None:
+        monitor_in_pilot = _round((_number(pilot_monitor.get('settled_usd')) or 0)
+                                  + (_number(pilot_monitor.get('held_usd')) or 0), 6)
     if out['settled_usd'] is not None:
         out['budget_pilot_usd'] = _round(out['settled_usd'] + (out['held_usd'] or 0), 6)
+        agent_pilot = _round(out['budget_pilot_usd'] - (monitor_in_pilot or 0), 6)
     else:
+        agent_pilot = None
         gaps.append('cost: no results.json budget.pilot')
     if runtime is not None:
         solver = overseer = 0.0
@@ -512,8 +520,7 @@ def cost_block(run, results, settings, runtime, calls, ledger, gaps):
             tokens['completion_tokens'] += usage.get('completion_tokens') or 0
             tokens['reasoning_tokens'] += (usage.get('completion_tokens_details') or {}).get('reasoning_tokens') or 0
         out.update(solver_usd=_round(solver, 6), overseer_usd=_round(overseer, 6), agent_tokens=tokens,
-                   agent_usd=out['budget_pilot_usd'] if out['budget_pilot_usd'] is not None
-                   else _round(solver + overseer, 6))
+                   agent_usd=agent_pilot if agent_pilot is not None else _round(solver + overseer, 6))
     else:
         cache = (results or {}).get('cache')
         if isinstance(cache, dict):
@@ -527,14 +534,16 @@ def cost_block(run, results, settings, runtime, calls, ledger, gaps):
         out['monitor_tokens'] = {
             'prompt_tokens': int(sum(c['prompt_tokens'] or 0 for c in calls)),
             'completion_tokens': int(sum(c['completion_tokens'] or 0 for c in calls))}
+    if monitor_in_pilot is not None:
+        out.update(monitor_usd=monitor_in_pilot, monitor_cost_source='results.json budget.pilot.monitor')
     if ledger is not None:
         split = _ledger_split(ledger, Path(run).name, gaps)
         if split:
             out.update(monitor_usd=split['monitor'][0], monitor_cost_source='ledger rows labelled monitor',
                        ledger_monitor_requests=split['monitor'][1], ledger_other_usd=split['other'][0],
                        ledger_other_requests=split['other'][1])
-    if out['agent_usd'] is None and out['budget_pilot_usd'] is not None:
-        out['agent_usd'] = out['budget_pilot_usd']
+    if out['agent_usd'] is None and agent_pilot is not None:
+        out['agent_usd'] = agent_pilot
     if out['agent_usd'] is not None:
         out['total_usd'] = _round(out['agent_usd'] + (out['monitor_usd'] or 0), 6)
     if out['monitor_usd'] is not None and out['total_usd']:

@@ -420,6 +420,92 @@ class CompareArmsTests(unittest.TestCase):
             self.assertEqual(json.loads(target.read_text())['arms']['M1']['metrics']['monitor.blocks']['mean'], 2.0)
 
 
+def _tbr():
+    spec = importlib.util.spec_from_file_location('tbr', ROOT / 'tests' / 'test_build_results.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def add_monitor_events(run):
+    """Monitor calls as research_swarm.inspect_adapter._score records them (e0e366d): admitted, then scored or
+    an error."""
+    lines = [
+        ev(5, 'monitor_admitted', 'agent-001', request_id='m1', reserved_usd='0.2', ledger_agent='monitor:agent-001',
+           agent_request_id='r1'),
+        ev(6, 'monitor_scored', 'agent-001', request_id='m1', settled_usd='0.05', basis='provider_reported_cost',
+           latency_seconds=1.0, agent_request_id='r1'),
+        ev(7, 'monitor_admitted', 'agent-001', request_id='m2', reserved_usd='0.2', ledger_agent='monitor:agent-001'),
+        ev(8, 'monitor_error', 'agent-001', request_id='m2', stage='generate', billing='unbilled_error'),
+        ev(9, 'monitor_admitted', 'agent-002', request_id='m3', reserved_usd='0.2', ledger_agent='monitor:agent-002'),
+        ev(9, 'monitor_error', 'agent-002', request_id='m3', stage='run_stopped'),
+        ev(10, 'monitor_admitted', 'agent-002', request_id='m4', reserved_usd='0.3', ledger_agent='monitor:agent-002'),
+        ev(11, 'monitor_error', 'agent-002', request_id='m4', stage='timeout', billing='uncertain'),
+        ev(12, 'monitor_error', 'agent-002', stage='window', error='KeyError')]  # never admitted: no request id
+    runtime = run / 'runtime.jsonl'
+    old = runtime.read_text().splitlines()
+    # T0 differs between the two fixtures; only the relative order matters here (before run_stop).
+    runtime.write_text('\n'.join(old[:-1] + lines + old[-1:]) + '\n')
+
+
+class MonitorAccountingTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.tbr = _tbr()
+
+    def test_non_monitor_run_has_no_monitor_accounting(self):
+        results, page = self.tbr.generate(self.tbr.make_run(self.tmp.name))
+        self.assertNotIn('monitor', results['budget']['pilot'])
+        self.assertNotIn('Top-down monitor', page)
+        self.assertEqual((results['budget']['pilot']['settled_usd'], results['budget']['pilot']['held_usd']),
+                         ('0.25', '0'))
+
+    def test_monitor_spend_in_run_accounting(self):
+        run = self.tbr.make_run(self.tmp.name)
+        add_monitor_events(run)
+        with contextlib.redirect_stderr(io.StringIO()):
+            results, page = self.tbr.generate(run)
+        pilot = results['budget']['pilot']
+        self.assertEqual((pilot['settled_usd'], pilot['held_usd'], pilot['unresolved_requests'],
+                          pilot['settled_requests'], pilot['unbilled_error_requests']), ('0.3', '0.3', 1, 5, 3))
+        self.assertEqual(pilot['monitor'], {'settled_usd': '0.05', 'held_usd': '0.3', 'unresolved_requests': 1,
+                                            'settled_requests': 3, 'unbilled_error_requests': 2, 'requests': 4})
+        self.assertEqual({a['agent']: a['requests'] for a in results['agents']}, {'agent-001': 1, 'agent-002': 1})
+        self.assertIn('Top-down monitor calls (this run, included above)', page)
+        self.assertIn('$0.05 settled, $0.3 held over 4 requests (1 unresolved)', page)
+        cost = results['outcome_metrics']['cost']
+        self.assertEqual((cost['budget_pilot_usd'], cost['monitor_usd'], cost['agent_usd'], cost['total_usd']),
+                         (0.6, 0.35, 0.25, 0.6))
+        self.assertEqual(cost['monitor_cost_source'], 'results.json budget.pilot.monitor')
+
+    def test_monitor_ids_with_ledger(self):
+        run = self.tbr.make_run(self.tmp.name)
+        add_monitor_events(run)
+        ledger = Path(self.tmp.name) / 'ledger.sqlite'
+        db = sqlite3.connect(ledger)
+        db.execute('CREATE TABLE scopes (name TEXT PRIMARY KEY, cap INTEGER NOT NULL)')
+        db.execute('CREATE TABLE calls (id TEXT PRIMARY KEY, scope TEXT, agent TEXT, reserved INTEGER, actual INTEGER, '
+                   'state TEXT, created TEXT, basis TEXT, settled TEXT)')
+        db.executemany('INSERT INTO scopes VALUES (?,?)', [('pilot', 10_000_000_000), ('compatibility', 0),
+                                                           ('analysis', 0)])
+        db.executemany('INSERT INTO calls VALUES (?,?,?,?,?,?,?,?,?)', [
+            ('r1', 'pilot', 'agent-001', 500_000_000, 250_000_000, 'settled', '', 'provider_reported_cost', ''),
+            ('r2', 'pilot', 'agent-002', 500_000_000, 0, 'settled', '', 'unbilled_error', ''),
+            ('m1', 'pilot', 'monitor:agent-001', 200_000_000, 50_000_000, 'settled', '', 'provider_reported_cost', ''),
+            ('m2', 'pilot', 'monitor:agent-001', 200_000_000, 0, 'settled', '', 'unbilled_error', ''),
+            ('m3', 'pilot', 'monitor:agent-002', 200_000_000, 0, 'settled', '', 'unbilled_error', ''),
+            ('m4', 'pilot', 'monitor:agent-002', 300_000_000, 70_000_000, 'settled', '', 'provider_reported_cost', ''),
+            ('old', 'pilot', 'a', 500_000_000, 3_000_000_000, 'settled', '', 'provider_reported_cost', '')])
+        db.commit()
+        db.close()
+        results, page = self.tbr.generate(run, '--ledger', str(ledger))
+        pilot = results['budget']['pilot']
+        self.assertEqual((pilot['settled_usd'], pilot['held_usd']), ('0.37', '0'))
+        self.assertEqual((pilot['monitor']['settled_usd'], pilot['monitor']['requests']), ('0.12', 4))
+        self.assertIn('$0.12 settled', page)
+
+
 class BuildResultsSectionTests(unittest.TestCase):
     def test_results_carry_outcome_metrics(self):
         import build_results

@@ -61,6 +61,12 @@ budget (docs/plan.md "One per-run budget, no manual approvals (October 20, 2026)
 budget as the pilot row's cap (from the ledger's runs table, else RUN/run-budget.json); the
 cumulative rows show an older ledger's legacy caps only, "not recorded" otherwise.
 
+Top-down monitor calls (docs/plan.md "Top-down monitor arms"): their requests are ledger-admitted in the same run
+budget and recorded as monitor_admitted (request_id, reserved_usd); they count in "budget.pilot" (with --ledger by
+request ID; without it monitor_scored settles a call, a monitor_error with billing unbilled_error or stage
+run_stopped is unbilled, any other monitor_error stays held) and "budget.pilot.monitor" is their subtotal, shown
+under Accounting. Per-agent request counts stay agent requests only. Runs without monitor calls are unchanged.
+
 Seeded runs (track "seeded", owner design 2026-10-25; research/analysis/roles.py): the seeded participant
 (agent-101, role "seed": no container, model or transcript) is left out of the per-agent rows and the solver
 counts; a researcher-only "seeded" block records it (task, channel, trigger, injection time from the
@@ -190,7 +196,7 @@ def json_lines(path):
 def read_runtime(run, stop_utc=None):
     """Single pass over runtime.jsonl."""
     out = {'start': None, 'stop': None, 'reason': None, 'elapsed': None, 'exits': collections.Counter(),
-           'budget_exits': [], 'restarts': 0, 'admitted': {}, 'finished': {}, 'unbilled': set(),
+           'budget_exits': [], 'restarts': 0, 'admitted': {}, 'finished': {}, 'unbilled': set(), 'monitor': set(),
            'tokens': collections.Counter(), 'agents': collections.defaultdict(lambda: {
                'requests': 0, 'finished': 0, 'unbilled': 0, 'restarts': 0, 'exit': None, 'exit_at': None})}
     for event in json_lines(run / 'runtime.jsonl'):
@@ -213,6 +219,21 @@ def read_runtime(run, stop_utc=None):
         elif kind == 'inference_admitted':
             out['admitted'][payload['request_id']] = Decimal(payload.get('reserved_usd') or 0)
             out['agents'][agent]['requests'] += 1
+        elif kind == 'monitor_admitted' and payload.get('request_id') is not None:
+            # Top-down monitor calls (inspect_adapter._score): ledger-admitted in the same run budget, counted
+            # in the run's spending; not an agent request, so the per-agent counts stay agents only.
+            out['admitted'][payload['request_id']] = Decimal(payload.get('reserved_usd') or 0)
+            out['monitor'].add(payload['request_id'])
+        elif kind == 'monitor_scored' and payload.get('request_id') is not None:
+            if payload.get('basis') == 'unbilled_error':
+                out['unbilled'].add(payload['request_id'])
+            elif payload.get('settled_usd') is not None:
+                out['finished'][payload['request_id']] = (payload.get('basis'), payload.get('settled_usd'))
+        elif kind == 'monitor_error' and payload.get('request_id') is not None:
+            # unbilled: the provider billed nothing (or the run stopped before dispatch: settled at 0);
+            # otherwise uncertain, held at its reservation.
+            if payload.get('billing') == 'unbilled_error' or payload.get('stage') == 'run_stopped':
+                out['unbilled'].add(payload['request_id'])
         elif kind == 'inference_unbilled':
             out['unbilled'].add(payload.get('request_id'))
             out['agents'][agent]['unbilled'] += 1
@@ -271,6 +292,25 @@ def recorded_run_budget(run, db=None):
     return None
 
 
+def runtime_subtotal(runtime, ids):
+    """Settled/held USD of the admitted requests ``ids`` from runtime.jsonl alone (the monitor subtotal)."""
+    settled = held = Decimal(0)
+    settled_n = unresolved = 0
+    for request in ids:
+        basis, amount = runtime['finished'].get(request, (None, None))
+        if request in runtime['unbilled']:
+            settled_n += 1
+        elif basis is not None:
+            settled_n += 1
+            settled += Decimal(amount or 0)
+        else:
+            unresolved += 1
+            held += runtime['admitted'].get(request, Decimal(0))
+    return {'settled_usd': dec(settled), 'held_usd': dec(held), 'unresolved_requests': unresolved,
+            'settled_requests': settled_n, 'unbilled_error_requests': len(runtime['unbilled'] & set(ids)),
+            'requests': len(ids)}
+
+
 def budgets(run, runtime, ledger):
     """Run-only pilot spending and the cumulative ledger, each labelled with its source."""
     final = json.loads(regular(run / 'budget-final.json').read_text())
@@ -280,6 +320,9 @@ def budgets(run, runtime, ledger):
             caps = dict(db.execute('SELECT name,cap FROM scopes'))
             budget = recorded_run_budget(run, db)
             pilot, committed = ledger_scope(db, 'pilot', set(runtime['admitted']))
+            if runtime['monitor']:
+                pilot['monitor'] = dict(ledger_scope(db, 'pilot', runtime['monitor'])[0],
+                                        requests=len(runtime['monitor']))
             if budget is not None:
                 pilot['cap_usd'] = dec(budget)
                 pilot['remaining_usd'] = dec(max(Decimal(0), budget - Decimal(committed) * NANO))
@@ -310,6 +353,7 @@ def budgets(run, runtime, ledger):
         else:
             unresolved += 1
             held += reserved
+    monitor = runtime_subtotal(runtime, runtime['monitor']) if runtime['monitor'] else None
     if unresolved:
         print(f'warning: {unresolved} request(s) have no settlement in runtime.jsonl and are reported as held; pass '
               '--ledger with a post-settlement ledger copy for exact run spending', file=sys.stderr)
@@ -319,6 +363,8 @@ def budgets(run, runtime, ledger):
              'provider_reported_cost_usd': dec(provider), 'manual_reconciliation_usd': '0',
              'manual_reconciliation_requests': 0, 'cap_usd': (final.get('pilot') or {}).get('cap_usd'),
              'source': 'runtime.jsonl'}
+    if monitor is not None:
+        pilot['monitor'] = monitor
     budget = recorded_run_budget(run)
     if budget is not None:
         pilot['cap_usd'] = dec(budget)
@@ -999,6 +1045,11 @@ def render(results, title, inspect_logs=(), settings=None):
               ('Manual reconciliation (this run)', f'{money(pilot["manual_reconciliation_usd"])} over '
                                                    f'{pilot["manual_reconciliation_requests"]} requests'),
               ('Unbilled error requests (this run)', pilot['unbilled_error_requests'])]
+    if pilot.get('monitor'):
+        m = pilot['monitor']
+        detail.append(('Top-down monitor calls (this run, included above)',
+                       f'{money(m["settled_usd"])} settled, {money(m["held_usd"])} held over {m["requests"]} requests '
+                       f'({m["unresolved_requests"]} unresolved)'))
     if 'key_usage_counter' in results:
         k = results['key_usage_counter']
         detail += [('Key usage counter since launch', money(k['billed_since_launch_usd'])),
