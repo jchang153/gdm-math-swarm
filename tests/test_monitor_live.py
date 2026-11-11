@@ -138,6 +138,8 @@ class FilterTests(unittest.TestCase):
         self.assertEqual(len(ledger_rows(self.ledger_path)), 2)
         self.assertEqual(self.intercept.state["requests"], 1)
         self.assertEqual(self.kinds("monitor_block_enforced")[0]["tool_use_id"], "t1")
+        self.assertEqual(self.kinds("monitor_lookup_allowed"),
+                         [{"tool_use_id": "t2", "tool": "Bash", "matched_by": "tool_use_id"}])
 
         # The next request carries exactly the block message as t1's result, whatever the CLI wrote.
         denied = ChatMessageTool(tool_call_id="t1", function="Write", content="PreToolUse:Write hook denied: x")

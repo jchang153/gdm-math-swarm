@@ -1201,6 +1201,9 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
             state["monitor_blocks_enforced"] += 1
             record("monitor_block_enforced", agent_id, {"tool_use_id": tool_use_id, "tool": decision.get("tool"),
                                                         "matched_by": matched})
+        else:  # hook coverage: every scored call the hook asked about (smoke check, November 10, 2026)
+            record("monitor_lookup_allowed", agent_id, {"tool_use_id": tool_use_id, "tool": decision.get("tool"),
+                                                        "matched_by": matched})
         return ModelOutput.from_content(model=getattr(model, "name", None) or "bridge", content=lookup_reply(decision))
 
     async def _score(model, messages, output, agent_request_id, generation_seconds):
