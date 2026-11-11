@@ -172,6 +172,7 @@ STYLE = (
     '@media (max-width:420px){.topnav .brand{font-size:13px}.tn-links{gap:12px;font-size:13px}}'
 )
 
+
 # Sorting, filtering, the compare view (2-4 ticked runs, shareable as #compare=RUN,RUN) and, for
 # entries published before the summary columns existed, reading the same fields from the run's
 # own published results.json and judge report.json (same-origin fetch; nothing is sent elsewhere); entries that

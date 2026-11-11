@@ -962,7 +962,7 @@ def render(results, title, inspect_logs=(), settings=None):
     c, ev, judge = results['condition'], results['independent_evaluation'], results['behavior_judge']
     pilot = results['budget']['pilot']
     logs = list(inspect_logs)
-    body = ['<p class="crumbs"><a href="../index.html">All experiments</a></p>',
+    body = ['<p class="crumbs"><a href="../experiments.html">All experiments</a></p>',
             f'<h1>{esc(title or results["run"])}</h1>',
             f'<p><code>{esc(results["run"])}</code> · {esc(results["start_utc"])} to {esc(results["stop_utc"])}</p>',
             summary_card(results), tab_bar(results, logs), '<main id="report">',

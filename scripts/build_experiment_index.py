@@ -25,6 +25,7 @@ from space_navigation import private_space_navigation
 import catalogue_intro
 import run_profile
 import site_look
+import site_nav
 
 ROOT = Path(__file__).resolve().parents[1]
 # Runs the owner removed from the library lists (docs/plan.md, October 20, 2026). Their files
@@ -650,11 +651,37 @@ def pane_script():
     return script
 
 
-def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=None, graphs=None):
+def skin_block(skin):
+    """The ``<style id="site-skin">`` layer of a visual skin's tokens (scripts/site_skin.py, scope 'tokens'; owner,
+    November 10, 2026), placed after every other style so it wins; '' for None (the earlier look)."""
+    if not skin:
+        return ''
+    import site_skin
+    return f'<style id="site-skin" data-skin="{html.escape(skin, quote=True)}">' + site_skin.skin_css(skin, scope='tokens') \
+        + '</style>'
+
+
+def about_page(intro=None, skin=None):
+    """about.html of the math library (owner, November 10, 2026: "Also include a separate about page"): the one About
+    page, scripts/explore_page.render_about (the explanations formerly collapsed at the bottom of the catalogue)."""
+    import explore_page
+    import site_skin
+    return explore_page.render_about(skin=skin or site_skin.DEFAULT)
+
+
+def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=None, graphs=None, skin=None):
     """Render catalogue entries, including previously published remote runs. ``intro``: the module with the
-    library's texts (default catalogue_intro, the math library; catalogue_intro_ib for the ImpossibleBench site)."""
+    library's texts (default catalogue_intro, the math library; catalogue_intro_ib for the ImpossibleBench site).
+
+    The math catalogue (``intro.PANES``) carries the top bar Explore | Experiments | About (scripts/site_nav.py;
+    owner, November 10, 2026). Hosted, only index.html is written: publish_cloudflare.render_catalogue serves it as
+    experiments.html, with about_page() as about.html and the Explore page (scripts/explore_page.py) as
+    index.html. Locally (``hosted=False``) the same catalogue is also written as experiments.html, plus
+    about.html, so the run pages' links work in runs/ (the local library stays a catalogue at index.html). ``skin`` (default ``intro.SKIN``) layers scripts/site_skin.py's CSS on both pages.
+    The ImpossibleBench catalogue is index.html only, as before."""
     intro = intro or catalogue_intro
     panes = getattr(intro, 'PANES', False)  # run panes: math catalogue only (owner, November 6, 2026)
+    skin = skin if skin is not None else getattr(intro, 'SKIN', None)
     runs = Path(runs)
     runs.mkdir(parents=True, exist_ok=True)
     entries = newest_first(entries)
@@ -696,9 +723,9 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
     # The compare view and the filters read the same entries; '<' is escaped so the JSON
     # can never close its script element.
     blob = json.dumps(entries, separators=(',', ':'), ensure_ascii=False).replace('<', '\\u003c')
-    note = ('This public site holds the experiment reports and derived views. Inspect logs and raw records are kept '
-            'in a private Hugging Face dataset that needs read access (Sign in with HF). Preserve the original '
-            'records when moving a run.' if hosted else
+    note = ('This public site holds the experiment reports and derived views. Inspect logs (agent transcripts) and '
+            'raw records are private: this site does not serve them, and the researchers keep them in a private '
+            'dataset.' if hosted else
             'These files are stored on this computer. Raw runs and transcripts are excluded from Git; the code '
             'repository alone is not a backup or a shared results library. Keep the full experiment folder when '
             'backing up or moving a run.')
@@ -720,8 +747,8 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
     body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>{esc(intro.TITLE)}</title><style>' + STYLE + (PANE_STYLE if panes else '') + '</style>'
-            + (PANE_TOKENS + site_look.block() if panes else '') + '</head><body>'
-            + intro.hero(stats)
+            + (PANE_TOKENS + site_look.block() + skin_block(skin) if panes else '') + '</head><body>'
+            + (intro.hero(stats, nav=False) if panes else intro.hero(stats))
             + (live_section(entries) if hosted else '')
             # Run panes: the run categories move into a sticky sidebar (owner, November 6, 2026).
             + ('<div class="cat-wrap"><aside class="snav-col">'
@@ -771,13 +798,19 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
             'published for the run; "…" means the entry predates these columns and the run\'s own records could '
             'not be read here.</dd>' + glossary + '</dl></details></section>'
             + ('</div></div>' if panes else '')
-            + intro.about_section() +
+            + (intro.about_link() if panes else intro.about_section()) +
             f'<footer class="foot"><p>{esc(note)}</p></footer>'
             f'<script type="application/json" id="catalogue-data">{blob}</script>'
             + (pane_labels(entries, labels) if panes else '') +
             '<script>' + (pane_script() if panes else SCRIPT.replace('/*CARDJS*/', run_profile.CARD_JS)) + '</script></body></html>')
     body = themed(body)
-    (runs / 'index.html').write_text(private_space_navigation(body) if hosted else body)
+    if panes:
+        body = site_nav.apply(body, 'experiments')
+    page = private_space_navigation(body) if hosted else body
+    (runs / 'index.html').write_text(page)
+    if panes and not hosted:  # the local library: both names and the About page, so run pages' links work
+        (runs / site_nav.EXPERIMENTS).write_text(page)
+        (runs / site_nav.ABOUT).write_text(about_page(intro, skin))
     (runs / 'experiments.json').write_text(json.dumps({'schema': 'gdm-experiment-index/1', 'experiments': entries, 'warnings': warnings}, indent=2))
     return {'index': str(runs / 'index.html'), 'experiments': len(entries), 'warnings': warnings}
 

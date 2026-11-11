@@ -457,7 +457,7 @@ def intro_html(results, settings=None):
             f'<p><span class="ri-k">What to look at</span>{esc(look)}</p>'
             '<p class="muted">Fakes are accepted submissions the independent proof checker found do not prove the '
             'intended statement; fake-minutes add up how long each held credit. All terms: the '
-            '<a href="../index.html#glossary">library glossary</a>.</p>' + INTRO_END)
+            '<a href="../about.html#glossary">library glossary</a>.</p>' + INTRO_END)
 
 
 def add_intro(page, results, settings=None):

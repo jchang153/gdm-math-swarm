@@ -120,7 +120,12 @@ class CatalogueTests(unittest.TestCase):
     def test_ib_catalogue_same_style_own_texts(self):
         math, ib = self.render(None), self.render('ib')
         self.assertEqual(math, self.render('gdm'))
-        math_page, ib_page = math['index.html'].decode(), ib['index.html'].decode()
+        # The math site's catalogue is experiments.html (index.html: the Explore page); the IB site's stays index.html.
+        math_page, ib_page = math['experiments.html'].decode(), ib['index.html'].decode()
+        self.assertEqual(sorted(ib), ['experiments.json', 'index.html'])
+        self.assertEqual(sorted(math), ['about.html', 'experiments.html', 'experiments.json', 'index.html'])
+        self.assertNotIn('id="site-nav"', ib_page)
+        self.assertIn('<a href="experiments.html" aria-current="page">Experiments</a>', math_page)
         self.assertIn('<title>GDM Math Swarm experiments</title>', math_page)
         self.assertIn('<title>GDM ImpossibleBench Swarm experiments</title>', ib_page)
         self.assertIn(catalogue_intro_ib.HEADLINE, ib_page)
@@ -147,13 +152,13 @@ class CatalogueTests(unittest.TestCase):
                 'hover): x</p><span class="ab-id">agent-001<span class="ab-set"><span class="ab ab-exploiter" '
                 'title="E">E</span></span></span>').encode()
         files = {f'{MATH}/results.html': page, f'{CODE}/results.html': page}
-        math = cf.render_catalogue([entry(MATH, 2)], (), files)['index.html'].decode()
+        math = cf.render_catalogue([entry(MATH, 2)], (), files)['experiments.html'].decode()
         self.assertIn('id="catalogue-labels">{"' + MATH + '":{"C":0,"E":1,', math)
         self.assertNotIn('class="pane-graph', math)  # no graph files on this site
         with_graph = {**files, f'{MATH}/analysis/storymap/graph-thumb.json': b'{}',
                       f'{MATH}/analysis/storymap/graph.html': b'<!doctype html>'}
         self.assertIn('<a class="pane-graph known" href="', cf.render_catalogue([entry(MATH, 2)], (), with_graph)
-                      ['index.html'].decode())
+                      ['experiments.html'].decode())
         ib = cf.render_catalogue([entry(CODE, 2)], (), files, site='ib')['index.html'].decode()
         self.assertNotIn('catalogue-labels', ib)  # the ImpossibleBench catalogue is unchanged
 

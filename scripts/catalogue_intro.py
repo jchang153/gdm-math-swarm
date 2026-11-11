@@ -19,6 +19,10 @@ PAPER_LABEL = 'Reconstructs'
 # Run panes with the interaction graph (owner, November 6, 2026): math catalogue only; catalogue_intro_ib.py leaves
 # this unset, so the ImpossibleBench catalogue keeps its cards.
 PANES = True
+# Visual skin of the math site's experiments.html (owner, November 10, 2026: "explore more stylistic options";
+# "yes i like editorial"): a name for scripts/site_skin.py, whose tokens (skin_css(name, scope='tokens')) are layered
+# on top of catalogue_page.STYLE; None keeps the earlier look. Explore and About use site_skin.DEFAULT.
+SKIN = 'editorial'
 
 PAPER_URL = 'https://arxiv.org/pdf/2609.04170'
 PAPER_TITLE = 'A Case Study on Emergent Cheating and Whistleblowing in Autonomous Research Swarms'
@@ -71,8 +75,9 @@ PAGES = (
      'its conference outcome and independent validity, reverts, proof checks and spend.'),
     ('Conference', 'What happened inside the conference: bulletin board posts, direct messages, library revisions, '
      'judging, organizer feedback and the agents\' captured private files, on the run clock.'),
-    ('Inspect View', 'Full agent transcripts: every model message and tool call. On the hosted site the logs live in a '
-     'private dataset, so Inspect View asks you to sign in with Hugging Face.'),
+    ('Inspect View', 'The viewer for full agent transcripts (every model message and tool call). The transcripts '
+     'themselves are private: this public site does not serve them, and Inspect View shows a notice instead, with a '
+     'link to the private logs dataset for members of the research team.'),
     ('Behavior judge', 'A researcher-only, model-graded reading of every transcript: who considered, explored, '
      'submitted or was credited with a cheat, and who blew the whistle.'),
     ('Incident report', 'A narrative write-up of what happened, with quotes checked word for word against the '
@@ -133,13 +138,14 @@ def topnav(text=None):
             f'<a href="{t.PAPER_URL}" target="_blank" rel="noopener noreferrer">Paper</a></span></nav>')
 
 
-def hero(stats, text=None):
+def hero(stats, text=None, nav=True):
     """The page top: navigation, title, a two-sentence summary, headline numbers and the compact paper credit.
-    stats: [(label, number)]; ``text``: the module holding the site's texts (default: this one)."""
+    stats: [(label, number)]; ``text``: the module holding the site's texts (default: this one). ``nav=False``
+    leaves out the in-page jump bar (the math site has the site-wide top bar instead, scripts/site_nav.py)."""
     t = _text(text)
     tiles = ''.join(f'<div><dt>{html.escape(k)}</dt><dd>{_fmt(v) if isinstance(v, int) else html.escape(str(v))}</dd></div>'
                     for k, v in stats)
-    return (topnav(t) + '<header class="hero" id="top"><p class="eyebrow">Experiment library</p>'
+    return ((topnav(t) if nav else '') + '<header class="hero" id="top"><p class="eyebrow">Experiment library</p>'
             f'<h1>{html.escape(t.HEADLINE)}</h1>'
             f'<p class="lead">{html.escape(t.LEAD)}</p><dl class="stats">{tiles}</dl>'
             f'<p class="paper"><span class="paper-k">{html.escape(t.PAPER_LABEL)}</span> {t.PAPER}. '
@@ -206,3 +212,11 @@ def series_nav(series, total, text=None):
                      + (f' title="{html.escape(line, quote=True)}"' if line else '')
                      + f'><span class="sn-t">{html.escape(title)}</span><span class="n">{count}</span></a>')
     return ('<nav class="snav jump" aria-label="Series"><p class="snav-h">Series</p>' + ''.join(items) + '</nav>')
+
+
+def about_link():
+    """The catalogue's pointer to about.html (math site, November 10, 2026: the explanations moved there)."""
+    return ('<section class="about about-link" id="about"><h2>About this library</h2><p class="sub">The objective, the '
+            'paper this reconstructs, how a run works, how to read a run\'s pages and the glossary are on the '
+            '<a href="about.html">About page</a> (<a href="about.html#glossary">glossary</a>).</p></section>')
+

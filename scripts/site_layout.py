@@ -16,6 +16,7 @@ import json
 import re
 
 import site_look
+import site_nav
 
 MARKER = 'id="site-layout"'
 MEASURE = '70ch'
@@ -131,7 +132,13 @@ def apply(name, document, read=None, overview=True):
             if css:
                 document = _insert_style(document, css)
             # The site look (fonts, buttons, shadows; owner, November 6, 2026): math site only, like the overview.
-            return site_look.apply(document) if overview and 'eference-test evaluator' not in document else document
+            if not overview or 'eference-test evaluator' in document:
+                return document
+            # The top bar Explore | Experiments | About (owner, November 10, 2026; scripts/site_nav.py), with
+            # paths from the page's place in its run folder, and the library links pointed at experiments.html.
+            relative = name[pattern.search(name).start():].lstrip('/')
+            document = site_nav.apply(site_nav.back_links(document), None, site_nav.prefix_for(relative))
+            return site_look.apply(document)
     return document
 
 

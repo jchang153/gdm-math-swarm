@@ -23,9 +23,11 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
         them point to the site's private-records notice.
     publish_cloudflare.py restyle [--run RUN ...] [--commit] [--receipt FILE]
         Re-render the layout of pages already on the site (``site_layout.apply``: results.html, the conference
-        view and the simplified judge report of every run, or only the given runs) and the catalogue page from
-        its entries. Only existing .html pages change; text, links, records and every other file stay as
-        served, and each replacement is recorded with old and new digests.
+        view and the simplified judge report of every run, or only the given runs) and the root pages from the
+        catalogue entries. Only existing .html pages change: the layout, and on the math site the top bar
+        Explore | Experiments | About with the library links pointed at experiments.html (scripts/site_nav.py,
+        November 10, 2026); text, records and every other file stay as served, and each replacement is recorded
+        with old and new digests.
     publish_cloudflare.py repack [--commit] [--receipt FILE]
         Pack every run's folders of many files (``PACK_GROUPS``: per-agent instructions and prompts, the proof
         checker's sources, story map agent pages, behavior judge per-agent files) into RUN/packed/ (pack files with
@@ -37,8 +39,10 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
         Remove runs already recorded in data/library-unlisted.json from the site (every file of each run; the
         catalogue is re-rendered without them). Other runs never change; private copies are untouched.
     publish_cloudflare.py catalogue [--commit] [--receipt FILE]
-        Re-render only the catalogue (index.html, experiments.json) from its entries; each entry's "Story map" link
-        follows whether RUN/analysis/storymap/index.html is on the site. No run file changes.
+        Re-render only the root pages from the catalogue entries (math site: index.html the Explore page,
+        experiments.html the catalogue, about.html; ImpossibleBench site: index.html the catalogue) and
+        experiments.json; each entry's "Story map" link follows whether RUN/analysis/storymap/index.html is on the
+        site. No run file changes.
     publish_cloudflare.py correct --run RUN --file PATH=LOCAL [--file ...] [--entry ENTRY_JSON] [--commit]
         Replace named records of a run already on the site with corrected bytes, only after an owner decision
         recorded in docs/plan.md (first use: 2ov r1's complete-evaluation records, November 4, 2026). Each PATH
@@ -103,12 +107,14 @@ import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_experiment_index import (GRAPH_PAGE, GRAPH_THUMB, STORYMAP_LABEL, STORYMAP_TARGET,  # noqa: E402
-                                    agent_label_counts, unlisted_runs, with_storymap_link, write_index)
+                                    about_page, agent_label_counts, unlisted_runs, with_storymap_link, write_index)
 import dataset_logs  # noqa: E402
 import deploy_lock  # noqa: E402
 import hf_visibility  # noqa: E402
 import site_layout  # noqa: E402
 import site_look  # noqa: E402
+import site_nav  # noqa: E402
+import explore_page  # noqa: E402
 import site_style  # noqa: E402
 import simple_judge_site  # noqa: E402
 import storymap_site  # noqa: E402
@@ -603,7 +609,7 @@ def repoint_private_links(files, pages=None):
     return files, changed
 
 
-def private_page():
+def private_page(catalogue_page='index.html'):
     from site_style import themed
     body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1"><title>Private records</title>'
@@ -611,7 +617,7 @@ def private_page():
             'background:var(--bg);color:var(--fg)}a{color:var(--link)}</style></head><body>'
             '<h1>Private records</h1><p>Inspect logs (agent transcripts), raw JSONL records, snapshots, databases, '
             'activity timelines and resume bundles are private. They are not served by this public site; the '
-            'researchers keep them.</p><p><a href="index.html">Back to the experiment library</a></p></body></html>')
+            f'researchers keep them.</p><p><a href="{catalogue_page}">Back to the experiment library</a></p></body></html>')
     return themed(body).encode()
 
 
@@ -744,9 +750,19 @@ def run_of(name):
     return name.split('/')[0] if '/' in name else None
 
 
+# The root pages a catalogue render writes. Math site (owner, November 10, 2026): index.html is the Explore page
+# (scripts/explore_page.py), experiments.html the catalogue, about.html the explanations; the ImpossibleBench site
+# (render_explore returns None) keeps its catalogue as index.html.
+CATALOGUE_FILES = ('index.html', site_nav.EXPERIMENTS, site_nav.ABOUT, 'experiments.json')
+
+
 def render_catalogue(entries, unlisted, files=None, site=None):
     """The catalogue pages; with ``files`` (the site after the change), each entry's Story map link follows
-    whether RUN/analysis/storymap/index.html is on the site. ``site`` picks the catalogue texts."""
+    whether RUN/analysis/storymap/index.html is on the site. ``site`` picks the catalogue texts.
+
+    Returns {'index.html', 'experiments.json'} and, when the site has an Explore page (math site), also
+    'experiments.html' (the catalogue) and 'about.html', with index.html the Explore page (top bar and the
+    forwarder of catalogue-style deep links, scripts/site_nav.py)."""
     site = site_of(site)
     entries = [x for x in entries if x['run'] not in unlisted]
     if files is not None:
@@ -769,7 +785,15 @@ def render_catalogue(entries, unlisted, files=None, site=None):
             write_index(tmp, entries, hosted=True, labels=labels, graphs=graphs)
         else:
             write_index(tmp, entries, hosted=True, intro=importlib.import_module(site.intro))
-        return {name: (Path(tmp) / name).read_bytes() for name in ('index.html', 'experiments.json')}
+        explore = explore_page.render_explore(entries, files, site=site.key)
+        if explore is None:
+            return {name: (Path(tmp) / name).read_bytes() for name in ('index.html', 'experiments.json')}
+        pages = {site_nav.EXPERIMENTS: (Path(tmp) / 'index.html').read_bytes(),
+                 site_nav.ABOUT: about_page().encode('utf-8'),
+                 'experiments.json': (Path(tmp) / 'experiments.json').read_bytes()}
+        # The Explore page brings its own top bar (site_skin.nav); only the deep-link forwarder is added.
+        pages['index.html'] = site_nav.with_forwarder(explore).encode('utf-8')
+        return pages
 
 
 def space_files(snapshot):
@@ -805,9 +829,10 @@ def plan_mirror(base_files, space, revision, unlisted, site=None):
     kept = {n: d for n, d in base_files.items() if run_of(n) and run_of(n) not in space_runs}
     files = {**kept, **space}
     preserved = sorted({run_of(n) for n in kept})
-    if preserved:  # another collaborator's runs published only on the site: keep their catalogue entries
-        site_only = [e for e in catalogue(base_files) if e['run'] in preserved]
-        files.update(render_catalogue(merge_entries(catalogue(space), site_only), unlisted, files, site=site))
+    # Another collaborator's runs published only on the site keep their catalogue entries. The root pages are
+    # always re-rendered (Explore, experiments.html, about.html; November 10, 2026), never the Space's catalogue.
+    site_only = [e for e in catalogue(base_files) if e['run'] in preserved]
+    files.update(render_catalogue(merge_entries(catalogue(space), site_only), unlisted, files, site=site))
     changed = sorted(n for n in space if run_of(n) and n in base_files and base_files[n] != space[n])
     removed = sorted(n for n in base_files if n not in files and n not in GENERATED)  # run files the Space removed
     return files, {'source': {'kind': 'hf-space', 'repo': hf_visibility.SPACE_REPO, 'revision': revision},
@@ -888,14 +913,15 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
                 raise ValueError('Immutable site run file differs: ' + run + '/' + PACK_FOLDER)
     pages = [n for n in files if run_of(n) in selected and n.endswith('.html')]
     files.update(storymap_site.graph_assets(files))  # graph.html shells load the site's shared viewer
+    entries = merge_entries(catalogue(base_files), incoming)
+    check_domains({n: d for n, d in files.items() if run_of(n) in selected}, site)
+    # The root pages first: the bundle's pages link experiments.html and about.html (top bar, November 10, 2026).
+    files.update(render_catalogue(entries, unlisted, files, site=site))
     files, repointed = repoint_private_links(files, pages)
     broken = broken_links(files, pages)
     if broken:  # a page of the bundle links a file the site would not serve
         raise ValueError(f'{len(broken)} broken link(s) in the bundle\'s pages, e.g. '
                          + '; '.join(f'{p} -> {u}' for p, u, _ in broken[:5]))
-    entries = merge_entries(catalogue(base_files), incoming)
-    check_domains({n: d for n, d in files.items() if run_of(n) in selected}, site)
-    files.update(render_catalogue(entries, unlisted, files, site=site))
     if 'archive-manifest.json' in base_files:  # the HF-origin run record; new runs are recorded in site-manifest
         files['archive-manifest.json'] = base_files['archive-manifest.json']
     return files, {'source': {'kind': 'bundle', 'runs': sorted(selected),
@@ -1104,7 +1130,7 @@ def plan_catalogue(base_files, unlisted, site=None):
     links follow the story map pages on the site). No run file changes."""
     files = dict(base_files)
     files.update(render_catalogue(catalogue(base_files), unlisted, base_files, site=site))
-    changed = sorted(n for n in ('index.html', 'experiments.json') if base_files.get(n) != files[n])
+    changed = sorted(n for n in CATALOGUE_FILES if n in files and base_files.get(n) != files[n])
     return files, {'source': {'kind': 'catalogue'}, 'changed_files': changed,
                    'storymap_links': sorted(e['run'] for e in catalogue(files) if STORYMAP_LABEL in e['links'])}
 
@@ -1201,7 +1227,7 @@ def finish(files, base_manifest, plan, project=None, site=None, consume=False):
     if site.domain == 'lean':  # the math site's self-hosted fonts (scripts/site_look.py; owner, November 6, 2026)
         files.update(site_look.font_assets())
     files[NOT_FOUND] = not_found_page()
-    files[PRIVATE_PAGE] = private_page()
+    files[PRIVATE_PAGE] = private_page(site_nav.EXPERIMENTS if site_nav.EXPERIMENTS in files else 'index.html')
     for name, data in files.items():
         site_gate(name, data)
     entries = catalogue(files)
@@ -1263,7 +1289,7 @@ def deploy(files, base, message, workdir, runner=subprocess.run, project=PROJECT
 
 # --- verify --------------------------------------------------------------------------------------------------
 
-PAGES = ('index.html', '{run}/results.html', '{run}/conference-view/index.html', '{run}/inspect-view/index.html')
+PAGES = ('index.html', site_nav.EXPERIMENTS, site_nav.ABOUT, '{run}/results.html', '{run}/conference-view/index.html', '{run}/inspect-view/index.html')
 LOG_DOWNLOAD_LINK = re.compile(rb'href="[^"]*\binspect/[^"/]*\.eval"')
 SAME_SITE = re.compile(r'''\b(?:href|src)=["']([^"'#?]*)''', re.I)
 
@@ -1485,7 +1511,8 @@ def main(argv=None):
     heat = sub.add_parser('heatmap', help='add the "Faking over time" heatmap to runs already on the site')
     heat.add_argument('--run', action='append', required=True,
                       help='RUN=FOLDER holding faking_heatmap.py output (repeatable)')
-    cat = sub.add_parser('catalogue', help='re-render only the catalogue (index.html, experiments.json)')
+    cat = sub.add_parser('catalogue', help='re-render only the root pages (index.html, experiments.html, about.html, '
+                                           'experiments.json)')
     fix = sub.add_parser('correct', help='replace named records of a run with corrected bytes (owner decision)')
     fix.add_argument('--run', required=True)
     fix.add_argument('--file', action='append', default=[], help='PATH=LOCAL: run-relative served record (repeatable)')

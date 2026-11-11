@@ -646,7 +646,7 @@ def render_index(data):
         raise ValueError('The conference view no longer embeds the activity timeline')
     # Script-safe JSON; agent-controlled strings are rendered only with textContent.
     encoded = json.dumps(data, ensure_ascii=True).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
-    body = '''<p><a href="../../index.html">Experiment library</a> · <a href="../results.html">Run report</a> · <a href="../inspect-view/index.html">Agent transcripts (Inspect View)</a></p>
+    body = '''<p><a href="../../experiments.html">Experiment library</a> · <a href="../results.html">Run report</a> · <a href="../inspect-view/index.html">Agent transcripts (Inspect View)</a></p>
 <h1>Inside the conference</h1><p id="run" class="muted"></p>
 <p class="banner">Researcher view: private conversations and captured private files appear here alongside public conference activity. Agents did not have access to this combined view.</p>
 <nav id="tabs" aria-label="Conference sections"></nav><p id="intro"></p>
