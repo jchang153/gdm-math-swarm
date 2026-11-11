@@ -1755,11 +1755,12 @@ is being merged into main via `collab-env`.
 39. **IN CODE 2026-11-10 (branch `worktree-agent-aa17329ed85272ec7`, not merged, not deployed): user-facing site with
     Explore, Experiments and About pages** (owner requests, November 10, 2026: "make the website more user-facing ...
     an "explore" page which is the main page, then "experiments" page which lists all of them"; "Also include a
-    separate about page"). Root pages of the math site: `index.html` = Explore (`scripts/explore_page.py`, designed
-    separately; a placeholder stub on this branch), `experiments.html` = the catalogue, `about.html` = the former
-    About section; top bar Explore | Experiments | About on every generated page (`scripts/site_nav.py`); old
-    catalogue deep links on `index.html` forward to `experiments.html` (or `about.html` for the About anchors).
-    Visual skin hook: `catalogue_intro.SKIN` + `scripts/site_skin.py` (not yet on the branch). ImpossibleBench site
+    separate about page"). Root pages of the math site: `index.html` = Explore (`scripts/explore_page.py`, with stories
+    and curated in `scripts/explore_highlights.json`), `experiments.html` = the catalogue, `about.html` = the former
+    About section (`explore_page.render_about`); top bar Explore | Experiments | About on every generated page
+    (`scripts/site_nav.py`); old catalogue deep links on `index.html` forward to `experiments.html` (or `about.html`
+    for the About anchors). Owner picked the **editorial** skin (`scripts/site_skin.py`; "yes i like editorial"):
+    full skin on Explore and About, its tokens on `experiments.html` (`catalogue_intro.SKIN`). ImpossibleBench site
     unchanged. Details: docs/experiment-library.md, "Root pages". **Deploy (one at a time, after the 12 monitor runs
     are published):** merge, then `publish_cloudflare.py restyle` (plan) and `restyle --commit`, then `verify`.
     Offline plan on the 2026-11-10 site (97 runs): 571 run pages re-rendered (96 results, 97 conference, 92 incident,

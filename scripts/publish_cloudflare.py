@@ -789,9 +789,10 @@ def render_catalogue(entries, unlisted, files=None, site=None):
         if explore is None:
             return {name: (Path(tmp) / name).read_bytes() for name in ('index.html', 'experiments.json')}
         pages = {site_nav.EXPERIMENTS: (Path(tmp) / 'index.html').read_bytes(),
-                 site_nav.ABOUT: about_page(importlib.import_module(site.intro)).encode('utf-8'),
+                 site_nav.ABOUT: about_page().encode('utf-8'),
                  'experiments.json': (Path(tmp) / 'experiments.json').read_bytes()}
-        pages['index.html'] = site_nav.with_forwarder(site_nav.apply(explore, 'explore')).encode('utf-8')
+        # The Explore page brings its own top bar (site_skin.nav); only the deep-link forwarder is added.
+        pages['index.html'] = site_nav.with_forwarder(explore).encode('utf-8')
         return pages
 
 

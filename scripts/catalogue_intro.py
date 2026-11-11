@@ -19,10 +19,10 @@ PAPER_LABEL = 'Reconstructs'
 # Run panes with the interaction graph (owner, November 6, 2026): math catalogue only; catalogue_intro_ib.py leaves
 # this unset, so the ImpossibleBench catalogue keeps its cards.
 PANES = True
-# Visual skin of the math site's experiments.html and about.html (owner, November 10, 2026: "explore more stylistic
-# options"): a name for scripts/site_skin.py's skin_css(name), layered on top of catalogue_page.STYLE; None keeps
-# the current look. Changing this one line restyles both pages on the next catalogue render.
-SKIN = None
+# Visual skin of the math site's experiments.html (owner, November 10, 2026: "explore more stylistic options";
+# "yes i like editorial"): a name for scripts/site_skin.py, whose tokens (skin_css(name, scope='tokens')) are layered
+# on top of catalogue_page.STYLE; None keeps the earlier look. Explore and About use site_skin.DEFAULT.
+SKIN = 'editorial'
 
 PAPER_URL = 'https://arxiv.org/pdf/2609.04170'
 PAPER_TITLE = 'A Case Study on Emergent Cheating and Whistleblowing in Autonomous Research Swarms'
@@ -75,8 +75,9 @@ PAGES = (
      'its conference outcome and independent validity, reverts, proof checks and spend.'),
     ('Conference', 'What happened inside the conference: bulletin board posts, direct messages, library revisions, '
      'judging, organizer feedback and the agents\' captured private files, on the run clock.'),
-    ('Inspect View', 'Full agent transcripts: every model message and tool call. On the hosted site the logs live in a '
-     'private dataset, so Inspect View asks you to sign in with Hugging Face.'),
+    ('Inspect View', 'The viewer for full agent transcripts (every model message and tool call). The transcripts '
+     'themselves are private: this public site does not serve them, and Inspect View shows a notice instead, with a '
+     'link to the private logs dataset for members of the research team.'),
     ('Behavior judge', 'A researcher-only, model-graded reading of every transcript: who considered, explored, '
      'submitted or was credited with a cheat, and who blew the whistle.'),
     ('Incident report', 'A narrative write-up of what happened, with quotes checked word for word against the '
@@ -219,28 +220,3 @@ def about_link():
             'paper this reconstructs, how a run works, how to read a run\'s pages and the glossary are on the '
             '<a href="about.html">About page</a> (<a href="about.html#glossary">glossary</a>).</p></section>')
 
-
-def about_page_body(text=None, extra_terms=''):
-    """The body of about.html (math site, owner, November 10, 2026): the objective and the paper, then the
-    experiment, how a run works, how to read the site and the glossary, all open. ``extra_terms``: more glossary
-    entries as ready <div><dt>..</dt><dd>..</dd></div> markup (the rubric-3.1 judge cohorts)."""
-    x = _text(text)
-    exp = ''.join(f'<li><strong>{html.escape(t)}.</strong> {d}</li>' for t, d in x.EXPERIMENT)
-    steps = ''.join(f'<li><strong>{html.escape(t)}</strong><span>{html.escape(d)}</span></li>' for t, d in x.STEPS)
-    pages = ''.join(f'<div><dt>{html.escape(t)}</dt><dd>{html.escape(d)}</dd></div>' for t, d in x.PAGES)
-    terms = ''.join(f'<div><dt>{html.escape(t)}</dt><dd>{html.escape(d)}</dd></div>' for t, d in x.GLOSSARY)
-    jump = ''.join(f'<a href="#{k}">{html.escape(t)}</a>' for k, t in (
-        ('experiment', 'The experiment'), ('how', 'How a run works'), ('read', 'How to read this site'),
-        ('glossary', 'Glossary')))
-    return ('<header class="hero about-hero" id="top"><p class="eyebrow">About</p>'
-            f'<h1>{html.escape(x.HEADLINE)}</h1><p class="lead">{html.escape(x.LEAD)}</p>'
-            f'<p class="paper"><span class="paper-k">{html.escape(x.PAPER_LABEL)}</span> {x.PAPER}. '
-            f'<span class="muted">{html.escape(x.DISCLAIMER)}</span></p>'
-            f'<nav class="toc jump about-jump" aria-label="On this page">{jump}</nav></header>'
-            '<main class="about about-page">'
-            f'<section id="experiment"><h2>The experiment</h2><ul class="facts">{exp}</ul></section>'
-            f'<section id="how"><h2>How a run works</h2><ol class="steps">{steps}</ol></section>'
-            '<section id="read"><h2>How to read this site</h2><p class="sub">Each run has these pages; open them '
-            f'from its pane on the <a href="experiments.html">Experiments</a> page.</p><dl class="defs">{pages}</dl>'
-            '</section>'
-            f'<section id="glossary"><h2>Glossary</h2><dl class="defs">{terms}{extra_terms}</dl></section></main>')

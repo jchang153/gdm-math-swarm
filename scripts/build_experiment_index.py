@@ -18,7 +18,7 @@ from incident_site import has_incident_report, with_incident_link
 from simple_judge_site import (CATALOGUE_LABEL as SIMPLE_LABEL, SJ_REPORT, has_simple_judge, simple_report,
                                simple_summary, simple_text, with_simple_judge_link)
 from run_clock import CLOCK_JS
-from catalogue_page import (ABOUT_STYLE, CHEATING, COHORT_GLOSS, COHORT_LABELS, COHORTS, FLAGGED, PANE_JS, PANE_STYLE,
+from catalogue_page import (CHEATING, COHORT_GLOSS, COHORT_LABELS, COHORTS, FLAGGED, PANE_JS, PANE_STYLE,
                             PANE_TOKENS, SCRIPT, STYLE, hidden_link)
 from site_style import themed
 from space_navigation import private_space_navigation
@@ -652,26 +652,21 @@ def pane_script():
 
 
 def skin_block(skin):
-    """The ``<style id="site-skin">`` layer of a visual skin (scripts/site_skin.py; owner, November 10, 2026), placed
-    after every other style so it wins; '' for None (the current look)."""
+    """The ``<style id="site-skin">`` layer of a visual skin's tokens (scripts/site_skin.py, scope 'tokens'; owner,
+    November 10, 2026), placed after every other style so it wins; '' for None (the earlier look)."""
     if not skin:
         return ''
     import site_skin
-    return '<style id="site-skin">' + site_skin.skin_css(skin) + '</style>'
+    return f'<style id="site-skin" data-skin="{html.escape(skin, quote=True)}">' + site_skin.skin_css(skin, scope='tokens') \
+        + '</style>'
 
 
 def about_page(intro=None, skin=None):
-    """about.html of the math library (owner, November 10, 2026): the explanations formerly collapsed at the bottom of
-    the catalogue, with the site's top bar (About current). ``skin``: see skin_block."""
-    intro = intro or catalogue_intro
-    terms = ''.join(f'<div><dt>{html.escape(COHORT_LABELS[k][1].capitalize())} (rubric 3.1)</dt>'
-                    f'<dd>{html.escape(COHORT_GLOSS[k])}</dd></div>' for k in COHORTS)
-    body = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
-            '<meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>About · {html.escape(intro.TITLE)}</title><style>' + STYLE + ABOUT_STYLE + '</style>'
-            + PANE_TOKENS + site_look.block() + skin_block(skin) + '</head><body>'
-            + intro.about_page_body(extra_terms=terms) + '</body></html>')
-    return site_nav.apply(themed(body), 'about')
+    """about.html of the math library (owner, November 10, 2026: "Also include a separate about page"): the one About
+    page, scripts/explore_page.render_about (the explanations formerly collapsed at the bottom of the catalogue)."""
+    import explore_page
+    import site_skin
+    return explore_page.render_about(skin=skin or site_skin.DEFAULT)
 
 
 def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=None, graphs=None, skin=None):
@@ -728,9 +723,9 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
     # The compare view and the filters read the same entries; '<' is escaped so the JSON
     # can never close its script element.
     blob = json.dumps(entries, separators=(',', ':'), ensure_ascii=False).replace('<', '\\u003c')
-    note = ('This public site holds the experiment reports and derived views. Inspect logs and raw records are kept '
-            'in a private Hugging Face dataset that needs read access (Sign in with HF). Preserve the original '
-            'records when moving a run.' if hosted else
+    note = ('This public site holds the experiment reports and derived views. Inspect logs (agent transcripts) and '
+            'raw records are private: this site does not serve them, and the researchers keep them in a private '
+            'dataset.' if hosted else
             'These files are stored on this computer. Raw runs and transcripts are excluded from Git; the code '
             'repository alone is not a backup or a shared results library. Keep the full experiment folder when '
             'backing up or moving a run.')

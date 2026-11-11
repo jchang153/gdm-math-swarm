@@ -40,8 +40,11 @@ static assets on a paid plan (100,000 files). `publish_cloudflare.py` refuses a 
 (a few highlighted runs with large graphs; `scripts/explore_page.py`, `render_explore(entries, files, site)`),
 `experiments.html` is the catalogue formerly served as `index.html` (short intro plus the browsable run list;
 `build_experiment_index.write_index`), and `about.html` holds the explanations formerly collapsed at the bottom of
-the catalogue (objective, the reconstructed paper, the experiment, how a run works, how to read the site, the
-glossary including the rubric-3.1 cohorts; `build_experiment_index.about_page`, texts in `catalogue_intro.py`).
+the catalogue (the setup, how a run works, how to read a run's pages, key terms, the full glossary including the
+rubric-3.1 cohorts, the paper; `explore_page.render_about`, texts in `catalogue_intro.py`). The owner picked the
+**editorial** skin (`scripts/site_skin.py`, `DEFAULT`; November 10, 2026, "yes i like editorial"): Explore and About
+use the full skin, `experiments.html` its tokens (`catalogue_intro.SKIN`), and the top bar of every other page the
+same editorial look in the page's own colours.
 `experiments.json` is unchanged. Every generated page of the math site (the three root pages, run reports,
 conference views, story map pages, simplified judge and incident reports) carries one top bar
 **Explore | Experiments | About** with the current page highlighted (`scripts/site_nav.py`, idempotent
@@ -64,9 +67,11 @@ with the same query and hash; `#about`, `#experiment`, `#how`, `#read` and `#glo
   writes the same page as `runs/experiments.html` and `runs/about.html`, so a local run page's top bar works.
 - The former HF Space has no such pages: `maintain_hf_run.py`'s re-rendered run pages drop the bar and keep their
   library links at `index.html` (`site_nav.for_hf_space`).
-- Visual skins: `catalogue_intro.SKIN` (default None, the current look) names a skin of `scripts/site_skin.py`
-  (`skin_css(name)`); its CSS is layered last (`<style id="site-skin">`) on `experiments.html` and `about.html`.
-  `write_index(..., skin=...)` overrides it.
+- Visual skins: `catalogue_intro.SKIN` (`'editorial'`; None for the earlier look) names a skin of
+  `scripts/site_skin.py`; its tokens (`skin_css(name, scope='tokens')`) are layered last (`<style id="site-skin">`)
+  on `experiments.html`. `write_index(..., skin=...)` overrides it; Explore and About take `site_skin.DEFAULT`.
+- Highlights of the Explore page are curated in `scripts/explore_highlights.json`; `render_explore` gets the site's
+  files, so a story shows only a graph or heatmap that is published.
 
 **ImpossibleBench site (owner decision, November 3, 2026).** The coding runs (ImpossibleBench
 Impossible-LiveCodeBench, `settings.json` domain `"code"`) are never published to the math site; they go to their

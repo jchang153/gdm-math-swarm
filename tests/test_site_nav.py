@@ -121,7 +121,8 @@ class RootPageTests(unittest.TestCase):
         pages = cf.render_catalogue(cf.catalogue(files), (), files)
         self.assertEqual(sorted(pages), ['about.html', 'experiments.html', 'experiments.json', 'index.html'])
         explore = pages['index.html'].decode()
-        self.assertIn('<a href="index.html" aria-current="page">Explore</a>', explore)
+        self.assertIn('<a href="index.html" aria-current="page">Explore</a>', explore)  # its own bar only
+        self.assertEqual(explore.count('aria-label="Site"'), 1)
         self.assertIn('id="catalogue-forward"', explore)
         catalogue = pages['experiments.html'].decode()
         self.assertIn('<a href="experiments.html" aria-current="page">Experiments</a>', catalogue)
@@ -130,7 +131,11 @@ class RootPageTests(unittest.TestCase):
         self.assertNotIn('<details id="glossary">', catalogue)
         about = pages['about.html'].decode()
         self.assertIn('<a href="about.html" aria-current="page">About</a>', about)
-        self.assertIn('<section id="glossary">', about)
+        for anchor in ('id="experiment"', 'id="how"', 'id="read"', 'id="glossary"'):  # the forwarder's targets
+            self.assertIn(anchor, about)
+        for term in ('Fake-minutes', 'Standing fake', 'Converts (rubric 3.1)'):  # run pages link about.html#glossary
+            self.assertIn(f'<dt>{term}</dt>', about)
+        self.assertIn('data-skin="editorial"', catalogue)  # the owner's pick: editorial tokens on the catalogue
 
     def test_ib_site_keeps_its_catalogue_as_index(self):
         pages = cf.render_catalogue([entry(RUN, 10)], (), {}, site='ib')
@@ -173,18 +178,19 @@ class RootPageTests(unittest.TestCase):
 
     def test_skin_layers_on_top(self):
         fake = types.ModuleType('site_skin')
-        fake.skin_css = lambda name: f'.skin-{name}{{color:red}}'
+        fake.skin_css = lambda name, scope='full': f'.skin-{name}-{scope}{{color:red}}'
         with patch.dict(sys.modules, {'site_skin': fake}), tempfile.TemporaryDirectory() as tmp:
             index.write_index(tmp, [entry(RUN, 10)], skin='bold')
             page = (Path(tmp) / 'experiments.html').read_text()
-            about = (Path(tmp) / 'about.html').read_text()
-            for text in (page, about):
-                self.assertIn('<style id="site-skin">.skin-bold{color:red}</style>', text)
-                self.assertLess(text.index('id="site-look"'), text.index('id="site-skin"'))
-        with tempfile.TemporaryDirectory() as tmp:  # default: no skin
+            self.assertIn('<style id="site-skin" data-skin="bold">.skin-bold-tokens{color:red}</style>', page)
+            self.assertLess(page.index('id="site-look"'), page.index('id="site-skin"'))
+        with tempfile.TemporaryDirectory() as tmp:  # default: catalogue_intro.SKIN, the editorial skin
             index.write_index(tmp, [entry(RUN, 10)])
+            self.assertIn('data-skin="editorial"', (Path(tmp) / 'experiments.html').read_text())
+            self.assertIn('data-skin="editorial"', (Path(tmp) / 'about.html').read_text())
+        with tempfile.TemporaryDirectory() as tmp:  # an empty skin keeps the earlier look
+            index.write_index(tmp, [entry(RUN, 10)], skin='')
             self.assertNotIn('site-skin', (Path(tmp) / 'experiments.html').read_text())
-
 
 if __name__ == '__main__':
     unittest.main()

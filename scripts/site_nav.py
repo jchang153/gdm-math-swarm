@@ -16,6 +16,8 @@ The ImpossibleBench site never gets the bar (its catalogue stays index.html).
 import html
 import re
 
+import site_skin
+
 EXPLORE = 'index.html'
 EXPERIMENTS = 'experiments.html'
 ABOUT = 'about.html'
@@ -25,24 +27,21 @@ BRAND = 'GDM Math Swarm'
 
 NAV_ID = 'site-nav'
 STYLE_MARKER = 'id="site-nav-style"'
+# The editorial skin's bar (owner, November 10, 2026: "yes i like editorial"), as on Explore and About
+# (site_skin.nav): the brand in the display serif, a hard ink rule, the current page underlined in the accent. Only
+# the page's own colour tokens (site_style: --fg, --muted, --accent, --line), so it fits every page in light and dark.
+_DISPLAY = site_skin.SKINS[site_skin.DEFAULT]['fonts']['display']
 CSS = (
-    '#site-nav{display:flex;align-items:center;justify-content:space-between;gap:10px 18px;flex-wrap:wrap;'
-    'margin:0 0 18px;padding:12px 0;border-bottom:1px solid var(--line,#8884);'
-    'font:600 14px/1.2 var(--font-text,system-ui,-apple-system,"Segoe UI",sans-serif)}'
-    '#site-nav .sn-brand{display:inline-flex;align-items:center;gap:9px;color:var(--fg,inherit);text-decoration:none;'
-    'font:750 15.5px/1.1 var(--font-display,var(--font-text,system-ui,sans-serif));letter-spacing:-.01em}'
-    '#site-nav .sn-dot{width:11px;height:11px;border-radius:50%;background:var(--accent,#2563eb);'
-    'box-shadow:7px -5px 0 -2px color-mix(in srgb,var(--accent,#2563eb) 55%,transparent),'
-    '-6px 5px 0 -3px color-mix(in srgb,var(--accent,#2563eb) 40%,transparent)}'
-    '#site-nav .sn-links{display:flex;gap:4px;flex-wrap:wrap}'
-    '#site-nav .sn-links a{padding:7px 13px;border-radius:999px;color:var(--muted,inherit);text-decoration:none;'
-    'border:1px solid transparent;transition:color .15s,background-color .15s,border-color .15s}'
-    '#site-nav .sn-links a:hover{color:var(--fg,inherit);'
-    'background:color-mix(in srgb,var(--accent,#2563eb) 9%,transparent)}'
-    '#site-nav .sn-links a[aria-current="page"]{color:var(--fg,inherit);border-color:var(--line,#8884);'
-    'background:var(--card,transparent);box-shadow:inset 0 -2px 0 var(--accent,#2563eb)}'
-    '@media (max-width:520px){#site-nav{padding:10px 0}#site-nav .sn-links a{padding:6px 10px;font-size:13.5px}}'
-    '@media (prefers-reduced-motion:reduce){#site-nav .sn-links a{transition:none}}'
+    '#site-nav{display:flex;align-items:center;justify-content:space-between;gap:6px 18px;flex-wrap:wrap;'
+    'margin:0 0 20px;padding:8px 0;min-height:44px;border-bottom:1px solid var(--fg,currentColor);'
+    'font:600 15px/1.2 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}'
+    f'#site-nav .sn-brand{{color:var(--fg,inherit);text-decoration:none;font:700 20px/1.1 {_DISPLAY};'
+    'letter-spacing:-.01em;white-space:nowrap}'
+    '#site-nav .sn-links{display:flex;gap:2px;flex-wrap:wrap}'
+    '#site-nav .sn-links a{padding:8px 14px;border-radius:2px;color:var(--muted,inherit);text-decoration:none;'
+    'white-space:nowrap}#site-nav .sn-links a:hover{color:var(--fg,inherit)}'
+    '#site-nav .sn-links a[aria-current="page"]{color:var(--fg,inherit);box-shadow:inset 0 -3px 0 var(--accent,currentColor)}'
+    '@media (max-width:520px){#site-nav .sn-brand{font-size:17px}#site-nav .sn-links a{padding:7px 8px;font-size:14px}}'
     '@media print{#site-nav{display:none}}'
 )
 
@@ -56,7 +55,7 @@ def bar(current=None, prefix=''):
     links = ''.join(f'<a href="{esc(prefix + target)}"' + (' aria-current="page"' if key == current else '')
                     + f'>{label}</a>' for key, target, label in PAGES)
     return (f'<nav id="{NAV_ID}" aria-label="Site"><a class="sn-brand" href="{esc(prefix + EXPLORE)}">'
-            f'<span class="sn-dot" aria-hidden="true"></span>{html.escape(BRAND)}</a>'
+            f'{html.escape(BRAND)}</a>'
             f'<span class="sn-links">{links}</span></nav>')
 
 
