@@ -22,7 +22,7 @@
     "enabled": true,
     "read": "full",
     "show_reason": false,
-    "threshold": null,
+    "threshold": 80,
     "lookback": 20,
     "max_output_chars": 2000
   },
