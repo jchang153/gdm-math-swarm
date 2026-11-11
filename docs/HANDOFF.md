@@ -1800,6 +1800,11 @@ is being merged into main via `collab-env`.
     needed); `/#series-sweep25` forwards to `experiments#series-sweep25`. Known, pre-existing on main (not from the
     merge): `tests/test_run_clock_maintenance.py` IncidentWithoutBundleTests.test_commit_changes_exactly_the_planned_files
     fails (HF-only path: the HF bundle preparer applies the site look/top bar, the runs-dir HF path does not).
+    **Explore revision LIVE 2026-11-11 ~11:08 PT (owner requests; commit 61abfe8, `catalogue --commit`, deployment
+    `9e95949d-5945-477c-850e-a71d1704ba71`, only index/experiments/about.html changed, built-in verify 9/9 ok):**
+    compact editorial type (body 16px), text beside figures (one column below 760px), no heatmaps on Explore (the
+    baseline story is now a text-and-number card), plain descriptive titles and headlines on Explore, About and
+    Experiments.
 
 ## Next steps / open items
 
