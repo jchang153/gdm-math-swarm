@@ -2320,6 +2320,10 @@ Standalone runs also carry the solvers' prompt as the first other solver got it,
 **Parallel runs (Amelie, chat, November 11, 2026: "yes do this").** After run 1, batch A runs three episodes at the
 same time on her VM: `...-rt-dev-attacker-standalone`, `...-rt-dev-reviewer-standalone` and `...-rt-dev-baseline`,
 each with its own $10 run budget, with the GPT 6.1 Sol compatibility check alongside. Each launch config sets
-`concurrent_run: true` (allowed on the gemini track, `budget.BUDGET_TRACKS`). Measured during run 1: 14 of 251 GB in
+`allow_concurrent_run: true` (allowed on the gemini track, `budget.BUDGET_TRACKS`). Because the launch lock and the
+`own_agent` interlock allow one paid launcher per checkout, each parallel run (and the compatibility check) runs from
+its own checkout on the VM (copies of `~/gdm-redteam` at the same commit without `runs/` and `state/`, each with
+its own ledger). Known cost of the override (as in "Run alongside hers"): CPU contention can push Lean compiles past
+120 s, and a run's post-run evaluator refuses while another run is live (rerun later). Measured during run 1: 14 of 251 GB in
 use, load about 16 of 64 CPUs. Batch B follows: `...-rt-dev-attacker-gpt61sol`, and the tactics attacker once its
 text is approved.
