@@ -1,5 +1,6 @@
 """Explore page, About page and site skins (owner, November 10, 2026: an eye-catching Explore landing page with large
 graphs, an Experiments page and an About page; three visual directions). Offline; no network or deploy."""
+import html
 import json
 from pathlib import Path
 import re
@@ -78,7 +79,10 @@ class HighlightsFile(unittest.TestCase):
         self.assertNotIn('baseline-90m', text)
         self.assertNotIn('baseline100', text)
         (talk,) = [s for s in stories if s['id'] == 'talk-vs-enforce']
-        self.assertEqual([n['value'] for n in talk['numbers']], ['41.7 vs 88.1', '≈25', '174 / 332 / 647'])
+        self.assertEqual([n['value'] for n in talk['numbers']], ['42 vs 88', '25 vs up to 647'])
+        for s in stories:  # owner, November 11, 2026: plain stories with at most three key numbers
+            self.assertLessEqual(len(s['numbers']), 3, s['id'])
+            self.assertFalse(s.get('links'), s['id'])
         self.assertTrue(talk['figures'][0]['minus_seed'])
 
     def test_monitor_slot_has_no_numbers(self):
@@ -125,7 +129,7 @@ class RenderExplore(unittest.TestCase):
     def test_graph_iframe_when_published(self):
         page = explore_page.render_explore(self.entries, self.files)
         run = 'glmflash100-seeded-10ov-glm-120m-push-r2-20261104T043647Z'
-        self.assertIn(f'<iframe title="Interaction graph of {run}', page)
+        self.assertIn('<iframe title="Interaction graph, replaying at 5x"', page)
         self.assertIn(f'data-graph="{run}/{GRAPH}"', page)
 
     def test_fallback_graph_to_curve(self):
@@ -204,6 +208,25 @@ class RenderExplore(unittest.TestCase):
         entries = [dict(entry('x-1'), profile=profile(accepted=26)), dict(entry('x-2'), profile=profile(accepted=24))]
         self.assertIn('average 24</title>', explore_page._bars_chart(spec, entries))
         self.assertIn('average 25</title>', explore_page._bars_chart(dict(spec, minus_seed=False), entries))
+
+    def test_no_replicates(self):
+        """Owner, November 11, 2026: no mention of replicates on Explore: no 'replicate', no run labels such as r1 or
+        'run 2 of 3', no per-run breakdowns; one number per condition and a single link to the highlighted run."""
+        for page in (explore_page.render_explore(self.entries, self.files), explore_page.render_explore(self.entries)):
+            self.assertNotRegex(page.lower(), r'replicate')
+            body = re.sub(r'<(script|style)\b.*?</\1>', ' ', page, flags=re.S)
+            seen = ' '.join(re.findall(r'(?:title|aria-label|alt)="([^"]*)"', body))
+            text = html.unescape(re.sub(r'<[^>]+>', ' ', body)) + ' ' + html.unescape(seen)
+            self.assertNotRegex(text, r'(?i)\br\d\b')
+            self.assertNotRegex(text, r'(?i)\brun \d+ of \d+|\b(?:two|three|four) runs\b|mean of \d+ runs')
+            self.assertNotRegex(text, r'\b\d+/\d+/\d+\b')
+            self.assertNotIn('compare with', text.lower())
+            self.assertNotIn('answer-echo', text)
+        page = explore_page.render_explore(self.entries, self.files)
+        for s in self.data['stories']:
+            section = page[page.index(f'id="{s["id"]}"'):]
+            section = section[:section.index('</section>')]
+            self.assertEqual(section.count('#overview"'), 1, s['id'])
 
     def test_totals(self):
         page = explore_page.render_explore(self.entries, self.files)

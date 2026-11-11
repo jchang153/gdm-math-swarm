@@ -2,6 +2,8 @@
 which is the main page, then "experiments" page which lists all of them. On the explore page it highlights a few of
 the most interesting runs ... The explore page should be more eye-catching, not boring. The graphs should be central
 and large on this page.").
+One number per condition, no replicates (owner, November 11, 2026: no replicate labels, per-run breakdowns or
+per-run marks on Explore; plain short stories). Charts show each condition's average only; run pages keep the rest.
 
 ``render_explore(entries, files=None, site=None)`` returns the whole HTML document (published as index.html; the
 catalogue moves to experiments.html). ``entries`` are the catalogue entries of experiments.json; ``files`` (name ->
@@ -81,8 +83,8 @@ def _matching(entries, pattern):
 # ---------------------------------------------------------------- charts (inline SVG, viewBox units)
 
 def _dots_chart(spec, by_run):
-    """One row per condition (HTML label, an SVG strip with a dot per replicate, the average as a big number), so the
-    labels stay readable at phone width."""
+    """One row per condition (HTML label, an SVG strip with a bar to the average, the average as a big number), so
+    the labels stay readable at phone width."""
     rows = spec['rows']
     vmax = spec.get('max') or max([v for r in rows for v in r['values']] + [1])
     W, pad = 600, 14
@@ -97,20 +99,10 @@ def _dots_chart(spec, by_run):
         strip += [f'<line class="ax" x1="{_num(x(t))}" x2="{_num(x(t))}" y1="2" y2="38"/>' for t in ticks]
         strip.append(f'<line class="track" x1="{pad}" x2="{W - pad}" y1="20" y2="20"/>'
                      f'<line class="sk-c{c}" stroke="currentColor" stroke-width="10" stroke-linecap="round" x1="{pad}" '
-                     f'x2="{_num(x(mean))}" y1="20" y2="20" opacity=".35"/></svg>')
-        dots, seen, runs = [], {}, row.get('runs') or []
-        for j, v in enumerate(vals):
-            k = seen[v] = seen.get(v, -1) + 1  # nudge equal values apart
-            left = f'calc({_num(x(v) / W * 100)}% + {k * 9}px)'
-            tip = f'{row["label"]}, replicate {j + 1}: {v}'
-            style = f'left:{left};background:var(--k-c{c})'
-            dot = f'<span class="sk-dot" style="{style}" title="{_attr(tip)}"></span>'
-            if j < len(runs) and runs[j] in by_run:
-                dot = (f'<a class="sk-dot" style="{style}" title="{_attr(tip)}" aria-label="{_attr(tip)}" '
-                       f'href="{_attr(_report(by_run[runs[j]]))}"></a>')
-            dots.append(dot)
+                     f'x2="{_num(x(mean))}" y1="20" y2="20" opacity=".8"><title>{esc(row["label"])}: {_num(mean)}</title>'
+                     '</line></svg>')
         out.append(f'<div class="sk-dotrow"><span class="sk-dotlbl">{esc(row["label"])}</span>'
-                   f'<span class="sk-strip">{"".join(strip)}{"".join(dots)}</span>'
+                   f'<span class="sk-strip">{"".join(strip)}</span>'
                    f'<span class="sk-dotavg sk-c{c}">{_num(mean)}</span></div>')
     out.append('<div class="sk-dotrow sk-dotaxis" aria-hidden="true"><span></span><span class="sk-strip">'
                + ''.join(f'<i style="left:{_num(x(t) / W * 100)}%">{t}</i>' for t in ticks)
@@ -131,7 +123,7 @@ def _step_at(curve, t):
 
 
 def _lines_chart(spec, entries, compact=False):
-    """Standing fakes over time, average per group (thick) and each replicate (faint). ``compact``: the phone
+    """Standing fakes over time, one line per group (the average of its runs). ``compact``: the phone
     variant (narrow viewBox, so text stays legible; end values go to the legend)."""
     groups = []
     for g in spec['groups']:
@@ -174,8 +166,6 @@ def _lines_chart(spec, entries, compact=False):
     labels = []
     for g, reps, mean in series:
         c = int(g.get('color', 1))
-        for r in reps:
-            out.append(f'<path class="rep sk-c{c}" stroke="currentColor" fill="none" stroke-width="1.5" d="{path(r)}"/>')
         out.append(f'<path class="sk-mark sk-c{c}" stroke="currentColor" fill="none" stroke-width="4" '
                    f'stroke-linejoin="round" d="{path(mean)}"><title>{esc(g["label"])}</title></path>')
         last = [v for v in mean if v is not None][-1]
@@ -196,7 +186,7 @@ def _lines_chart(spec, entries, compact=False):
 
 
 def _bars_chart(spec, entries, compact=False):
-    """Grouped bars: average of a profile fakes metric per condition, with each replicate as a dot."""
+    """Grouped bars: average of a profile fakes metric per condition."""
     metric = spec.get('metric', 'accepted')
     cats = []
     for cat in spec['categories']:
@@ -238,11 +228,8 @@ def _bars_chart(spec, entries, compact=False):
             out.append(f'<rect class="sk-mark sk-c{c}" fill="currentColor" x="{_num(bx)}" y="{_num(Y(mean))}" '
                        f'width="{_num(bw)}" height="{_num(Y(0) - Y(mean))}" rx="3"><title>{esc(cat["label"])}, '
                        f'{esc(b["label"])}: average {_num(mean)}</title></rect>'
-                       f'<text class="lbl" x="{_num(bx + bw / 2)}" y="{_num(Y(max(vals + [mean])) - 10)}" text-anchor="middle" '
+                       f'<text class="lbl" x="{_num(bx + bw / 2)}" y="{_num(Y(mean) - 10)}" text-anchor="middle" '
                        f'font-weight="800">{_num(mean)}</text>')
-            for k, v in enumerate(vals):
-                out.append(f'<circle fill="var(--k-card)" stroke="var(--k-ink)" stroke-width="1.5" '
-                           f'cx="{_num(bx + bw * (k + 1) / (len(vals) + 1))}" cy="{_num(Y(v))}" r="4.5"/>')
         out.append(f'<text class="lbl" x="{_num(x0 + cw / 2)}" y="{H - 14}" text-anchor="middle">{esc(cat["label"])}</text>')
     out.append('</svg>')
     out.append('<ul class="sk-legend">' + ''.join(f'<li><i class="sk-c{c}" style="background:currentColor"></i>'
@@ -290,13 +277,12 @@ _EXPAND = ('<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" f
 def _graph_fig(entry, caption):
     run = entry['run']
     page = _url(run, GRAPH)
-    title = f'Interaction graph of {run}, replaying at 5x'
+    title = 'Interaction graph, replaying at 5x'
     return (f'<figure class="sk-fig"><div class="sk-fig-frame sk-gwrap" data-graph="{_attr(page)}">'
             f'<iframe title="{_attr(title)}" loading="lazy" src="{_attr(page)}?embed=1&amp;play=1"></iframe>'
             '<button class="sk-gclose" type="button" aria-label="Close full screen" hidden>&#x2715;</button></div>'
             f'<figcaption><span>{esc(caption or "")}</span><span class="sk-acts">'
-            f'<a class="sk-btn sk-full" href="{_attr(page)}">{_EXPAND}Full screen</a>'
-            f'<a class="sk-btn ghost" href="{_attr(_report(entry))}#overview">Open this run</a></span></figcaption></figure>')
+            f'<a class="sk-btn sk-full" href="{_attr(page)}">{_EXPAND}Full screen</a></span></figcaption></figure>')
 
 
 def _figure(fig, entries, by_run, files):
@@ -316,8 +302,7 @@ def _figure(fig, entries, by_run, files):
         return ''
     caption = fig.get('caption') if kind != 'graph' else 'Fake proofs credited and still standing in this run.'
     return ('<figure class="sk-fig">' + _chart_block({'title': 'Fake proofs standing over the run'}, svg)
-            + f'<figcaption><span>{esc(caption or "")}</span><span class="sk-acts"><a class="sk-btn ghost" '
-            f'href="{_attr(_report(entry))}#overview">Open this run</a></span></figcaption></figure>')
+            + f'<figcaption><span>{esc(caption or "")}</span></figcaption></figure>')
 
 
 # ---------------------------------------------------------------- page
@@ -367,17 +352,10 @@ def _story(n, s, entries, by_run, files):
     entry = by_run[s['run']]
     nums = ''.join(f'<div><dt>{esc(x["label"])}</dt><dd>{esc(x["value"])}</dd></div>' for x in s.get('numbers', []))
     figs = ''.join(_figure(f, entries, by_run, files) for f in s.get('figures', []))
-    links = [f'<a class="sk-btn" href="{_attr(_report(entry))}#overview">Explore this run</a>']
-    for extra in s.get('links', []):
-        if extra.get('run') in by_run:
-            links.append(f'<a class="sk-btn ghost" href="{_attr(_report(by_run[extra["run"]]))}#overview">'
-                         f'{esc(extra["label"])}</a>')
-    if s.get('series'):
-        links.append(f'<a class="sk-btn ghost" href="experiments.html#series-{_attr(s["series"])}">All runs in this '
-                     'series</a>')
+    links = [f'<a class="sk-btn" href="{_attr(_report(entry))}#overview">Explore this run</a>']  # the one run link
     text = (f'<p class="sk-chapter-n">{n:02d}</p><p class="sk-kicker">{esc(s.get("kicker", ""))}</p>'
             f'<h2 class="sk-h2">{esc(s["headline"])}</h2><p class="sk-take">{esc(s["takeaway"])}</p>'
-            f'<p class="sk-story">{esc(s["story"])}</p>')
+            + (f'<p class="sk-story">{esc(s["story"])}</p>' if s.get('story') else ''))
     row = f'<p class="sk-links-row">{"".join(links)}</p>'
     if figs:
         body = (f'<div class="sk-split"><div class="sk-copy">{text}<dl class="sk-num">{nums}</dl>{row}</div>'
@@ -392,11 +370,8 @@ def _upcoming(u, entries, by_run):
     runs = _matching(entries, u['match']) if u.get('match') else []
     chart = ''
     if runs:
-        spec = {'chart': 'lines', 'title': 'Fake proofs credited and still standing (preliminary)',
-                'subtitle': f'{len(runs)} monitor run{"" if len(runs) == 1 else "s"} in the catalogue so far; average '
-                            'per arm, from each run\'s proof-checker record.',
-                'basis': 'Drawn from the catalogue entries as runs land; the write-up follows when all runs are in.',
-                'groups': u.get('groups', [])}
+        spec = {'chart': 'lines', 'title': 'Fake proofs credited and not yet undone (early results)',
+                'subtitle': 'Two-hour runs, by monitor setup.', 'groups': u.get('groups', [])}
         block = _chart(spec, entries, by_run)
         chart = f'<div class="sk-figcol"><figure class="sk-fig">{block}</figure></div>' if block else ''
     status = (f'{len(runs)} run{"" if len(runs) == 1 else "s"} published so far.' if runs else u.get('pending_text', ''))
@@ -439,10 +414,8 @@ def render_explore(entries, files=None, site=None, skin=None, highlights=None):
     out.append('<footer class="sk-foot"><div class="sk-wrap"><p class="sk-links-row">'
                f'<a class="sk-btn" href="experiments.html">Browse all {len(entries)} experiments</a>'
                '<a class="sk-btn ghost" href="about.html">About the project</a></p>'
-               '<p>Fakers are agents with at least one fake submission by the strict fake rule (answer-echo-v2); the '
-               'planted seed and the overseers are not counted. Each number links back to a run page whose records it '
-               'comes from. An independent reconstruction of Paglieri et al., not an official Google DeepMind '
-               'release.</p></div></footer>')
+               '<p>An independent reproduction of Paglieri et al., not an official Google DeepMind release. How the '
+               'numbers are counted is on the About page.</p></div></footer>')
     out.append(_JS)
     return _document(TITLE, hero.get('lead', ''), ''.join(out), skin, 'explore')
 
