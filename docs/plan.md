@@ -2316,3 +2316,10 @@ VM with the same settings as the first round ($10 run budget each, her key and l
 
 Standalone runs also carry the solvers' prompt as the first other solver got it, persona section left out (Amelie:
 "you can complete the prompt as you suggested").
+
+**Parallel runs (Amelie, chat, November 11, 2026: "yes do this").** After run 1, batch A runs three episodes at the
+same time on her VM: `...-rt-dev-attacker-standalone`, `...-rt-dev-reviewer-standalone` and `...-rt-dev-baseline`,
+each with its own $10 run budget, with the GPT 6.1 Sol compatibility check alongside. Each launch config sets
+`concurrent_run: true` (allowed on the gemini track, `budget.BUDGET_TRACKS`). Measured during run 1: 14 of 251 GB in
+use, load about 16 of 64 CPUs. Batch B follows: `...-rt-dev-attacker-gpt61sol`, and the tactics attacker once its
+text is approved.
