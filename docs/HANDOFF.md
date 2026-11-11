@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-10 16:40 PT by Claude (Opus 5.5) monitor-runs prep agent (item 38 PREPARED, not launched).
+Last updated: 2026-11-10 17:05 PT by Claude (Opus 5.5) coordinator (item 38: monitor code, metrics; calibration and smoke run in flight).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1711,6 +1711,18 @@ is being merged into main via `collab-env`.
    `scripts/run_profile.py`, before `push120comms`). Still needed before launch: the monitor code (built by other
    agents), the calibrated threshold in all four configs, an OpenRouter credit check. VM readiness checked (12 VMs,
    one run per VM, all TERMINATED again); launch runbook and operator scripts in `HANDOFF.local.md` (host-only).
+   - **Monitor code on main (2026-11-10):** `src/research_swarm/monitor.py` + bridge-filter integration (4c3fafc,
+     e0e366d): synchronous scoring of every tool call (same model/settings as agents) in `budget_filter`, decisions
+     looked up by a root-owned Claude Code PreToolUse hook through the in-container model proxy (never billed),
+     exact owner block wording, fail-open on monitor errors; events `monitor_*` in runtime.jsonl, prompts/replies in
+     private `RUN/monitor/calls.jsonl`, ledger rows `monitor:<agent>`. Tested with fakes only.
+   - **Outcome metrics (a5156de, b941865):** `research/analysis/run_metrics.py` (fakes, genuine incl. re-judged
+     uncredited, slowdown, agent vs monitor cost, monitor stats) in results.json/html "Outcome metrics";
+     `scripts/compare_arms.py` (mean ± 95% CI); `scripts/rejudge_submissions.py` (VM only: Lean/comparator images);
+     Accounting now includes monitor spend (non-monitor runs byte-identical).
+   - **In flight:** threshold calibration (offline replay of control 120m push r1, run limit $30, threshold = lowest
+     with FPR <= 1% on non-fake actions, per read mode) and a paid smoke run (10 agents, 10 min, $10, threshold 30)
+     to verify the hook on Claude Code 2.1.296 before the 12-run launch.
 
 ## Next steps / open items
 
