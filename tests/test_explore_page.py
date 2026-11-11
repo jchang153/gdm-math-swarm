@@ -109,17 +109,43 @@ class RenderExplore(unittest.TestCase):
         self.assertIn(f'<iframe title="Interaction graph of {run}', page)
         self.assertIn(f'data-graph="{run}/{GRAPH}"', page)
 
-    def test_fallback_graph_to_heatmap_to_curve(self):
+    def test_fallback_graph_to_curve(self):
         run = 'glmflash100-seeded-10ov-glm-120m-push-r2-20261104T043647Z'
         files = dict(self.files)
         del files[f'{run}/{GRAPH}']
         page = explore_page.render_explore(self.entries, files)
         self.assertNotIn(f'data-graph="{run}/', page)
-        self.assertIn(f'<img src="{run}/{HEAT}"', page)
-        del files[f'{run}/{HEAT}']
-        page = explore_page.render_explore(self.entries, files)
         self.assertNotIn(f'{run}/{HEAT}', page)
         self.assertIn('Fake proofs standing over the run', page)
+
+    def test_no_heatmap_anywhere(self):
+        """Owner, November 11, 2026: no heat maps on Explore (they stay on the run pages), even when every run has
+        one published and a curated figure asks for one."""
+        data = json.loads(json.dumps(self.data))
+        data['stories'][0]['figures'] = [{'kind': 'heatmap', 'run': data['stories'][0]['run'], 'caption': 'x'}]
+        for page in (explore_page.render_explore(self.entries, self.files),
+                     explore_page.render_explore(self.entries, self.files, highlights=data),
+                     explore_page.render_explore(self.entries)):
+            self.assertNotIn(HEAT, page)
+            self.assertNotRegex(page.lower(), r'heat[ -]?map')
+            self.assertNotIn('<img', page)
+        for s in self.data['stories']:
+            self.assertFalse([f for f in s['figures'] if f.get('kind') == 'heatmap'], s['id'])
+
+    def test_story_without_figures_is_a_text_card(self):
+        data = json.loads(json.dumps(self.data))
+        data['stories'][0]['figures'] = []
+        page = explore_page.render_explore(self.entries, self.files, highlights=data)
+        self.assertIn('class="sk-split sk-textcard"', page)
+        self.assertIn('class="sk-num sk-numcard"', page)
+
+    def test_side_by_side_and_one_column_on_phones(self):
+        page = explore_page.render_explore(self.entries, self.files)
+        self.assertIn('class="sk-split"', page)
+        self.assertIn('class="sk-figcol"', page)
+        css = site_skin.skin_css()
+        self.assertIn('@media (max-width:760px){.sk-split', css)
+        self.assertIn('font:16px/1.6', css)
 
     def test_missing_anchor_run_drops_the_story(self):
         drop = self.data['stories'][0]

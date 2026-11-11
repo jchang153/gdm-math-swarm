@@ -5,8 +5,9 @@ and large on this page.").
 
 ``render_explore(entries, files=None, site=None)`` returns the whole HTML document (published as index.html; the
 catalogue moves to experiments.html). ``entries`` are the catalogue entries of experiments.json; ``files`` (name ->
-bytes, the site after the change) says which per-run files exist, so a story only shows a graph or heatmap that is
-actually published. The stories, their numbers and figures are curated in scripts/explore_highlights.json; site-level
+bytes, the site after the change) says which per-run files exist, so a story only shows a graph that is actually
+published. No heatmaps on Explore (owner, November 11, 2026: "No heat maps anywhere on Explore"); they stay on the run
+pages. Layout (same date): editorial type scale, text and figure side by side on desktop, one column below 760px. The stories, their numbers and figures are curated in scripts/explore_highlights.json; site-level
 charts (standing fakes over time, fakes accepted per condition) are drawn as inline SVG from the entries' profiles.
 ``render_about`` returns the About page. Math site only: any other ``site`` returns None.
 
@@ -26,10 +27,9 @@ import site_style
 
 HIGHLIGHTS = Path(__file__).with_name('explore_highlights.json')
 GRAPH = 'analysis/storymap/graph.html'
-HEATMAP = 'faking-heatmap.png'
 STORYMAP_LABEL = 'Story map'
 MATH_SITES = (None, 'gdm')
-TITLE = 'GDM Math Swarm: explore'
+TITLE = 'GDM math swarm reproduction'
 esc = html.escape
 
 
@@ -140,7 +140,7 @@ def _lines_chart(spec, entries, compact=False):
     if not groups:
         return None
     tmax = max(1, math.floor(max(p['minutes'] for _g, ps in groups for p in ps)))
-    W, H, left, right, top, bottom = (400, 300, 30, 8, 10, 28) if compact else (1000, 440, 46, 150, 16, 34)
+    W, H, left, right, top, bottom = (400, 300, 30, 8, 10, 28) if compact else (760, 420, 40, 170, 14, 32)
     pw, ph = W - left - right, H - top - bottom
     series = []
     for g, ps in groups:
@@ -211,7 +211,7 @@ def _bars_chart(spec, entries, compact=False):
     vmax = max(v for _c, bars in cats for _b, vals in bars for v in vals) or 1
     nice = next(n for n in (2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000) if n * 4 >= vmax)
     vtop = nice * math.ceil(vmax / nice)
-    W, H, left, top, bottom = (400, 300, 34, 24, 30) if compact else (1000, 440, 50, 30, 46)
+    W, H, left, top, bottom = (400, 300, 34, 24, 30) if compact else (760, 420, 44, 26, 40)
     pw, ph = W - left - 10, H - top - bottom
     Y = lambda v: top + ph - v / vtop * ph  # noqa: E731
     out = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{_attr(spec.get("title", ""))}">']
@@ -296,18 +296,9 @@ def _graph_fig(entry, caption):
             f'<a class="sk-btn ghost" href="{_attr(_report(entry))}#overview">Open this run</a></span></figcaption></figure>')
 
 
-def _heatmap_fig(entry, caption, half=False):
-    run = entry['run']
-    src = _url(run, HEATMAP)
-    alt = f'Faking over time in {run}: one row per agent that faked'
-    return (f'<figure class="sk-fig{" half" if half else ""}"><a class="sk-fig-frame" href="{_attr(src)}">'
-            f'<img src="{_attr(src)}" alt="{_attr(alt)}" loading="lazy" width="2400" height="1650"></a>'
-            f'<figcaption><span>{esc(caption or "")}</span><span class="sk-acts"><a class="sk-btn ghost" '
-            f'href="{_attr(_report(entry))}#overview">Open this run</a></span></figcaption></figure>')
-
-
 def _figure(fig, entries, by_run, files):
-    """One figure, falling back graph -> heatmap -> the run's standing-fakes curve -> nothing."""
+    """One figure, falling back graph -> the run's standing-fakes curve -> nothing. Never a heatmap: a 'heatmap' or
+    'curve' figure draws the run's curve when it has a profile."""
     kind = fig.get('kind')
     if kind == 'chart':
         block = _chart(fig, entries, by_run)
@@ -315,14 +306,15 @@ def _figure(fig, entries, by_run, files):
     entry = by_run.get(fig.get('run'))
     if not entry:
         return ''
-    run, half = entry['run'], fig.get('size') == 'half'
-    if kind == 'graph' and _has(files, run, GRAPH, entry):
+    if kind == 'graph' and _has(files, entry['run'], GRAPH, entry):
         return _graph_fig(entry, fig.get('caption'))
-    if kind in ('graph', 'heatmap') and _has(files, run, HEATMAP, entry) and (files is not None or _profile(entry)):
-        return _heatmap_fig(entry, fig.get('caption') if kind == 'heatmap' else 'Faking over time in this run.', half)
     svg = _curve_chart(entry)
-    return (f'<figure class="sk-fig{" half" if half else ""}">'
-            + _chart_block({'title': 'Fake proofs standing over the run'}, svg) + '</figure>') if svg else ''
+    if not svg:
+        return ''
+    caption = fig.get('caption') if kind != 'graph' else 'Fake proofs credited and still standing in this run.'
+    return ('<figure class="sk-fig">' + _chart_block({'title': 'Fake proofs standing over the run'}, svg)
+            + f'<figcaption><span>{esc(caption or "")}</span><span class="sk-acts"><a class="sk-btn ghost" '
+            f'href="{_attr(_report(entry))}#overview">Open this run</a></span></figcaption></figure>')
 
 
 # ---------------------------------------------------------------- page
@@ -367,6 +359,8 @@ def _totals(entries):
 
 
 def _story(n, s, entries, by_run, files):
+    """Text and numbers beside the story's figures (stacked in one column on phones). A story whose figures are all
+    unavailable becomes a text-and-number card."""
     entry = by_run[s['run']]
     nums = ''.join(f'<div><dt>{esc(x["label"])}</dt><dd>{esc(x["value"])}</dd></div>' for x in s.get('numbers', []))
     figs = ''.join(_figure(f, entries, by_run, files) for f in s.get('figures', []))
@@ -378,14 +372,17 @@ def _story(n, s, entries, by_run, files):
     if s.get('series'):
         links.append(f'<a class="sk-btn ghost" href="experiments.html#series-{_attr(s["series"])}">All runs in this '
                      'series</a>')
-    return (f'<section class="sk-chapter" id="{_attr(s["id"])}"><div class="sk-wrap">'
-            '<div class="sk-chapter-head"><div>'
-            f'<p class="sk-chapter-n">{n:02d}</p><p class="sk-kicker">{esc(s.get("kicker", ""))}</p>'
+    text = (f'<p class="sk-chapter-n">{n:02d}</p><p class="sk-kicker">{esc(s.get("kicker", ""))}</p>'
             f'<h2 class="sk-h2">{esc(s["headline"])}</h2><p class="sk-take">{esc(s["takeaway"])}</p>'
-            f'<p class="sk-story">{esc(s["story"])}</p></div>'
-            f'<dl class="sk-num">{nums}</dl></div>'
-            f'<div class="sk-figs">{figs}</div>'
-            f'<p class="sk-links-row">{"".join(links)}</p></div></section>')
+            f'<p class="sk-story">{esc(s["story"])}</p>')
+    row = f'<p class="sk-links-row">{"".join(links)}</p>'
+    if figs:
+        body = (f'<div class="sk-split"><div class="sk-copy">{text}<dl class="sk-num">{nums}</dl>{row}</div>'
+                f'<div class="sk-figcol">{figs}</div></div>')
+    else:
+        body = (f'<div class="sk-split sk-textcard"><div class="sk-copy">{text}{row}</div>'
+                f'<dl class="sk-num sk-numcard">{nums}</dl></div>')
+    return f'<section class="sk-chapter" id="{_attr(s["id"])}"><div class="sk-wrap">{body}</div></section>'
 
 
 def _upcoming(u, entries, by_run):
@@ -398,14 +395,14 @@ def _upcoming(u, entries, by_run):
                 'basis': 'Drawn from the catalogue entries as runs land; the write-up follows when all runs are in.',
                 'groups': u.get('groups', [])}
         block = _chart(spec, entries, by_run)
-        chart = f'<div class="sk-figs"><figure class="sk-fig">{block}</figure></div>' if block else ''
+        chart = f'<div class="sk-figcol"><figure class="sk-fig">{block}</figure></div>' if block else ''
     status = (f'{len(runs)} run{"" if len(runs) == 1 else "s"} published so far.' if runs else u.get('pending_text', ''))
     link = (f'<p class="sk-links-row"><a class="sk-btn" href="experiments.html#series-{_attr(u["series"])}">See the '
             'runs</a></p>' if runs and u.get('series') else '')
-    return (f'<section class="sk-band" id="{_attr(u["id"])}"><div class="sk-wrap">'
-            f'<p class="sk-kicker">{esc(u.get("kicker", ""))}</p><h2 class="sk-h2">{esc(u["headline"])}</h2>'
-            f'<p class="sk-story" style="color:inherit">{esc(u["story"])}</p>'
-            f'<p><span class="sk-pending">{esc(status)}</span></p>{chart}{link}</div></section>')
+    return (f'<section class="sk-band" id="{_attr(u["id"])}"><div class="sk-wrap"><div class="sk-split">'
+            f'<div class="sk-copy"><p class="sk-kicker">{esc(u.get("kicker", ""))}</p><h2 class="sk-h2">'
+            f'{esc(u["headline"])}</h2><p class="sk-story" style="color:inherit">{esc(u["story"])}</p>'
+            f'<p><span class="sk-pending">{esc(status)}</span></p>{link}</div>{chart}</div></div></section>')
 
 
 def render_explore(entries, files=None, site=None, skin=None, highlights=None):
@@ -418,18 +415,19 @@ def render_explore(entries, files=None, site=None, skin=None, highlights=None):
     by_run = {e['run']: e for e in entries}
     hero = data.get('hero', {})
     stats = ''.join(f'<div class="sk-stat"><dt>{esc(k)}</dt><dd>{esc(v)}</dd></div>' for v, k in _totals(entries))
-    out = [f'<header class="sk-hero"><div class="sk-wrap"><p class="sk-kicker">{esc(hero.get("kicker", ""))}</p>'
-           f'<h1 class="sk-h1">{esc(hero.get("title", ""))}</h1><p class="sk-lead">{esc(hero.get("lead", ""))}</p>'
-           f'<dl class="sk-stats">{stats}</dl><p class="sk-cta"><a class="sk-btn" href="#stories">See the stories</a>'
-           '<a class="sk-btn ghost" href="experiments.html">Browse all experiments</a>'
-           '<a class="sk-btn ghost" href="about.html">How it works</a></p></div></header>']
+    out = [f'<header class="sk-hero"><div class="sk-wrap sk-hero-grid"><div><p class="sk-kicker">'
+           f'{esc(hero.get("kicker", ""))}</p><h1 class="sk-h1">{esc(hero.get("title", ""))}</h1>'
+           f'<p class="sk-lead">{esc(hero.get("lead", ""))}</p><p class="sk-cta"><a class="sk-btn" href="#stories">'
+           'Selected results</a><a class="sk-btn ghost" href="experiments.html">Browse all experiments</a>'
+           '<a class="sk-btn ghost" href="about.html">How it works</a></p></div>'
+           f'<dl class="sk-stats">{stats}</dl></div></header>']
     if hero.get('chart'):
         block = _chart(hero['chart'], entries, by_run)
         if block:
             series = hero['chart'].get('series')
             more = (f'<p class="sk-links-row"><a class="sk-btn ghost" href="experiments.html#series-{_attr(series)}">'
                     'The runs behind this chart</a></p>' if series else '')
-            out.append(f'<section class="sk-section sk-big"><div class="sk-wrap"><p class="sk-kicker">The big picture</p>'
+            out.append(f'<section class="sk-section sk-big"><div class="sk-wrap"><p class="sk-kicker">Overview</p>'
                        f'<div class="sk-figs"><figure class="sk-fig">{block}</figure></div>{more}</div></section>')
     stories = [s for s in data.get('stories', []) if s.get('run') in by_run]
     out.append('<div id="stories">' + ''.join(_story(i + 1, s, entries, by_run, files)
@@ -494,8 +492,8 @@ def render_about(site=None, skin=None):
             '<section class="sk-band" id="how"><div class="sk-wrap"><h2 class="sk-h2">How a run works</h2>'
             f'<ol class="sk-steps">{steps}</ol></div></section>'
             '<section class="sk-section"><div class="sk-wrap sk-grid">'
-            f'<div class="sk-card"><h2 class="sk-h2" style="font-size:1.6rem">Key terms</h2><dl class="sk-gloss">{gloss}</dl></div>'
-            f'<div class="sk-card" id="read"><h2 class="sk-h2" style="font-size:1.6rem">On each run\'s page</h2>'
+            f'<div class="sk-card"><h2 class="sk-h2" style="font-size:1.2rem">Key terms</h2><dl class="sk-gloss">{gloss}</dl></div>'
+            f'<div class="sk-card" id="read"><h2 class="sk-h2" style="font-size:1.2rem">On each run\'s page</h2>'
             f'<dl class="sk-gloss">{pages}</dl></div></div></section>'
             '<section class="sk-section" id="glossary"><div class="sk-wrap"><h2 class="sk-h2">Glossary</h2>'
             '<p class="sk-sub" style="color:var(--k-muted);max-width:70ch">Every term used on the run cards, run '

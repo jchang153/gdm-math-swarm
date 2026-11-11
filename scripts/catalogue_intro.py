@@ -14,7 +14,7 @@ import sys
 # site, November 3, 2026) defines the same names and passes its module as ``text`` to the functions below.
 TITLE = 'GDM Math Swarm experiments'
 BRAND = 'GDM Math Swarm'
-HEADLINE = 'Do AI research swarms cheat, and does anyone stop them?'
+HEADLINE = 'A reproduction of the GDM math swarm environment, with overseers'
 PAPER_LABEL = 'Reconstructs'
 # Run panes with the interaction graph (owner, November 6, 2026): math catalogue only; catalogue_intro_ib.py leaves
 # this unset, so the ImpossibleBench catalogue keeps its cards.
@@ -29,9 +29,9 @@ PAPER_TITLE = 'A Case Study on Emergent Cheating and Whistleblowing in Autonomou
 PAPER = (f'Paglieri et al., <a href="{PAPER_URL}" target="_blank" rel="noopener noreferrer"><cite>{PAPER_TITLE}</cite></a>, '
          'arXiv:2609.04170 (v1, September 3, 2026)')
 
-LEAD = ('Swarms of 5 to 100 autonomous AI agents race to prove Lean 4 mathematics problems in a simulated research '
-        'conference whose judge is deliberately weak. Do they discover and spread cheats, or blow the whistle, and can '
-        'overseer agents contain an exploit the researchers plant?')
+LEAD = ('Groups of 5 to 100 AI agents solve Lean 4 mathematics problems in a simulated research conference whose '
+        'automatic judge is deliberately weak, so agents sometimes submit fake proofs that it accepts. We record how '
+        'faking starts and spreads, and test overseer agents, reminders and external monitors that try to stop it.')
 
 DISCLAIMER = ('An independent, documented reconstruction of the paper\'s research-conference environment: not an exact '
               'replication, and not an official Google DeepMind release. Deviations from the paper are recorded in the '

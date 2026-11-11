@@ -163,7 +163,7 @@ class CataloguePageTests(unittest.TestCase):
 
     def test_newcomer_sections_and_paper(self):
         page, _ = self.write([entry('glm-rule6-20261021T224441Z', 1)])
-        self.assertIn('<h1>Do AI research swarms cheat, and does anyone stop them?</h1>', page)
+        self.assertIn(f'<h1>{catalogue_intro.HEADLINE}</h1>', page)
         self.assertIn(f'href="{catalogue_intro.PAPER_URL}" target="_blank" rel="noopener noreferrer">'
                       f'<cite>{catalogue_intro.PAPER_TITLE}</cite></a>', page)
         self.assertIn('Paglieri et al.', page)
