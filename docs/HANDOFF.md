@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-05 18:25 PT by Claude (Opus 5.5) interaction-graph data agent (item 35 DONE).
+Last updated: 2026-11-10 16:40 PT by Claude (Opus 5.5) monitor-runs prep agent (item 38 PREPARED, not launched).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1699,6 +1699,18 @@ is being merged into main via `collab-env`.
      (owner) (3bbe0c9). Live as `50f0e53b` (`restyle --commit`, verify ok).
      Fix 7c95737: on the live site the run-page tab switcher also caught the expand click (switched to the Story
      map tab and left the page scroll-locked); live as `db2cabd6`, checked on the served page.
+
+38. **PREPARED, NOT LAUNCHED (2026-11-10 16:40 PT): top-down monitor runs, 4 arms x 3 replicates** (docs/plan.md,
+   "Top-down monitor arms (owner decisions, November 10, 2026)"). Configs
+   `configs/glmflash100-seeded-monitor-{actions-silent,actions-reason,full-silent,full-reason}-120m-push.json`
+   (M1-M4): copies of `glmflash100-seeded-control-120m-push.json` except `experiment`, `run_budget_usd` (M1/M2 $100,
+   M3/M4 $150) and a `monitor` block (`enabled`, `read` actions/full, `show_reason`, `threshold`, `lookback` 20,
+   `max_output_chars` 2000) plus `monitor_note`. **`monitor.threshold` is null until the offline calibration fixes it;
+   the launch refuses while it is null.** Replicates r1-r3 as for the push control (same config and
+   `persona_seed`, run id `<experiment>-rK-<UTC>`). Catalogue series `monitor120` ("Top-down monitors",
+   `scripts/run_profile.py`, before `push120comms`). Still needed before launch: the monitor code (built by other
+   agents), the calibrated threshold in all four configs, an OpenRouter credit check. VM readiness checked (12 VMs,
+   one run per VM, all TERMINATED again); launch runbook and operator scripts in `HANDOFF.local.md` (host-only).
 
 ## Next steps / open items
 

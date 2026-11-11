@@ -45,6 +45,12 @@ SERIES = (
      'the silent seed. Board posts and direct messages are pushed into the next tool result, as in the 120-minute '
      'push runs; unread notices remain for new library files only. Compare with the GLM 5.3 Flash push control '
      '(100 solvers, 120 minutes).'),
+    ('monitor120', r'^glmflash100-seeded-monitor-.+-120m-push-r\d', 'Top-down monitors',
+     'Twelve 120-minute seeded runs (100 GLM 5.3 Flash solvers, the planted exploit at +3 min, no overseers, pushed '
+     'messages) with a generic monitor outside the swarm: before every tool call runs, a GLM 5.3 Flash monitor scores '
+     'it from the agent\'s last 20 tool calls and blocks it at or above a fixed threshold. Four arms, three replicates '
+     'each: the monitor reads tool calls and outputs only or the full transcript, and a blocked agent sees no reason or '
+     'the monitor\'s reason. Compare with the 120-minute push control and overseer runs.'),
     ('push120comms', r'^glmflash100-seeded-.+-120m-push-commsonly-',
      '120-minute communication-only overseers with pushed messages',
      'Nine 120-minute seeded runs (100 GLM 5.3 Flash solvers, the planted exploit at +3 min) with 1, 2 or 10 GLM 5.3 '
