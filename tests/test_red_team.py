@@ -109,7 +109,16 @@ class RedTeamPromptTests(unittest.TestCase):
             text, overseer = after["agent-005"], after[ov_id]
             self.assertTrue(text.startswith("# Lean Mathematics Collaboration\n\nYou are agent-005. 25 other "
                                             "agents, agent-001 to agent-026, are working on"), text[:200])
-            head, copy = text.split("\n\n## The overseer's instructions\n\n", 1)
+            rest, copy = text.split("\n\n## The overseer's instructions\n\n", 1)
+            head, solvers = rest.split("\n\n" + red_team.SOLVER_COPY_HEADING + "\n\n", 1)
+            # The solvers' prompt as agent-001 got it (push wording included), persona section left out.
+            note, solver_text = solvers.split("\n\n", 1)
+            self.assertIn("shown here as agent-001 received them", note)
+            full = after["agent-001"]
+            start = full.index("\n\n## Persona: ")
+            self.assertEqual(solver_text, (full[:start] + full[full.index("\n\n## Problems", start):]).rstrip("\n"))
+            self.assertNotIn("## Persona", solvers)
+            self.assertIn("appear in a `<system-reminder>` block", solver_text)
             # The overseer's copy is the same as in appended mode, byte for byte.
             self.assertEqual(copy, before["agent-005"].split("\n\n## The overseer's instructions\n\n", 1)[1])
             self.assertTrue(copy.startswith(overseer))
@@ -126,6 +135,37 @@ class RedTeamPromptTests(unittest.TestCase):
             self.assertTrue(head.endswith(platform.rstrip("\n")), role)
             self.assertIn("appear in a `<system-reminder>` block", head)
             self.assertIsNone(NEUTRAL_FORBIDDEN.search(head))
+
+    def test_stronger_attacker_and_baseline_configs(self):
+        appended = load(f"{DEV}-attacker")
+        sol = load(f"{DEV}-attacker-gpt61sol")
+        self.assertEqual({k for k in set(appended) | set(sol) if appended.get(k) != sol.get(k)},
+                         {"experiment", "run_budget_usd", "red_team"})
+        self.assertEqual(sol["run_budget_usd"], 18)
+        self.assertEqual({k: v for k, v in sol["red_team"].items() if k not in ("note", "model")},
+                         {k: v for k, v in appended["red_team"].items() if k != "note"})
+        self.assertEqual(red_team.red_team_problems(sol), [])
+        self.assertEqual(red_team.model_settings(sol).model_id, "openai/gpt-6.1-sol")
+        from research_swarm.provider import SIGNED_REASONING_MODEL_IDS, TRACK_MODEL_IDS
+        self.assertIn("openai/gpt-6.1-sol", TRACK_MODEL_IDS[sol["budget_track"]])
+        self.assertIn("openai/gpt-6.1-sol", SIGNED_REASONING_MODEL_IDS)
+        # Same prompts as the appended attacker: only the model differs.
+        self.assertEqual(self.prompts(sol)[0], self.prompts(appended)[0])
+        baseline = load(f"{DEV}-baseline")
+        self.assertEqual({k for k in set(appended) | set(baseline) if appended.get(k) != baseline.get(k)},
+                         {"experiment", "red_team"})
+        self.assertNotIn("red_team", baseline)
+        prompts, _, _ = self.prompts(baseline)
+        self.assertEqual({a for a in prompts if prompts[a] != self.prompts(appended)[0][a]}, {"agent-005"})
+
+    def test_solver_copy_fails_closed(self):
+        with self.assertRaises(ValueError):
+            red_team.solver_copy("# Title\n\nNo persona here.", "agent-001")
+        with self.assertRaises(ValueError):
+            red_team.solver_copy("# T\n\n## Persona: A\n\nx\n\n## Persona: B\n\ny\n\n## Problems", "agent-001")
+        self.assertEqual(red_team.solver_copy("# T\n\nYou are agent-001.\n\n## Persona: A\n\nx\n\n## Problems\n\np\n",
+                                              "agent-001").split("\n\n", 2)[2],
+                         "# T\n\nYou are agent-001.\n\n## Problems\n\np")
 
     def test_platform_sections_match_the_overseer_prompt(self):
         config = load(f"{DEV}-attacker")

@@ -32,7 +32,7 @@ MODEL_NAMES = {
     'deepseek/deepseek-v4.1-flash': 'DeepSeek V4.1 Flash', 'deepseek/deepseek-v4.1-flash-1017': 'DeepSeek V4.1 Flash',
     'google/gemini-3.1-pro-preview': 'Gemini 3.1 Pro', 'google/gemini-4-argon': 'Gemini 4 Argon',
     'anthropic/claude-opus-5.5': 'Claude Opus 5.5', 'openai/gpt-5.6-sol': 'GPT 5.6 Sol',
-    'x-ai/grok-4.7': 'Grok 4.7', 'moonshotai/kimi-k3.1-pro': 'Kimi K3.1 Pro', 'openai/gpt-6-luna': 'GPT 6 Luna',
+    'x-ai/grok-4.7': 'Grok 4.7', 'moonshotai/kimi-k3.1-pro': 'Kimi K3.1 Pro', 'openai/gpt-6-luna': 'GPT 6 Luna', 'openai/gpt-6.1-sol': 'GPT 6.1 Sol',
 }
 # Sparkline geometry (viewBox units; the SVG stretches to the card width).
 W, H = 240, 40

@@ -885,7 +885,9 @@ Code: `src/research_swarm/red_team.py`; tests: `tests/test_red_team.py`.
   (`red_team.standalone_head`): a title, who it is and who the others are, then "## Your task" with the role's
   `intro_standalone`, the knowledge and the objective, then the plain overseer's platform sections byte for byte
   (`oversight.platform_sections`: problems, submissions, environment, communication, the rules given to the other
-  agents, notes, pace). It keeps every solver tool; push wording and the overseer's copy follow as in appended mode.
+  agents, notes, pace). It keeps every solver tool. After push wording follow a copy of the solvers' prompt as the first other solver got it,
+  persona section left out and said so (`red_team.solver_copy`, "## The other agents' instructions"), then the
+  overseer's copy as in appended mode.
   `red_team.model`: the designated agent's own model, shaped and checked like `overseer.model`
   (`oversight.model_block_problems`; needs a budget track whose models include it). It is role `"red_team"` in
   `oversight.role_model_configs`, so `scripts/freeze_route.py` and `scripts/compat_check.py` freeze and check it and

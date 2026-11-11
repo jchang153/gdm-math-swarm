@@ -608,11 +608,20 @@ def make_prompt_for(config, *, overseer, solver_ids, seed, listing, variant, dom
     section = copy = None
     if block:
         ov_prompt, ov_continue = final(ov_id, None), _continue_for(ov_id, overseer, neutral, push)
-        section = red_team.section_for(block["role"], ov_id, ov_prompt, ov_continue, config["seeded"]["task_id"],
-                                       standalone=standalone)
-        # Appended: the whole section follows the solver prompt. Standalone: the role text is already
-        # in the agent's own prompt, so only the overseer's copy follows.
-        copy = red_team.overseer_copy(ov_prompt, ov_continue) if standalone else section
+        if standalone:
+            # The role text is already in the agent's own prompt; what follows it is a copy of the solvers'
+            # prompt (as the first other solver got it, persona section left out), then the overseer's copy.
+            shown = next(a for a in solver_ids if a != block["agent_id"])
+            persona = personas_for(config, len(solver_ids),
+                                   int(config.get("persona_seed", DEFAULT_PERSONA_SEED)))[shown]
+            copy = (red_team.solver_copy(final(shown, persona), shown) + "\n\n"
+                    + red_team.overseer_copy(ov_prompt, ov_continue))
+            section = red_team.role_text(block["role"], ov_id, config["seeded"]["task_id"], standalone=True) \
+                + "\n\n" + copy
+        else:
+            # Appended: the whole section follows the solver prompt.
+            section = copy = red_team.section_for(block["role"], ov_id, ov_prompt, ov_continue,
+                                                  config["seeded"]["task_id"])
 
     def prompt_for(agent, persona):
         text = final(agent, persona)

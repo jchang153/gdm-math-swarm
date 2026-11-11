@@ -39,7 +39,13 @@ KIMI_K31_PRO_MODEL_ID = "moonshotai/kimi-k3.1-pro"
 # item, as for GPT 5.6 Sol, so its signed replay is a required compatibility check.
 GPT6_LUNA_MODEL_ID = "openai/gpt-6-luna"
 SWEEP25_MODEL_IDS = (GROK47_MODEL_ID, KIMI_K31_PRO_MODEL_ID, GPT6_LUNA_MODEL_ID)
-GEMINI_MODEL_IDS = (GEMINI_MODEL_ID, *OWNER_MULTIMODEL_IDS, *MULTI_OVERSEER_MODEL_IDS, *SWEEP25_MODEL_IDS)
+# GPT 6.1 Sol for the designated red-team attacker only (research_swarm.red_team ``red_team.model``; docs/plan.md,
+# "Red-team development episodes, second round (November 11, 2026)"). ID and first-party route openai verified in
+# the public OpenRouter catalog on November 11, 2026; encrypted openai-responses reasoning, as GPT 6 Luna.
+GPT61_SOL_MODEL_ID = "openai/gpt-6.1-sol"
+RED_TEAM_MODEL_IDS = (GPT61_SOL_MODEL_ID,)
+GEMINI_MODEL_IDS = (GEMINI_MODEL_ID, *OWNER_MULTIMODEL_IDS, *MULTI_OVERSEER_MODEL_IDS, *SWEEP25_MODEL_IDS,
+                    *RED_TEAM_MODEL_IDS)
 # Models each budget track (budget.BUDGET_TRACKS) may run; the launch gates check this table.
 # Budget track "gemini" is the owner's track (its name predates the multi-model runs).
 TRACK_MODEL_IDS = {"ablation": ABLATION_MODEL_IDS, "gemini": GEMINI_MODEL_IDS}
@@ -49,7 +55,8 @@ KNOWN_MODEL_IDS = tuple(dict.fromkeys(m for ids in ((MODEL_ID,), *TRACK_MODEL_ID
 # encrypted payload, e.g. Gemini thought signatures) and must be passed back on later turns with
 # tool calls. Their live compatibility check must show such a replay accepted
 # (``signed_reasoning_tool_call_replay``, scripts/compat_check.py).
-SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID, GEMINI4_MODEL_ID, GPT_SOL_MODEL_ID, GPT6_LUNA_MODEL_ID)
+SIGNED_REASONING_MODEL_IDS = (GEMINI_MODEL_ID, GEMINI4_MODEL_ID, GPT_SOL_MODEL_ID, GPT6_LUNA_MODEL_ID,
+                              GPT61_SOL_MODEL_ID)
 # Config-scoped reasoning-replay exception (owner decision, chat, November 5, 2026: "sure that's fine";
 # docs/plan.md "Five-model 25-agent sweep (November 5, 2026)"). On amazon-bedrock/global Grok 4.7
 # enforces max_tokens but returns no reasoning content, so there is nothing to replay: the model sees only
