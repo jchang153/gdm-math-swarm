@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-11 13:20 PT by Claude (Opus 5.5) site deploy agent (item 39: one top bar, deployment 8e1fc9be).
+Last updated: 2026-11-11 14:40 PT by Claude (Opus 5.5) site deploy agent (item 39: simple Explore, deployment 3c3ec272).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1814,6 +1814,10 @@ is being merged into main via `collab-env`.
     Experiments/run pages `site_nav.bar` inside their own body column); now `site_nav.bar`/`style` is the only bar,
     full-width and identical on every page (live rect 0,0,1440x61 desktop, 0,0,375x53 phone on /, /experiments,
     /about and run pages); phones show "Math Swarm" on one line; test `SameBarEverywhere` in tests/test_site_nav.py.
+    **Simple Explore LIVE 2026-11-11 ~14:35 PT (commit a08f891, `catalogue --commit`, deployment `3c3ec272`, only
+    index.html changed, verify 9/9 ok):** no replicates on Explore (no replicate words, run labels, per-run breakdowns,
+    per-run chart dots or faint lines; one average per condition; one run link per story); short plain headings and
+    sentences, at most three numbers per story, methodology notes left to About; test `test_no_replicates`.
 
 ## Next steps / open items
 
