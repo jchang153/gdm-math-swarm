@@ -10,6 +10,11 @@ Use terminal Git commands and an SSH GitHub remote for future commits and pushes
 as requested by the user. Do not use GitHub Desktop to push; report any SSH
 authentication blocker instead.
 
+As soon as a VM run is planned (before implementation finishes), check the owner's gcloud
+login (the VM tools' gcloud; location in HANDOFF.local.md) and, if the token has expired, open
+`gcloud auth login` for the owner at once in a Terminal panel tab, so the browser sign-in is done
+while they are present rather than blocking the launch later (owner request, November 10, 2026).
+
 Before GCP provisioning, SSH, file transfer, remote execution, or shutdown, read
 private/docs/gcp-vm.md and docs/validation.md. They preserve the user's supplied setup and
 run procedure. Stop the VM after authorized work completes or fails, once results
