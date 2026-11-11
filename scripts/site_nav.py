@@ -27,21 +27,38 @@ BRAND = 'GDM Math Swarm'
 
 NAV_ID = 'site-nav'
 STYLE_MARKER = 'id="site-nav-style"'
-# The editorial skin's bar (owner, November 10, 2026: "yes i like editorial"), as on Explore and About
-# (site_skin.nav): the brand in the display serif, a hard ink rule, the current page underlined in the accent. Only
-# the page's own colour tokens (site_style: --fg, --muted, --accent, --line), so it fits every page in light and dark.
+# The one top bar of every page that has it: Explore, Experiments, About and the run pages (owner, November 11,
+# 2026: clicking "Experiments" moved the whole top bar). The same markup and this same style block go on every page,
+# so the bar sits in exactly the same place at the same size everywhere. It depends on nothing of the page: its own
+# fonts, sizes, line heights and box model; full viewport width whatever the page's body margin, padding or
+# max-width (the inner row is centred, max 1240px, as Explore's column); the body's top margin is removed so the
+# bar starts at the top. Colours are the site_style tokens (--bg, --fg, --soft, --accent), which the skins map to
+# their own, so it follows light and dark. The editorial look (owner, November 10, 2026: "yes i like editorial"):
+# the brand in the display serif, a hard ink rule, the current page underlined in the accent.
 _DISPLAY = site_skin.SKINS[site_skin.DEFAULT]['fonts']['display']
+_BODY = site_skin.SKINS[site_skin.DEFAULT]['fonts']['body']
 CSS = (
-    '#site-nav{display:flex;align-items:center;justify-content:space-between;gap:6px 18px;flex-wrap:wrap;'
-    'margin:0 0 20px;padding:8px 0;min-height:44px;border-bottom:1px solid var(--fg,currentColor);'
-    'font:600 15px/1.2 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}'
-    f'#site-nav .sn-brand{{color:var(--fg,inherit);text-decoration:none;font:700 20px/1.1 {_DISPLAY};'
-    'letter-spacing:-.01em;white-space:nowrap}'
-    '#site-nav .sn-links{display:flex;gap:2px;flex-wrap:wrap}'
-    '#site-nav .sn-links a{padding:8px 14px;border-radius:2px;color:var(--muted,inherit);text-decoration:none;'
-    'white-space:nowrap}#site-nav .sn-links a:hover{color:var(--fg,inherit)}'
-    '#site-nav .sn-links a[aria-current="page"]{color:var(--fg,inherit);box-shadow:inset 0 -3px 0 var(--accent,currentColor)}'
-    '@media (max-width:520px){#site-nav .sn-brand{font-size:17px}#site-nav .sn-links a{padding:7px 8px;font-size:14px}}'
+    # A vertical scrollbar appearing or not never changes the layout width between pages.
+    'html{scrollbar-gutter:stable;overflow-x:clip}html>body{margin-top:0!important;padding-top:0!important}'
+    '#site-nav,#site-nav *{box-sizing:border-box}'
+    '#site-nav{display:block;position:relative;z-index:40;width:100vw;max-width:none;'
+    'margin:0 calc(50% - 50vw);padding:0;background:var(--bg,Canvas);border:0;'
+    'border-bottom:1px solid var(--fg,currentColor);'
+    f'font:600 15px/24px {_BODY};letter-spacing:normal;text-align:left}}'
+    '#site-nav .sn-in{display:flex;flex-wrap:nowrap;align-items:center;justify-content:space-between;gap:16px;'
+    'max-width:1240px;min-height:60px;margin:0 auto;padding:0 32px}'
+    f'#site-nav .sn-brand{{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+    f'color:var(--fg,inherit);text-decoration:none;font:700 20px/32px {_DISPLAY};letter-spacing:-.01em}}'
+    '#site-nav .sn-links{display:flex;flex:0 0 auto;flex-wrap:nowrap;gap:4px;margin:0;padding:0}'
+    '#site-nav .sn-links a{display:block;padding:8px 14px;border-radius:2px;color:var(--soft,var(--muted,inherit));'
+    'text-decoration:none;white-space:nowrap;font:inherit}'
+    '#site-nav a:hover{color:var(--fg,inherit);text-decoration:none}'
+    '#site-nav .sn-links a[aria-current="page"]{color:var(--fg,inherit);'
+    'box-shadow:inset 0 -3px 0 var(--accent,currentColor)}'
+    # Phones: one line; the brand shrinks to "Math Swarm" (below about 340px it ends in an ellipsis), never wraps.
+    '@media (max-width:640px){#site-nav .sn-in{min-height:52px;padding:0 16px;gap:8px}'
+    '#site-nav .sn-brand{font-size:16px;line-height:24px}#site-nav .sn-long{display:none}#site-nav .sn-links{gap:0}'
+    '#site-nav .sn-links a{padding:7px 8px;font-size:14px;line-height:22px}}'
     '@media print{#site-nav{display:none}}'
 )
 
@@ -52,11 +69,14 @@ _STYLE = re.compile(r'<style id="site-nav-style">.*?</style>', re.S)
 def bar(current=None, prefix=''):
     """The top bar: the brand (to Explore) and Explore / Experiments / About, ``current`` marked."""
     esc = lambda s: html.escape(s, quote=True)  # noqa: E731
+    # Phones show the short label "Math Swarm" (the brand never wraps; owner, November 11, 2026).
+    first, _, rest = BRAND.partition(' ')
+    brand = f'<span class="sn-long">{html.escape(first)} </span>{html.escape(rest)}'
     links = ''.join(f'<a href="{esc(prefix + target)}"' + (' aria-current="page"' if key == current else '')
                     + f'>{label}</a>' for key, target, label in PAGES)
-    return (f'<nav id="{NAV_ID}" aria-label="Site"><a class="sn-brand" href="{esc(prefix + EXPLORE)}">'
-            f'{html.escape(BRAND)}</a>'
-            f'<span class="sn-links">{links}</span></nav>')
+    return (f'<nav id="{NAV_ID}" aria-label="Site"><div class="sn-in">'
+            f'<a class="sn-brand" href="{esc(prefix + EXPLORE)}" aria-label="{esc(BRAND)}">{brand}</a>'
+            f'<span class="sn-links">{links}</span></div></nav>')
 
 
 def style():

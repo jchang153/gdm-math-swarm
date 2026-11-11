@@ -22,6 +22,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
+import site_nav
 import site_skin
 import site_style
 
@@ -348,8 +349,8 @@ def _document(title, description, body, skin, current):
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<title>{esc(title)}</title><meta name="description" content="{_attr(description)}">'
-        f'<style id="site-skin" data-skin="{_attr(skin)}">{css}</style></head>'
-        f'<body class="sk sk-{_attr(skin)}">{site_skin.nav(current)}{body}</body></html>')
+        f'<style id="site-skin" data-skin="{_attr(skin)}">{css}</style>{site_nav.style()}</head>'
+        f'<body class="sk sk-{_attr(skin)}">{site_nav.bar(current)}{body}</body></html>')
 
 
 def _totals(entries):

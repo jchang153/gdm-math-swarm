@@ -2,6 +2,7 @@
 About page): index.html is the Explore page, experiments.html the catalogue, about.html the explanations, and every
 generated page carries Explore | Experiments | About (scripts/site_nav.py). Offline; no network or deploy."""
 from pathlib import Path
+import re
 import sys
 import tempfile
 import types
@@ -43,6 +44,45 @@ def site():
         files[f'{run}/results.html'] = OLD_RESULTS.encode()
         files[f'{run}/conference-view/index.html'] = OLD_CONFERENCE.encode()
     return files
+
+
+def nav_parts(page):
+    """The top bar's style block and markup (current-page mark removed) of a page."""
+    style = re.findall(r'<style id="site-nav-style">.*?</style>', page, re.S)
+    bar = re.findall(r'<nav id="site-nav".*?</nav>', page, re.S)
+    return style, [b.replace(' aria-current="page"', '') for b in bar]
+
+
+class SameBarEverywhere(unittest.TestCase):
+    """Owner, November 11, 2026: clicking "Experiments" moved the whole top bar. Explore, Experiments and About (and
+    the run pages) carry one identical bar: the same style block and the same markup."""
+
+    def test_explore_experiments_and_about_share_one_bar(self):
+        import explore_page
+        files = site()
+        pages = {'explore': explore_page.render_explore([entry(RUN, 10)], files),
+                 'experiments': files['index.html'].decode('utf-8'),
+                 'about': explore_page.render_about(),
+                 'results': site_layout.apply(f'{RUN}/results.html', OLD_RESULTS)}
+        expected = ([site_nav.style()], [site_nav.bar(None)])
+        for key, page in pages.items():
+            style, bar = nav_parts(page)
+            self.assertEqual(style, expected[0], key)
+            if key == 'results':
+                self.assertEqual(bar, [site_nav.bar(None, '../')], key)
+            else:
+                self.assertEqual(bar, expected[1], key)
+                self.assertIn(f'href="{dict((k, t) for k, t, _ in site_nav.PAGES)[key]}" aria-current="page"', page)
+            # No second, page-specific bar.
+            self.assertNotIn('sk-nav', page, key)
+            self.assertNotIn('class="topnav"', page, key)
+
+    def test_bar_never_wraps_and_ignores_the_page_column(self):
+        css = site_nav.CSS
+        self.assertIn('scrollbar-gutter:stable', css)
+        self.assertIn('width:100vw', css)
+        self.assertIn('margin:0 calc(50% - 50vw)', css)
+        self.assertIn('white-space:nowrap', css.split('.sn-brand{')[1].split('}')[0])
 
 
 class BarTests(unittest.TestCase):
@@ -106,7 +146,7 @@ class RunPageTests(unittest.TestCase):
                              (f'{RUN}/analysis/storymap/index.html', '../../../')):
             page = site_layout.apply(name, OLD_RESULTS)
             self.assertIn(f'<a href="{prefix}experiments.html">Experiments</a>', page, name)
-            self.assertIn(f'<a class="sn-brand" href="{prefix}index.html">', page, name)
+            self.assertIn(f'<a class="sn-brand" href="{prefix}index.html" aria-label="GDM Math Swarm">', page, name)
             self.assertEqual(site_layout.apply(name, page), page, name)  # idempotent
 
     def test_imposible_bench_pages_get_no_bar(self):

@@ -8,6 +8,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import explore_page  # noqa: E402
+import site_nav  # noqa: E402
 import site_skin  # noqa: E402
 
 GRAPH = 'analysis/storymap/graph.html'
@@ -252,7 +253,7 @@ class Skins(unittest.TestCase):
                     self.assertGreaterEqual(ratio(t[c], t['card']), 3.0, f'{name} {mode} {c} on card')
 
     def test_nav(self):
-        bar = site_skin.nav('experiments', prefix='../')
+        bar = site_nav.bar('experiments', prefix='../')
         self.assertIn('href="../experiments.html" aria-current="page"', bar)
         self.assertEqual(len(re.findall('aria-current', bar)), 1)
 

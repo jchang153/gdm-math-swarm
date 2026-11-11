@@ -12,8 +12,6 @@ overridden by ``data-theme`` on <html> from the corner toggle.
 
 System font stacks only; no external resources. Text colours meet WCAG AA (4.5:1) on their backgrounds.
 """
-import html
-
 DEFAULT = 'editorial'
 
 # Token names: bg, ink (text), soft (secondary text), muted (captions), card, line, accent, on-accent (text on the
@@ -59,8 +57,6 @@ SKINS = {
             '.sk-band a.sk-btn:not(.ghost){background:var(--k-block-ink);color:var(--k-block);border-color:var(--k-block-ink)}'
             '.sk-card{border:1px solid var(--k-ink);box-shadow:4px 4px 0 var(--k-ink)}'
             '.sk-fig-frame{border:1px solid var(--k-ink)}'
-            '.sk-nav{border-bottom:1px solid var(--k-ink)}.sk-nav .sk-brand{font-family:var(--k-display);font-size:20px}'
-            'body.sk .sk-nav a[aria-current]{box-shadow:inset 0 -3px 0 var(--k-accent)}'
         ),
     },
     'lab': {
@@ -102,9 +98,6 @@ SKINS = {
             '.sk-chart .sk-mark{filter:drop-shadow(0 0 4px color-mix(in srgb,currentColor 70%,transparent))}'
             '.sk-band{background:var(--k-block);color:var(--k-block-ink);border-block:1px solid var(--k-line)}'
             '.sk-band .sk-h2,.sk-band p{color:var(--k-block-ink)}'
-            '.sk-nav{background:color-mix(in srgb,var(--k-bg) 85%,transparent);backdrop-filter:blur(8px);'
-            'border-bottom:1px solid var(--k-line)}.sk-nav .sk-brand{font-family:var(--k-mono);letter-spacing:.04em}'
-            'body.sk .sk-nav a[aria-current]{color:var(--k-accent);text-shadow:0 0 12px var(--k-glow)}'
             '.sk-take{color:var(--k-ink)}'
         ),
     },
@@ -148,7 +141,6 @@ SKINS = {
             '.sk-band{background:var(--k-block);color:var(--k-block-ink)}'
             '.sk-band .sk-h2,.sk-band p{color:var(--k-block-ink)}'
             'body.sk a.sk-btn{border-width:2px;border-color:var(--k-ink);box-shadow:3px 3px 0 var(--k-shadow-c)}'
-            'body.sk .sk-nav a[aria-current]{background:var(--k-ink);color:var(--k-bg)}'
         ),
     },
 }
@@ -161,15 +153,8 @@ COMPONENTS = (
     'body.sk a{color:var(--k-accent)}'
     '.sk-wrap{max-width:1240px;margin:0 auto;padding:0 32px}'
     '.sk-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}'
-    # Top navigation
-    '.sk-nav{position:sticky;top:0;z-index:40;background:var(--k-bg)}[id]{scroll-margin-top:72px}'
-    '.sk-nav .sk-wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:60px}'
-    '.sk-brand{font-weight:700;color:var(--k-ink)!important;text-decoration:none;white-space:nowrap}'
-    '.sk-links{display:flex;gap:4px;margin:0;padding:0;list-style:none}'
-    # body.sk: above the page's generic accent link colour (body.sk a), so the bar's links read as navigation.
-    'body.sk .sk-links a{display:block;padding:8px 14px;border-radius:var(--k-radius);color:var(--k-soft);'
-    'text-decoration:none;font-weight:600;font-size:15px;white-space:nowrap}body.sk .sk-links a:hover{color:var(--k-ink)}'
-    'body.sk .sk-links a[aria-current]{color:var(--k-ink)}'
+    # Top navigation: scripts/site_nav.py (one bar for every page); on these pages it stays at the top on scroll.
+    'body.sk #site-nav{position:sticky;top:0}[id]{scroll-margin-top:72px}'
     # Hero (owner, November 11, 2026: a normal editorial type scale, things side by side)
     '.sk-hero{padding:48px 0 40px}'
     '.sk-hero-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:28px 56px;align-items:end}'
@@ -265,14 +250,11 @@ COMPONENTS = (
     '@media (max-width:760px){.sk-split,.sk-textcard,.sk-hero-grid{grid-template-columns:minmax(0,1fr)}'
     '.sk-copy{position:static}.sk-hero{padding:36px 0 32px}}'
     '@media (max-width:640px){body.sk{margin:0!important;padding:0!important}'
-    '.sk-wrap{padding:0 16px}.sk-nav .sk-wrap{min-height:52px}'
-    '.sk-links a{padding:7px 8px;font-size:14px}.sk-brand{font-size:15px!important;white-space:normal;line-height:1.15;'
-    'max-width:8.5em}'
+    '.sk-wrap{padding:0 16px}'
     '.sk-fig-frame iframe{height:70vh}.sk-chart{padding:14px 12px 10px}.sk-chapter{padding:32px 0 36px}'
     '.sk-wide{display:none}.sk-narrow{display:block}'
     '.sk-dotrow{grid-template-columns:minmax(0,1fr) 48px;gap:2px 10px}.sk-dotlbl{grid-column:1/-1;text-align:left;'
     'font-size:13.5px;margin-top:6px}.sk-dotaxis>span:first-child{display:none}'
-    '.sk-links{gap:0}.sk-links a{white-space:nowrap}'
     '.sk-gloss{grid-template-columns:minmax(0,1fr)}.sk-gloss dd{margin-bottom:8px}}'
     '@media (max-width:520px){.sk-num{grid-template-columns:minmax(0,1fr);gap:10px}'
     '.sk-num>div{display:grid;grid-template-columns:5.2em minmax(0,1fr);align-items:baseline;gap:12px}'
@@ -313,18 +295,3 @@ def skin_css(name=DEFAULT, scope='full'):
         return (tokens_css(name) + 'body{font-family:var(--k-body);background-color:var(--k-bg);color:var(--k-ink)}'
                 'h1,h2,h3{font-family:var(--k-display)}')
     return tokens_css(name) + COMPONENTS + SKINS[name]['css']
-
-
-NAV = (('index.html', 'explore', 'Explore'), ('experiments.html', 'experiments', 'Experiments'),
-       ('about.html', 'about', 'About'))
-
-
-def nav(current, prefix='', brand='GDM Math Swarm'):
-    """The top navigation bar shared by Explore, Experiments and About (``prefix``: path back to the site root, for
-    pages in subfolders, e.g. '../')."""
-    esc = html.escape
-    items = ''.join(f'<li><a href="{esc(prefix + href, quote=True)}"'
-                    + (' aria-current="page"' if key == current else '') + f'>{esc(label)}</a></li>'
-                    for href, key, label in NAV)
-    return (f'<nav class="sk-nav" aria-label="Site"><div class="sk-wrap"><a class="sk-brand" '
-            f'href="{esc(prefix + "index.html", quote=True)}">{esc(brand)}</a><ul class="sk-links">{items}</ul></div></nav>')
