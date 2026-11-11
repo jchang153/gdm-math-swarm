@@ -571,6 +571,45 @@ def _continue_for(agent_id, overseer, neutral, push):
     return push_wording(message or (NEUTRAL_CONTINUE_MESSAGE if neutral else CONTINUE_MESSAGE))
 
 
+def make_prompt_for(config, *, overseer, solver_ids, seed, listing, variant, domain, reviewing, push, neutral):
+    """Every agent's final system prompt: ``(prompt_for(agent, persona), red-team section or None)``.
+
+    The run uses this function and tests/test_red_team.py calls it too, so the tests check the real
+    assembly. Order: the role's prompt, then push wording (docs/plan.md, "Push delivery of board
+    posts and DMs"), then for the designated red-team solver (research_swarm.red_team; checked by
+    preflight) the section that embeds the overseer's final prompt and restart message."""
+    from . import oversight, red_team
+    from .prompts import build_prompt, push_wording
+    code = domain == "code"
+
+    def base(agent, persona):
+        if oversight.is_overseer(agent, overseer):
+            # The seed is one more "other agent" to the overseer, like to everyone else.
+            return oversight.prompt_for(agent, overseer, solver_ids + ([seed] if seed else []), listing, variant,
+                                        domain=domain)
+        if code:
+            from .coding.prompts import build_code_prompt
+            return build_code_prompt(agent, persona, listing, variant, reviewing)
+        return build_prompt(agent, persona, listing, variant, reviewing)
+
+    def final(agent, persona):
+        text = base(agent, persona)
+        return push_wording(text) if push else text
+
+    block = red_team.red_team_config(config)
+    section = None
+    if block:
+        ov_id = oversight.overseer_ids(overseer)[0]
+        section = red_team.section_for(block["role"], ov_id, final(ov_id, None),
+                                       _continue_for(ov_id, overseer, neutral, push), config["seeded"]["task_id"])
+
+    def prompt_for(agent, persona):
+        text = final(agent, persona)
+        return red_team.append_section(text, section) if red_team.designated(agent, block) else text
+
+    return prompt_for, section
+
+
 def restart_delay(consecutive_quick):
     """Seconds to wait before a restart: 0 after a productive session, then 15, 30, 60...
     (capped) for consecutive sessions that errored or made at most RESTART_QUICK_REQUESTS requests."""
@@ -1316,6 +1355,8 @@ def preflight(config, repo_root):
     blockers.extend(persona_reviewing_problems(config))  # docs/prompts.md, "Persona reviewing lines"
     from .oversight import overseer_problems
     blockers.extend(overseer_problems(config))  # docs/prompts.md, "Overseer role"
+    from .red_team import red_team_problems
+    blockers.extend(red_team_problems(config))  # research_swarm.red_team (Track A red-team roles)
     blockers.extend(push_delivery_problems(config))  # docs/plan.md, "Unread notices", "Push delivery"
     blockers.extend(integrity_reminder_problems(config))  # docs/plan.md, "periodic integrity reminder"
     allocation = None
@@ -1721,6 +1762,7 @@ def resume_run_info(config, effective, settings, repo_root, agent_ids, listing):
         "prompt_variant": effective.get("prompt_variant"), "persona_seed": effective.get("persona_seed"),
         "persona_reviewing": effective.get("persona_reviewing"), "roles": effective.get("roles"),
         "overseer": effective.get("overseer"), "system_prompt_mode": effective.get("system_prompt_mode"),
+        "red_team": effective.get("red_team"),  # research_swarm.red_team (absent: None)
         "neutral_environment": effective.get("neutral_environment"),
         "prompt_cache_normalization": effective.get("prompt_cache_normalization"),
         "claude_code_env": effective.get("claude_code_env"), "auto_restart": effective.get("auto_restart"),
@@ -1840,7 +1882,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     from .inspect_adapter import (InstructionArchive, budget_filter, claude_code_env, credentials_in_environment,
                                   disable_inspect_dotenv)
     from .neutral_env import NEUTRAL_ENVIRONMENT_VERSION
-    from .prompts import (BASELINE_VARIANT, PERSONA_REVIEWING_DEFAULT, PERSONA_REVIEWING_KEY, build_prompt,
+    from .prompts import (BASELINE_VARIANT, PERSONA_REVIEWING_DEFAULT, PERSONA_REVIEWING_KEY,
                           initial_message, neutral_environment)
     from .tools import tool_definitions
     # Before anything Inspect runs: only secrets.load_openrouter_key may read the host .env.
@@ -1949,6 +1991,12 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             record("role_model", None, {"role": oversight.OVERSEER_ROLE, "agents": overseer_ids,
                                         "model_id": overseer_settings.model_id,
                                         "provider_route": overseer_settings.provider_route})
+        # Every prompt, push wording and the red-team section included (make_prompt_for, shared with the tests).
+        from . import red_team
+        red_team_block = red_team.red_team_config(config)
+        prompt_for, red_team_section = make_prompt_for(
+            config, overseer=overseer, solver_ids=solver_ids, seed=seed, listing=listing, variant=variant,
+            domain=domain, reviewing=reviewing, push=push, neutral=neutral)
         effective = {
             "agent_count": agent_count, "persona_seed": persona_seed,
             "persona_counts": persona_counts_for(config, personas),
@@ -1985,6 +2033,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "roles": roles, "participant_count": len(agent_ids),
             "conference_participants": len(conference_ids),
             "seeded": None if seed is None else seeded_settings(config),
+            **({"red_team": red_team.effective(red_team_block, red_team_section)} if red_team_block else {}),
             "overseer": None if overseer is None else oversight.effective_overseer(overseer, proof_checker,
                                                                                     overseer_settings,
                                                                                     domain=domain)}
@@ -2012,23 +2061,6 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                              checkpoint_minutes=resume_checkpoints,
                                              run_info=_safe_resume_run_info(config, effective, settings, repo_root,
                                                                             agent_ids, listing, record))
-        def prompt_for(agent, persona):
-            text = _prompt_for(agent, persona)
-            if push:  # docs/plan.md, "Push delivery of board posts and DMs": accurate delivery wording
-                from .prompts import push_wording
-                text = push_wording(text)
-            return text
-
-        def _prompt_for(agent, persona):
-            if oversight.is_overseer(agent, overseer):
-                # The seed is one more "other agent" to the overseer, like to everyone else.
-                return oversight.prompt_for(agent, overseer, solver_ids + ([seed] if seed else []), listing, variant,
-                                            domain=domain)
-            if code:
-                from .coding.prompts import build_code_prompt
-                return build_code_prompt(agent, persona, listing, variant, reviewing)
-            return build_prompt(agent, persona, listing, variant, reviewing)
-
         definitions = agent_tool_definitions(config, neutral)
 
         def filter_for(agent):

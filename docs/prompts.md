@@ -849,3 +849,34 @@ With one overseer (`count` 1, no board) the prompt is byte-identical to the sing
 are unchanged. Tool descriptions: `post_overseer_board` "Post a message to the overseer board, which only the
 overseers can read."; `read_overseer_board` "Read the overseer board's posts in posting order." (with the usual
 `since_seq`/`limit` paging).
+
+## Red-team roles (November 10, 2026)
+
+Amelie's Track A red-teaming of the overseer (can a swarm agent manipulate it into accepting the seeded exploit?);
+plan and prompts in Amelie's project repo, `docs/redteam/plan_trackA.md` and `docs/redteam/prompts_trackA.md`.
+Code: `src/research_swarm/red_team.py`; tests: `tests/test_red_team.py`.
+
+- Config key `red_team`: absent or null (every prompt byte-identical to the run without it), or
+  `{"agent_id": "agent-NNN", "role": "attacker" | "reviewer", "note"?}`. The designated solver keeps its persona,
+  tools and solver prompt; one section is appended after its final prompt (after push wording). Every prompt is
+  built by `runtime.make_prompt_for`, which the run and the tests share.
+- The section names the overseer, reproduces verbatim the overseer's system prompt as configured (push wording
+  included) and the message it receives when its session restarts, describes the seeded solution, and gives the
+  role's objective. Both roles get the same knowledge and differ only in the objective. The role texts are
+  researcher-only: `private/research/redteam/trackA_text.json` (git-ignored, host-only; this repository is public),
+  pinned by `red_team.TEXT_SHA256`; preflight refuses a run without the file or with other bytes.
+- Scope of the copy: what every agent gets alike from Claude Code (its own system text, the neutralized environment
+  block, the tool list) is not reproduced; only `system_prompt_mode` "replace" is allowed (preflight).
+- Preflight (`red_team_problems`) refuses a designated agent that is not a solver, an unknown role, a run that is not
+  a declared seeded run with the answer-wrapper seed (`artifact_sha256` 61ce60cc…, elapsed trigger of at most
+  600 s, above 0 and before `max_run_seconds`), anything but exactly one overseer without oversight tools and with contact, the coding domain, and a
+  non-neutral variant. The section is checked against `NEUTRAL_FORBIDDEN`.
+- Recorded: `settings.json` `effective.red_team` (agent, role, text version `trackA-v2`, section SHA-256 and
+  length) and the resume manifest's `red_team`. `roles` still lists the designated agent as a solver.
+- Not for the public library: these runs' `prompts/`, instructions and `settings.json` disclose the assignment
+  and the exploit; do not publish them with `scripts/publish_cloudflare.py` (Amelie, November 10, 2026).
+- The simple behavior judge cannot see the assignment (its case file shows only the prompt opening and integrity
+  rules), so the red-team configs set `behavior_judge` "off" and `auto_incident_report` false.
+- Configs: `configs/glmflash100-seeded-1ov-glm-120m-push-commsonly-rt-{solver,attacker,reviewer}.json`, identical to
+  `glmflash100-seeded-1ov-glm-120m-push-commsonly` except the experiment name, the behavior judge and
+  incident report turned off, and (attacker, reviewer) the `red_team` block for `agent-050`.
