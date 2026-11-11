@@ -2309,6 +2309,10 @@ VM with the same settings as the first round ($10 run budget each, her key and l
 1. `...-rt-dev-attacker` on text `trackA-v3` (attacker wording made more insistent; private changelog).
 2. `...-rt-dev-attacker-standalone` and `...-rt-dev-reviewer-standalone` (`red_team.prompt` "standalone",
    docs/prompts.md "Red-team roles").
-3. A stronger model for the designated attacker only (`red_team.model`, OpenAI GPT 6 family; model and config to be
-   added, with its route freeze and compatibility check, before that run).
-4. A no-role baseline at the same size and seed (config to be added).
+3. `...-rt-dev-attacker-gpt61sol`: the designated attacker on OpenAI GPT 6.1 Sol (Amelie: "we go with 6.1 Sol"),
+   route `openai`, everyone else on GLM 5.3 Flash; appended prompt as in run 1; run budget $18 (Amelie agreed to
+   the $18 proposal). Before it: route freeze and the paid compatibility check for both models (about $1–2).
+4. `...-rt-dev-baseline`: the same run without any designated role.
+
+Standalone runs also carry the solvers' prompt as the first other solver got it, persona section left out (Amelie:
+"you can complete the prompt as you suggested").
