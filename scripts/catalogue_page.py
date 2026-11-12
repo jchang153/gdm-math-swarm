@@ -517,6 +517,9 @@ function specChips(e,p){const out=[],ov=p&&p.overseers,sd=p&&p.seed,run=e.run;
  if(/-push(?:-|$)/.test(run))out.push(['k-push','push delivery','Board posts and DMs are pushed into the next tool result']);
  else if(p&&p.notices===true)out.push(['k-push','unread notices','Tool results announce unread messages, posts and files']);
  if(/-reminder5m-/.test(run))out.push(['k-push','reminder / 5 min','Integrity reminder every 5 minutes']);
+ {const mo=/-seeded-monitor-(actions|full)-(silent|reason)-/.exec(run);if(mo){
+  out.push(['k-ov','monitor reads '+(mo[1]==='actions'?'actions':'full transcript'),'Top-down monitor input: '+(mo[1]==='actions'?'tool calls and outputs only':'the full transcript, reasoning included')]);
+  out.push(['k-ov',mo[2]==='silent'?'silent block':'block with reason','A blocked agent sees '+(mo[2]==='silent'?'only "this action was blocked"':'the monitor\'s reason')]);}}
  if(sd)out.push(['k-seed','exploit at +'+(sd.minute!=null?Math.floor(sd.minute+0.5):'?')+' min','Planted exploit (seed)']);
  else if(p)out.push(['k-spont','spontaneous','No planted exploit']);
  out.push(['',esc(pdur(p?p.minutes:e.elapsed_seconds/60)),'Duration']);

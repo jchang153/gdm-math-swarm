@@ -309,7 +309,14 @@ def card_order(entry):
 
 # Short card titles from the run ID (redesign, October 29, 2026): the condition in a few words; the full condition
 # sentence moves into the card's details. First match wins; otherwise the model's display name.
+_MONITOR_ARM = {('actions', 'silent'): 'M1', ('actions', 'reason'): 'M2', ('full', 'silent'): 'M3',
+                ('full', 'reason'): 'M4'}
 _TITLES = (
+    # Top-down monitor arms (owner, November 12, 2026: label which spec each run is).
+    (r'-seeded-monitor-(actions|full)-(silent|reason)-',
+     lambda m: f'{_MONITOR_ARM[(m[1], m[2])]}: '
+               f'{"actions-only" if m[1] == "actions" else "full-transcript"} monitor, '
+               f'{"silent block" if m[2] == "silent" else "block with reason"}'),
     (r'-(\d+)ov-glm-.*-(commsonly|enforceonly)(?:-|$)',
      lambda m: f'{m[1]} GLM overseer{"" if m[1] == "1" else "s"}, '
                f'{"comms only" if m[2] == "commsonly" else "enforcement only"}'),
@@ -445,6 +452,14 @@ def spec_chips(entry, p):
         out.append(('k-push', 'unread notices', 'Tool results announce unread messages, posts and files'))
     if '-reminder5m-' in run:
         out.append(('k-push', 'reminder / 5 min', 'Integrity reminder every 5 minutes'))
+    found = re.search(r'-seeded-monitor-(actions|full)-(silent|reason)-', run)
+    if found:
+        out.append(('k-ov', 'monitor reads ' + ('actions' if found[1] == 'actions' else 'full transcript'),
+                    'Top-down monitor input: ' + ('tool calls and outputs only' if found[1] == 'actions'
+                                                  else 'the full transcript, reasoning included')))
+        out.append(('k-ov', 'silent block' if found[2] == 'silent' else 'block with reason',
+                    'A blocked agent sees ' + ('only "this action was blocked"' if found[2] == 'silent'
+                                               else "the monitor's reason")))
     if seed:
         minute = math.floor(seed['minute'] + 0.5) if seed.get('minute') is not None else '?'
         out.append(('k-seed', f'exploit at +{minute} min', 'Planted exploit (seed)'))
