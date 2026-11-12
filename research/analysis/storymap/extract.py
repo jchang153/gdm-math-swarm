@@ -51,6 +51,15 @@ REMINDER_SUMMARY = 300  # characters of an integrity reminder kept in the event 
 UNREAD = re.compile(r"(\d+) new ([a-z ]+?)(?: since| \(|$)")
 PUSH_EVENT = "push_delivered"   # research_swarm.conference.PUSH_EVENT
 PUSH_CHANNEL_TYPE = {"board": "B1", "dm": "D1", "reminder": "R1"}
+# Top-down monitor blocks (owner request, November 12, 2026; events X1/X2, monitor runs only): the agent's tool result
+# carries research_swarm.monitor.BLOCK_MESSAGE or BLOCK_MESSAGE_WITH_REASON (Claude Code wraps it as a hook error).
+# The whole result must be the block message (optionally inside Claude Code's hook-error wrapper), so a post or file
+# that quotes it is not a block.
+BLOCKED = re.compile(r"\s*(?:<tool_use_error>)?\s*(?:PreToolUse:\S+ hook error: )?Error: this action was blocked"
+                     r"(?:\.\s*(?:</tool_use_error>)?\s*$| by a monitor\. Reason: (?P<reason>.*))", re.S)
+BLOCK_EPISODE_GAP = 3       # a block more than this many model turns after the previous one starts a new episode
+BLOCK_ARGS = 300            # characters of the blocked call's arguments kept in detail.args
+MONITOR_KINDS = ("monitor_blocked", "monitor_block_enforced", "monitor_block_result")
 
 
 def push_delivery(seq, timestamp, payload):
@@ -97,6 +106,44 @@ def place_pushes(stream, pushes):
             out.append(("push", push["ts"], push))
     out.extend(("push", p["ts"], p) for p in unanchored[u:])
     return out
+
+
+def monitor_config(settings):
+    """The run's monitor block (``config.monitor``, else ``effective.monitor``) when enabled, else None."""
+    for key in ("config", "effective"):
+        block = (settings.get(key) or {}).get("monitor")
+        if isinstance(block, dict) and block.get("enabled"):
+            return block
+    return None
+
+
+def load_monitor_records(path, start):
+    """Per blocked tool call: the monitor's score and decision time (``monitor_blocked``) and whether the PreToolUse
+    hook enforced it (``monitor_block_enforced``). ``{}`` when the file is missing (callers report unknown)."""
+    path = Path(path)
+    if not path.exists():
+        return {}
+    out = {}
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            if '"monitor_block' not in line:
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            kind, payload = row.get("kind"), row.get("payload") or {}
+            tid = payload.get("tool_use_id")
+            if kind not in MONITOR_KINDS or not tid:
+                continue
+            rec = out.setdefault(tid, {"score": None, "enforced": False, "decided_t": None,
+                                       "agent": row.get("agent_id"), "tool": payload.get("tool")})
+            if kind == "monitor_blocked":
+                rec["score"] = payload.get("score")
+                rec["decided_t"] = mins(row.get("timestamp"), start)
+            elif kind == "monitor_block_enforced":
+                rec["enforced"] = True
+    return {"records": out} if out or path.exists() else {}
 
 
 def _epoch(value):
@@ -238,9 +285,18 @@ class RunContext:
             self.ov_board = {"ovpost-%06d" % r["post_id"]: dict(r)
                              for r in db.execute("select * from overseer_board order by post_id")}
         db.close()
+        self.monitor = monitor_config(self.settings)
+        self._monitor_records = None
         if self.start is None:
             clock = (self.settings.get("effective") or {}).get("common_start_utc")
             self.start = _epoch(clock) or 0.0
+
+    def monitor_records(self):
+        """``{tool_use_id: {"score", "enforced", "decided_t", "agent"}}`` from runtime.jsonl's monitor events (read
+        once, lazily), or None when the run has no runtime.jsonl (the join is then explicitly unknown)."""
+        if self._monitor_records is None:
+            self._monitor_records = load_monitor_records(self.run_dir / "runtime.jsonl", self.start)
+        return self._monitor_records or None
 
     def role(self, agent):
         if agent is None:
@@ -520,6 +576,7 @@ class Builder:
         self.pending_push = []   # push deliveries waiting for the model step that received them
         # overseer mode: conference event seqs already joined to a call, per-type counters, the current call's time
         self.ov_used, self.ov_n, self.ov_seen_posts, self.call_ts = set(), {}, set(), None
+        self.blocks = []         # monitor runs: the agent's blocked calls, in order
 
     # -- helpers
     def t(self, ts):
@@ -562,6 +619,8 @@ class Builder:
                 name, turn, args, self.call_ts = self.calls.get(p.get("id"), (None, max(self.turn, 0), None, ts))
                 self.add(ts, "tool_result", trim_result(name, p["text"]), tool=short_tool(name), turn=turn,
                          call_id=p.get("id"))
+                if getattr(self.ctx, "monitor", None) is not None:
+                    self.on_block(ts, p, name, args, turn)
                 if is_collab(name):
                     self.derive(ts, short_tool(name), args, p["text"], turn)
             elif kind == "context":
@@ -576,7 +635,70 @@ class Builder:
                            "Restart: a new session begins without the earlier conversation",
                            detail={"trigger": "restart", "session": p.get("session"), "summary": None})
         self.flush_push(None)
+        if self.blocks:
+            self.finish_blocks()
         return self.items
+
+    # -- top-down monitor blocks (X1 no reason shown, X2 reason shown; monitor runs only)
+    def on_block(self, ts, p, name, args, turn):
+        match = BLOCKED.match(str(p.get("text") or ""))
+        if match is None:
+            return
+        reason = match.group("reason")
+        if reason is not None:
+            reason = re.sub(r"\s*</tool_use_error>\s*$", "", reason).strip()
+        shown = reason is not None
+        etype = "X2" if shown else "X1"
+        n = len(self.blocks) + 1
+        tool = short_tool(name)
+        body = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False) if args is not None else ""
+        summary = block_args(name, args)
+        prev = self.blocks[-1] if self.blocks else None
+        start = prev is None or turn - prev["turn"] > BLOCK_EPISODE_GAP
+        episode = 1 if prev is None else prev["episode"] + (1 if start else 0)
+        retry = next((b["id"] for b in self.blocks if b["tool"] == tool and b["body"] == body), None)
+        records = self.ctx.monitor_records()
+        rec = (records or {}).get("records", {}).get(p.get("id")) if records is not None else None
+        monitor = None
+        if records is not None:
+            monitor = {"score": rec.get("score") if rec else None, "threshold": self.ctx.monitor.get("threshold"),
+                       "enforced": bool(rec.get("enforced")) if rec else None,
+                       "decided_t": rec.get("decided_t") if rec else None}
+        eid = f"{etype}:{self.agent}:block-{n:03d}"
+        text = (f"Action blocked by a monitor: {tool}: {summary[:160]} | Reason shown: {reason}" if shown
+                else f"Action blocked (no reason shown): {tool}: {summary[:160]}")
+        detail = {"n": n, "tool": tool, "call_id": p.get("id"), "args": summary, "reason": reason,
+                  "reason_shown": shown, "episode": episode, "episode_start": start, "batch_size": 1,
+                  "retry_of": retry, "next_call": None, "next_tool": None, "monitor": monitor,
+                  "monitor_record": "joined" if rec else "unknown"}
+        self.event(ts, etype, eid, text, tool=tool, outcome="blocked", detail=detail, turn=turn)
+        self.blocks.append({"id": eid, "turn": turn, "episode": episode, "tool": tool, "body": body,
+                            "position": len(self.items) - 1, "call_id": p.get("id")})
+
+    def finish_blocks(self):
+        """Fill each block's ``batch_size`` (blocks of the same model turn) and ``next_call`` (the agent's next
+        tool call after the block: identical retry, same tool changed, other tool, none)."""
+        per_turn = {}
+        for b in self.blocks:
+            per_turn[b["turn"]] = per_turn.get(b["turn"], 0) + 1
+        calls = {it["call_id"]: it for it in self.items if it["kind"] == "tool_call" and it.get("call_id")}
+        for b in self.blocks:
+            item = self.items[b["position"]]
+            detail = item["event"]["detail"]
+            detail["batch_size"] = per_turn[b["turn"]]
+            own = calls.get(b["call_id"])
+            nxt = next((it for it in self.items[b["position"] + 1:] if it["kind"] == "tool_call"
+                        and it.get("call_id") != b["call_id"]), None)
+            if nxt is None:
+                detail["next_call"] = "none"
+            else:
+                detail["next_tool"] = nxt.get("tool")
+                if own is not None and nxt.get("tool") == own.get("tool") and nxt.get("text") == own.get("text"):
+                    detail["next_call"] = "identical_retry"
+                elif nxt.get("tool") == b["tool"]:
+                    detail["next_call"] = "same_tool_changed"
+                else:
+                    detail["next_call"] = "other_tool"
 
     # -- push delivery (host-appended board posts, DMs and reminders)
     def flush_push(self, turn):
@@ -1086,6 +1208,69 @@ def overseer_context(ctx):
 # Driver
 
 
+def block_args(name, args):
+    """A short summary of a blocked call's arguments (at most BLOCK_ARGS characters): Bash's command, the file of a
+    Write/Edit/Read (with the start of its content), else the arguments as JSON."""
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except ValueError:
+            return cut_line(args)
+    if not isinstance(args, dict):
+        return "" if args is None else cut_line(json.dumps(args, ensure_ascii=False))
+    tool = short_tool(name)
+    if tool == "Bash" and isinstance(args.get("command"), str):
+        return cut_line(args["command"])
+    if isinstance(args.get("file_path"), str) and tool in ("Write", "Edit", "MultiEdit", "Read", "NotebookEdit"):
+        rest = args.get("content") or args.get("new_string") or ""
+        return cut_line(args["file_path"] + (": " + rest if isinstance(rest, str) and rest else ""))
+    return cut_line(json.dumps(args, ensure_ascii=False))
+
+
+def cut_line(text):
+    text = " ".join(str(text).split())
+    return text if len(text) <= BLOCK_ARGS else text[:BLOCK_ARGS - 2].rstrip() + " …"
+
+
+def monitor_context(ctx, tl, agents):
+    """Run-level monitor-block context (``timeline/monitor_context.json``, monitor runs only): the arm, per-agent
+    block counts from the written timelines, the cumulative block curve, and the monitor's decided and enforced
+    blocks for these agents from runtime.jsonl (null, with ``records: "unknown"``, when it is missing)."""
+    arm = ctx.monitor or {}
+    max_run = (ctx.settings.get("config") or {}).get("max_run_seconds")
+    per_agent, times = {}, []
+    for agent in sorted(agents):
+        path = Path(tl) / f"{agent}.jsonl"
+        if not path.exists():
+            continue
+        row = {"blocks": 0, "episodes": 0, "first_t": None, "by_tool": {}, "next_call": {}}
+        for line in path.read_text(encoding="utf-8").splitlines():
+            it = json.loads(line)
+            ev = it.get("event") or {}
+            if it.get("kind") != "event" or ev.get("type") not in ("X1", "X2"):
+                continue
+            d = ev.get("detail") or {}
+            row["blocks"] += 1
+            row["episodes"] += bool(d.get("episode_start"))
+            row["first_t"] = it["t"] if row["first_t"] is None else row["first_t"]
+            row["by_tool"][d.get("tool")] = row["by_tool"].get(d.get("tool"), 0) + 1
+            row["next_call"][d.get("next_call")] = row["next_call"].get(d.get("next_call"), 0) + 1
+            if isinstance(it.get("t"), (int, float)):
+                times.append(it["t"])
+        per_agent[agent] = row
+    records = ctx.monitor_records()
+    mine = [r for r in (records or {}).get("records", {}).values() if r.get("agent") in per_agent] \
+        if records is not None else None
+    return {"schema": "storymap-monitor-context/1",
+            "run_minutes": round(max_run / 60, 3) if isinstance(max_run, (int, float)) else None,
+            "arm": {"read": arm.get("read"), "show_reason": arm.get("show_reason"), "threshold": arm.get("threshold")},
+            "records": "joined" if records is not None else "unknown",
+            "decided_blocks": len(mine) if mine is not None else None,
+            "enforced_blocks": sum(bool(r.get("enforced")) for r in mine) if mine is not None else None,
+            "seen_blocks": len(times), "per_agent": per_agent,
+            "blocks_curve": _step_curve((t, 1) for t in times)}
+
+
 def item_tokens(item):
     from research.analysis.storymap.chunk import render_detail
     n = estimate_tokens(item["text"])
@@ -1147,6 +1332,9 @@ def extract(run_dir, out, agents=None, workers=4, log=None, overseers=False):
     (tl / "index.json").write_text(json.dumps(index, indent=1) + "\n", encoding="utf-8")
     if ctx.domain != domain_mod.LEAN:   # coding runs: the viewer and pipeline read the domain from here
         (tl / "domain.json").write_text(json.dumps({"domain": ctx.domain}) + "\n", encoding="utf-8")
+    if ctx.monitor is not None:   # monitor runs only (top-down monitor arms, November 10, 2026)
+        (tl / "monitor_context.json").write_text(json.dumps(monitor_context(ctx, tl, index), indent=1) + "\n",
+                                                  encoding="utf-8")
     if overseers or any(ctx.role(a) == "overseer" for a in selected):
         (tl / "overseer_context.json").write_text(json.dumps(overseer_context(ctx), indent=1) + "\n",
                                                    encoding="utf-8")

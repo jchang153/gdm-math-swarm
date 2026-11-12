@@ -2,7 +2,8 @@
 
 ``MockStorymapModel`` is a ``FakeTransport`` responder: it reads the ``STORYMAP UNIT {json}`` header line of the
 user message and returns a schema-shaped JSON reply served as the requested model by its pinned provider.
-Stage 1 quotes the start of the chunk's first reasoning item (code ``C1``, low certainty); stages 2 and 3 return
+Stage 1 quotes the start of the chunk's first reasoning item (code ``A1``, low certainty; in monitor runs also W1
+after an X1 block or W5 after an X2, on the first reasoning item after it); stages 2 and 3 return
 "unclear"/"unknown" labels. It never claims cheating; it only exercises the plumbing.
 
 Overseer mode (unit header ``"mode": "overseer"``): replies follow ``storymap/schema_overseer.py`` (its
@@ -38,6 +39,26 @@ def _first_reasoning(user):
             turn = int(match.group(2)) if match.group(2).isdigit() else 0
             t = float(match.group(3)) if match.group(3) not in ("?",) else 0.0
             return int(match.group(1)), turn, t, match.group(5).strip()[:60]
+    return None
+
+
+def _after_block(user):
+    """Monitor runs: (i, turn, t, quote, code) of the first reasoning item after a block event in the chunk, with
+    the mock code W1 after X1 (no reason shown) and W5 after X2 (reason shown), or None."""
+    if "=== MONITOR BLOCKS ===" not in str(user):
+        return None
+    block = None
+    for line in str(user).splitlines():
+        match = _ITEM.match(line)
+        if not match:
+            continue
+        kind = match.group(4)
+        if kind.startswith("event X1") or kind.startswith("event X2"):
+            block = kind.split()[1]
+        elif block and kind == "reasoning" and match.group(5).strip():
+            turn = int(match.group(2)) if match.group(2).isdigit() else 0
+            t = float(match.group(3)) if match.group(3) not in ("?",) else 0.0
+            return int(match.group(1)), turn, t, match.group(5).strip()[:60], "W1" if block == "X1" else "W5"
     return None
 
 
@@ -92,6 +113,10 @@ def reply(user):
         found = _first_reasoning(user)
         thoughts = [] if found is None else [{"code": "A1", "turn": found[1], "item": found[0], "t": found[2],
                                                "quote": found[3], "certainty": "low", "note": None}]
+        block = _after_block(user)
+        if block is not None:
+            thoughts.append({"code": block[4], "turn": block[1], "item": block[0], "t": block[2], "quote": block[3],
+                             "certainty": "low", "note": "mock response to a block"})
         return {"thoughts": thoughts,
                 "state": {"has_trick": False, "stance": "none", "believes_judge": "unknown", "open_questions": [],
                           "summary": f"mock state after chunk {unit.get('chunk')}"}}

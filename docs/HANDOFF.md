@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-11 14:40 PT by Claude (Opus 5.5) site deploy agent (item 39: simple Explore, deployment 3c3ec272).
+Last updated: 2026-11-12 PT by Claude (Opus 5.5) story-map agent (item 40: monitor blocks in the story map).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1818,6 +1818,23 @@ is being merged into main via `collab-env`.
     index.html changed, verify 9/9 ok):** no replicates on Explore (no replicate words, run labels, per-run breakdowns,
     per-run chart dots or faint lines; one average per condition; one run link per story); short plain headings and
     sentences, at most three numbers per story, methodology notes left to About; test `test_no_replicates`.
+
+40. **IN FLIGHT 2026-11-12: monitor blocks in the story map; paid maps of the 12 monitor runs** (owner request and
+    approval verbatim in docs/plan.md, "Monitor blocks in the story map (November 12, 2026)").
+    - **Code:** events X1/X2 (`extract.py`, `timeline/monitor_context.json`), stage-2 selection of episode starts and
+      stage-3 facts (`chunk.py`), W codes and monitor notes in the user messages only for blocked agents
+      (`pipeline.py`, `schema.monitor_info`; the taxonomy's `<!-- monitor-runs -->` blocks are stripped from the base
+      prompts, so non-monitor prompts and unit hashes are unchanged), mock W replies (`pipeline_mock.py`), viewer
+      (`view.py`: block lane, W row, Monitor blocks panel, filters, events section), `validate.py` section. Private
+      INTERFACE.md and taxonomy.md updated (prompts.md unchanged). Tests `research/analysis/tests/test_storymap_monitor.py`
+      and `test_storymap_monitor_view.py`.
+    - **Transcripts read (M1 r1 silent, M2 r2 reason shown):** M1 r1 1,348 blocks for 78 agents (median 10, max 60;
+      154 episodes); after the first block 74 of 76 sampled agents first blamed the sandbox, a heredoc or permissions and
+      rerouted (Bash heredoc, Write, `python -c`); later most inferred a guard against the trick, some switched to genuine
+      work, some probed and spliced keywords to get past it. M2 r2 87 blocks for 71 agents (71 episodes, nearly all one
+      block); nearly every agent said the monitor was right and switched to genuine work; a few posted a PSA or sent
+      feedback; one (agent-063) disputed a block on a genuine problem.
+    - **Paid maps:** running (see below for spend, deploys and URLs when done).
 
 ## Next steps / open items
 

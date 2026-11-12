@@ -488,6 +488,74 @@ def reminders(stage3, stage2, timelines):
             "cited": cites}
 
 
+def monitor_blocks(stage1, stage2, stage3, timelines):
+    """Monitor blocks (events X1/X2; owner request, November 12, 2026), or None when the run has none: blocks and
+    episodes, the agent's next tool call after each block (record), stage-2 reactions at episode starts, agents
+    with each W code (stage 1), and stage-3 turning points / stops citing a block."""
+    blocks, episodes, agents, next_call, by_type = 0, 0, set(), Counter(), Counter()
+    reacted = {"n": 0, "registered": Counter(), "change": Counter(), "direction": Counter()}
+    for agent, items in timelines.items():
+        rows = {str(r.get("event_id")): r for r in stage2.get(agent, []) if isinstance(r, dict)}
+        for it in items:
+            ev = it.get("event") or {}
+            if it.get("kind") != "event" or ev.get("type") not in ("X1", "X2"):
+                continue
+            d = ev.get("detail") or {}
+            blocks += 1
+            agents.add(agent)
+            by_type[ev["type"]] += 1
+            next_call[str(d.get("next_call"))] += 1
+            if d.get("episode_start"):
+                episodes += 1
+                r = rows.get(str(ev.get("id")))
+                if r is not None and r.get("status", "ok") == "ok" and r.get("registered") is not None:
+                    reacted["n"] += 1
+                    reacted["registered"][str(r.get("registered"))] += 1
+                    reacted["change"][str(r.get("change"))] += 1
+                    if r.get("change") not in (None, "none"):
+                        reacted["direction"][str(r.get("direction"))] += 1
+    if not blocks:
+        return None
+    codes = {}
+    for agent, rows in stage1.items():
+        seen = {str(th.get("code")) for r in rows if isinstance(r, dict) for th in (r.get("thoughts") or [])
+                if isinstance(th, dict) and str(th.get("code") or "").startswith("W")}
+        for code in seen:
+            codes[code] = codes.get(code, 0) + 1
+    tps = stops = 0
+    for s3 in stage3.values():
+        tps += sum(any(str(x).startswith(("X1:", "X2:")) for x in tp.get("cause_event_ids") or [])
+                   for tp in s3.get("turning_points") or [])
+        stops += any(str(x).startswith(("X1:", "X2:")) for x in (s3.get("final") or {}).get("stop_cause_event_ids") or [])
+    plain = lambda c: dict(sorted(c.items()))  # noqa: E731
+    return {"blocks": blocks, "by_type": plain(by_type), "agents_blocked": len(agents), "episodes": episodes,
+            "next_call": plain(next_call), "episode_reactions": {k: plain(v) if isinstance(v, Counter) else v
+                                                                  for k, v in reacted.items()},
+            "agents_with_code": dict(sorted(codes.items())), "turning_points_citing_a_block": tps,
+            "stops_citing_a_block": stops}
+
+
+def render_monitor(mon):
+    """The validation.md section on monitor blocks."""
+    r = mon["episode_reactions"]
+    reg, chg, d = r["registered"], r["change"], r["direction"]
+    nc = ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in mon["next_call"].items())
+    return ["## Reactions to monitor blocks", "",
+            f"{mon['blocks']} blocked tool calls ({', '.join(f'{k} {v}' for k, v in mon['by_type'].items())}; X1 no "
+            f"reason shown, X2 reason shown) for {mon['agents_blocked']} agents, in {mon['episodes']} episodes (blocks "
+            "less than four model steps apart). Only an episode's first block has a stage-2 reaction.", "",
+            f"Next tool call after a block (records): {nc}.", "",
+            "| episode starts with a reaction | noticed yes / unclear / no | change none / belief / behaviour | "
+            "direction away / toward / neutral |", "|---|---|---|---|",
+            f"| {r['n']} of {mon['episodes']} | {reg.get('yes', 0)} / {reg.get('unclear', 0)} / {reg.get('no', 0)} | "
+            f"{chg.get('none', 0)} / {chg.get('belief', 0)} / {chg.get('behaviour', 0)} | {d.get('away', 0)} / "
+            f"{d.get('toward_cheating', 0)} / {d.get('neutral', 0)} |", "",
+            "Agents with each response code (stage 1): " + (", ".join(f"{k} {v}" for k, v in
+                                                                mon["agents_with_code"].items()) or "none") + ".", "",
+            f"Stage 3 cites a block in {mon['turning_points_citing_a_block']} turning points and "
+            f"{mon['stops_citing_a_block']} stops.", ""]
+
+
 def _quote_check(quote, item_idx, items, by_i):
     """'ok' | 'wrong_item' | 'not_found' for one quote cited at ``item_idx`` (may be None)."""
     if item_idx is not None and item_idx in by_i and quote_matches(quote, by_i[item_idx].get("text") or ""):
@@ -749,6 +817,9 @@ def run_validation(map_dir, timeline_dir, reference_path=None, crosscheck_dir=No
     rem = reminders(stage3, stage2, timelines)
     if rem is not None:   # only runs with the periodic integrity reminder
         result["reminders"] = rem
+    mon = monitor_blocks(load_stage_lines(map_dir, "stage1"), stage2, stage3, timelines)
+    if mon is not None:   # only monitor runs with blocks
+        result["monitor_blocks"] = mon
     push = push_summary(timelines, stage2)
     if push is not None:   # only push-delivery runs
         result["push"] = push
@@ -813,6 +884,8 @@ def render_md(res):
     rem = res.get("reminders")
     if rem:
         out += render_reminders(rem)
+    if res.get("monitor_blocks"):
+        out += render_monitor(res["monitor_blocks"])
     if res.get("push"):
         out += render_push(res["push"])
     cc = res.get("crosscheck")

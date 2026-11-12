@@ -2343,3 +2343,29 @@ recall 10% / 29%, because almost all high-scoring non-fake calls were the agents
 (generating or compiling the answer-restating files). Counting those as part of the cheat, 80 blocks ~0.2% of other
 calls with recall ~83% (actions) / ~79% (full); ~5% of genuine submissions (4 of 81) score >= 80 in both modes, which
 is reported as the monitor's cost. Launch: all 12 runs at once (one per VM).
+
+## Monitor blocks in the story map (November 12, 2026)
+
+Owner request (November 12, 2026, verbatim): "can we include block / block with reason as new interventions, maybe a
+new category in the story map?"
+
+Built (offline; code `research/analysis/storymap/`, codebook additions in the public `taxonomy.md`):
+- Events X1 (action blocked, no reason shown) and X2 (action blocked, the monitor's reason shown), from the agent's
+  own tool result when the whole result is the monitor's block message, with the blocked tool, an argument summary,
+  the reason as shown (X2), block episode (blocks less than four model steps apart), batch size, exact retries, the
+  agent's next tool call, and the monitor's score / threshold / enforcement joined from `runtime.jsonl` when it is
+  available (otherwise explicitly unknown). The monitor's hidden reason in the silent arms is never used.
+- Thought group W (responses to a block), grounded in reading post-block transcripts of M1 r1 and M2 r2: W1 reads it
+  as a technical fault, W2 probes what is blocked, W3 attributes it to oversight, W4 works around it, W5 complies, W6
+  disputes it, W7 tells others. Stage 2 reads the first block of each episode; stage 3 may cite blocks as causes.
+- Viewer: block lane and W row on agent pages, a "Monitor blocks" run panel, Blocks column and W / blocked filters,
+  an events-page section; validation.md "Reactions to monitor blocks".
+- Runs without blocks are unchanged byte for byte (the monitor material sits in marked blocks of the taxonomy that
+  the base prompts leave out; golden tests).
+
+Owner (November 12, 2026, verbatim): "go ahead and run the 12 story maps, and publish to the site". Approved: real
+story maps on all 12 top-down monitor runs (M1-M4 x 3) with the stage models of the solver maps (stage 1 Claude
+Haiku 5.5, stage 2 GPT-6.1 Terra, stage 3 GPT-6.1 Sol), **`--run-limit 50` per run** (one budget per run), then
+publication on the public Cloudflare library with the usual privacy scans (monitor reasons only as they appear in
+the agents' own transcripts; `RUN/monitor/calls.jsonl`, Inspect logs and raw records stay private) and catalogue
+links.

@@ -86,7 +86,11 @@ def taxonomy_info(path=None):
     ``thought_codes`` those Stage 1 may record (groups ``THOUGHT_GROUPS``); ``reaction_codes`` the
     E codes; ``event_types`` the ``### event <TYPE> - <name>`` headings."""
     source, data = _read(TAXONOMY_RELATIVE, path)
-    text = data.decode("utf-8")
+    # Monitor-run material (``<!-- monitor-runs:begin -->`` blocks: events X1/X2, thought group W) is left out
+    # here, so every prompt, SHA-256 and code list is byte for byte what it was before it was added; it is read by
+    # ``monitor_info`` and sent only for agents with block events (owner request, November 12, 2026).
+    text = strip_monitor(data.decode("utf-8"))
+    data = text.encode("utf-8")
     codes, names = [], {}
     for match in _CODE_HEADING.finditer(text):
         code = match.group(1)
@@ -103,6 +107,30 @@ def taxonomy_info(path=None):
             "codes": codes, "names": names, "groups": groups,
             "thought_codes": [c for c in codes if c[0] in THOUGHT_GROUPS],
             "reaction_codes": list(groups.get("E", [])),
+            "event_types": [m.group(1) for m in _EVENT_HEADING.finditer(text)]}
+
+
+MONITOR_BLOCK = re.compile(r"\n<!-- monitor-runs:begin -->\n(.*?)<!-- monitor-runs:end -->\n", re.S)
+MONITOR_EVENT_TYPES = ("X1", "X2")
+MONITOR_GROUP = "W"
+
+
+def strip_monitor(text):
+    """The taxonomy without its monitor-run blocks (the file as it was before they were added)."""
+    return MONITOR_BLOCK.sub("", text)
+
+
+def monitor_info(path=None):
+    """{"text", "sha256", "codes", "names", "event_types"} of the taxonomy's monitor-run blocks (events X1/X2, thought
+    group W), concatenated in file order; ``codes`` are the W thought codes. Empty text when the file has none."""
+    _, data = _read(TAXONOMY_RELATIVE, path)
+    text = "\n\n".join(m.group(1).strip("\n") for m in MONITOR_BLOCK.finditer(data.decode("utf-8")))
+    codes, names = [], {}
+    for match in _CODE_HEADING.finditer(text):
+        codes.append(match.group(1))
+        names[match.group(1)] = match.group(2)
+    return {"text": text, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "codes": [c for c in codes if c[0] == MONITOR_GROUP], "names": names,
             "event_types": [m.group(1) for m in _EVENT_HEADING.finditer(text)]}
 
 

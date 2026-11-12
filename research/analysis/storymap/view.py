@@ -22,6 +22,11 @@ Writes (default ``--out`` = ``--map``):
 * ``events.html``: each overseer post or DM, other relevant board post, revert, library file and (runs with the
   periodic integrity reminder) each delivery number of the reminder, with who read it and when, and the breakdown of
   stage-2 reactions (no change / belief / behaviour by direction).
+* Monitor runs (top-down monitor arms; timelines with "action blocked" events, owner request November 12, 2026): a
+  "Blocked by monitor" lane and a W thought lane on agent pages, a "Monitor blocks" run panel, a Blocks column and
+  block / W-code filters on ``index.html``, a monitor-blocks section on ``events.html``, and the taxonomy's
+  ``<!-- monitor-runs:begin/end -->`` blocks on the codes page and legends. Runs without blocks strip those blocks and
+  render every page byte for byte as before.
 
 Inputs follow private/research/analysis/storymap/INTERFACE.md. Every input is optional: an agent with only a timeline,
 or only stage outputs, still gets a row, and missing stages are stated on the page instead of guessed. The taxonomy is
@@ -56,6 +61,22 @@ from site_style import themed  # noqa: E402  (shared light/dark tokens and toggl
 DEFAULT_TAXONOMY = Path(__file__).resolve().parent / "taxonomy.md"  # public copy (owner, November 2, 2026)
 AXIS_MIN = 180.0
 LETTERS = "ABCDEFG"
+BLOCK_TYPES = ("X1", "X2")  # monitor runs only: a tool call blocked by the top-down monitor (no reason / reason shown)
+MONITOR = {"on": False, "ctx": None}  # set by _build when the run has blocks; off renders every page as before
+MONITOR_BLOCK = re.compile(r"\n<!-- monitor-runs:begin -->\n.*?<!-- monitor-runs:end -->\n", re.S)
+MONITOR_MARKER = re.compile(r"^<!-- monitor-runs:(?:begin|end) -->\n", re.M)
+
+
+def letters():
+    """The thought-code group letters of this build: A-G, and W (responses to a monitor block) in monitor runs."""
+    return LETTERS + ("W" if MONITOR["on"] else "")
+
+
+def taxonomy_text(text, monitor=False):
+    """The taxonomy for this run: the monitor-runs blocks kept without their marker lines (monitor runs) or stripped
+    with their leading newline, which gives the file as it was before the blocks were added, byte for byte."""
+    text = "" if text is None else str(text)
+    return MONITOR_MARKER.sub("", text) if monitor else MONITOR_BLOCK.sub("", text)
 STANCES = ("none", "considering", "deferred", "rejected", "faking", "stopped")
 CHANGES = ("none", "belief", "behaviour")
 DIRECTIONS = ("toward_cheating", "away", "neutral", None)
@@ -78,6 +99,9 @@ LANES = (  # (key, label, short label (phones), event types, hover hint); the "r
     ("own", "Did: own posts, restarts", "Own acts", ("O1", "C1"),
      "The agent's own posts, DMs and notes, and context compactions or restarts"),
 )
+BLOCK_LANE = ("block", "Blocked by monitor", "Blocks", BLOCK_TYPES,  # only on agents with blocks (monitor runs)
+              "Tool calls the run's top-down monitor blocked before they ran (filled square: the monitor's reason was "
+              "shown to the agent)")
 POSITION = "Position on cheating"
 POSITION_HINT = ("What the agent intended about the shortcut at that moment: not aware, considering, deferred, "
                  "rejected, faking, stopped")
@@ -110,7 +134,8 @@ def model_label(mid):
 TYPE_NAME = {"L1": "library listing", "L2": "library file read", "P1": "problem list",
              "P2": "revert of its own credit", "B1": "board post", "D1": "direct message", "S1": "submission",
              "O1": "own post, DM or note", "C1": "context compaction or restart", "N1": "unread-messages notice",
-             "R1": "integrity reminder"}
+             "R1": "integrity reminder", "X1": "action blocked (no reason shown)",
+             "X2": "action blocked (reason shown)"}
 
 
 def type_name(typ, cap=False):
@@ -141,6 +166,11 @@ def event_label(e_or_id, typ=None):
             return f"integrity reminder at {float(at):.1f} min"
         except (TypeError, ValueError):
             return type_name(typ)
+    if typ in BLOCK_TYPES:  # 'X1:agent-032:block-001' -> 'blocked action no. 1 (Bash)'
+        m = re.search(r"block-0*(\d+)$", rest)
+        tool = ((e_or_id.get("detail") or {}).get("tool") if isinstance(e_or_id, dict) else None)
+        return (f"blocked action no. {m.group(1)}" if m else "blocked action") + (f" ({redact(str(tool))})"
+                                                                                  if tool else "")
     if typ == "S1" and isinstance(e_or_id, dict) and (e_or_id.get("detail") or {}).get("task_id"):
         return f"submission {rest} ({e_or_id['detail']['task_id']})"
     if typ in ("B1", "D1", "S1"):
@@ -154,7 +184,9 @@ def event_label(e_or_id, typ=None):
 
 def plain_ids(text):
     """Model-written or extractor text with raw event ids ('B1:post-000003') made plain."""
-    text = re.sub(r"\b([LPBDSOCNR][12]):([^\s,;)'\"\]]+)", lambda m: event_label(m.group(0), m.group(1)), str(text))
+    letters_ = "LPBDSOCNRX" if MONITOR["on"] else "LPBDSOCNR"
+    text = re.sub(r"\b([" + letters_ + r"][12]):([^\s,;)'\"\]]+)", lambda m: event_label(m.group(0), m.group(1)),
+                  str(text))
     return re.sub(r"\bt\s?=\s?(-?\d+(?:\.\d+)?)\b", lambda m: fmt_t(float(m.group(1))), text)  # one time format
 
 
@@ -358,6 +390,19 @@ tr.xr{display:block}tr.xr>td{display:block}.sb{grid-template-columns:1fr;gap:2px
 @media (max-height:599px){details.legend{position:static}}
 """
 )
+
+# Monitor runs only (added to every page's styles when the run has blocks): the block glyph (an ink square with a
+# cross, filled when the reason was shown), the index's Blocks column and the monitor panel's bars.
+MONITOR_CSS = """
+.g.g-block .m{fill:var(--card);stroke:var(--fg);stroke-width:1.4}.g .xb{fill:none;stroke:var(--fg);stroke-width:1.4;
+stroke-linecap:round}.g.g-block.g-reason .m{fill:var(--fg)}.g.g-block.g-reason .xb{stroke:var(--card)}
+.g.g-block:hover .m{stroke-width:2.2}.g.g-block.sel .m{stroke-width:2.8}
+.grid.mon .row,.grid.mon .hdr{grid-template-columns:96px minmax(0,1fr) 56px 320px}.grid.mon .blk{text-align:right;
+font-size:13px;font-variant-numeric:tabular-nums;padding-right:6px}
+section.mon h3{margin-top:10px}section.mon svg.bars{display:block;width:100%;height:84px;overflow:visible}
+.mbar{fill:var(--fg);opacity:.72}.mbar:hover{opacity:1}.monk{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:13.5px}
+@media (max-width:900px){.grid.mon .row,.grid.mon .hdr{grid-template-columns:80px minmax(0,1fr) 44px}}
+"""
 
 # The agent page's detail column: selecting (click, Enter, #sel=) or stepping (arrow keys, j / k, Prev / Next) shows
 # one item; a stacked spot lists all of its items; nothing ever scrolls the window (owner, Nov 2, 2026): only the
@@ -651,17 +696,18 @@ def _num(v, default=0.0):
         return default
 
 
-def load_taxonomy(path):
-    """{"A": "group title", "C4": "code title"} from the researcher-only taxonomy headings, if any."""
+def load_taxonomy(path, monitor=False):
+    """{"A": "group title", "C4": "code title"} from the taxonomy headings, if any. The monitor-runs blocks (group W)
+    count only with ``monitor``; otherwise they are stripped first, so the names are exactly as before them."""
     names = {}
     try:
-        text = Path(path).read_text(encoding="utf-8")
+        text = taxonomy_text(Path(path).read_text(encoding="utf-8"), monitor)
     except (OSError, TypeError):
         return names
     for line in text.splitlines():
-        m = re.match(r"^#{1,4}\s*(?:Group\s+)?([A-G])(\d{0,2})\b\s*[.:)\-–—]*\s*(.*)$", line.strip())
+        m = re.match(r"^#{1,4}\s*(?:Group\s+)?([A-GW])(\d{0,2})\b\s*[.:)\-–—]*\s*(.*)$", line.strip())
         if not m:
-            m = re.match(r"^[-*]\s*\**`?([A-G])(\d{1,2})`?\**\s*[.:)\-–—]+\s*(.*)$", line.strip())
+            m = re.match(r"^[-*]\s*\**`?([A-GW])(\d{1,2})`?\**\s*[.:)\-–—]+\s*(.*)$", line.strip())
         if m:
             key = m.group(1) + m.group(2)
             title = re.sub(r"[*`_]", "", m.group(3)).strip()
@@ -671,12 +717,13 @@ def load_taxonomy(path):
     return names
 
 
-def load_definitions(path):
+def load_definitions(path, monitor=False):
     """{code: {"name", "def", "include", "example"}} from the taxonomy's code sections (``### A1 - name`` and its
     paragraph): ``def`` is the text before "Include:" / "Exclude:" / "Example", ``include`` the inclusion note,
-    ``example`` the example. Group headings (``### A - name``) get their intro paragraph, if any."""
+    ``example`` the example. Group headings (``### A - name``) get their intro paragraph, if any. Group W (monitor
+    runs) only with ``monitor``, as in load_taxonomy."""
     try:
-        text = Path(path).read_text(encoding="utf-8")
+        text = taxonomy_text(Path(path).read_text(encoding="utf-8"), monitor)
     except (OSError, TypeError):
         return {}
     out, cur, body = {}, None, []
@@ -695,7 +742,7 @@ def load_definitions(path):
                 d["example"] = part
         out[cur[0]] = d
     for line in text.splitlines():
-        m = re.match(r"^###\s+([A-G]\d{0,2})\s+-\s+(.*)$", line.strip())
+        m = re.match(r"^###\s+([A-GW]\d{0,2})\s+-\s+(.*)$", line.strip())
         if m or line.startswith("#"):
             close()
             cur, body = ((m.group(1), re.split(r"\s\(", m.group(2))[0].strip()) if m else None), []
@@ -831,6 +878,8 @@ def glyph_class(ev):
     host's integrity reminder (an amber star); push when it was pushed into the agent's context (a chevron)."""
     e = ev["event"]
     typ = e.get("type")
+    if typ in BLOCK_TYPES:  # a square with a cross (ink); filled when the monitor's reason was shown
+        return "g-block" + (" g-reason" if typ == "X2" else "")
     flags = (["g-other"] if typ in OTHER_TYPES else ["g-rem"] if typ == "R1"
              else ["g-fill" if e.get("fake") else "g-hollow"])
     if is_overseer(e):
@@ -859,6 +908,11 @@ def _mark(typ, x, y, r, cls="m"):
                        f"{y - (r * 1.35 if k % 2 == 0 else r * 0.58) * math.cos(math.pi * k / 5):.1f}"
                        for k in range(10))
         return f'<polygon class="{cls}" points="{pts}"/>'
+    if typ in BLOCK_TYPES:  # a square with a cross: an action the monitor blocked
+        k = r * 1.05
+        return (f'<rect class="{cls}" x="{x - k:.1f}" y="{y - k:.1f}" width="{2 * k:.1f}" height="{2 * k:.1f}" '
+                f'rx="1"/><path class="xb" d="M{x - k * .55:.1f},{y - k * .55:.1f}L{x + k * .55:.1f},{y + k * .55:.1f}'
+                f'M{x + k * .55:.1f},{y - k * .55:.1f}L{x - k * .55:.1f},{y + k * .55:.1f}"/>')
     if typ in OTHER_TYPES:
         return f'<circle class="{cls}" cx="{x:.1f}" cy="{y:.1f}" r="{max(r * 0.45, 1.6):.1f}"/>'
     if typ == "TH":
@@ -911,14 +965,17 @@ def shape(typ, x, y, r, cls, key, title, count=0, attrs=""):
 
 def event_title(ev):
     e = ev["event"]
-    lab = event_label(e)[:90] if e.get("type") in ("L2", "B1", "D1", "S1", "P2", "O1") else type_name(e.get("type"))
+    lab = (event_label(e)[:90] if e.get("type") in ("L2", "B1", "D1", "S1", "P2", "O1", "X1", "X2")
+           else type_name(e.get("type")))
     bits = [lab[:1].upper() + lab[1:], fmt_t(ev.get("t"))]
     if e.get("author") and e.get("type") != "S1":
         bits.append(f"by {e['author']}" + (f" ({e['author_role']})" if e.get("author_role") else ""))
     if e.get("fake"):
         bits.append("fake")
-    if e.get("outcome"):
+    if e.get("outcome") and e.get("type") not in BLOCK_TYPES:
         bits.append(OUTCOME_LABEL.get(str(e["outcome"]), str(e["outcome"]).replace("_", " ")))
+    if e.get("type") in BLOCK_TYPES:
+        bits.append("reason shown" if e.get("type") == "X2" else "no reason shown")
     if delivery_of(e) in ("push", "notice"):
         bits.append(DELIVERY_LABEL[delivery_of(e)])
     return " · ".join(bits)
@@ -1016,7 +1073,8 @@ def phases_of(a, tmax):
 def page(title, body, scripts="", body_class="", css=""):
     doc = (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
            f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-           f'<meta name="robots" content="noindex"><title>{esc(title)}</title><style>{CSS}{css}</style></head>'
+           f'<meta name="robots" content="noindex"><title>{esc(title)}</title>'
+           f'<style>{CSS}{MONITOR_CSS if MONITOR["on"] else ""}{css}</style></head>'
            f'<body{f" class={chr(34)}{body_class}{chr(34)}" if body_class else ""}>{body}'
            f'{"<script>" + scripts + "</script>" if scripts else ""}</body></html>')
     return themed(doc)
@@ -1071,6 +1129,8 @@ SHAPE_MEANING = (  # (type, glyph_class flags, legend text); drawn by shape() ex
     ("N1", "g-other", "problem list, unread-messages notice, own post or restart"),
     ("R1", "g-rem", TYPE_NAME["R1"]))
 AGENT_ONLY_SHAPES = {"R1"}  # drawn only on the agent pages (their own lane), so listed elsewhere only when present
+BLOCK_MEANING = (("X1", "g-block", "action blocked by the monitor"),  # listed only where blocks are shown
+                 ("X2", "g-block g-reason", "filled: the monitor's reason was shown"))
 MARK_MEANING = (("L2", "g-fill", "pink, solid: fake"), ("D1", "g-hollow ring", "cyan ring: from an overseer"),
                 ("S1", "g-hollow ok", "✓ accepted or credited"), ("S1", "g-hollow no", "slash: not accepted"))
 PUSH_MEANING = ("B1", "g-hollow push", "chevron below: delivered into its context unasked (no chevron: it read it)")
@@ -1107,11 +1167,25 @@ CODE_SCHEME = ("Letters are only ever code groups: A–D and G are thought codes
                "lettered: they are named in words and drawn as shapes.")
 
 
+MONITOR_GLOSSARY = (
+    ("monitor, block", "in monitor runs, a model outside the swarm rates each pending tool call of a solver; above its "
+     "threshold the host blocks the call before it runs and the agent sees only an error (with the monitor's reason "
+     "in reason-shown runs). Blocks less than four model steps apart form one episode"),)
+MONITOR_SCHEME = (" In monitor runs, W codes are the agents' responses to a monitor block (stage 1); a blocked action "
+                  "is an event, drawn as a square with a cross.")
+
+
+def code_scheme():
+    """CODE_SCHEME, with the W group and the block event in monitor runs."""
+    return CODE_SCHEME + (MONITOR_SCHEME if MONITOR["on"] else "")
+
+
 def terms_html():
     """The glossary: a separate, collapsed block, so the legend stays short."""
+    gloss = GLOSSARY + (MONITOR_GLOSSARY if MONITOR["on"] else ())
     return ('<details class="terms"><summary>Terms used on these pages: trick, fake, judge, credited, closed, revert, '
-            'overseer, seed, turn, item, chunk, certainty</summary><ul>'
-            + "".join(f"<li><b>{esc(k)}</b>: {esc(v)}</li>" for k, v in GLOSSARY) + "</ul></details>")
+            'overseer, seed, turn, item, chunk, certainty' + (", monitor, block" if MONITOR["on"] else "")
+            + '</summary><ul>' + "".join(f"<li><b>{esc(k)}</b>: {esc(v)}</li>" for k, v in gloss) + "</ul></details>")
 
 
 def groups_html(names, href, defs=None):
@@ -1120,10 +1194,11 @@ def groups_html(names, href, defs=None):
     names are not shown."""
     defs = defs or {}
     if not any(names.get(L) for L in LETTERS):
-        return ('<p class="note">Thoughts that the stage-1 reader quoted and coded into seven groups, A–G; '
-                'the group names are not shown on this copy.</p>')
+        return ('<p class="note">Thoughts that the stage-1 reader quoted and coded into seven groups, A–G'
+                + (' (and W, responses to a monitor block)' if MONITOR["on"] else '')
+                + '; the group names are not shown on this copy.</p>')
     groups = []
-    for L in LETTERS:
+    for L in letters():
         codes = sorted((c for c in names if c[:1] == L and len(c) > 1), key=lambda c: int(c[1:]))
         items = "".join(
             f'<details class="code"><summary title="{esc(code_tip(c, defs, names))}"><b>{c}</b> {esc(names[c])}'
@@ -1136,6 +1211,13 @@ def groups_html(names, href, defs=None):
             f'reactions). Hover or click a code for its definition.{more}</p><div class="codes">{"".join(groups)}</div>')
 
 
+def block_legend(shown_types):
+    """The legend's block shapes ('' unless blocks are shown: monitor runs only)."""
+    if not set(shown_types) & set(BLOCK_TYPES):
+        return ""
+    return "".join(f'<li>{_legend_glyph(t, c)}{esc(m)}</li>' for t, c, m in BLOCK_MEANING)
+
+
 def legend_bar(mode="agent", shown_types=(), push=False):
     """The compact legend every page keeps in view (sticky at the top on wide screens, collapsible): position colours,
     event shapes, marks; each item's meaning on hover. The explanation is in legend_about further down."""
@@ -1143,6 +1225,7 @@ def legend_bar(mode="agent", shown_types=(), push=False):
                   for s, m in STANCE_MEANING)
     shapes = "".join(f'<li>{_legend_glyph(t, c)}{esc(m)}</li>' for t, c, m in SHAPE_MEANING
                      if t not in AGENT_ONLY_SHAPES or t in shown_types)
+    shapes += block_legend(shown_types)
     if mode == "agent":
         shapes += (f'<li>{_legend_glyph("TH", "g-th")}{_legend_glyph("TH", "g-th-low")}thought (hollow = low certainty)'
                    f'</li><li>{_legend_glyph("TP", "")}turning point</li>')
@@ -1166,6 +1249,7 @@ def legend_about(mode="agent", names=None, href="taxonomy.html", defs=None, show
                  for s, m in STANCE_MEANING)
     shapes = "".join(f'<li>{_legend_glyph(t, c)}{esc(m)}</li>' for t, c, m in SHAPE_MEANING
                      if mode == "agent" or t not in AGENT_ONLY_SHAPES or t in shown_types)
+    shapes += block_legend(shown_types)
     if mode == "agent":
         shapes += (f'<li>{_legend_glyph("TH", "g-th")}{_legend_glyph("TH", "g-th-low")}thought (hollow = low '
                    f'certainty)</li><li>{_legend_glyph("TP", "")}turning point</li>')
@@ -1187,7 +1271,7 @@ def legend_about(mode="agent", names=None, href="taxonomy.html", defs=None, show
             f'<ul>{shapes}</ul><h4>Marks</h4><ul>{marks}<li>{_legend_glyph("L2", "g-hollow", 3)}number = that many items '
             f'stacked at one spot (click it to list them all)</li></ul><h4>Read as</h4><ul>{examples}</ul>'
             f'<p class="note">Event colours (pink, cyan{", amber" if rem else ""}) are never position colours. '
-            f'{esc(CODE_SCHEME)}</p><p class="note">{where}</p></div>'
+            f'{esc(code_scheme())}</p><p class="note">{where}</p></div>'
             + (f'<div class="lgbox"><h4>What it thought: code groups</h4>{groups_html(names, href, defs)}</div>'
                if names or mode == "agent" else "")
             + '</div>' + terms_html() + '</details>')
@@ -1225,7 +1309,7 @@ def _event_prio(ev):
     e = ev["event"]
     typ = e.get("type")
     return (0 if e.get("fake") else 1 if is_overseer(e) else 2 if typ == "P2" else 3 if typ == "R1"
-            else 4 if typ == "S1" else 5 if typ in ("L2", "B1", "D1") else 6)
+            else 4 if typ in ("S1", "X1", "X2") else 5 if typ in ("L2", "B1", "D1") else 6)
 
 
 def stack(entries, tmax):
@@ -1263,7 +1347,7 @@ def stack_glyph(group, tmax, y, r, href=None):
 
 # ------------------------------------------------------------------ index.html
 
-INDEX_TYPES = ("L2", "B1", "D1", "P2", "S1")
+INDEX_TYPES = ("L2", "B1", "D1", "P2", "S1", "X1", "X2")  # blocks exist only in monitor runs
 
 
 def stance_title(frm, to, st, label):
@@ -1322,7 +1406,7 @@ def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css="", gra
             if typ not in INDEX_TYPES or (typ in ("B1", "D1") and not (is_overseer(e) or set(e.get("tags") or []) & RELEVANT_TAGS)):
                 continue
             push_seen = push_seen or delivery_of(e) in ("push", "notice")
-            (below if typ == "S1" else above).append(
+            (below if typ in ("S1", "X1", "X2") else above).append(
                 {"t": _num(ev.get("t")), "order": _num(ev.get("i")), "prio": _event_prio(ev), "typ": typ,
                  "cls": glyph_class(ev), "key": f"ev-{ev.get('i')}", "title": event_title(ev)})
         for entries, y in ((above, 6.5), (below, 27.5)):
@@ -1330,12 +1414,19 @@ def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css="", gra
                 parts.append(stack_glyph(group, tmax, y, 4.4, f"agents/{name}.html#sel={group[0]['key']}"))
         data = {"source": src, "faked": _yn(f.get("faked")), "stopped": _yn(f.get("stopped")),
                 "credited": _yn(f.get("credited")), "aware": str(f.get("aware_cheating") or "")}
+        nblk = sum(ev["event"].get("type") in BLOCK_TYPES for ev in a["events"])
+        if MONITOR["on"]:  # monitor runs: blocked or not, and the W codes it ever had (stage 1)
+            data["blocked"] = "yes" if nblk else "no"
+            data["wcodes"] = " ".join(sorted({str(th.get("code")) for th in a["thoughts"]
+                                              if re.fullmatch(r"W\d+", str(th.get("code") or ""))},
+                                             key=lambda c: int(c[1:])))
         attrs = " ".join(f'data-{k}="{esc(v)}"' for k, v in data.items())
         story = (a["stage3"] or {}).get("story") or ""
         rows.append(f'<div class="row" data-agent="{esc(name)}" {attrs}>'
                     f'<div class="agent"><a href="agents/{esc(name)}.html" title="{esc(story)}">{esc(name)}</a></div>'
                     f'<div class="strip"><svg>{"".join(parts)}</svg></div>'
-                    f'<div class="labels">{final_labels(a["stage3"])}</div></div>')
+                    + (f'<div class="blk" title="Monitor blocks of this agent">{nblk}</div>' if MONITOR["on"] else "")
+                    + f'<div class="labels">{final_labels(a["stage3"])}</div></div>')
     header_axis = ("<svg>" + "".join(
         f'<text x="{pct(t, tmax):.2f}%" y="12" text-anchor="{"start" if t == 0 else "end" if t + tick_step(tmax) > tmax else "middle"}">{t}</text>'
         for t in range(0, int(tmax) + 1, tick_step(tmax))) + "</svg>")
@@ -1351,19 +1442,22 @@ def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css="", gra
                + sel("credited", "Got credit for a fake", yn, "At least one fake was accepted with credit")
                + sel("stopped", "Stopped faking", yn, "Faked, then decided to stop, with no later fake")
                + sel("aware", "Knew it was cheating", [("yes", "Yes"), ("no", "No"), ("unclear", "Unclear")], AWARE_HINT)
+               + (monitor_filters(agents, names or {}, sel) if MONITOR["on"] else "")
                + '<button type="button" id="reset">Reset</button> <span id="shown" class="muted"></span></div>')
     summary = "".join(tbadge(f"{source_label(k)}: {v}", SOURCE_HINT) for k, v in sorted(counts.items()))
     run = pipeline.get("run_id") or ""
     body = (f"{nav}<h1>Story map{(': ' + esc(run)) if run else ''}</h1>{graph_link(graph)}{sample_note(sample)}"
             f'{banner(model_names(pipeline))}'
-            f"{legend_bar('index', push=push_seen)}"
+            f"{legend_bar('index', BLOCK_TYPES if MONITOR['on'] else (), push=push_seen)}"
             f'<p class="muted">{len(agents)} agents. {SOURCE_TITLE}: {summary}. Time axis: minutes from run start '
-            f'(0–{int(tmax)}). A number on a shape counts the items stacked there.</p>{extra}{filters}'
-            f'<div class="grid"><div class="hdr"><div>Agent</div><div>{header_axis}</div>'
-            f'<div class="lab">Final reading (stage 3)</div></div>'
+            f'(0–{int(tmax)}). A number on a shape counts the items stacked there.</p>{extra}'
+            f'{monitor_panel(agents, tmax, names or {}) if MONITOR["on"] else ""}{filters}'
+            f'<div class="grid{" mon" if MONITOR["on"] else ""}"><div class="hdr"><div>Agent</div><div>{header_axis}</div>'
+            + ('<div class="blk" title="Tool calls the monitor blocked">Blocks</div>' if MONITOR["on"] else "")
+            + f'<div class="lab">Final reading (stage 3)</div></div>'
             f'{"".join(rows) or "<div class=empty>No agents found.</div>"}</div>'
-            f"{legend_about('index', names, 'taxonomy.html' if names else '', DEFS, push=push_seen)}")
-    return page(f"Story map {run}".strip(), body, LEGEND_JS + FILTER_JS, css=css)
+            f"{legend_about('index', names, 'taxonomy.html' if names else '', DEFS, BLOCK_TYPES if MONITOR['on'] else (), push=push_seen)}")
+    return page(f"Story map {run}".strip(), body, LEGEND_JS + (MONITOR_FILTER_JS if MONITOR["on"] else FILTER_JS), css=css)
 
 
 def overseer_only_index(ov, tmax, nav, graph=False):
@@ -1548,9 +1642,76 @@ def chain_box(turn, cite, label, before=1, after=0, quote="", spans=()):
             + f'><button type="button" data-act="open">{esc(label)}</button><div class="cbody"></div></div>')
 
 
+NEXT_CALL_LABEL = {"identical_retry": "retried the identical call", "same_tool_changed": "same tool, changed call",
+                   "other_tool": "switched to another tool", "none": "no further tool call"}
+
+
+def _unknown(v, fmt=str):
+    return "unknown" if v is None else fmt(v)
+
+
+def block_article(ev, reactions, key, names=None, href=""):
+    """A monitor block (X1 / X2) in the detail column: the blocked call, the reason as the agent saw it (reason-shown
+    runs), the monitor's score, threshold and enforcement when the host's records were joined (else "unknown"),
+    block and episode numbers, batch, exact repeat, the agent's next call and, at an episode's first block, the
+    stage-2 reaction. Arguments, reason and text pass through the chain redaction."""
+    e = ev["event"]
+    typ = e.get("type")
+    d = e.get("detail") or {}
+    mon = d.get("monitor") if isinstance(d.get("monitor"), dict) else {}
+    joined = d.get("monitor_record") == "joined" and bool(mon)
+    meta = [badge(type_name(typ))]
+    if d.get("episode_start"):
+        meta.append(tbadge("episode start", "The first block of an episode (blocks less than four model steps apart "
+                           "form one episode); only an episode's first block gets a stage-2 reading"))
+    if d.get("retry_of"):
+        meta.append(tbadge("repeats an earlier blocked call", "Same tool and arguments as an earlier block", "caution"))
+    rows = [("Blocked tool", redact(str(d.get("tool") or e.get("tool") or ev.get("tool") or "unknown"))),
+            ("Call (summary of its arguments)", redact(str(d.get("args") or "")) or "not recorded")]
+    if typ == "X2" or d.get("reason_shown"):
+        rows.append(("Reason shown to the agent", redact(str(d.get("reason"))) if d.get("reason") else "not recorded"))
+    else:
+        rows.append(("Reason shown to the agent", "none (the agent saw only that the action was blocked)"))
+    rows += [("Monitor score", _unknown(mon.get("score") if joined else None)),
+             ("Monitor threshold", _unknown(mon.get("threshold") if joined else None)),
+             ("Enforced by the host", _unknown(mon.get("enforced") if joined else None, yesno))]
+    if not joined:
+        rows.append(("Monitor records", "not joined: score, threshold and enforcement are unknown"))
+    rows += [("Block", f"no. {d.get('n')} of this agent" if d.get("n") is not None else "unknown"),
+             ("Episode", (f"no. {d.get('episode')}" + (" (its first block)" if d.get("episode_start") else
+                                                     " (continues it)")) if d.get("episode") is not None
+              else "unknown"),
+             ("Blocked in the same model step", plural(int(_num(d.get("batch_size"), 1)), "call")
+              if d.get("batch_size") is not None else "unknown"),
+             ("Repeats", event_label(d["retry_of"]) if d.get("retry_of") else "no earlier identical blocked call"),
+             ("Its next tool call", NEXT_CALL_LABEL.get(d.get("next_call"), str(d.get("next_call") or "not recorded"))
+              + (f" ({redact(str(d['next_tool']))})" if d.get("next_tool") and d.get("next_call") != "none" else ""))]
+    kv = "".join(f"<dt>{esc(k)}</dt><dd>{esc(v)}</dd>" for k, v in rows)
+    if reactions:
+        reacts = "".join(reaction_html(r, names, href) for r in reactions)
+    elif d.get("episode_start") or d.get("episode_start") is None:
+        reacts = reaction_html(None)
+    else:
+        reacts = ('<p class="muted">Stage-2 reactions are read only at the first block of an episode; this block '
+                  f'continues episode {esc(d.get("episode"))}.</p>')
+    head = event_label(e)
+    head = head[:1].upper() + head[1:]
+    icon = f'<svg class="hglyph" viewBox="-9 -9 18 18">{shape(typ, 0, 0, 5.2, glyph_class(ev), None, "")}</svg>'
+    cite = [ev.get("i")] + [q.get("item") for r in reactions for q in r.get("quotes") or [] if isinstance(q, dict)]
+    chain = chain_box(ev.get("turn"), cite, "Show what surrounded it: the agent's reasoning and tool calls",
+                      before=0, after=1)
+    return (f'<article class="item" id="{key}" data-kind="blk" data-t="{_num(ev.get("t")):.1f}" '
+            f'data-label="{esc(fmt_t(ev.get("t")) + " · " + head[:110])}">'
+            f'<h3>{icon}{fmt_t(ev.get("t"))} &middot; {esc(head)}</h3>'
+            f'<p>{"".join(meta)} <small>turn {esc(ev.get("turn"))} &middot; timeline item {esc(ev.get("i"))}</small></p>'
+            f'<pre>{esc(redact(cut(ev.get("text"))))}</pre><dl class="kv">{kv}</dl>{reacts}{chain}</article>')
+
+
 def event_article(name, ev, reactions, key, names=None, href="", together=0):
     e = ev["event"]
     typ = e.get("type")
+    if typ in BLOCK_TYPES:
+        return block_article(ev, reactions, key, names, href)
     d = e.get("detail") or {}
     meta = [badge(type_name(typ))]
     if e.get("author") and typ != "S1":
@@ -1667,6 +1828,14 @@ PANEL = ('<aside id="panel" aria-label="Detail"><div class="stepper"><button typ
          '<div id="pbody"></div><p class="muted keys">→ / j next, ← / k previous, Esc closes.</p></aside>')
 
 
+BLOCK_OPTION = '<option value="blk">only monitor blocks</option>'
+
+
+def panel_html(blocks=False):
+    """The detail column; agents with monitor blocks get a "monitor blocks" step filter."""
+    return PANEL.replace('<option value="tp">', BLOCK_OPTION + '<option value="tp">') if blocks else PANEL
+
+
 def thought_lane_label(L, names):
     """(full, short, hint) of a thought lane: the group letter and its name (the one code scheme: letters are
     code groups only)."""
@@ -1683,8 +1852,13 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
     LH, R = LANE_PX, 6.5
     types_here = {ev["event"].get("type") for ev in a["events"]}
     ev_lanes = [ln for ln in LANES if ln[0] != "rem" or "R1" in types_here]
+    blocked = bool(types_here & set(BLOCK_TYPES))
+    if blocked:  # monitor runs: the agent's blocked calls, just before its submissions
+        ev_lanes.insert([ln[0] for ln in ev_lanes].index("subs"), BLOCK_LANE)
+    lane_letters = LETTERS + ("W" if MONITOR["on"] and any(str(th.get("code") or "")[:1].upper() == "W"
+                                                           for th in a["thoughts"]) else "")
     lanes = ([("stance", "", POSITION, "Position", POSITION_HINT)]
-             + [(f"th-{L}", L) + thought_lane_label(L, names) for L in LETTERS]
+             + [(f"th-{L}", L) + thought_lane_label(L, names) for L in lane_letters]
              + [(k, "", label, short, hint) for k, label, short, _, hint in ev_lanes])
     ypos = {ln[0]: LANE_TOP + n * LH for n, ln in enumerate(lanes)}
     bottom = LANE_TOP + len(lanes) * LH
@@ -1755,7 +1929,7 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
     for n, th in enumerate(a["thoughts"]):
         key = f"th-{n}"
         L = str(th.get("code") or "?")[:1].upper()
-        lane = f"th-{L}" if L in LETTERS else "th-G"
+        lane = f"th-{L}" if L in lane_letters else "th-G"
         low = th.get("certainty") == "low"
         per_lane[lane].append(
             {"t": _num(th.get("t")), "order": _num(th.get("item")), "typ": "TH", "key": key,
@@ -1799,7 +1973,7 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
     push = any(delivery_of(ev["event"]) in ("push", "notice") for ev in a["events"])
     has_chain = EVIDENCE["on"] and bool(a["items"])
     tl_json = f'<script type="application/json" id="tl">{timeline_json(a)}</script>' if has_chain else ""
-    shown = {"R1"} if "R1" in types_here else set()
+    shown = ({"R1"} if "R1" in types_here else set()) | (types_here & set(BLOCK_TYPES))
     # Timeline (the main view) with the detail column fixed beside it; story, items and readings below.
     body = (nav.replace("</nav>", f'<span class="sp"></span>{prev_link}{next_link}</nav>')
             + f'<header class="ah"><h1>{esc(name)}</h1> {final_labels(a["stage3"])}</header>{banner_line(models)}'
@@ -1828,7 +2002,7 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
                f'stage-1 reader recorded at the end of each chunk of the timeline.</p><table><tr><th>Chunk</th><th>Span</th>'
                f"<th>Position on cheating</th><th>Knows the trick</th><th>Thinks the judge</th><th>Reader's summary</th>"
                f"</tr>{states}</table></details>" if states else "")
-            + f'{legend_about("agent", names, href, DEFS, shown, push)}</div>{PANEL}</div>{tl_json}')
+            + f'{legend_about("agent", names, href, DEFS, shown, push)}</div>{panel_html(blocked)}</div>{tl_json}')
     return page(f"Story map {name}", body, LEGEND_JS + PANEL_JS + (CHAIN_JS if has_chain else ""), "agent")
 
 
@@ -1948,7 +2122,7 @@ def events_page(agents, tmax, models="", nav="", names=None):
     head = "".join(f'<th data-sort="{k}"{" class=n" if num else ""} title="{esc(tip)}">{esc(lab)}</th>'
                    for k, lab, num, tip in EV_COLUMNS)
     n_skip = sum(skipped.values())
-    shown = {"R1"} if count["rem"] else set()
+    shown = ({"R1"} if count["rem"] else set()) | (set(BLOCK_TYPES) if MONITOR["on"] else set())
     push = any(delivery_of(g["first"]["event"]) in ("push", "notice") for _, g in order)
     body = (f"{nav}<h1>Story map: events</h1>{banner(models)}"
             f"{legend_bar('events', shown, push)}"
@@ -1960,6 +2134,7 @@ def events_page(agents, tmax, models="", nav="", names=None):
             f'<table class="evt" id="evt"><thead><tr>{head}</tr></thead><tbody>{"".join(rows)}</tbody></table>'
             f'<div id="cards" hidden>{"".join(cards)}</div>'
             + ('' if order else '<div class="empty">No events.</div>')
+            + (monitor_events_section(agents) if MONITOR["on"] else "")
             + legend_about('events', names, 'taxonomy.html' if names else '', DEFS, shown, push))
     return page("Story map events", body, LEGEND_JS + EVENTS_JS)
 
@@ -2172,7 +2347,7 @@ def validation_page(text, models="", nav=""):
     return page("Story map validation", body)
 
 
-EVENT_TOKEN = r"(?:L1|L2|P1|P2|B1|D1|S1|O1|C1|N1|R1)"
+EVENT_TOKEN = r"(?:L1|L2|P1|P2|B1|D1|S1|O1|C1|N1|R1|X1|X2)"  # X1 / X2 only in the monitor-runs blocks
 
 
 def _event_names(m):
@@ -2192,34 +2367,39 @@ def taxonomy_display(text):
         if line.startswith("#"):
             out.append(line)
             continue
-        line = re.sub(r"Their type\s+letters overlap thought codes[^.]*\.[^.]*`code`\.", CODE_SCHEME, line)
+        line = re.sub(r"Their type\s+letters overlap thought codes[^.]*\.[^.]*`code`\.", code_scheme(), line)
         line = re.sub(r"\bevents?\s+" + EVENT_TOKEN + r"(?:(?:,\s*|\s+(?:or|and)\s+)" + EVENT_TOKEN + r")*",
                       _event_names, line)
         line = re.sub(r"\((" + EVENT_TOKEN + r")\)", lambda m: f"({type_name(m.group(1))} event)", line)
         line = re.sub(r"\b(" + EVENT_TOKEN + r")/(" + EVENT_TOKEN + r") events\b",
                       lambda m: f"{type_name(m.group(1))} or {type_name(m.group(2))} events", line)
         line = re.sub(r"\bS1 with\b", "a submission event with", line)
+        line = re.sub(r"\b(?:(?:an?|the)\s+)?(X[12])\b", lambda m: f"the \u201c{type_name(m.group(1))}\u201d event", line)
         out.append(line)
     text = "\n".join(out)
     # The section-2 intro sentence spans lines: replace it after joining.
-    return re.sub(r"Their type\s+letters overlap thought codes.*?never as a thought `code`\.", CODE_SCHEME, text,
+    return re.sub(r"Their type\s+letters overlap thought codes.*?never as a thought `code`\.", code_scheme(), text,
                   flags=re.S)
 
 
 def taxonomy_page(text, models="", nav=""):
-    html_text = markdown_html(taxonomy_display(text), anchors=True)
+    """The codes page; the taxonomy's monitor-runs blocks are kept (without their marker lines) only in monitor
+    runs, otherwise stripped, so other runs' page is as before."""
+    html_text = markdown_html(taxonomy_display(taxonomy_text(text, MONITOR["on"])), anchors=True)
 
     def event_heading(m):
         typ = m.group(2)
+        cls = ("g-rem" if typ == "R1" else glyph_class({"event": {"type": typ}}) if typ in BLOCK_TYPES
+               else "g-other" if typ in OTHER_TYPES else "g-hollow")
         icon = (f'<svg class="hglyph" viewBox="-9 -9 18 18">'
-                f'{shape(typ, 0, 0, 5.2, "g-rem" if typ == "R1" else "g-other" if typ in OTHER_TYPES else "g-hollow", None, "")}'
+                f'{shape(typ, 0, 0, 5.2, cls, None, "")}'
                 f'</svg>')
         return f'<h{m.group(1)} id="event-{typ}">{icon}Event: {esc(type_name(typ))}</h{m.group(1)}>'
     html_text = re.sub(r'<h(\d) id="event-(' + EVENT_TOKEN + r')">[^<]*</h\d>', event_heading, html_text)
     body = (f"{nav}{banner(models)}"
             '<p class="muted">The code set the model readers apply. On the agent pages each thought links here; the '
             'legend box "What it thought: code groups" gives each code\'s short definition in place. '
-            f'{esc(CODE_SCHEME)}</p>'
+            f'{esc(code_scheme())}</p>'
             f'<div class="story">{html_text}</div>')
     return page("Story map codes", body)
 
@@ -2230,6 +2410,240 @@ def nav_html(prefix="", has_val=False, has_tax=False):
     links += [("validation.html", "Validation")] if has_val else []
     links += [("taxonomy.html", "Codes")] if has_tax else []
     return '<nav class="top">' + "".join(f'<a href="{prefix}{h}">{t}</a>' for h, t in links) + "</nav>"
+
+
+# ------------------------------------------------------------------ monitor runs (index panel, filters, events)
+
+# The index filter in monitor runs: as FILTER_JS, but a select with data-multi matches one of the row's
+# space-separated values (an agent's W codes).
+MONITOR_FILTER_JS = """
+(()=>{const sels=[...document.querySelectorAll('.filters select')],rows=[...document.querySelectorAll('.row[data-agent]')],
+count=document.getElementById('shown');
+function m(r,s){const v=r.dataset[s.name]||'';return s.dataset.multi?v.split(' ').includes(s.value):v===s.value;}
+function apply(){let n=0;rows.forEach(r=>{const ok=sels.every(s=>!s.value||m(r,s));
+r.hidden=!ok;if(ok)n++;});count.textContent=n+' of '+rows.length+' agents shown';}
+sels.forEach(s=>s.addEventListener('change',apply));
+document.getElementById('reset').addEventListener('click',()=>{sels.forEach(s=>s.value='');apply();});apply();})();
+"""
+BIN_MIN = 5.0  # minutes per bar of the blocks-over-time chart
+W_HINT = "Agents whose stage-1 reading has this response to a monitor block at any time"
+
+
+def blocks_of(agents):
+    """[(agent, timeline event item)] of every monitor block (X1 / X2), in time order."""
+    out = [(name, ev) for name, a in agents.items() for ev in a["events"] if ev["event"].get("type") in BLOCK_TYPES]
+    return sorted(out, key=lambda x: (_num(x[1].get("t")), x[0], _num(x[1].get("i"))))
+
+
+def load_monitor_context(timeline):
+    """TIMELINE/timeline/monitor_context.json (storymap-monitor-context/1) or None (optional: the pages then count
+    the blocks in the timelines and state the arm as unknown)."""
+    if timeline is None:
+        return None
+    data = _read_json(timeline_dir(timeline) / "monitor_context.json")
+    return data if isinstance(data, dict) else None
+
+
+def w_codes(agents, names):
+    """The W codes to offer: the taxonomy's (W1..W7 when loaded) and any the stage-1 readings used."""
+    used = {str(th.get("code")) for a in agents.values() for th in a["thoughts"]
+            if re.fullmatch(r"W\d+", str(th.get("code") or ""))}
+    return sorted(used | {c for c in names if re.fullmatch(r"W\d+", c)}, key=lambda c: int(c[1:]))
+
+
+def monitor_filters(agents, names, sel):
+    """The index's monitor filters: blocked or never blocked, and agents with a W code at any time."""
+    opts = "".join(f'<option value="{esc(c)}">{esc(code_name(c, names, c))}</option>' for c in w_codes(agents, names))
+    return (sel("blocked", "Blocked by the monitor", [("yes", "Blocked at least once"), ("no", "Never blocked")],
+                "Whether the monitor blocked at least one of the agent's tool calls")
+            + f'<label title="{esc(W_HINT)}">Response to a block <select name="wcodes" data-multi="1">'
+              f'<option value="">Any</option>{opts}</select></label>')
+
+
+def arm_line(ctx):
+    """The monitor arm in words, with what is unknown said so."""
+    if not ctx:
+        return ("Monitor arm: unknown (no monitor context file with this map); counts below are from the agents' "
+                "timelines.")
+    arm = ctx.get("arm") if isinstance(ctx.get("arm"), dict) else {}
+    read = {"actions": "the agents' tool calls only", "full": "the agents' full context (reasoning and tool calls)"}
+    sr = arm.get("show_reason")
+    return (f"Monitor arm: it reads {read.get(arm.get('read'), 'unknown input')}; its reason is "
+            f"{'shown' if sr is True else 'not shown' if sr is False else 'shown or not (unknown)'} to the blocked "
+            f"agent; block threshold {_unknown(arm.get('threshold'))}.")
+
+
+def time_bars(times, tmax):
+    """Blocks per BIN_MIN minutes as an SVG bar chart on the run's time axis (gridlines and minute labels below)."""
+    nbins = max(1, int(math.ceil(tmax / BIN_MIN)))
+    counts = [0] * nbins
+    for t in times:
+        counts[min(nbins - 1, max(0, int(_num(t) // BIN_MIN)))] += 1
+    top = max(counts) or 1
+    H = 60
+    bars = []
+    for k, n in enumerate(counts):
+        if not n:
+            continue
+        h = max(2.0, H * n / top)
+        x0, x1 = pct(k * BIN_MIN, tmax), pct(min((k + 1) * BIN_MIN, tmax), tmax)
+        bars.append(f'<rect class="mbar" x="{x0 + 0.1:.2f}%" y="{H - h:.1f}" width="{max(x1 - x0 - 0.2, 0.1):.2f}%" '
+                    f'height="{h:.1f}"><title>{esc(fmt_span(k * BIN_MIN, min((k + 1) * BIN_MIN, tmax)))}: '
+                    f'{esc(plural(n, "block"))}</title></rect>')
+    return (f'<svg class="bars" role="img" aria-label="Monitor blocks per {int(BIN_MIN)} minutes (most in one bar: '
+            f'{top})">{axis_svg(tmax, 0, H)}{"".join(bars)}<text x="100%" y="9" text-anchor="end">most in one bar: {top}</text></svg>')
+
+
+def block_reactions(agents, blocks):
+    """(counts like reaction_counts, episode starts, starts with a reaction) over the stage-2 readings of the
+    episode-start blocks."""
+    c, starts, judged = Counter(), 0, 0
+    for name, ev in blocks:
+        e = ev["event"]
+        if not (e.get("detail") or {}).get("episode_start"):
+            continue
+        starts += 1
+        rs = agents[name]["by_event"].get(str(e.get("id")), [])
+        if not rs:
+            c["unjudged"] += 1
+            continue
+        judged += 1
+        r = rs[0]
+        c["reg-" + str(r.get("registered"))] += 1
+        ch = r.get("change") if r.get("change") in CHANGES else "none"
+        c["chg-" + ch] += 1
+        if ch != "none":
+            c["dir-" + str(r.get("direction") or "none")] += 1
+    return c, starts, judged
+
+
+def reaction_bars(c, judged):
+    changed = c["chg-belief"] + c["chg-behaviour"]
+    return (stacked("Noticed it", [("yes", c["reg-yes"]), ("unclear", c["reg-unclear"]), ("no", c["reg-no"])], judged,
+                    "Did the agent's following reasoning or acts refer to the block?")
+            + stacked("Change", [("behaviour", c["chg-behaviour"]), ("belief", c["chg-belief"]),
+                                 ("none", c["chg-none"])], judged, "What changed in the agent after the block")
+            + stacked("Direction of the change", [("toward cheating", c["dir-toward_cheating"]),
+                                                  ("away", c["dir-away"]), ("neutral", c["dir-neutral"]),
+                                                  ("not given", c["dir-none"])], changed,
+                      "For agents who changed: toward or away from cheating"))
+
+
+def next_call_bar(blocks, label="After the block"):
+    nc = Counter((ev["event"].get("detail") or {}).get("next_call") for _, ev in blocks)
+    parts = [(NEXT_CALL_LABEL[k], nc[k]) for k in NEXT_CALL_LABEL] + [("not recorded", sum(
+        v for k, v in nc.items() if k not in NEXT_CALL_LABEL))]
+    return stacked(label, parts, len(blocks), "The agent's next tool call after each block (from its timeline)")
+
+
+def monitor_panel(agents, tmax, names):
+    """The index's "Monitor blocks" run panel: the arm, blocks over time, blocks per agent, and the responses after
+    blocks (next call, W codes, stage-2 reactions at episode starts), with every unknown stated."""
+    ctx = MONITOR["ctx"] or {}
+    blocks = blocks_of(agents)
+    n = len(blocks)
+    per = defaultdict(list)
+    for name, ev in blocks:
+        per[name].append(ev)
+    n_x2 = sum(ev["event"].get("type") == "X2" for _, ev in blocks)
+    unjoined = sum((ev["event"].get("detail") or {}).get("monitor_record") != "joined" for _, ev in blocks)
+    decided, enforced = ctx.get("decided_blocks"), ctx.get("enforced_blocks")
+    facts = [f"{plural(n, 'block')} seen by the agents ({n_x2} with the reason shown, {n - n_x2} without)",
+             f"{len(per)} of {plural(len(agents), 'agent')} blocked at least once",
+             f"blocks the monitor decided: {_unknown(decided)}", f"blocks the host enforced: {_unknown(enforced)}"]
+    unknown = []
+    if unjoined:
+        unknown.append(f"monitor score, threshold and enforcement unknown for {plural(unjoined, 'block')} (the host's "
+                       f"monitor records were not joined)")
+    if not MONITOR["ctx"]:
+        unknown.append("arm settings and the monitor's own counts unknown (no monitor context file)")
+    # Per agent.
+    rows = []
+    for name, evs in sorted(per.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:12]:
+        eps = {(ev["event"].get("detail") or {}).get("episode") for ev in evs} - {None}
+        nc = Counter((ev["event"].get("detail") or {}).get("next_call") for ev in evs)
+        top_nc = ", ".join(f"{NEXT_CALL_LABEL.get(k, 'not recorded')} {v}" for k, v in nc.most_common(2))
+        rows.append(f'<tr><td><a href="agents/{esc(name)}.html#sel=ev-{esc(evs[0].get("i"))}">{esc(name)}</a></td>'
+                    f'<td class="n">{len(evs)}</td><td class="n">{len(eps) if eps else "unknown"}</td>'
+                    f'<td class="n">{fmt_t(evs[0].get("t"))}</td><td>{esc(top_nc)}</td></tr>')
+    dist = Counter(len(v) for v in per.values())
+    dist_txt = "; ".join(f"{plural(v, 'agent')} with {plural(k, 'block')}" for k, v in sorted(dist.items()))
+    more = len(per) - len(rows)
+    # W codes (stage 1): agents with each code at any time.
+    with_s1 = sum(1 for a in agents.values() if a["chunks"])
+    wc = Counter(c for a in agents.values() for c in {str(th.get("code")) for th in a["thoughts"]
+                                                       if re.fullmatch(r"W\d+", str(th.get("code") or ""))})
+    href = "taxonomy.html" if names else ""
+    wrows = "".join(f'<tr><td>{code_link(c, names, href)}</td><td class="n">{wc[c]}</td></tr>'
+                    for c in w_codes(agents, names))
+    c, starts, judged = block_reactions(agents, blocks)
+    return (f'<section class="ev mon" id="monitor"><h2>Monitor blocks</h2>'
+            f'<p>{esc(arm_line(MONITOR["ctx"]))}</p><div class="monk">'
+            + "".join(f"<span>{esc(x)}</span>" for x in facts) + '</div>'
+            + (f'<p class="muted">Unknown: {esc("; ".join(unknown))}.</p>' if unknown else "")
+            + f'<h3>Blocks over time (per {int(BIN_MIN)} minutes)</h3>{time_bars([ev.get("t") for _, ev in blocks], tmax)}'
+            f'<h3>Blocks per agent</h3><p class="muted">{esc(dist_txt) or "No blocks."}</p>'
+            + (f'<table><tr><th>Agent</th><th>Blocks</th><th>Episodes</th><th>First block</th><th>Next calls (most '
+               f'common)</th></tr>{"".join(rows)}</table>' if rows else "")
+            + (f'<p class="muted">… and {plural(more, "more blocked agent")} (Blocks column below).</p>' if more > 0 else "")
+            + f'<h3>Responses after blocks</h3><div class="sbs"><p class="muted">The agent\'s next tool call after each '
+            f'block (deterministic, from the timelines):</p>{next_call_bar(blocks)}'
+            f'<p class="muted">How the agents reacted at the first block of each episode (stage 2; '
+            f'{plural(starts, "episode start")}, {judged} with a reaction, {starts - judged} without):</p>'
+            f'{reaction_bars(c, judged)}</div>'
+            + (f'<p class="muted">Agents with each response code at any time (stage 1, {with_s1} of '
+               f'{plural(len(agents), "agent")} read):</p><table><tr><th>Code</th><th>Agents</th></tr>{wrows}</table>'
+               if wrows else '<p class="muted">No responses to a block were coded by the stage-1 reader.</p>')
+            + '</section>')
+
+
+def _slug(text):
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", str(text)).strip("-") or "tool"
+
+
+def monitor_events_section(agents):
+    """events.html: the monitor's blocks grouped by blocked tool, each with its next-call and episode-start reaction
+    breakdowns and the list of blocks (arguments and reasons redacted as on the agent pages). '' without blocks."""
+    blocks = blocks_of(agents)
+    if not blocks:
+        return ""
+    by_tool = defaultdict(list)
+    for name, ev in blocks:
+        d = ev["event"].get("detail") or {}
+        by_tool[str(d.get("tool") or ev.get("tool") or "unknown")].append((name, ev))
+    cards = []
+    for tool, items in sorted(by_tool.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        c, starts, judged = block_reactions(agents, items)
+        who = sorted({n for n, _ in items})
+        rows = []
+        for name, ev in items[:300]:
+            e = ev["event"]
+            d = e.get("detail") or {}
+            r = (agents[name]["by_event"].get(str(e.get("id"))) or [None])[0]
+            react = (f'{CHANGE_LABEL.get(r.get("change"), r.get("change"))}, '
+                     f'{DIRECTION_LABEL.get(r.get("direction"), r.get("direction"))}' if r
+                     else "no stage-2 reaction" if d.get("episode_start") else "not read (episode continues)")
+            rows.append(f'<tr><td><a href="agents/{esc(name)}.html#sel=ev-{esc(ev.get("i"))}">{esc(name)}</a></td>'
+                        f'<td class="n">{fmt_t(ev.get("t"))}</td><td class="n">{esc(d.get("n"))}</td>'
+                        f'<td class="n">{esc(d.get("episode"))}{" (start)" if d.get("episode_start") else ""}</td>'
+                        f'<td>{esc(cut(redact(str(d.get("args") or "")), 160))}</td>'
+                        f'<td>{esc(cut(redact(str(d.get("reason"))), 200)) if d.get("reason") else "<span class=muted>none shown</span>"}</td>'
+                        f'<td>{esc(NEXT_CALL_LABEL.get(d.get("next_call"), "not recorded"))}</td><td>{esc(react)}</td></tr>')
+        icon = (f'<svg class="hglyph" viewBox="0 0 18 16">{shape("X1", 9, 8, 5, "g-block", None, "")}</svg>')
+        cards.append(
+            f'<section class="ev" id="block-{esc(_slug(tool))}"><h3>{icon}Blocked {esc(redact(tool))} calls</h3>'
+            f'<p><small>{plural(len(items), "block")} &middot; {plural(len(who), "agent")} &middot; '
+            f'{plural(starts, "episode start")} &middot; first at {fmt_t(items[0][1].get("t"))}</small></p>'
+            f'<div class="sbs">{next_call_bar(items, "Next call")}<p class="muted">Reactions at episode starts (stage 2; '
+            f'{judged} with a reaction, {starts - judged} without):</p>{reaction_bars(c, judged)}</div>'
+            f'<details{" open" if len(items) <= 12 else ""}><summary>Blocks</summary><table><tr><th>Agent</th>'
+            f'<th>At</th><th>Block</th><th>Episode</th><th>Call</th><th>Reason shown</th><th>Next call</th>'
+            f'<th>Reaction</th></tr>{"".join(rows)}</table>'
+            + (f'<p class="muted">First 300 of {len(items)} listed.</p>' if len(items) > 300 else "")
+            + '</details></section>')
+    return (f'<h2 id="monitor-blocks">Monitor blocks</h2><p class="muted">{esc(arm_line(MONITOR["ctx"]))} Tool calls '
+            f'the monitor blocked before they ran, by tool. Only an episode\'s first block gets a stage-2 reading.</p>'
+            + "".join(cards))
 
 
 # ------------------------------------------------------------------ main
@@ -2255,21 +2669,25 @@ def build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, domain=No
             return _build(map_dir, timeline, out, taxonomy, minutes, overseer_map, overseer_timeline, graph)
         finally:
             EVIDENCE["on"] = True
+            MONITOR.update(on=False, ctx=None)
 
 
 def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=None, overseer_map=None,
            overseer_timeline=None, graph=None):
     """Write index.html, events.html and agents/<agent>.html; return the list of written paths."""
     agents, pipeline = load(map_dir, timeline)
+    # Monitor runs: only when an agent's timeline has a blocked action; every other run renders as before.
+    monitor = any(ev["event"].get("type") in BLOCK_TYPES for a in agents.values() for ev in a["events"])
+    MONITOR.update(on=monitor, ctx=load_monitor_context(timeline) if monitor else None)
     out = Path(out or map_dir)
     if graph is None:
         graph = (out / GRAPH_PAGE).is_file()
     (out / "agents").mkdir(parents=True, exist_ok=True)
-    names = load_taxonomy(taxonomy) if taxonomy else {}
+    names = load_taxonomy(taxonomy, monitor) if taxonomy else {}
     if names and "E" not in names and any(c[:1] == "E" for c in names):  # E codes describe reactions (stage 2)
         names["E"] = "Reactions (stage 2)"
     DEFS.clear()
-    DEFS.update(load_definitions(taxonomy) if taxonomy else {})
+    DEFS.update(load_definitions(taxonomy, monitor) if taxonomy else {})
     has_tax = bool(names) and Path(taxonomy).is_file()
     if not agents and minutes is None and overseer_timeline is not None:  # overseer-only: the run's configured length
         ctx_file = timeline_dir(overseer_timeline) / "overseer_context.json"
