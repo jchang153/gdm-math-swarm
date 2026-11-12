@@ -133,6 +133,10 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
   `scripts/build_experiment_index.py`.
 - **Raw runs:** `runs/<run-id>/`. Git-ignored. Since 2026-10-29 only each run's core stays local; the rest is in the
   private logs dataset (`runs/<run-id>/OFFLOADED.json`, restore with `scripts/offload_runs.py restore`, item 15).
+  **Monitor reasoning in Inspect View (2026-11-12, local only):** `scripts/monitor_to_inspect.py` turns a monitor
+  run's `monitor/calls.jsonl` (dataset only) + `runtime.jsonl` into `runs/_monitor_inspect/M<k>-<read>-<mode>-r<n>-monitor.eval`
+  (one sample per agent, one ModelEvent per monitor call with reasoning; metadata `agent_turn` = the agent's model call
+  in `M<k>-...-r<n>.eval`); all 12 glmflash100 monitor runs converted, raw call logs deleted after.
   **New runs (since 2026-10-29, item 16) never come to this computer in full:** the supervisor uploads them from the
   VM to the dataset and `scripts/fetch_run.py` fetches only the core and phase records.
   **Always offload (owner, 2026-11-03, item 27):** the simple judge, `scripts/run_storymap.py` and
