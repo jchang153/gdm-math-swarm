@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-12 PT by Claude (Opus 5.5) story-map agent (item 40: monitor blocks in the story map).
+Last updated: 2026-11-12 PT by Claude (Opus 5.5) log-viewer agent (item 41: log viewer with HF sign-in).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1839,6 +1839,22 @@ is being merged into main via `collab-env`.
       block); nearly every agent said the monitor was right and switched to genuine work; a few posted a PSA or sent
       feedback; one (agent-063) disputed a block on a genuine problem.
     - **Paid maps:** running (see below for spend, deploys and URLs when done).
+
+41. **IN FLIGHT 2026-11-12: log viewer with HF sign-in** (owner approval verbatim in docs/plan.md, "Log viewer with
+    HF sign-in (November 12, 2026)"; details and threat model in docs/experiment-library.md, same title).
+    - **Design:** a separate free Pages project `gdm-math-swarm-viewer` (https://gdm-math-swarm-viewer.pages.dev)
+      serves one Inspect View copy, one page per run (`RUN/`), sign-in and a strict CSP; the `.eval` logs come
+      straight from the private HF logs dataset with the visitor's own HF token (tab sessionStorage on the viewer
+      origin only, at most 8 h). No log is on Cloudflare. Main-site Inspect links point at the viewer; the old
+      `RUN/inspect-view/` pages stay as fallback with a bar linking the viewer.
+    - **Code:** `scripts/log_viewer.py`, `scripts/cf_site/viewer/`, `publish_cloudflare.py` (`viewer` command,
+      `verify --viewer`; `viewer --commit` creates it, then every math-site `--commit` deploys it first), `scripts/cf_site/private-logs.js`
+      (viewer link), `tests/test_log_viewer.py`.
+    - **Owner step:** create the HF OAuth app (redirect URI `https://gdm-math-swarm-viewer.pages.dev/signin`,
+      homepage `https://gdm-math-swarm-viewer.pages.dev`, scopes `openid profile read-repos`) and give the client ID;
+      export it as `GDM_HF_OAUTH_CLIENT_ID` (HANDOFF.local.md) before a math-site `--commit` (otherwise the served
+      viewer's `viewer.json` keeps the last one).
+    - **Deploy:** waits for item 40's story-map deploy (one deploy at a time).
 
 ## Next steps / open items
 

@@ -134,6 +134,25 @@ class BundleTests(unittest.TestCase):
         return root, (manifest, [entry(RUN, '2026-10-27T00:00:00Z')])
 
     @patch.object(cf, 'render_catalogue', side_effect=fake_catalogue)
+    def test_republish_compares_pages_with_log_viewer_links(self, _):
+        # A run already served with its links pointed at the log viewer (November 12, 2026) republishes unchanged.
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = {f'{RUN}/results.html': b'<html><a href="inspect-view/index.html">I</a></html>',
+                      f'{RUN}/inspect-view/index.html': HF_INSPECT.replace(
+                          COMMIT, dataset_logs.COMMIT_PLACEHOLDER).encode(),
+                      f'{RUN}/inspect-view/assets/index.js': b'js'}
+            root, loaded = self.bundle(tmp, bundle)
+            with patch.object(cf, 'load_bundle', return_value=loaded):
+                first, _ = cf.plan_bundle(site(OTHER), root, unlisted=(), dataset_commit=COMMIT)
+            served, changed = cf.apply_viewer(first)
+            self.assertEqual(changed, 0)  # the plan already serves the viewer links
+            self.assertIn(b'gdm-math-swarm-viewer.pages.dev', served[f'{RUN}/results.html'])
+            with patch.object(cf, 'load_bundle', return_value=loaded):
+                again, plan = cf.plan_bundle(served, root, unlisted=(), dataset_commit=COMMIT)
+            self.assertEqual(plan['replaced_pages'], [])
+            self.assertEqual(again[f'{RUN}/results.html'], served[f'{RUN}/results.html'])
+
+    @patch.object(cf, 'render_catalogue', side_effect=fake_catalogue)
     def test_new_run_added_and_existing_runs_immutable(self, _):
         with tempfile.TemporaryDirectory() as tmp:
             root, loaded = self.bundle(tmp, {f'{RUN}/results.html': b'<html>new</html>',

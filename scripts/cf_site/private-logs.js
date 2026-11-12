@@ -4,6 +4,8 @@
 // settings as data-* attributes of the script tag:
 //   data-records  optional link to where members can read the private logs (the private HF logs dataset
 //                 folder of the run at its pinned commit); empty when the logs are kept offline
+//   data-viewer   optional link to the run's page on the separate log viewer origin, where members read the logs
+//                 with their own HF sign-in (scripts/log_viewer.py); no token ever lives on this origin
 // Same-origin GET/HEAD requests for logs/<name>.eval answer 404 locally (nothing is fetched) and a bar explains
 // where the logs are. It sends nothing and stores nothing.
 (() => {
@@ -28,7 +30,18 @@
       bar.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147483647;padding:8px 14px;'
         + 'font:14px/1.4 system-ui,sans-serif;background:#fff8c5;color:#3b2300;border-top:1px solid #d4a72c';
       bar.append('This run\'s Inspect logs (agent transcripts) are private and are not served by this public site.');
-      if (config.records) {
+      if (config.viewer) {
+        const viewer = document.createElement('a');
+        const here = () => config.viewer + (location.hash.startsWith('#/') ? location.hash : '');
+        viewer.href = here();
+        viewer.addEventListener('pointerdown', () => { viewer.href = here(); });
+        viewer.addEventListener('focus', () => { viewer.href = here(); });
+        viewer.rel = 'noopener noreferrer';
+        if (window.top !== window) viewer.target = '_blank';  // the viewer refuses to be framed
+        viewer.textContent = 'Read them in the log viewer with HF sign-in';
+        viewer.style.fontWeight = '600';
+        bar.append(' ', viewer, ' (organization members only).');
+      } else if (config.records) {
         const link = document.createElement('a');
         link.href = config.records;
         link.target = '_blank';

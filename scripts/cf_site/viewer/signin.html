@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en" data-client-id="__CLIENT_ID__" data-redirect-uri="__REDIRECT_URI__" data-org-ids="__ORG_IDS__" data-org-name="__ORG_NAME__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Sign in with HF</title>
+<link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+<main>
+<h1>Sign in with Hugging Face</h1>
+<p>The Inspect logs of the experiment library are stored in a private Hugging Face dataset. This viewer reads them
+with your own HF sign-in. Nothing is stored on a server: the access token stays in this browser tab, on this site
+only, and is forgotten when you close the tab or sign out (at most 8 hours).</p>
+<p id="status" role="status">Checking…</p>
+<p><button id="signin" type="button" hidden>Sign in with HF</button>
+<button id="signout" type="button" class="secondary" hidden>Sign out</button></p>
+<p id="next"></p>
+<p class="muted">At the HF consent screen, grant access to the organization <strong id="org"></strong> only. The
+sign-in asks for <code>read-repos</code>: read-only, but it covers every repository of each organization you grant,
+so grant no other organization.</p>
+<p class="muted"><a href="./">All runs</a></p>
+</main>
+<script src="signin.js"></script>
+</body>
+</html>

@@ -21,13 +21,93 @@ the wrangler login has no Zero Trust/Access scope. So the private files stay whe
 dataset and the researchers' machines (`runs/`).
 
 **Inspect View on Cloudflare.** Each run's `inspect-view/index.html` carries `scripts/cf_site/private-logs.js`
-(inlined, `id="private-logs"`) instead of the HF sign-in shim (`signin.html` is not deployed: HF OAuth only works on
-the Space host). A request for `logs/<name>.eval` answers 404 locally (nothing is fetched or sent) and a bar says
+(inlined, `id="private-logs"`) instead of the HF sign-in shim (the HF `signin.html` is not deployed: HF OAuth only
+works on the Space host; since November 12, 2026 sign-in happens on the separate log viewer origin, below, and this
+page's bar links the run's viewer page). A request for `logs/<name>.eval` answers 404 locally (nothing is fetched or sent) and a bar says
 the logs are private, linking the run's folder in the private HF logs dataset at its pinned commit (organization
 members only; the link is read from the HF shim the page had). Runs published only to Cloudflare without
 `--dataset-commit` show "kept offline by the researchers". Links of a page to a private file of an unpinned bundle
 point to the site's `private-records.html` notice. Links to the HF logs dataset (moved-file links, timelines) are
 kept as they are and work only while that dataset exists.
+
+**Log viewer with HF sign-in (owner approval, November 12, 2026; docs/plan.md, "Log viewer with HF sign-in").**
+Organization members read the private Inspect logs online on a **separate origin,
+https://gdm-math-swarm-viewer.pages.dev** (free Pages project `gdm-math-swarm-viewer`), with their own HF sign-in.
+Neither origin hosts any log: the viewer's Inspect View reads each `.eval` straight from the private HF logs dataset.
+
+- **What the viewer serves** (`scripts/log_viewer.py`, sources in `scripts/cf_site/viewer/`): one copy of the
+  Inspect View assets (byte-identical across all published runs; the build refuses runs whose assets differ), one
+  page per run at `RUN/` (the run's Inspect View page with the HF shim, the private-logs notice and the old Space
+  navigation script removed, every inline script moved to `assets/inline-<sha>.js`, and `auth-fetch.js` loaded
+  first with the run's dataset, pinned commit and folder), the run's public `logs/listing.json`, `signin.html`
+  (+`signin.js`), a run index, `viewer.json` (its public configuration and file digests), `404.html`, `robots.txt`
+  and `_headers`. Only runs whose logs are in the dataset at a pinned commit get a page (97 of 110 on 2026-11-12;
+  the twelve 180-minute 2026-10-28 runs were published without a dataset commit and keep "kept offline").
+- **Main site.** Once the viewer is served, every math-site deployment (`finish`, any command) points each `<a href>` to a run's Inspect View
+  (`RUN/inspect-view/` or `index.html`, hash kept, e.g. incident-report deep links to a transcript event) at the
+  run's viewer page; the old `RUN/inspect-view/index.html` stays as a fallback whose bar links the viewer (with the
+  current hash). `plan_bundle` compares a republished bundle's pages as finish will serve them. The ImpossibleBench
+  site is unchanged.
+- **Deploys.** `viewer --commit` creates the viewer (the Pages project on first use) and points the links at it.
+  From then on (the served `viewer.json` exists), every `--commit` on the math site (one deploy lock) builds the
+  viewer from the final site files and deploys it **first**, verifies it (`verify_viewer`), and only then deploys
+  the math site; a failed viewer verify stops the site deploy. Before that, other commands neither deploy the viewer
+  nor change the links. `viewer --commit` alone refreshes the viewer and the links; `verify --viewer` is the read-only check (every file's bytes, security headers on pages, no log
+  served). The HF OAuth client ID comes from `$GDM_HF_OAUTH_CLIENT_ID` (HANDOFF.local.md), else the served
+  `viewer.json`; without one, sign-in is shown as not configured.
+- **Sign-in** (`signin.js`): authorization code with PKCE S256 as a public client (no secret anywhere), same-tab
+  redirect (no popup, no postMessage), redirect URI exactly `https://gdm-math-swarm-viewer.pages.dev/signin` (Pages
+  answers `/signin.html` with a 308), scope exactly `openid profile read-repos`, `orgIds` = the organization's public
+  ID. A random `state` and the verifier live in this tab's sessionStorage for one attempt (removed before the
+  exchange; 15-minute limit); the returned `code`/`state` are stripped from the address bar with
+  `history.replaceState` before anything else runs. The token `{accessToken, expiresAt}` goes to **this tab's
+  sessionStorage on the viewer origin only**, expiry `min(expires_in, 8 h)`, honoured on every read; Sign out (bar
+  and sign-in page) removes it; closing the tab forgets it.
+- **Fetch shim** (`auth-fetch.js`): only same-origin GET/HEAD for `logs/<name>.eval` are rewritten, to
+  `https://huggingface.co/datasets/<dataset>/resolve/<commit>/<RUN/inspect>/<name>` (hub constant, validated
+  dataset/commit/folder), with `Authorization: Bearer`, `redirect: 'follow'`, `credentials: 'omit'`,
+  `referrerPolicy: 'no-referrer'`, `cache: 'no-store'`. Without a token a page-wide "These Inspect logs are private"
+  panel with "Sign in with HF" replaces Inspect View's load error; a 401/403/404 from HF says the sign-in may have
+  expired or lack the organization.
+- **Security headers** (`_headers`, every response): `Content-Security-Policy: default-src 'none'; script-src 'self'
+  'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src
+  'self' https://huggingface.co https://*.hf.co https://*.huggingface.co; worker-src 'self' blob:; frame-ancestors
+  'none'; base-uri 'none'; form-action 'none'; object-src 'none'`, `Referrer-Policy: no-referrer`, `X-Frame-Options:
+  DENY`, `nosniff`, `Cross-Origin-Opener-Policy: same-origin`, `noindex`. `'unsafe-eval'` is required by Inspect
+  View's zstd worker (fzstd builds worker code from strings; without it no log opens).
+- **Tests and checks (2026-11-12).** Risk check from the real site origin in Chromium: HF `resolve` answers the CORS
+  preflight with the origin echoed and `authorization,range` allowed; a public dataset file with Range follows the
+  302 to `us.aws.cdn.hf.co` and gives 206 with a readable `Content-Range` (HEAD 200); the private dataset with a
+  dummy bearer gives a readable 401; `/oauth/token` answers CORS (400 for a bad code). End to end on a local
+  Pages-like server with the CSP, a fake HF resolve endpoint (needs a test bearer, 302 to a fake CDN on another
+  origin) and a local `.eval`: Inspect View listed 100 samples and opened a transcript; the fake HF got the bearer on
+  all 25 requests, the fake CDN on none (the browser drops `Authorization` on the cross-origin redirect), no request
+  carried a Referer. Offline tests: `tests/test_log_viewer.py`. Not yet exercised: a real HF sign-in and the
+  organization grant (needs the owner's login and the client ID).
+
+**Threat model of the log viewer.**
+
+- *What the token can do.* An HF OAuth access token with `openid profile read-repos`: read the user's profile and
+  read (never write) every repository the user can read, including private repositories of each organization the
+  user granted at consent. Granting only the organization limits it to that organization's repositories plus the
+  user's own; `read-repos` cannot be narrowed to one dataset. Lifetime: HF's `expires_in` (8 h by default), capped
+  at 8 h by the viewer; there is no refresh token in this flow. HF lists the grant under the user's connected apps,
+  where it can be revoked.
+- *Where it lives.* Only in one tab's sessionStorage on the viewer origin, and in transit only to
+  `https://huggingface.co` as a bearer header (never to the CDN, which gets a signed URL; never in a URL, log,
+  console message or Referer). The public library's origin never holds it.
+- *Mitigations.* Separate origin with no agent-written HTML of our own (only Inspect View, which renders log
+  content); CSP with no inline script, no foreign script, no framing, no `<base>`, no form posts and network limited
+  to this origin and HF (so injected markup in a transcript cannot run script or exfiltrate to another host); PKCE
+  S256 with a single-use random state; the code stripped at once; no postMessage channel at all; sign-out and
+  tab-scoped storage; `no-store` on log responses.
+- *Residual risks.* Anyone who can deploy to the viewer Pages project (the Cloudflare account) or change these
+  scripts on `main` and deploy could ship JavaScript that reads tokens of later visitors; a malicious or compromised
+  browser extension can read page memory and storage; a bug in Inspect View that lets log content run script through
+  `eval` would be inside the CSP (`'unsafe-eval'` is allowed for its zstd worker), though network exfiltration is
+  still limited to HF; a token copied out of devtools by the user works for up to 8 h wherever it is used; HF's CDN
+  hosts are allowed by wildcard (`*.hf.co`, `*.huggingface.co`, all HF-run; Spaces' user content on `*.hf.space` is
+  not allowed), so script inside the CSP could still send data to an HF host; and the browser keeps decoded log bytes in memory while the tab is open.
 
 **Limits.** Cloudflare Pages allows 20,000 files per deployment and 25 MiB per file. The first deployment
 (mirror of Space revision `227e31e9`) has 10,131 files, 860.4 MB, largest 5.5 MB (each run's Inspect View

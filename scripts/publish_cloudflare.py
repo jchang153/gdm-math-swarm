@@ -111,6 +111,7 @@ from build_experiment_index import (GRAPH_PAGE, GRAPH_THUMB, STORYMAP_LABEL, STO
 import dataset_logs  # noqa: E402
 import deploy_lock  # noqa: E402
 import hf_visibility  # noqa: E402
+import log_viewer  # noqa: E402
 import site_layout  # noqa: E402
 import site_look  # noqa: E402
 import site_nav  # noqa: E402
@@ -519,19 +520,28 @@ def records_url(document):
     return f'{dataset_logs.HUB}/datasets/{repo}/tree/{commit}/{folder}'
 
 
-def notice_shim(records=''):
+def notice_shim(records='', viewer=''):
     if records and not re.fullmatch(r'https://huggingface\.co/datasets/[A-Za-z0-9_./-]+', records):
         raise ValueError('Unsafe records link: ' + records)
+    if viewer and not re.fullmatch(re.escape(log_viewer.URL) + r'/[A-Za-z0-9][A-Za-z0-9_.+=-]*/', viewer):
+        raise ValueError('Unsafe log viewer link: ' + viewer)
     source = SHIM_FILE.read_text(encoding='utf-8')
-    return f'<script {SHIM_MARKER} data-records="{html.escape(records, quote=True)}">\n{source}</script>'
+    extra = f' data-viewer="{html.escape(viewer, quote=True)}"' if viewer else ''
+    return f'<script {SHIM_MARKER} data-records="{html.escape(records, quote=True)}"{extra}>\n{source}</script>'
 
 
-def inspect_page(document, records=None):
+def inspect_page(document, records=None, run=None):
     """An Inspect View index.html for Cloudflare: the HF sign-in shim (or an earlier notice) replaced by the
-    private-logs notice, inlined first in <head>. ``records`` defaults to the HF shim's dataset folder."""
+    private-logs notice, inlined first in <head>. ``records`` defaults to the HF shim's dataset folder (or the
+    earlier notice's). With ``run`` (math site), a run whose logs are in the dataset also links its page on the
+    log viewer origin (scripts/log_viewer.py)."""
     if records is None:
         records = records_url(document)
-    script = notice_shim(records)
+        if not records:
+            match = log_viewer.CF_RECORDS.search(document)
+            records = html.unescape(match.group(1)) if match else ''
+    viewer = log_viewer.run_url(run) if run and log_viewer.settings_from_records(records) else ''
+    script = notice_shim(records, viewer)
     for pattern in (HF_SHIM, CF_SHIM):
         if pattern.search(document):
             return pattern.sub(lambda _: script, document, count=1)
@@ -543,6 +553,32 @@ def inspect_page(document, records=None):
 
 def is_inspect_page(name):
     return name.endswith('/inspect-view/index.html')
+
+
+def viewer_html(name, data, runs):
+    """A math-site page with the log viewer applied: a run's Inspect View notice links the run's viewer page, and
+    links of other pages to a run's Inspect View go straight to the viewer (owner, November 12, 2026)."""
+    if is_inspect_page(name):
+        run = run_of(name)
+        return inspect_page(data.decode('utf-8'), run=run if run in runs else None).encode()
+    if not name.endswith('.html'):
+        return data
+    text = data.decode('utf-8', 'surrogateescape')
+    new = log_viewer.rewrite_links(name, text, runs)
+    return data if new == text else new.encode('utf-8', 'surrogateescape')
+
+
+def apply_viewer(files):
+    """(files, number of changed pages) with ``viewer_html`` applied to every page (unpacked site)."""
+    runs = log_viewer.viewer_runs(files)
+    files = dict(files)
+    changed = 0
+    for name in [n for n in files if n.endswith('.html')]:
+        new = viewer_html(name, files[name], runs)
+        if new != files[name]:
+            files[name] = new
+            changed += 1
+    return files, changed
 
 
 def private_links(document, page):
@@ -878,6 +914,17 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
     bundle = Path(bundle)
     files = dict(base_files)
     added, replaced = [], []
+    viewer = None  # math site: pages compared as finish will serve them (log viewer links)
+    if site_of(site).key == DEFAULT_SITE:
+        viewer = set(log_viewer.viewer_runs(base_files))
+        for run in selected:
+            page = bundle / run / 'inspect-view' / 'index.html'
+            if f'{run}/inspect-view/index.html' in manifest['files'] and page.is_file():
+                text = page.read_text(encoding='utf-8')
+                if dataset_commit:
+                    text = dataset_logs.pin_commit(text.encode(), dataset_commit).decode()
+                if log_viewer.page_settings(text):
+                    viewer.add(run)
     for name in sorted(manifest['files']):
         if '/' not in name or name in HF_ONLY:
             continue  # root pages are regenerated below; HF configuration never deploys
@@ -889,6 +936,8 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
                 data = private_links(data.decode('utf-8'), name).encode()
         if is_inspect_page(name):
             data = inspect_page(data.decode('utf-8')).encode()
+        if viewer is not None:
+            data = viewer_html(name, data, viewer)
         if dataset_logs.COMMIT_PLACEHOLDER.encode() in data and not is_inspect_page(name):
             raise ValueError('Page still carries the dataset commit placeholder: ' + name)
         if name in base_files and base_files[name] != data:
@@ -1206,7 +1255,7 @@ def plan_repack(base_files):
     return dict(base_files), {'source': {'kind': 'repack', 'runs': pending}}
 
 
-def finish(files, base_manifest, plan, project=None, site=None, consume=False):
+def finish(files, base_manifest, plan, project=None, site=None, consume=False, viewer=None):
     """Add the generated pages and the site manifest; gate every file, every run's domain (``check_domains``)
     and the deployment limits. ``consume``: ``files`` is a one-item list [plan files] that finish takes over."""
     site = site_of(site)
@@ -1220,6 +1269,10 @@ def finish(files, base_manifest, plan, project=None, site=None, consume=False):
     files, repointed = repoint_private_links(unpack_site(files))
     if repointed:
         plan['repointed_private_links'] = repointed
+    if site.key == DEFAULT_SITE if viewer is None else viewer:  # math site: Inspect links go to the log viewer
+        files, changed = apply_viewer(files)
+        if changed:
+            plan['viewer_links_pages'] = changed
     files, packed = pack_site(files, consume=True)
     if packed:
         plan['packed_runs'] = packed
@@ -1430,6 +1483,118 @@ def verify(base, runs=None, full=False, getter=fetch, head_getter=None):
             'site_files': len(recorded) + 1, 'runs': len(runs), 'checks': checks}
 
 
+# --- log viewer (separate origin, owner approval November 12, 2026) -------------------------------------------
+
+VIEWER_SPECIAL = frozenset({'_headers'})  # the viewer's own generated security headers, never from a bundle
+
+
+def viewer_gate(name, data):
+    """The deploy gate for viewer files: no credential-like content, no private category, no .eval or zip."""
+    if name in PAGES_SPECIAL and name not in VIEWER_SPECIAL:
+        raise ValueError('Pages special file refused on the viewer: ' + name)
+    if SECRET.search(data):
+        raise ValueError('Credential-like content; viewer deploy refused: ' + name)
+    if private_category(name) is not None or name.endswith('.eval') or data[:4] == b'PK\x03\x04':
+        raise ValueError('Private file refused on the viewer: ' + name)
+    if len(data) > MAX_FILE_BYTES:
+        raise ValueError(f'{name} exceeds Cloudflare Pages\' 25 MiB per-file limit')
+    return data
+
+
+def served_viewer_config(getter=fetch):
+    """The served viewer's viewer.json, or None (not deployed yet, unreachable or unexpected)."""
+    try:
+        status, _, data = getter(file_url(log_viewer.URL, log_viewer.CONFIG))
+    except (OSError, RuntimeError):
+        return None
+    if status != 200:
+        return None
+    try:
+        published = json.loads(data)
+    except ValueError:
+        return None
+    return published if isinstance(published, dict) and published.get('schema') == log_viewer.SCHEMA else None
+
+
+def plan_viewer(files, getter=fetch):
+    """(viewer files, summary) built from the math site's final files (packed or not)."""
+    client_id = log_viewer.client_id_from(served_viewer_config(getter))
+    viewer, published = log_viewer.build(files, catalogue(files), client_id)
+    viewer[log_viewer.NOT_FOUND] = log_viewer.not_found_page().encode()
+    for name, data in viewer.items():
+        viewer_gate(name, data)
+    if len(viewer) > MAX_FILES:
+        raise ValueError('Viewer exceeds the Pages file limit')
+    return viewer, {'project': log_viewer.PROJECT, 'files': len(viewer), 'bytes': sum(map(len, viewer.values())),
+                    'runs': len(published['runs']), 'sign_in_configured': bool(client_id)}
+
+
+def ensure_viewer_project(workdir, runner=subprocess.run):
+    """The viewer's production deployments; creates the (free) Pages project on first use (owner, November 12)."""
+    try:
+        return deployments(workdir, runner, log_viewer.PROJECT)
+    except RuntimeError as error:
+        if 'not found' not in str(error).lower() and '8000007' not in str(error):
+            raise
+    run_wrangler(['pages', 'project', 'create', log_viewer.PROJECT, '--production-branch', BRANCH], workdir, runner)
+    return deployments(workdir, runner, log_viewer.PROJECT)
+
+
+def deploy_viewer(viewer, message, workdir, runner=subprocess.run):
+    workdir = Path(workdir) / 'viewer'
+    workdir.mkdir(parents=True, exist_ok=True)
+    current = ensure_viewer_project(workdir, runner)
+    base = current[0] if current else None
+    deployment, _ = deploy(viewer, base, message, workdir, runner, project=log_viewer.PROJECT)
+    return deployment
+
+
+def verify_viewer(base=log_viewer.URL, getter=fetch):
+    """Read-only check of the served viewer: its published; every file with its exact bytes; the security headers on
+    pages; no Inspect log served (a probe of each run's first log); the sign-in page."""
+    checks = []
+
+    def check(name, ok, detail=''):
+        checks.append({'check': name, 'ok': bool(ok), **({'detail': detail} if detail else {})})
+
+    status, _, data = getter(file_url(base, log_viewer.CONFIG))
+    check('viewer_config', status == 200, f'HTTP {status}')
+    if status != 200:
+        return {'url': base, 'ok': False, 'checks': checks}
+    published = json.loads(data)
+    bad = []
+    for name, digest_ in sorted(published['files'].items()):
+        if name == '_headers':
+            continue  # consumed by Pages, never served
+        code, _, body = getter(file_url(base, name))
+        if code != 200 or sha256(body) != digest_:
+            bad.append(f'{name} (HTTP {code})')
+    check('served_bytes', not bad, '; '.join(bad[:5]) or f'{len(published["files"]) - 1} files')
+    missing = []
+    for page in ['index.html', 'signin.html'] + [f'{run}/index.html' for run in list(published['runs'])[:3]]:
+        code, headers, _ = getter(file_url(base, page))
+        lowered = {k.lower(): v for k, v in headers.items()}
+        csp = lowered.get('content-security-policy', '')
+        if code != 200 or "frame-ancestors 'none'" not in csp or "script-src 'self' 'unsafe-eval';" not in csp \
+                or lowered.get('referrer-policy') != 'no-referrer':
+            missing.append(page)
+    check('security_headers', not missing, ', '.join(missing))
+    probes = []
+    for run in published['runs']:
+        code, _, listing = getter(file_url(base, f'{run}/logs/listing.json'))
+        try:
+            names = list(json.loads(listing)) if code == 200 else []
+        except ValueError:
+            names = []
+        for log in names[:1]:
+            code, _, body = getter(file_url(base, f'{run}/logs/{log}'))
+            if body[:2] == b'PK':
+                probes.append(f'{run}/{log}')
+    check('no_logs_served', not probes, ', '.join(probes[:5]))
+    return {'url': base, 'ok': all(c['ok'] for c in checks), 'runs': len(published['runs']),
+            'sign_in_configured': bool(published.get('client_id')), 'checks': checks}
+
+
 # --- CLI -----------------------------------------------------------------------------------------------------
 
 LFS_POINTER = b'version https://git-lfs.github.com/spec/'
@@ -1521,7 +1686,8 @@ def main(argv=None):
     fix.add_argument('--remove', action='append', default=[], help='PATH: run-relative served record to remove')
     labels = sub.add_parser('judge-labels', help='rewrite the simplified judge\'s level wording on the site')
     labels.add_argument('--run', action='append', help='only this run (repeatable; default every judged run)')
-    for command in (mirror, bundle, restyle, withdraw, repack, story, heat, cat, labels, fix):
+    view = sub.add_parser('viewer', help='sync the log viewer origin (HF sign-in) and the math site\'s links to it')
+    for command in (mirror, bundle, restyle, withdraw, repack, story, heat, cat, labels, fix, view):
         command.add_argument('--site', choices=sorted(SITES), default=DEFAULT_SITE,
                              help='which library (default gdm, the math site; ib: the ImpossibleBench site)')
         command.add_argument('--commit', action='store_true', help='deploy; otherwise only plan')
@@ -1533,9 +1699,11 @@ def main(argv=None):
     check.add_argument('--run', action='append')
     check.add_argument('--full', action='store_true', help='check every file, not only pages and records')
     check.add_argument('--output', type=Path)
+    check.add_argument('--viewer', action='store_true', help='check the log viewer origin instead')
     args = parser.parse_args(argv)
     if args.command == 'verify':
-        result = verify(args.url or SITES[args.site].url, args.run, args.full)
+        result = (verify_viewer(args.url or log_viewer.URL) if args.viewer
+                  else verify(args.url or SITES[args.site].url, args.run, args.full))
         text = json.dumps(result, indent=2)
         if args.output:
             args.output.write_text(text)
@@ -1546,6 +1714,8 @@ def main(argv=None):
     if args.receipt and args.command == 'publish' and args.receipt.resolve().is_relative_to(args.bundle.resolve()):
         parser.error('--receipt must be outside the prepared bundle')
     site = SITES[args.site]
+    if args.command == 'viewer' and site.key != DEFAULT_SITE:
+        parser.error('the log viewer serves the math library only')
     if args.command == 'mirror-space' and not site.mirror_space:
         parser.error(f'mirror-space copies the math library\'s HF Space; not for --site {site.key}')
     # Every committing command holds the deploy lock from reading the served site to verifying its deployment
@@ -1600,6 +1770,9 @@ def main(argv=None):
         elif args.command == 'judge-labels':
             files, plan = plan_judge_labels(base_files, args.run)
             message = f'Judge level wording on {len(plan["replaced_pages"])} page(s)'
+        elif args.command == 'viewer':
+            files, plan = dict(base_files), {'source': {'kind': 'viewer'}}
+            message = 'Log viewer links'
         elif args.command == 'withdraw':
             files, plan = plan_withdraw(base_files, unlisted, args.run, site=site)
             message = 'Withdraw ' + ', '.join(plan['source']['runs'])
@@ -1607,12 +1780,24 @@ def main(argv=None):
             files, plan = plan_bundle(base_files, args.bundle, unlisted, args.dataset_commit, args.replace_pages,
                                       site=site)
             message = 'Publish ' + ', '.join(plan['source']['runs'])
+        # The log viewer (November 12, 2026): created by the ``viewer`` command; once it is served, every math-site
+        # deployment keeps it in sync and points the Inspect links at it.
+        sync = site.key == DEFAULT_SITE and (args.command == 'viewer' or served_viewer_config() is not None)
         handoff = [files]  # finish takes the plan over (peak memory, November 7, 2026)
         del base_files, files
-        files, manifest = finish(handoff, base_manifest, plan, site=site, consume=True)
+        files, manifest = finish(handoff, base_manifest, plan, site=site, consume=True, viewer=sync)
         result = {**summary(files, served, plan, base, site=site), 'committed': False}
+        viewer = None
+        if sync:  # the log viewer is deployed first (the site's links need it)
+            viewer, result['viewer'] = plan_viewer(files)
         if args.commit:
             remember(files, cache=site.cache)
+            if viewer is not None:
+                result['viewer']['deployment'] = deploy_viewer(viewer, message, workdir)
+                result['viewer']['verify'] = verify_viewer(result['viewer']['deployment']['url'] or log_viewer.URL)
+                if not result['viewer']['verify']['ok']:
+                    raise RuntimeError('Log viewer verify failed; the math site was not deployed: '
+                                       + json.dumps(result['viewer']['verify'])[:2000])
             deployment, tail = deploy(files, base, message, workdir, project=site.project)
             result.update(committed=True, deployment=deployment, site=site.url)
             result['verify'] = verify(deployment['url'] or site.url)

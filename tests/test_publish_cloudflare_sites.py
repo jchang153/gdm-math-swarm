@@ -182,7 +182,8 @@ class CliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, \
                 patch.object(cf, 'deployments', return_value=[]) as deployments, \
                 patch.object(cf, 'load_site', return_value=({}, base_files)) as load_site, \
-                patch.object(cf, planner, return_value=result), patch('builtins.print') as printed:
+                patch.object(cf, planner, return_value=result), patch('builtins.print') as printed, \
+                patch.object(cf, 'served_viewer_config', return_value=None):
             code = cf.main([*argv, '--workdir', tmp])
         return code, deployments, load_site, json.loads(printed.call_args.args[0])
 

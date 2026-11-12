@@ -2378,3 +2378,29 @@ events page show "Monitor's reason (not shown to the agent)" for X1 and "(shown 
 when missing. No story-map stage sees it (stage 1-3 inputs and outputs unchanged). Only the short stated reason is
 published; the monitor's thinking and raw requests stay private. This supersedes, for story-map pages, the earlier
 practice of keeping monitor reasons off the public site.
+
+## Log viewer with HF sign-in (November 12, 2026)
+
+Owner request (November 12, 2026): make the private Inspect logs viewable online from the public Cloudflare site by
+signing in with Hugging Face, with no log data hosted on Cloudflare. The owner said "go ahead" to the design: they
+create the HF OAuth app themselves (scopes `openid profile read-repos`), a PKCE sign-in, and a fetch shim that reads
+`RUN/inspect/<name>.eval` from the private logs dataset at the run's pinned commit with the viewer's own token.
+
+Owner question "are you sure it won't leak?" (November 12, 2026) added hardening: no localStorage (token in memory
+or this tab's sessionStorage, at most 8 h, a visible Sign out), isolation from the agent-written content the library
+renders (a separate origin preferred over CSP alone), origin checks and single-use PKCE, the bearer only to
+huggingface.co, no token in URLs, logs or Referer, scope `read-repos` with only the organization granted, and a threat
+model in docs/experiment-library.md.
+
+Owner approval (November 12, 2026, verbatim): "ok, go for it", for creating the free Cloudflare Pages project
+`gdm-math-swarm-viewer` and the separate-origin design. Also requested with it: the main site's Inspect View links
+(run pages, catalogue, Explore, incident reports) go straight to the run's page on the viewer, the old
+`RUN/inspect-view/index.html` stays as a fallback whose bar links the viewer, and viewer pages show a clear "logs are
+private, sign in with HF" state to visitors without access. The owner registers the HF OAuth app with redirect URI
+https://gdm-math-swarm-viewer.pages.dev/signin and homepage https://gdm-math-swarm-viewer.pages.dev; its client ID
+(public by design) is kept out of tracked files like other account details (`GDM_HF_OAUTH_CLIENT_ID`,
+HANDOFF.local.md).
+
+Built: `scripts/log_viewer.py`, `scripts/cf_site/viewer/` (sign-in page and script, auth fetch shim, stylesheet),
+the `viewer` command and `verify --viewer` of `scripts/publish_cloudflare.py`; every math-site deployment syncs the
+viewer first. Details and threat model: docs/experiment-library.md, "Log viewer with HF sign-in".
