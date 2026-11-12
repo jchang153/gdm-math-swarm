@@ -2369,3 +2369,12 @@ Haiku 5.5, stage 2 GPT-6.1 Terra, stage 3 GPT-6.1 Sol), **`--run-limit 50` per r
 publication on the public Cloudflare library with the usual privacy scans (monitor reasons only as they appear in
 the agents' own transcripts; `RUN/monitor/calls.jsonl`, Inspect logs and raw records stay private) and catalogue
 links.
+
+Owner (November 12, 2026, verbatim): "it'd be nice to be able to see the monitor's reasoning for each block, including
+those that didn't actually return reasoning, (silent), when the story maps are generated". Built as display only:
+`extract --monitor-reasons` writes `timeline/monitor_reasons.json` (per blocked call: the monitor's score and short
+stated reason from runtime.jsonl `monitor_scored`, enforcement from `monitor_block_enforced`); the agent pages and the
+events page show "Monitor's reason (not shown to the agent)" for X1 and "(shown to the agent)" for X2, "not recorded"
+when missing. No story-map stage sees it (stage 1-3 inputs and outputs unchanged). Only the short stated reason is
+published; the monitor's thinking and raw requests stay private. This supersedes, for story-map pages, the earlier
+practice of keeping monitor reasons off the public site.

@@ -114,6 +114,43 @@ class ExtractTests(unittest.TestCase):
             self.assertEqual(ex.load_monitor_records(Path(tmp) / "missing.jsonl", START), {})
 
 
+class MonitorReasonsTests(unittest.TestCase):
+    """Owner request (November 12, 2026): the monitor's stated reason for every block, display only."""
+
+    def test_reasons_joined_by_tool_use_id_and_never_in_items(self):
+        items = ex.Builder(ctx(), "agent-001").feed(stream())
+        with tempfile.TemporaryDirectory() as tmp:
+            tl, run = Path(tmp) / "timeline", Path(tmp) / "run"
+            tl.mkdir()
+            run.mkdir()
+            (tl / "agent-001.jsonl").write_text("".join(json.dumps(i) + "\n" for i in items))
+            rows = [{"kind": "monitor_scored", "agent_id": "agent-001",
+                     "payload": {"tool_use_ids": ["cX", "c0"], "scores": [5, 91],
+                                 "reasons": ["fine", "You are generating restated answers."]}},
+                    {"kind": "monitor_block_enforced", "agent_id": "agent-001", "payload": {"tool_use_id": "c0"}}]
+            (run / "runtime.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            out = ex.monitor_reasons(run, tl, ["agent-001"])
+            self.assertEqual(out["records"], "joined")
+            self.assertEqual(out["calls"]["c0"]["score"], 91)
+            self.assertEqual(out["calls"]["c0"]["reason"], "You are generating restated answers.")
+            self.assertTrue(out["calls"]["c0"]["enforced"])
+            self.assertIsNone(out["calls"]["c1"]["reason"])
+            self.assertEqual(ex.monitor_reasons(Path(tmp) / "none", tl, ["agent-001"])["records"], "unknown")
+        self.assertNotIn("restated answers", json.dumps(items))
+
+    def test_view_labels(self):
+        from research.analysis.storymap import view
+        view.MONITOR.update(reasons={"calls": {"c0": {"score": 91, "reason": "Because <b>.", "enforced": True}}})
+        try:
+            self.assertEqual(view.monitor_reason_of({"call_id": "c0"}, "X1"),
+                             ("Monitor's reason (not shown to the agent)", "91", "Because <b>.", "yes"))
+            self.assertEqual(view.monitor_reason_of({"call_id": "zz", "reason_shown": True}, "X2"),
+                             ("Monitor's reason (shown to the agent)", "not recorded", "not recorded",
+                              "not recorded"))
+        finally:
+            view.MONITOR.update(on=False, ctx=None, reasons=None)
+
+
 class ChunkAndPipelineTests(unittest.TestCase):
     def setUp(self):
         self.items = ex.Builder(ctx(), "agent-001").feed(stream())

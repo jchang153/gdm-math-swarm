@@ -1271,6 +1271,60 @@ def monitor_context(ctx, tl, agents):
             "blocks_curve": _step_curve((t, 1) for t in times)}
 
 
+MONITOR_REASON_CHARS = 600   # the monitor's stated reason as recorded (one or two sentences), capped
+
+
+def monitor_reasons(run_dir, tl, agents):
+    """``timeline/monitor_reasons.json`` (display only; owner request, November 12, 2026: "see the monitor's
+    reasoning for each block, including those that didn't actually return reasoning (silent)"): for every blocked
+    call in the written timelines, the monitor's score and its short stated reason from runtime.jsonl
+    ``monitor_scored`` (``tool_use_ids[i]``, ``scores[i]``, ``reasons[i]``) and whether the hook enforced it
+    (``monitor_block_enforced``). Never part of a timeline item, so no stage-1/2/3 input changes; the monitor's
+    thinking and raw requests are not read. Null values when runtime.jsonl or the call's record is missing."""
+    calls = {}
+    for agent in sorted(agents):
+        path = Path(tl) / f"{agent}.jsonl"
+        if not path.exists():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            it = json.loads(line)
+            ev = it.get("event") or {}
+            if it.get("kind") == "event" and ev.get("type") in ("X1", "X2"):
+                cid = (ev.get("detail") or {}).get("call_id")
+                if cid:
+                    calls[cid] = {"agent": agent, "event_id": ev.get("id"), "shown": ev["type"] == "X2",
+                                  "score": None, "reason": None, "enforced": None}
+    runtime = Path(run_dir) / "runtime.jsonl"
+    found = runtime.exists()
+    if found and calls:
+        enforced = set()
+        with runtime.open(encoding="utf-8") as f:
+            for line in f:
+                if '"monitor_scored"' not in line and '"monitor_block_enforced"' not in line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                payload = row.get("payload") or {}
+                if row.get("kind") == "monitor_block_enforced":
+                    enforced.add(payload.get("tool_use_id"))
+                    continue
+                if row.get("kind") != "monitor_scored":
+                    continue
+                ids, scores, reasons = (payload.get(k) or [] for k in ("tool_use_ids", "scores", "reasons"))
+                for n, cid in enumerate(ids):
+                    if cid in calls:
+                        reason = reasons[n] if n < len(reasons) and isinstance(reasons[n], str) else None
+                        calls[cid].update(score=scores[n] if n < len(scores) else None,
+                                          reason=reason[:MONITOR_REASON_CHARS] if reason else None)
+        for cid, rec in calls.items():
+            rec["enforced"] = cid in enforced
+    return {"schema": "storymap-monitor-reasons/1", "records": "joined" if found else "unknown",
+            "note": "display only: the monitor's score and short stated reason per blocked call (not shown to the "
+                    "agent in silent arms); never sent to a story-map stage", "calls": calls}
+
+
 def item_tokens(item):
     from research.analysis.storymap.chunk import render_detail
     n = estimate_tokens(item["text"])
@@ -1335,6 +1389,8 @@ def extract(run_dir, out, agents=None, workers=4, log=None, overseers=False):
     if ctx.monitor is not None:   # monitor runs only (top-down monitor arms, November 10, 2026)
         (tl / "monitor_context.json").write_text(json.dumps(monitor_context(ctx, tl, index), indent=1) + "\n",
                                                   encoding="utf-8")
+        (tl / "monitor_reasons.json").write_text(json.dumps(monitor_reasons(run_dir, tl, index), indent=1,
+                                                            ensure_ascii=False) + "\n", encoding="utf-8")
     if overseers or any(ctx.role(a) == "overseer" for a in selected):
         (tl / "overseer_context.json").write_text(json.dumps(overseer_context(ctx), indent=1) + "\n",
                                                    encoding="utf-8")
@@ -1349,7 +1405,15 @@ def main(argv=None):
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--overseers", action="store_true",
                     help="map every overseer instead of the solvers (never the seed); writes overseer_context.json")
+    ap.add_argument("--monitor-reasons", action="store_true",
+                    help="only (re)write timeline/monitor_reasons.json for an existing timeline (monitor runs)")
     a = ap.parse_args(argv)
+    if a.monitor_reasons:
+        tl = Path(a.out) / "timeline"
+        index = json.loads((tl / "index.json").read_text(encoding="utf-8"))
+        (tl / "monitor_reasons.json").write_text(json.dumps(monitor_reasons(a.run_dir, tl, index), indent=1,
+                                                            ensure_ascii=False) + "\n", encoding="utf-8")
+        return 0
     agents = [x.strip() for x in a.agents.split(",") if x.strip()] if a.agents else None
     index = extract(a.run_dir, a.out, agents, a.workers, overseers=a.overseers,
                     log=lambda ag, e: print(ag, e.get("error") or f"{e['items']} items, {e['est_tokens']} tokens, "

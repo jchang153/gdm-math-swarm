@@ -145,7 +145,7 @@ class MonitorViewTest(unittest.TestCase):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def test_switch_resets_after_build(self):
-        self.assertEqual(view.MONITOR, {"on": False, "ctx": None})
+        self.assertEqual(view.MONITOR, {"on": False, "ctx": None, "reasons": None})
         self.assertEqual(view.letters(), view.LETTERS)
 
     def test_block_lane_only_with_blocks(self):

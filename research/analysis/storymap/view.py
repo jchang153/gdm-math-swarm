@@ -62,7 +62,7 @@ DEFAULT_TAXONOMY = Path(__file__).resolve().parent / "taxonomy.md"  # public cop
 AXIS_MIN = 180.0
 LETTERS = "ABCDEFG"
 BLOCK_TYPES = ("X1", "X2")  # monitor runs only: a tool call blocked by the top-down monitor (no reason / reason shown)
-MONITOR = {"on": False, "ctx": None}  # set by _build when the run has blocks; off renders every page as before
+MONITOR = {"on": False, "ctx": None, "reasons": None}  # set by _build when the run has blocks; off renders every page as before
 MONITOR_BLOCK = re.compile(r"\n<!-- monitor-runs:begin -->\n.*?<!-- monitor-runs:end -->\n", re.S)
 MONITOR_MARKER = re.compile(r"^<!-- monitor-runs:(?:begin|end) -->\n", re.M)
 
@@ -1672,6 +1672,9 @@ def block_article(ev, reactions, key, names=None, href=""):
         rows.append(("Reason shown to the agent", redact(str(d.get("reason"))) if d.get("reason") else "not recorded"))
     else:
         rows.append(("Reason shown to the agent", "none (the agent saw only that the action was blocked)"))
+    if MONITOR.get("reasons") is not None:
+        label, score, reason, enforced = monitor_reason_of(d, typ)
+        rows += [("Monitor's score", score), (label, reason), ("Enforced (monitor records)", enforced)]
     rows += [("Monitor score", _unknown(mon.get("score") if joined else None)),
              ("Monitor threshold", _unknown(mon.get("threshold") if joined else None)),
              ("Enforced by the host", _unknown(mon.get("enforced") if joined else None, yesno))]
@@ -2444,6 +2447,27 @@ def load_monitor_context(timeline):
     return data if isinstance(data, dict) else None
 
 
+def load_monitor_reasons(timeline):
+    """TIMELINE/timeline/monitor_reasons.json (storymap-monitor-reasons/1, display only) or None."""
+    if timeline is None:
+        return None
+    data = _read_json(timeline_dir(timeline) / "monitor_reasons.json")
+    return data if isinstance(data, dict) and isinstance(data.get("calls"), dict) else None
+
+
+def monitor_reason_of(d, typ):
+    """(label, score text, reason text, enforced text) of a block from monitor_reasons.json (owner request, November
+    12, 2026: the monitor's stated reason for every block, also in silent arms); "not recorded" when missing."""
+    shown = typ == "X2" or bool(d.get("reason_shown"))
+    label = "Monitor's reason (shown to the agent)" if shown else "Monitor's reason (not shown to the agent)"
+    rec = ((MONITOR.get("reasons") or {}).get("calls") or {}).get(str(d.get("call_id"))) or {}
+    score = rec.get("score")
+    enforced = rec.get("enforced")
+    return (label, "not recorded" if score is None else str(score),
+            redact(str(rec["reason"])) if rec.get("reason") else "not recorded",
+            "not recorded" if enforced is None else ("yes" if enforced else "no"))
+
+
 def w_codes(agents, names):
     """The W codes to offer: the taxonomy's (W1..W7 when loaded) and any the stage-1 readings used."""
     used = {str(th.get("code")) for a in agents.values() for th in a["thoughts"]
@@ -2628,7 +2652,10 @@ def monitor_events_section(agents):
                         f'<td class="n">{esc(d.get("episode"))}{" (start)" if d.get("episode_start") else ""}</td>'
                         f'<td>{esc(cut(redact(str(d.get("args") or "")), 160))}</td>'
                         f'<td>{esc(cut(redact(str(d.get("reason"))), 200)) if d.get("reason") else "<span class=muted>none shown</span>"}</td>'
-                        f'<td>{esc(NEXT_CALL_LABEL.get(d.get("next_call"), "not recorded"))}</td><td>{esc(react)}</td></tr>')
+                        + (f'<td class="n">{esc(monitor_reason_of(d, e.get("type"))[1])}</td>'
+                           f'<td>{esc(cut(monitor_reason_of(d, e.get("type"))[2], 240))}</td>'
+                           if MONITOR.get("reasons") is not None else "")
+                        + f'<td>{esc(NEXT_CALL_LABEL.get(d.get("next_call"), "not recorded"))}</td><td>{esc(react)}</td></tr>')
         icon = (f'<svg class="hglyph" viewBox="0 0 18 16">{shape("X1", 9, 8, 5, "g-block", None, "")}</svg>')
         cards.append(
             f'<section class="ev" id="block-{esc(_slug(tool))}"><h3>{icon}Blocked {esc(redact(tool))} calls</h3>'
@@ -2637,8 +2664,9 @@ def monitor_events_section(agents):
             f'<div class="sbs">{next_call_bar(items, "Next call")}<p class="muted">Reactions at episode starts (stage 2; '
             f'{judged} with a reaction, {starts - judged} without):</p>{reaction_bars(c, judged)}</div>'
             f'<details{" open" if len(items) <= 12 else ""}><summary>Blocks</summary><table><tr><th>Agent</th>'
-            f'<th>At</th><th>Block</th><th>Episode</th><th>Call</th><th>Reason shown</th><th>Next call</th>'
-            f'<th>Reaction</th></tr>{"".join(rows)}</table>'
+            f'<th>At</th><th>Block</th><th>Episode</th><th>Call</th><th>Reason shown</th>'
+            + ('<th>Monitor\'s score</th><th>Monitor\'s reason</th>' if MONITOR.get("reasons") is not None else "")
+            + f'<th>Next call</th><th>Reaction</th></tr>{"".join(rows)}</table>'
             + (f'<p class="muted">First 300 of {len(items)} listed.</p>' if len(items) > 300 else "")
             + '</details></section>')
     return (f'<h2 id="monitor-blocks">Monitor blocks</h2><p class="muted">{esc(arm_line(MONITOR["ctx"]))} Tool calls '
@@ -2669,7 +2697,7 @@ def build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, domain=No
             return _build(map_dir, timeline, out, taxonomy, minutes, overseer_map, overseer_timeline, graph)
         finally:
             EVIDENCE["on"] = True
-            MONITOR.update(on=False, ctx=None)
+            MONITOR.update(on=False, ctx=None, reasons=None)
 
 
 def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=None, overseer_map=None,
@@ -2678,7 +2706,8 @@ def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=
     agents, pipeline = load(map_dir, timeline)
     # Monitor runs: only when an agent's timeline has a blocked action; every other run renders as before.
     monitor = any(ev["event"].get("type") in BLOCK_TYPES for a in agents.values() for ev in a["events"])
-    MONITOR.update(on=monitor, ctx=load_monitor_context(timeline) if monitor else None)
+    MONITOR.update(on=monitor, ctx=load_monitor_context(timeline) if monitor else None,
+                   reasons=load_monitor_reasons(timeline) if monitor else None)
     out = Path(out or map_dir)
     if graph is None:
         graph = (out / GRAPH_PAGE).is_file()
