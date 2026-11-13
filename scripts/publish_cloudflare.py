@@ -1536,7 +1536,10 @@ def ensure_viewer_project(workdir, runner=subprocess.run):
     except RuntimeError as error:
         if 'not found' not in str(error).lower() and '8000007' not in str(error):
             raise
-    run_wrangler(['pages', 'project', 'create', log_viewer.PROJECT, '--production-branch', BRANCH], workdir, runner)
+    # --force: a classic Pages project like the library's (wrangler 4.154 otherwise delegates project creation to
+    # "Pages in Workers", which fails without a static-files folder; November 12, 2026).
+    run_wrangler(['pages', 'project', 'create', log_viewer.PROJECT, '--production-branch', BRANCH, '--force'],
+                 workdir, runner)
     return deployments(workdir, runner, log_viewer.PROJECT)
 
 
