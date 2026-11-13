@@ -467,13 +467,15 @@ def render_about(site=None, skin=None):
             f'<ol class="sk-steps">{setup}</ol></div></section>'
             '<section class="sk-band" id="how"><div class="sk-wrap"><h2 class="sk-h2">How a run works</h2>'
             f'<ol class="sk-steps">{steps}</ol></div></section>'
-            '<section class="sk-section"><div class="sk-wrap sk-grid">'
+            # Full-width cards; the glossary flows in two columns on wide screens (owner, November 12, 2026: the side
+            # by side cards were too tall and narrow; two dt/dd pair columns measured taller, rows align).
+            '<section class="sk-section"><div class="sk-wrap sk-stack">'
             f'<div class="sk-card"><h2 class="sk-h2" style="font-size:1.2rem">Key terms</h2><dl class="sk-gloss">{gloss}</dl></div>'
             f'<div class="sk-card" id="read"><h2 class="sk-h2" style="font-size:1.2rem">On each run\'s page</h2>'
             f'<dl class="sk-gloss">{pages}</dl></div></div></section>'
             '<section class="sk-section" id="glossary"><div class="sk-wrap"><h2 class="sk-h2">Glossary</h2>'
             '<p class="sk-sub" style="color:var(--k-muted);max-width:70ch">Every term used on the run cards, run '
-            f'reports and the Experiments page.</p><div class="sk-card"><dl class="sk-gloss">{terms}</dl></div></div>'
+            f'reports and the Experiments page.</p><div class="sk-card"><dl class="sk-gloss sk-gloss-cols">{terms}</dl></div></div>'
             '</section>'
             '<section class="sk-section"><div class="sk-wrap sk-prose"><h2 class="sk-h2">The paper</h2>'
             f'<p>{intro.PAPER}</p><p>{esc(intro.DISCLAIMER)}</p></div></section>'

@@ -106,6 +106,13 @@ class RenderExplore(unittest.TestCase):
         self.assertIsNone(explore_page.render_about(site='ib'))
         self.assertIsNotNone(explore_page.render_explore(self.entries, self.files, site='gdm'))
 
+    def test_about_cards_full_width(self):
+        """Owner, November 12, 2026: the definition cards were too tall and narrow side by side."""
+        page = explore_page.render_about()
+        self.assertIn('<div class="sk-wrap sk-stack"><div class="sk-card"><h2', page)
+        self.assertIn('<dl class="sk-gloss sk-gloss-cols">', page)
+        self.assertIn('@media (min-width:820px){.sk-gloss-cols{display:block;columns:2 300px', page)
+
     def test_deterministic_and_complete(self):
         a = explore_page.render_explore(self.entries, self.files)
         b = explore_page.render_explore(list(self.entries), dict(self.files))

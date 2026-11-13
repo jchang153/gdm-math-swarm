@@ -243,6 +243,12 @@ COMPONENTS = (
     '.sk-steps b{display:block;color:var(--k-ink);margin-bottom:4px}'
     '.sk-gloss{display:grid;grid-template-columns:minmax(140px,max-content) 1fr;gap:10px 24px;margin:0}'
     '.sk-gloss dt{font-weight:700}.sk-gloss dd{margin:0;color:var(--k-soft)}'
+    # About page (owner, November 12, 2026): full-width cards; the glossary flows, term over definition, in two
+    # columns on wide screens
+    '.sk-stack{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}'
+    '@media (min-width:820px){.sk-gloss-cols{display:block;columns:2 300px;column-gap:40px}'
+    '.sk-gloss-cols dt{break-after:avoid;margin-top:14px}.sk-gloss-cols dt:first-child{margin-top:0}'
+    '.sk-gloss-cols dd{break-before:avoid;break-inside:avoid;margin-top:2px}}'
     'code{font-family:var(--k-mono);font-size:.9em;background:var(--k-chip);padding:1px 5px;border-radius:4px}'
     '.sk-foot{padding:40px 0 80px;border-top:1px solid var(--k-line);color:var(--k-muted);font-size:14px}'
     '.sk-foot p{max-width:80ch;color:var(--k-muted)}'
