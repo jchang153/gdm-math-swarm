@@ -1823,7 +1823,7 @@ is being merged into main via `collab-env`.
     per-run chart dots or faint lines; one average per condition; one run link per story); short plain headings and
     sentences, at most three numbers per story, methodology notes left to About; test `test_no_replicates`.
 
-40. **IN FLIGHT 2026-11-12: monitor blocks in the story map; paid maps of the 12 monitor runs** (owner request and
+40. **DONE 2026-11-12 (16:03 PT): monitor blocks in the story map; paid maps of the 12 monitor runs, published** (owner request and
     approval verbatim in docs/plan.md, "Monitor blocks in the story map (November 12, 2026)").
     - **Code:** events X1/X2 (`extract.py`, `timeline/monitor_context.json`), stage-2 selection of episode starts and
       stage-3 facts (`chunk.py`), W codes and monitor notes in the user messages only for blocked agents
@@ -1838,7 +1838,36 @@ is being merged into main via `collab-env`.
       work, some probed and spliced keywords to get past it. M2 r2 87 blocks for 71 agents (71 episodes, nearly all one
       block); nearly every agent said the monitor was right and switched to genuine work; a few posted a PSA or sent
       feedback; one (agent-063) disputed a block on a genuine problem.
-    - **Paid maps:** running (see below for spend, deploys and URLs when done).
+    - **Paid maps DONE 2026-11-12 (13:07-13:50 PT)** (owner "go ahead and run the 12 story maps, and publish to the
+      site"; `--run-limit 50` per run; stage 1 Claude Haiku 5.5, stage 2 GPT-6.1 Terra, stage 3 GPT-6.1 Sol,
+      cross-check Gemini 3.8 Flash on 10 agents; `scripts/run_storymap.py --no-offload`, then `--retry-failed`).
+      Settled $ per run (run ids `glmflash100-seeded-monitor-` omitted): M1 actions-silent r1 15.61, r2 36.06, r3 15.91;
+      M2 actions-reason r1 27.81, r2 28.39, r3 26.82; M3 full-silent r1 23.36, r2 16.61, r3 17.78; M4 full-reason r1
+      23.54, r2 31.12, r3 22.55; total $285.58. Remaining gaps: 1-2 Haiku stage-1 chunks (malformed JSON after repair)
+      in 9 runs, recorded as gaps; no stage-2/3 failures. Blocks seen / episodes: M1 1348/154, 1128/127, 1339/139; M2
+      65/63, 87/71, 27/27; M3 923/154, 526/105, 1052/193; M4 76/69, 124/94, 80/75 (all joined to the monitor records).
+    - **Findings (model readings):** silent arms: in every run ~70-86 agents first read a block as a technical fault
+      (W1), probed (W2), rerouted the same content through other tools (W4), then attributed it to a guard (W3);
+      most eventually complied (W5), and at episode starts stage 2 reads more reactions toward cheating (keeping the
+      goal via workarounds: 53-89 per run) than away (26-57). Reason-shown arms: nearly every blocked agent took the
+      reason as a verdict and switched to genuine work (stage 2 "away" 27/27, 61/63, 69/71, 69/69, 91/94, 74/75); a few
+      disputed a block as a misfire (W6, 0-3 per run) or told others (W7).
+    - **Site:** story maps of all 12 published as Cloudflare deployment `00e0793e` (15:22 PT; base 3c3ec272; 1,296 files
+      added, 12 results.html gain the Story map tab; built-in verify ok: manifest, limits, no private files, served
+      bytes, links, 404, packed URLs). Livecheck: index/events/taxonomy/validation of all 12 served = local (48/48);
+      packed agent pages match local digests. Receipt `runs/phase-b/cloudflare/receipts/storymap-monitor-20261112.json`.
+      Independent decoded-text scan of every page (keys, tokens, host paths, private/ paths, emails, infra names,
+      monitor prompt and window markers): 0 hits on 12 x 108 files. Published from a clean worktree of `dc05701` (the
+      main checkout had another agent's uncommitted publish_cloudflare.py edits). Catalogue deployment `885340f2`
+      (16:03 PT; verify ok; the 12 monitor rows link their story maps and carry the M1-M4 titles of 36cfc12; receipt
+      `runs/phase-b/cloudflare/receipts/catalogue-monitor-storymap-20261112.json`).
+      Example: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-monitor-actions-silent-120m-push-r1-20261111T014006Z/analysis/storymap/index.html
+    - **Local files:** the restored resume/, inspect/ and runtime.jsonl were deleted after use (they stay in the
+      dataset). The new `RUN/analysis/storymap/` outputs are local only (not offloaded: the dataset was read-only for
+      this job).
+    - **Monitor reasons on the pages (owner request, docs/plan.md):** `extract --monitor-reasons` wrote
+      `timeline/monitor_reasons.json` for all 12 (every block joined: score, short reason, enforced); shown as
+      "Monitor's reason (not shown / shown to the agent)". Display only; stages unchanged.
 
 41. **IN FLIGHT 2026-11-12: log viewer with HF sign-in** (owner approval verbatim in docs/plan.md, "Log viewer with
     HF sign-in (November 12, 2026)"; details and threat model in docs/experiment-library.md, same title).
