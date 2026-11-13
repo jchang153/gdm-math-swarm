@@ -1891,6 +1891,24 @@ is being merged into main via `collab-env`.
       The twelve 180-minute 2026-10-28 runs have no dataset commit on the site, so no viewer page ("kept offline").
     - **Pending:** the owner's one-time real sign-in test (organization grant, private-dataset 206 through the CDN).
 
+42. **LIVE 2026-11-12 ~22:40 PT: monitor run pages show the interaction graph; M1-M4 titles; wider About cards**
+    (owner: "the story maps and graphs are shown on the main page, but don't show when I click into the runs").
+    - **Root cause:** `publish_cloudflare.plan_storymap` only inserted the Story map tab into the run page's existing
+      overview block, which had been rendered before the run had a story map (graph pane = "Standing fakes"); nothing
+      re-rendered it. It now re-renders the overview (`site_layout.apply` with `read` over the new files; math site,
+      themed pages only). Live scan before the fix: exactly the 12 monitor runs had a Story map tab without
+      `id="ov-graph"`; none after.
+    - **Monitor labels:** run-page title and chips (`site_layout._spec`) use the catalogue's M1-M4 arms, e.g. "100 GLM
+      5.3 Flash solvers · M1: actions-only monitor, silent block · 2 h · push · r1" and a Monitor chip instead of
+      "Oversight: no overseer". Non-monitor runs unchanged.
+    - **About page:** Key terms and On each run's page cards stacked full width (`sk-stack`; at 900 px 659 and 517 px
+      tall, was ~1,734 each side by side); the Glossary flows term over definition in two columns from 820 px
+      (`sk-gloss-cols`; 1,861 -> 1,642 px at 900). Two dt/dd pair columns were measured taller and not used.
+    - **Deployed:** `restyle --commit` (60 pages of the 12 monitor runs + about.html): math site deployment
+      `c2175d21` on top of `ecb8df93`, viewer `1ab52d2c` first; built-in verify and production `verify` ok (9/9);
+      live scan: 56 story-mapped run pages, all with the graph; receipt
+      `runs/phase-b/cloudflare/receipts/restyle-monitor-overview-about-20261112.json`. Commits a2f8dcc, e0abf99.
+
 ## Next steps / open items
 
 - **Logs dataset storage (2026-11-10 21:30 PT):** used_storage 90.2 GB of the org's 100 GB private limit (raw files
