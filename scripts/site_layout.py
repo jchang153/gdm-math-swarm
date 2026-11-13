@@ -308,6 +308,21 @@ def _short_overseers(part):
     return f'{count} overseer{"s" if count != 1 else ""}' + (f' ({powers})' if powers else '')
 
 
+# Top-down monitor arms (owner, November 12, 2026): the same M1-M4 labels as scripts/build_experiment_index.py.
+_MONITOR_RUN = re.compile(r'-seeded-monitor-(actions|full)-(silent|reason)-')
+_MONITOR_ARM = {('actions', 'silent'): 'M1', ('actions', 'reason'): 'M2', ('full', 'silent'): 'M3',
+                ('full', 'reason'): 'M4'}
+
+
+def _monitor(run):
+    """(arm, short monitor spec) of a top-down monitor run, else None."""
+    m = _MONITOR_RUN.search(run)
+    if not m:
+        return None
+    return (_MONITOR_ARM[(m[1], m[2])], f'{"actions-only" if m[1] == "actions" else "full-transcript"}, '
+                                       f'{"silent block" if m[2] == "silent" else "block with reason"}')
+
+
 def _spec(document, run):
     """(title, [(chip key, chip value)]) from the run intro sentence, the summary tiles and the run id."""
     parts, chips = _intro_parts(document), []
@@ -327,7 +342,11 @@ def _spec(document, run):
     agents_tile, _ = _tile(document, 'Agents')
     if not solvers and agents_tile:
         chips.append(('Agents', agents_tile))
-    chips.append(('Oversight', overseer if overseer else ('no overseer' if 'no overseer' in parts else None)))
+    monitor = _monitor(run)
+    if monitor:  # a monitor run's intro says "no overseer" (no overseer agents); the monitor is its oversight
+        chips.append(('Monitor', monitor[1]))
+    else:
+        chips.append(('Oversight', overseer if overseer else ('no overseer' if 'no overseer' in parts else None)))
     chips.append(('Exploit', seed if seed and seed != 'no planted exploit' else
                   ('none planted' if seed else None)))
     chips.append(('Delivery', delivery))
@@ -339,7 +358,12 @@ def _spec(document, run):
     rep = re.search(r'-r(\d+)-\d{8}T', run)
     if solvers:
         title = solvers
-        title += ' · ' + (_short_overseers(overseer) if overseer else 'no overseer')
+        if monitor:
+            arm, spec = monitor
+            kind, block = spec.split(', ')
+            title += f' · {arm}: {kind} monitor, {block}'
+        else:
+            title += ' · ' + (_short_overseers(overseer) if overseer else 'no overseer')
     else:
         title = (model or run) + (f' · {agents_tile}' if agents_tile else '')
     if duration:

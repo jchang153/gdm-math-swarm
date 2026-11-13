@@ -1034,7 +1034,7 @@ def plan_withdraw(base_files, unlisted, runs, site=None):
                    'removed_by_run': {r: sum(1 for n in removed if run_of(n) == r) for r in runs}}
 
 
-def plan_storymap(base_files, unlisted, folders, taxonomy=()):
+def plan_storymap(base_files, unlisted, folders, taxonomy=(), site=None):
     """The site with the story map pages of runs already on it (``folders``: run -> local folder of the public
     render). Each run's RUN/analysis/storymap/ becomes exactly the allowlisted, screened pages of its folder
     (``storymap_site.public_files``; earlier story map pages are replaced, never left stale) and its results.html
@@ -1065,7 +1065,13 @@ def plan_storymap(base_files, unlisted, folders, taxonomy=()):
         page = f'{run}/results.html'
         if page not in base_files:
             raise ValueError(f'{page} is not on the site')
-        new = storymap_site.add_storymap_tab(base_files[page].decode('utf-8')).encode('utf-8')
+        # The tab is inserted into the overview block, whose graph pane was rendered without a story map; re-render
+        # the overview from the new files so the run page shows the interaction graph (live bug, November 12, 2026).
+        new = storymap_site.add_storymap_tab(base_files[page].decode('utf-8'))
+        if site_style.MARKER in new:  # a page from before the shared theme stays as served (like restyle)
+            new = site_layout.apply('results.html', new, read=lambda path, run=run: files.get(f'{run}/{path}'),
+                                    overview=(site or SITES['gdm']).domain == 'lean')
+        new = new.encode('utf-8')
         if new != base_files[page]:
             replaced.append({'path': page, 'old': digest(base_files[page]), 'new': digest(new)})
             files[page] = new
@@ -1764,7 +1770,7 @@ def main(argv=None):
             message = 'Re-render the catalogue'
         elif args.command == 'storymap':
             folders = dict(spec.split('=', 1) for spec in args.run)
-            files, plan = plan_storymap(base_files, unlisted, folders, storymap_taxonomy())
+            files, plan = plan_storymap(base_files, unlisted, folders, storymap_taxonomy(), site=site)
             message = 'Story map ' + ', '.join(plan['source']['runs'])
         elif args.command == 'heatmap':
             folders = dict(spec.split('=', 1) for spec in args.run)

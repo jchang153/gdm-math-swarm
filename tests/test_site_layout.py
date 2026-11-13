@@ -309,5 +309,49 @@ class OverviewTest(unittest.TestCase):
         self.assertNotIn(site_layout.OV_START.encode(), files[f'{RUN_ID}/results.html'])
 
 
+    def test_monitor_run_title_and_chip(self):
+        """Owner, November 12, 2026: monitor runs carry the M1-M4 arm labels, not "no overseer"."""
+        arms = {'actions-silent': ('M1: actions-only monitor, silent block', 'actions-only, silent block'),
+                'actions-reason': ('M2: actions-only monitor, block with reason', 'actions-only, block with reason'),
+                'full-silent': ('M3: full-transcript monitor, silent block', 'full-transcript, silent block'),
+                'full-reason': ('M4: full-transcript monitor, block with reason', 'full-transcript, block with reason')}
+        intro = ('100 GLM 5.3 Flash solvers, 1 GLM 5.3 Flash overseer with check_proof and revert powers, '
+                 'exploit planted at +3 min, 2 h.')
+        for arm, (label, chip) in arms.items():
+            run = f'glmflash100-seeded-monitor-{arm}-120m-push-r1-20261111T014006Z'
+            page = site_layout.apply('results.html', RUN_PAGE.replace(RUN_ID, run).replace(
+                intro, '100 GLM 5.3 Flash solvers, no overseer, exploit planted at +3 min, unread notices on, 2 h.'))
+            self.assertIn(f'100 GLM 5.3 Flash solvers · {label} · 2 h · push · r1', page)
+            self.assertIn(f'<li><b>Monitor</b>{chip}</li>', page)
+            self.assertNotIn('<b>Oversight</b>', page)
+            self.assertNotIn('no overseer', page.split(site_layout.OV_START)[1].split(site_layout.OV_END)[0])
+        # Non-monitor runs unchanged.
+        self.assertIn('<li><b>Oversight</b>', site_layout.apply('results.html', RUN_PAGE))
+
+    def test_storymap_publish_rerenders_the_overview_graph(self):
+        """Live bug, November 12, 2026: a run page rendered before its story map kept the fakes pane after the
+        storymap command added the tab; plan_storymap now re-renders the overview from the new files."""
+        import json
+        import tempfile
+        from unittest.mock import patch
+        import publish_cloudflare as pc
+        import storymap_graph as sg
+        no_map = RUN_PAGE.replace('<a data-tab="storymap" href="analysis/storymap/index.html">Story map</a>', '')
+        before = site_layout.apply('results.html', no_map)
+        self.assertNotIn('id="ov-graph"', before)
+        base = {'experiments.json': json.dumps({'experiments': []}).encode(),
+                f'{RUN_ID}/results.html': before.encode(), f'{RUN_ID}/results.json': b'{}'}
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, 'index.html').write_text('<a href="graph.html">g</a>')
+            Path(tmp, 'graph.html').write_text(sg.shell())
+            Path(tmp, 'graph.json').write_text('{"schema": "storymap-graph/1", "nodes": []}')
+            with patch.object(pc.storymap_site, 'prompt_lines', return_value=frozenset()):
+                files, _ = pc.plan_storymap(base, (), {RUN_ID: tmp})
+        page = files[f'{RUN_ID}/results.html'].decode()
+        self.assertIn('id="ov-graph"', page)
+        self.assertNotIn('Standing fakes over the run', page)
+        self.assertEqual(page.count(site_layout.OV_START), 1)
+
+
 if __name__ == '__main__':
     unittest.main()
