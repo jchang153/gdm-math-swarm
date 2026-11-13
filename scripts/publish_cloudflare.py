@@ -118,6 +118,7 @@ import site_look  # noqa: E402
 import site_nav  # noqa: E402
 import explore_page  # noqa: E402
 import site_style  # noqa: E402
+import site_terms  # noqa: E402
 import simple_judge_site  # noqa: E402
 import storymap_site  # noqa: E402
 from publish_hf_library import (SECRET, load_bundle, merge_entries, packed_text,  # noqa: E402
@@ -985,7 +986,8 @@ def plan_restyle(base_files, unlisted, runs=None, site=None):
     """The site with its run pages in the current layout (``site_layout.apply``) and the catalogue re-rendered.
 
     Pages only: no file is added or removed, non-HTML files never change, and a page changes only by the layout
-    transform (which keeps text, links and scripts). ``runs`` limits the run pages touched (default: all)."""
+    transform (which keeps links and scripts) and, on the math site, the plain-words transform of its visible text
+    (``site_terms``; also on the judge and story-map agent pages). ``runs`` limits the run pages touched (default: all)."""
     known = {run_of(n) for n in base_files if run_of(n)}
     missing = sorted(set(runs or ()) - known)
     if missing:
@@ -993,14 +995,22 @@ def plan_restyle(base_files, unlisted, runs=None, site=None):
     files, replaced, legacy = dict(base_files), [], []
     for name in sorted(base_files):
         run = run_of(name)
-        if not run or run in NON_RUN or (runs and run not in runs) or site_layout.kind(name) is None:
+        math = (site or SITES['gdm']).domain == 'lean'
+        # The judge pages and story-map agent pages get the plain words only (math site; scripts/site_terms.py).
+        words_only = site_layout.kind(name) is None and math and site_terms.covers(name)
+        if not run or run in NON_RUN or (runs and run not in runs) or (site_layout.kind(name) is None
+                                                                      and not words_only):
             continue
         old = base_files[name]
         if site_style.MARKER.encode() not in old:  # a page from before the shared theme: left as served
             legacy.append(name)
             continue
-        new = site_layout.apply(name, old.decode('utf-8'), read=lambda path, run=run: base_files.get(f'{run}/{path}'),
-                                overview=(site or SITES['gdm']).domain == 'lean').encode('utf-8')
+        if words_only:
+            new = site_terms.apply(old.decode('utf-8')).encode('utf-8')
+        else:
+            new = site_layout.apply(name, old.decode('utf-8'),
+                                    read=lambda path, run=run: base_files.get(f'{run}/{path}'),
+                                    overview=math).encode('utf-8')
         if new == old:
             continue
         replaced.append({'path': name, 'old': digest(old), 'new': digest(new)})

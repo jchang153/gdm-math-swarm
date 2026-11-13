@@ -543,16 +543,16 @@ def render_monitor(mon):
     return ["## Reactions to monitor blocks", "",
             f"{mon['blocks']} blocked tool calls ({', '.join(f'{k} {v}' for k, v in mon['by_type'].items())}; X1 no "
             f"reason shown, X2 reason shown) for {mon['agents_blocked']} agents, in {mon['episodes']} episodes (blocks "
-            "less than four model steps apart). Only an episode's first block has a stage-2 reaction.", "",
+            "less than four model steps apart). Only an episode's first block has a reaction reading.", "",
             f"Next tool call after a block (records): {nc}.", "",
             "| episode starts with a reaction | noticed yes / unclear / no | change none / belief / behaviour | "
             "direction away / toward / neutral |", "|---|---|---|---|",
             f"| {r['n']} of {mon['episodes']} | {reg.get('yes', 0)} / {reg.get('unclear', 0)} / {reg.get('no', 0)} | "
             f"{chg.get('none', 0)} / {chg.get('belief', 0)} / {chg.get('behaviour', 0)} | {d.get('away', 0)} / "
             f"{d.get('toward_cheating', 0)} / {d.get('neutral', 0)} |", "",
-            "Agents with each response code (stage 1): " + (", ".join(f"{k} {v}" for k, v in
+            "Agents with each response code: " + (", ".join(f"{k} {v}" for k, v in
                                                                 mon["agents_with_code"].items()) or "none") + ".", "",
-            f"Stage 3 cites a block in {mon['turning_points_citing_a_block']} turning points and "
+            f"The final reading cites a block in {mon['turning_points_citing_a_block']} turning points and "
             f"{mon['stops_citing_a_block']} stops.", ""]
 
 
@@ -896,14 +896,14 @@ def render_md(res):
         out += [f"## Agreement between two models ({pair}) on {sample}", "",
                 "How often two different models read the same agents the same way. This is agreement between "
                 "models, not accuracy: neither reading is ground truth.", "",
-                f"Stage 1: {cc['stage1']['agents']} agents, {cc['stage1']['chunks']} chunks, mean code-set Jaccard {_fmt(cc['stage1']['mean_jaccard'])}", "",
-                f"Stage 3 final fields ({cc['stage3']['agents']} agents):", "", "| field | agree | pct |", "|---|---|---|"]
+                f"Thought reading: {cc['stage1']['agents']} agents, {cc['stage1']['chunks']} chunks, mean code-set Jaccard {_fmt(cc['stage1']['mean_jaccard'])}", "",
+                f"Final reading fields ({cc['stage3']['agents']} agents):", "", "| field | agree | pct |", "|---|---|---|"]
         for f, v in cc["stage3"]["fields"].items():
             out.append(f"| {f} | {v['agree']}/{v['n']} | {_p(v['pct'])} |")
         out.append("")
     bo = res.get("bakeoff")
     if bo:
-        out += ["## Stage-1 model comparison", "", "| model | agents | faker | decision +/-2 | self idea | score | cost USD |", "|---|---|---|---|---|---|---|"]
+        out += ["## Thought-reading model comparison", "", "| model | agents | faker | decision +/-2 | self idea | score | cost USD |", "|---|---|---|---|---|---|---|"]
         for m, v in bo["models"].items():
             out.append(f"| {m} | {v['agents']} | {_p(v['faker_acc'])} | {_p(v['decision_acc'])} | {_p(v['self_idea_acc'])} | {_p(v['score'])} | {_fmt(v['cost_usd'])} |")
         out += ["", f"Best score {_p(bo['best_score'])}; within {bo['points']:g} points: {', '.join(bo['within']) or 'none'}; "
@@ -956,7 +956,7 @@ def render_push(push):
             f"Placement: {place} (anchor = right after the tool result the host appended the block to; time = by "
             f"timestamp, the anchor is not in the transcript). Blocks with no model reply after them: "
             f"{push['unanswered_blocks']}. First reads: {push['first_reads_pushed']} pushed, "
-            f"{push['first_reads_pulled']} board posts or DMs pulled by the agent's own call. Stage-2 reactions to "
+            f"{push['first_reads_pulled']} board posts or DMs pulled by the agent's own call. Reaction readings to "
             f"pushed items: {reac or 'none'}.", ""]
 
 
@@ -970,15 +970,15 @@ def render_reminders(rem):
     c = rem["cited"]
     out = ["## Reactions to the integrity reminders", "",
            "Every delivery of the run's periodic integrity reminder (a host notice sent to every solver on a timer) "
-           "has a stage-2 reaction. Faking at the time: a fake submission (strict rule) at or before the reminder, "
-           "or the stage-3 position at that minute.", "",
+           "has a reaction reading. Faking at the time: a fake submission (strict rule) at or before the reminder, "
+           "or the final-reading position at that minute.", "",
            "| deliveries | n | with a reaction | noticed yes / unclear / no | change none / belief / behaviour | "
            "direction away / toward / neutral |", "|---|---|---|---|---|---|",
            row(f"all ({rem['agents']} agents)", rem["all"])]
-    for key, label in (("fake_submitted", "had submitted a fake"), ("stance_faking", "stage-3 position faking")):
+    for key, label in (("fake_submitted", "had submitted a fake"), ("stance_faking", "final-reading position faking")):
         for v in ("yes", "no"):
             out.append(row(f"{label}: {v}", rem["split"][key][v]))
-    out += ["", f"Stage 3 cites a reminder in {c['tp_reminder_alone'] + c['tp_reminder_with_others']} of "
+    out += ["", f"The final reading cites a reminder in {c['tp_reminder_alone'] + c['tp_reminder_with_others']} of "
                 f"{c['turning_points']} turning points ({c['tp_reminder_alone']} as the only cause, "
                 f"{c['tp_reminder_with_others']} with other events) and in {c['stop_reminder_alone'] + c['stop_reminder_with_others']} "
                 f"of {c['stops']} stops ({c['stop_reminder_alone']} alone, {c['stop_reminder_with_others']} with others); "
@@ -993,9 +993,9 @@ CHECK_MEANING = {
     "stopped": "stopped vs fake submissions after the stop",
     "stage2_event_exists": "each reaction cites an event the agent actually saw",
     "stage2_event_before_reaction": "a reaction's quotes come after the event",
-    "stage2_quotes": "stage-2 quotes verbatim in the agent's records",
-    "stage1_quotes": "stage-1 quotes verbatim in the agent's records",
-    "stage3_phases": "stage-3 phases consecutive, without gaps or zero-length phases",
+    "stage2_quotes": "reaction-reading quotes verbatim in the agent's records",
+    "stage1_quotes": "thought-reading quotes verbatim in the agent's records",
+    "stage3_phases": "final-reading phases consecutive, without gaps or zero-length phases",
     "stage3_turning_points": "each turning point at a phase boundary with the same stances, chained in order",
     "stage3_causes": "cited causes are in the timeline and come before the turning point (stop causes before the stop)",
     "stage3_stopped_vs_phases": "a faker's final stopped agrees with its last phase (stopped / faking)",

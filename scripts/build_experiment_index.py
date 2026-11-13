@@ -213,7 +213,7 @@ def run_summary(run_dir, data):
 # (the maintenance tools reproduce it byte for byte) while the mirror updates only live/. A run that
 # is already in the catalogue is never listed as live. Entries are shown with textContent only and
 # every link is built here from a validated run ID, never taken from the file.
-LIVE_SCRIPT = r'''<section id="live" hidden><h2>Live now</h2><p>Runs still going, mirrored from their VM about every few minutes. These are unfinished snapshots: transcripts so far in Inspect View, conference (operational) outcomes only, no independent evaluation or behavior judge yet. A run's live entry is removed once it is published here.</p><ul id="live-runs"></ul></section>
+LIVE_SCRIPT = r'''<section id="live" hidden><h2>Live now</h2><p>Runs still going, mirrored from their VM about every few minutes. These are unfinished snapshots: transcripts so far in Inspect View, conference (weak judge) outcomes only, no independent evaluation or behavior judge yet. A run's live entry is removed once it is published here.</p><ul id="live-runs"></ul></section>
 <script>CLOCKJS
 (()=>{const published=new Set(PUBLISHED);const ok=/^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 fetch('live/index.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(d=>{if(!d||d.schema!=='gdm-live-mirror/1'||!Array.isArray(d.runs))return;
@@ -255,7 +255,7 @@ def judge_text(entry):
     simple = summary.get('simple_judge') if isinstance(summary, dict) else None
     simple_linked = SIMPLE_LABEL in entry['links']
     lines, sort = [], None
-    label = 'rubric 3.1: ' if (simple or simple_linked) else ''
+    label = 'detailed judge: ' if (simple or simple_linked) else ''
     if judge:
         parts = [f'{judge["cohorts"][k]} {COHORT_LABELS[k][0 if judge["cohorts"][k] == 1 else 1]}'
                  for k in FLAGGED if judge['cohorts'].get(k)]
@@ -271,7 +271,7 @@ def judge_text(entry):
         sort = -1
     if simple:
         main, detail = simple_text(simple)
-        lines.append(f'{esc("simple: " + main)}<br><small>{esc(detail)} · '
+        lines.append(f'{esc("behavior judge: " + main)}<br><small>{esc(detail)} · '
                      f'<a href="{esc(entry["links"].get(SIMPLE_LABEL) or "", quote=True)}">report</a></small>'
                      if simple_linked else f'{esc("simple: " + main)}<br><small>{esc(detail)}</small>')
         sort = simple['cheating_any'] if sort is None or sort < 0 else sort
@@ -337,7 +337,9 @@ _TITLES = (
     (r'^pilot(?:-|$)', lambda m: 'Pilot'),
 )
 # Shorter link labels on the cards (full name in the tooltip; the table and compare view keep the full names).
-CARD_LINK = {'Simple behavior judge': 'Judge', 'Behavior judge': 'Rubric judge', 'Incident report': 'Incident'}
+CARD_LINK = {'Simple behavior judge': 'Judge', 'Behavior judge': 'Detailed judge', 'Incident report': 'Incident'}
+# Full names shown for the catalogue's link keys (entries keep their keys; owner, November 13, 2026: plain words).
+LINK_TEXT = {'Simple behavior judge': 'Behavior judge', 'Behavior judge': 'Detailed behavior judge'}
 _STAMP = re.compile(r'-\d{8}T\d{6}Z$')
 _REPLICATE = re.compile(r'-(r\d+)$')
 
@@ -354,7 +356,7 @@ def short_title(entry):
     if title is None:
         title = run_profile.model_name(entry.get('model'))
     rep = _REPLICATE.search(run)
-    return title + (f' · {rep[1]}' if rep else '')
+    return title + (f' · run {rep[1][1:]}' if rep else '')  # replicate, in words (November 13, 2026)
 
 
 def short_date(entry):
@@ -387,7 +389,7 @@ def run_card(entry, scale):
              ('Accepted tasks', f'<span class="rc-accepted">{accepted if accepted is not None else "?"}</span>'),
              ('Duration', esc(duration_text(entry['elapsed_seconds']))),
              ('Spend', f'${Decimal(entry["pilot_spent_usd"]):.2f}')]
-    links = ''.join(f'<a href="{esc(url, quote=True)}"' + (f' title="{esc(name, quote=True)}"' if name in CARD_LINK
+    links = ''.join(f'<a href="{esc(url, quote=True)}"' + (f' title="{esc(LINK_TEXT.get(name, name), quote=True)}"' if name in CARD_LINK
                                                              else '') + f'>{esc(CARD_LINK.get(name, name))}</a>'
                     for name, url in entry['links'].items() if not hidden_link(name))
     run = esc(entry['run'], quote=True)
@@ -411,7 +413,7 @@ def run_card(entry, scale):
 # without a profile; specChips and paneNums there write the same markup as spec_chips and pane_numbers here.
 GRAPH_THUMB = 'analysis/storymap/graph-thumb.json'
 GRAPH_PAGE = 'analysis/storymap/graph.html'
-PRIMARY = (('Simple behavior judge', 'Behavior judge'), ('Behavior judge', 'Behavior judge (rubric 3.1)'),
+PRIMARY = (('Simple behavior judge', 'Behavior judge'), ('Behavior judge', 'Detailed behavior judge'),
            (STORYMAP_LABEL, 'Story map'))
 QUIET = {'Report': 'Report', 'Conference': 'Conference', 'Incident report': 'Incident', 'Inspect View': 'Inspect'}
 # Pane links open the run page's in-page tab (owner, November 6, 2026: "it should open up the tab version not the
@@ -491,7 +493,8 @@ def pane_numbers(entry, p):
 _LABELLED_ID = re.compile(r'<span class="ab-id">(agent-\d+)<span class="ab-set">((?:<span class="ab ab-[a-z_]+"[^>]*>'
                           r'[^<]*</span>)*)</span>')
 _LABEL_SOURCE = re.compile(r'<p class="ab-legend"[^>]*><strong>Agent labels</strong> \(from the ([^;)]*)')
-LABEL_SOURCES = {'simplified behavior judge': 'simple', 'rubric-3.1 behavior judge': 'rubric'}
+LABEL_SOURCES = {'simplified behavior judge': 'simple', 'rubric-3.1 behavior judge': 'rubric',
+                 'behavior judge': 'simple', 'detailed behavior judge': 'rubric'}  # before and after site_terms
 
 
 def agent_label_counts(document):
@@ -705,7 +708,7 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
     esc = html.escape
     rows = []
     for e in entries:
-        links = ' · '.join(f'<a href="{esc(url, quote=True)}">{esc(name)}</a>' for name, url in e['links'].items()
+        links = ' · '.join(f'<a href="{esc(url, quote=True)}">{esc(LINK_TEXT.get(name, name))}</a>' for name, url in e['links'].items()
                            if not hidden_link(name))
         summary = e.get('summary') if isinstance(e.get('summary'), dict) else None
         pending = '<span class="pending" title="Not in this catalogue entry">…</span>'
@@ -806,15 +809,15 @@ def write_index(runs, entries, warnings=(), *, hosted=False, intro=None, labels=
             '<div class="scroll"><table id="runs"><thead><tr>' + head + '</tr></thead><tbody>'
             + ''.join(rows) + '</tbody></table></div>'
             '<details class="help"><summary>What the columns mean</summary><dl>'
-            '<dt>Accepted / genuine</dt><dd>Accepted: distinct tasks the weak operational judge accepted during the run '
+            '<dt>Accepted / genuine</dt><dd>Accepted: distinct tasks the weak judge accepted during the run '
             '(acceptance is not mathematical validity). Genuine: distinct intended statements with at least one '
             'submission the independent evaluator found genuine, so duplicate accepted proofs count once.</dd>'
             '<dt>Cost</dt><dd>Settled pilot model spend from the run\'s budget ledger.</dd>'
-            '<dt>Behavior judge</dt><dd>The researcher-only post-hoc transcript judges. "simple": the simplified '
-            'one-pass judge (default since October 24, 2026), as counts of agents whose cheating reached explored, '
+            '<dt>Behavior judge</dt><dd>The researcher-only post-hoc transcript judges. "behavior judge": one model '
+            'reading per agent, as counts of agents whose cheating reached explored, '
             'submitted or credited, plus whistleblowers, of the agents it labelled; its evaluation-awareness counts '
-            '(compare view) are not comparable with the rubric-3.1 judge\'s. "rubric 3.1": the earlier multi-stage '
-            'judge, by cohort (below); a row shows both when both ran. "not run" means no judge outputs are '
+            '(compare view) are not comparable with the detailed judge\'s. "detailed judge": the earlier, multi-step '
+            'detailed behavior judge, by cohort (below); a row shows both when both ran. "not run" means no judge outputs are '
             'published for the run; "…" means the entry predates these columns and the run\'s own records could '
             'not be read here.</dd>' + glossary + '</dl></details></section>'
             + ('</div></div>' if panes else '')

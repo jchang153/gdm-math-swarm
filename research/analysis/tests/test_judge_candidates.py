@@ -496,7 +496,7 @@ class CandidateEndToEndTests(unittest.TestCase):
                       "established)", html)
         index = (self.r.judge_dir / "review" / "index.html").read_text()
         self.assertIn("constructed (explicit)", index)
-        self.assertIn("judge rubric gdm-judge-rubric/3.1, post-hoc", index)
+        self.assertIn("report (post-hoc)", index)  # rubric names stay off the page
 
     def test_completes_with_the_expected_cohorts(self):
         self.assertEqual(self.summary["status"], "complete", self.summary["errors"])

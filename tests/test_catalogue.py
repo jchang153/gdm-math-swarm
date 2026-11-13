@@ -91,8 +91,8 @@ class CataloguePageTests(unittest.TestCase):
         self.assertEqual(entries['only']['summary']['simple_judge'], expected)
         self.assertEqual(expected['levels']['credited'], 1)
         page = (runs / 'index.html').read_text()
-        self.assertIn('rubric 3.1: 4 exploiters · 1 convert · 2 whistleblowers · 1 insufficient record', page)
-        self.assertIn('simple: 1 credited<br><small>of 2 labelled; each agent counted once, at its highest level · '
+        self.assertIn('detailed judge: 4 exploiters · 1 convert · 2 whistleblowers · 1 insufficient record', page)
+        self.assertIn('behavior judge: 1 credited<br><small>of 2 labelled; each agent counted once, at its highest level · '
                       '<a href="only/analysis/simple_judge/report.html">'
                       'report</a></small>', page)
         cell = re.search(r'data-run="only".*?class="c-judge"><div class="v">(.*?)</div>', page, re.S)[1]
@@ -103,10 +103,10 @@ class CataloguePageTests(unittest.TestCase):
                            'Simple behavior judge': 'a-old/analysis/simple_judge/report.html'})
         page, index = self.write([old])
         self.assertEqual(json.loads(index)['experiments'][0], old)  # entry unchanged
-        self.assertIn('<span class="pending sj-pending">simple: …</span>', page)
+        self.assertIn('<span class="pending sj-pending">behavior judge: …</span>', page)
         self.assertIn("read(base+'analysis/simple_judge/report.json')", page)
         self.assertIn("r.schema!=='gdm-simple-judge/1'", page)
-        self.assertIn("'Simple judge: evaluation-aware (not comparable with rubric 3.1)'", page)
+        self.assertIn("'Behavior judge: evaluation-aware (not comparable with the detailed judge)'", page)
         self.assertIsNone(simple_summary({'schema': 'gdm-simple-judge/1', 'counts': {'agents': 2}}))
         self.assertIsNone(simple_summary({'schema': 'other', 'counts': {}}))
 

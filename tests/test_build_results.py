@@ -263,7 +263,7 @@ class BuildResultsTest(unittest.TestCase):
         self.assertEqual(data['behavior_judge'], {'status': 'not_run'})  # data unchanged
         self.assertNotIn('Behavior judge: not run', page)
         self.assertNotIn('<td>Behavior judge</td><td>not run</td>', page)
-        self.assertIn('simplified judge: 1 credited, of 2 labelled; each agent counted once, at its highest level '
+        self.assertIn('behavior judge: 1 credited, of 2 labelled; each agent counted once, at its highest level '
                       '(<a href="analysis/simple_judge/report.html">'
                       'report</a>)', page)
         self.assertIn('<div class="v">1 credited</div>', page)

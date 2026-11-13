@@ -865,8 +865,8 @@ def unmatched_sentence(record):
     if other:
         parts.append(f"{_plural(len(other), 'agent')} labelled submitted or credited have no detector-flagged "
                      f"submission ({', '.join(other)})")
-    return ("Not drawn: " + "; ".join(parts) + ". The judge counts them as submitted (rubric 3.1), but no exploit "
-            "submission of theirs is identified.")
+    return ("Not drawn: " + "; ".join(parts) + ". The judge counts them as submitted (detailed behavior judge), but "
+            "no exploit submission of theirs is identified.")
 
 
 def _slug(text):
@@ -874,14 +874,16 @@ def _slug(text):
 
 
 def behavior_line(record):
-    return record.get("behavior_findings") or (
-        "Behavior findings: rubric-3.1 judge." if record.get("source") == "judge"
-        else "Behavior findings: none, deterministic detectors.")
+    from .judge_source import plain
+    return plain(record.get("behavior_findings") or (
+        "Behavior findings: detailed behavior judge." if record.get("source") == "judge"
+        else "Behavior findings: none, deterministic detectors."))
 
 
 def source_line(record):
+    from .judge_source import plain
     line = (f"{behavior_line(record)} Computed by the program from the conference records (no model). Exploit "
-            f"submissions are identified by {record['source_text']}.")
+            f"submissions are identified by {plain(record['source_text'])}.")
     if record.get("records") == "events.jsonl":
         line += " The conference database was unavailable, so submissions come from conference/events.jsonl."
     return line
@@ -892,7 +894,7 @@ def none_line(record):
         return (f"Not computed: the run's conference records are unavailable ({record.get('records_problem')}); "
                 "whether an exploit was used is unknown here.")
     basis = {"judge": "the behavior judge's verified findings",
-             "simple_judge": "the simplified judge's verified labels and the detectors"}.get(record["source"],
+             "simple_judge": "the behavior judge's verified labels and the detectors"}.get(record["source"],
                                                                                           "the program's detectors")
     line = f"No exploit submission was found ({basis}; computed by the program, no model). {behavior_line(record)}"
     extra = unmatched_sentence(record)

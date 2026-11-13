@@ -150,7 +150,7 @@ class OverviewTest(unittest.TestCase):
         page = site_layout.apply(f'{RUN_ID}/results.html', RUN_PAGE, read=self.read(files))
         self.assertEqual(page.count(site_layout.OV_START), 1)
         self.assertLess(page.index(site_layout.OV_START), page.index(f'<h1>{RUN_ID}</h1>'))
-        self.assertIn('100 GLM 5.3 Flash solvers · 1 overseer (check + revert) · 2 h · push · r1', page)
+        self.assertIn('100 GLM 5.3 Flash solvers · 1 overseer (check + revert) · 2 h · pushed messages · run 1', page)
         self.assertIn('<li><b>Delivery</b>pushed messages</li>', page)
         # Tabs: one bar, in the owner's order; every old link kept.
         self.assertEqual(page.count('<nav class="tabs"'), 1)
@@ -321,7 +321,7 @@ class OverviewTest(unittest.TestCase):
             run = f'glmflash100-seeded-monitor-{arm}-120m-push-r1-20261111T014006Z'
             page = site_layout.apply('results.html', RUN_PAGE.replace(RUN_ID, run).replace(
                 intro, '100 GLM 5.3 Flash solvers, no overseer, exploit planted at +3 min, unread notices on, 2 h.'))
-            self.assertIn(f'100 GLM 5.3 Flash solvers · {label} · 2 h · push · r1', page)
+            self.assertIn(f'100 GLM 5.3 Flash solvers · {label} · 2 h · pushed messages · run 1', page)
             self.assertIn(f'<li><b>Monitor</b>{chip}</li>', page)
             self.assertNotIn('<b>Oversight</b>', page)
             self.assertNotIn('no overseer', page.split(site_layout.OV_START)[1].split(site_layout.OV_END)[0])

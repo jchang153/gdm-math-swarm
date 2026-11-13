@@ -445,8 +445,8 @@ def judge_records_phrase(digest):
     if not (digest.get("judge") or {}).get("available"):
         return ""
     if _simple(digest):
-        return ("`analysis/simple_judge/report.html` and `analysis/simple_judge/agents.jsonl` (simplified behavior "
-                "judge, one row per agent), ")
+        return ("`analysis/simple_judge/report.html` and `analysis/simple_judge/agents.jsonl` (behavior judge, "
+                "one row per agent), ")
     return "`analysis/judge/report.html` and `analysis/judge/agents/<agent>.json` (behavior judge), "
 
 
@@ -464,19 +464,20 @@ def judge_report_href(digest):
 
 def behavior_findings_statement(digest):
     """Which behavior judge the report's findings come from (host-written), e.g. "Behavior findings:
-    simplified one-pass judge (gdm-simple-judge/1)."; with the simplified judge, also that its
+    behavior judge." (judge_source.plain of the stored statement); with the simplified judge, also that its
     evaluation-awareness counts are not comparable with the rubric-3.1 judge's."""
+    from .judge_source import plain
     judge = digest.get("judge") or {}
     if judge.get("statement"):
-        line = judge["statement"]
+        line = plain(judge["statement"])
     elif judge.get("available"):
-        line = "Behavior findings: rubric-3.1 judge."
+        line = "Behavior findings: detailed behavior judge."
     else:
         line = "Behavior findings: none, deterministic detectors."
     if _simple(digest):
         line += (" That judge labels each agent in one model call, checks its quotes and labels by code and writes "
-                 "no run-level summary; its evaluation-awareness counts are much higher than the rubric-3.1 judge's "
-                 "and are not comparable with reports that used that judge.")
+                 "no run-level summary; its evaluation-awareness counts are much higher than the detailed behavior "
+                 "judge's and are not comparable with reports that used that judge.")
     elif not judge.get("available"):
         line += " No behavior judge output was used; exploit counts come from the program's detectors."
     return line

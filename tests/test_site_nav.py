@@ -173,7 +173,7 @@ class RootPageTests(unittest.TestCase):
         self.assertIn('<a href="about.html" aria-current="page">About</a>', about)
         for anchor in ('id="experiment"', 'id="how"', 'id="read"', 'id="glossary"'):  # the forwarder's targets
             self.assertIn(anchor, about)
-        for term in ('Fake-minutes', 'Standing fake', 'Converts (rubric 3.1)'):  # run pages link about.html#glossary
+        for term in ('Fake-minutes', 'Standing fake', 'Converts (detailed judge)'):  # run pages link about.html#glossary
             self.assertIn(f'<dt>{term}</dt>', about)
         self.assertIn('data-skin="editorial"', catalogue)  # the owner's pick: editorial tokens on the catalogue
 

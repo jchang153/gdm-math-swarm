@@ -17,6 +17,7 @@ import re
 
 import site_look
 import site_nav
+import site_terms
 
 MARKER = 'id="site-layout"'
 MEASURE = '70ch'
@@ -138,7 +139,8 @@ def apply(name, document, read=None, overview=True):
             # paths from the page's place in its run folder, and the library links pointed at experiments.html.
             relative = name[pattern.search(name).start():].lstrip('/')
             document = site_nav.apply(site_nav.back_links(document), None, site_nav.prefix_for(relative))
-            return site_look.apply(document)
+            # Plain words for visitors (owner, November 13, 2026; scripts/site_terms.py): visible text only.
+            return site_terms.apply(site_look.apply(document))
     return document
 
 
@@ -369,9 +371,9 @@ def _spec(document, run):
     if duration:
         title += ' · ' + duration
     if delivery == 'pushed messages':
-        title += ' · push'
+        title += ' · pushed messages'
     if rep:
-        title += f' · r{rep[1]}'
+        title += f' · run {rep[1]}'
     return title, chips
 
 

@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-12 PT by Claude (Opus 5.5) log-viewer agent (item 41: log viewer live).
+Last updated: 2026-11-13 PT by Claude (Opus 5.5) plain-words agent (item 43: plain words on the site).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1908,6 +1908,34 @@ is being merged into main via `collab-env`.
       `c2175d21` on top of `ecb8df93`, viewer `1ab52d2c` first; built-in verify and production `verify` ok (9/9);
       live scan: 56 story-mapped run pages, all with the graph; receipt
       `runs/phase-b/cloudflare/receipts/restyle-monitor-overview-about-20261112.json`. Commits a2f8dcc, e0abf99.
+
+43. **LIVE 2026-11-13 PT: plain words on the public site** (owner: "things like 'rubric 3.1' or 'simple behavior
+    judge' are confusing terms ... simplify so these backend side things aren't exposed").
+    - **Vocabulary** (one module, `scripts/site_terms.py`, `tests/test_site_terms.py`): simplified/simple judge ->
+      **Behavior judge**; rubric-3.1 judge -> **Detailed behavior judge** ("detailed judge" in the catalogue cells);
+      operational judge -> **weak judge**; story-map stage 1/2/3 -> **thought / reaction / final reading**; run titles
+      "push" -> "pushed messages", "r1" -> "run 1"; script, record and config names (roles.py, run_metrics.py,
+      rejudge_submissions.py, settings.json, common_start, budget.pilot, answer-echo-v2, gdm-simple-judge/1, judge
+      revision/mode tags) dropped from running text; taxonomy pages' developer-note intro replaced by one sentence.
+    - **How:** `site_terms.apply` rewrites visible text only (text nodes, title/aria-label/alt) outside
+      script/style/pre/code; ids, classes, data attributes, option values, hrefs, tab hashes, records and run IDs are
+      unchanged. Hooked into `site_layout.apply`, `prepare_hf_library.py` (judge and story-map agent pages too) and
+      `publish_cloudflare.py restyle` (math site; now also judge, judge review and story-map agent pages). The
+      generators (build_results, simple_judge_site, agent_badges, incident, judge report/review, run_metrics,
+      storymap view/view_overseer/validate, catalogue/explore/about) emit the same wording. Catalogue link keys in
+      experiments.json stay ("Simple behavior judge", "Behavior judge") and are displayed via `LINK_TEXT`.
+      Taxonomy .md files and model prompts are unchanged.
+    - **Left as is:** model- and agent-written text (incident narratives, story-map consistency flags such as
+      "Stage-1 states retain ...", agent quotes), the detailed judge report's methods/provenance paragraphs (rubric
+      and revision IDs), status codes explained in the run page glossary (stopped:max_run_seconds), prompt variant
+      IDs (explained in the About glossary), links to record files (settings.json, evaluations/*.jsonl). The
+      ImpossibleBench site was not restyled.
+    - **Deployed:** `restyle --commit` (6,111 pages; 1,471 served files incl. packs) -> math site `d2d38330` on top of
+      `c2175d21`, viewer `f52dbece` first; built-in and production `verify` ok. Then `catalogue --commit` (table
+      link labels, experiments.html only) -> `df5d2a7e`, viewer `db7c0c7d` first; verify ok. Receipts `runs/phase-b/cloudflare/receipts/restyle-plain-words-20261113.json`,
+      `catalogue-plain-words-20261113.json`.
+    - Pre-existing failure, not from this change: `tests/test_run_clock_maintenance` IncidentWithoutBundleTests
+      (fails on clean HEAD too).
 
 ## Next steps / open items
 

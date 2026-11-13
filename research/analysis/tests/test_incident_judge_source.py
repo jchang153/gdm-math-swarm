@@ -139,16 +139,16 @@ class SimpleContagionTests(unittest.TestCase):
         self.assertEqual([r["agent"] for r in record["judge_unmatched"]], ["agent-005"])
         self.assertEqual(record["detector_crosscheck"][cg.ANSWER]["users"], 4)
         page = cg.section_html(record)
-        self.assertIn("Behavior findings: simplified one-pass judge (gdm-simple-judge/1).", page)
+        self.assertIn("Behavior findings: behavior judge.", page)
         self.assertIn("Cross-check", page)
         self.assertIn("agent-005", page)
         md = cg.section_markdown(record)
-        self.assertIn("Behavior findings: simplified one-pass judge", md)
+        self.assertIn("Behavior findings: behavior judge.", md)
 
     def test_section_names_full_and_none_sources(self):
         record = cg.compute(self.run)                         # only the rubric-3.1 judge
         self.assertEqual(record["source"], "judge")
-        self.assertIn("Behavior findings: rubric-3.1 judge", cg.section_html(record))
+        self.assertIn("Behavior findings: detailed behavior judge.", cg.section_html(record))
         record = cg.compute(self.run, judge_source="none")
         self.assertEqual(record["source"], "detector")
         self.assertIn("Behavior findings: none, deterministic detectors.", cg.section_html(record))
@@ -159,7 +159,7 @@ class SimpleContagionTests(unittest.TestCase):
         write_simple(self.run, [simple_row("agent-001", "explored")])
         record = cg.compute(self.run)
         self.assertEqual(record["techniques"], [])
-        self.assertIn("simplified one-pass judge", cg.none_line(record))
+        self.assertIn("Behavior findings: behavior judge.", cg.none_line(record))
 
     def test_rerender_with_simple_source(self):
         write_simple(self.run, SIMPLE_SCENARIO)
@@ -170,10 +170,10 @@ class SimpleContagionTests(unittest.TestCase):
         record, _ = cg.rerender(self.run, out)
         self.assertEqual(record["source"], "simple_judge")
         self.assertEqual(json.loads((out / "contagion.json").read_text())["judge_source"], js.SIMPLE)
-        self.assertIn("Behavior findings: simplified one-pass judge", (out / "report.html").read_text())
+        self.assertIn("Behavior findings: behavior judge.", (out / "report.html").read_text())
         record, _ = cg.rerender(self.run, out, judge_source="full")
         self.assertEqual(record["source"], "judge")
-        self.assertIn("Behavior findings: rubric-3.1 judge", (out / "report.html").read_text())
+        self.assertIn("Behavior findings: detailed behavior judge.", (out / "report.html").read_text())
 
 
 class SimpleDigestTests(unittest.TestCase):
@@ -228,7 +228,7 @@ class SimpleDigestTests(unittest.TestCase):
         self.assertNotIn("Nobody cheated.", text)                                # the old judge is not read
         self.assertNotIn("words that are not there", text)
         note = render.host_note_markdown(digest, {"storylines": []}, [], [])
-        self.assertIn("Behavior findings: simplified one-pass judge (gdm-simple-judge/1).", note)
+        self.assertIn("Behavior findings: behavior judge.", note)
         self.assertIn("not comparable", note)
         self.assertIn("analysis/simple_judge/agents.jsonl", render.judge_records_phrase(digest))
 
@@ -237,7 +237,7 @@ class SimpleDigestTests(unittest.TestCase):
         full = dg.build_digest(self.fx.run_dir, self.fx.run, judge_source="full")
         self.assertEqual(full["judge"]["source"], js.FULL)
         self.assertIn("Nobody cheated.", dg.digest_text(full))
-        self.assertIn("Behavior findings: rubric-3.1 judge", render.host_note_markdown(full, {"storylines": []}, [], []))
+        self.assertIn("Behavior findings: detailed behavior judge.", render.host_note_markdown(full, {"storylines": []}, [], []))
         none = dg.build_digest(self.fx.run_dir, self.fx.run, judge_source="none")
         self.assertFalse(none["judge"]["available"])
         self.assertEqual(none["judge"]["statement"], "Behavior findings: none, deterministic detectors.")
@@ -250,7 +250,7 @@ class SimpleDigestTests(unittest.TestCase):
         self.assertEqual(summary["behavior_findings"], "simplified one-pass judge (gdm-simple-judge/1)")
         self.assertEqual(json.loads((self.fx.out / "digest.json").read_text())["judge"]["source"], js.SIMPLE)
         self.assertEqual(json.loads((self.fx.out / "contagion.json").read_text())["judge_source"], js.SIMPLE)
-        self.assertIn("Behavior findings: simplified one-pass judge", (self.fx.out / "report.md").read_text())
+        self.assertIn("Behavior findings: behavior judge.", (self.fx.out / "report.md").read_text())
 
 
 if __name__ == "__main__":

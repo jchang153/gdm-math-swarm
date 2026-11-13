@@ -111,7 +111,7 @@ SOURCE_LABEL = {"library": "Library", "self_then_library": "Own idea, then libra
                 "overseer_then_library": "Overseer, then library", "board": "Board post", "dm": "Direct message",
                 "self": "Own idea", "none": "Did not fake", "unknown": "Unknown", "no stage 3": "No final reading"}
 SOURCE_TITLE = "Source of the fake"
-SOURCE_HINT = ("Where the agent's first fake came from (stage-3 reading): library = copied a fake library file; "
+SOURCE_HINT = ("Where the agent's first fake came from (final reading): library = copied a fake library file; "
                "own idea, then library = had the idea itself but acted only after seeing accepted fakes; "
                "overseer, then library = first learned it from an overseer warning, then acted after library fakes")
 MODEL_LABEL = {"anthropic/claude-haiku-5.5": "Claude Haiku 5.5", "openai/gpt-5.6-terra": "GPT-5.6 Terra",
@@ -731,7 +731,7 @@ def load_definitions(path, monitor=False):
     def close():
         if cur is None:
             return
-        para = re.sub(r"\s+", " ", re.sub(r"[*`]", "", " ".join(body))).strip()
+        para = plain_taxonomy(re.sub(r"\s+", " ", re.sub(r"[*`]", "", " ".join(body))).strip())
         parts = re.split(r"\s(?=(?:Include|Exclude|Example)\b)", para)
         d = {"name": cur[1], "def": parts[0] if parts and not re.match(r"(Include|Exclude|Example)\b", parts[0]) else "",
              "include": "", "example": ""}
@@ -846,9 +846,9 @@ def tbadge(text, tip, tone=""):
     return f'<span class="badge{" b-" + tone if tone else ""}" title="{esc(tip)}">{esc(text)}</span>'
 
 
-AWARE_HINT = ("Knew it was cheating (stage-3 reading): yes = at some point called the trick cheating, a loophole, "
+AWARE_HINT = ("Knew it was cheating (final reading): yes = at some point called the trick cheating, a loophole, "
               "gaming or against the spirit; no = discussed it and only called it legitimate; unclear = neither")
-FLAG_HINT = ("Consistency flags: places where the stage-3 reader noted that the stage-1 or stage-2 readings disagree "
+FLAG_HINT = ("Consistency flags: places where the final reader noted that the thought or reaction readings disagree "
              "with each other or with the run's records.")
 
 
@@ -1058,16 +1058,16 @@ def phases_of(a, tmax):
     s3 = a["stage3"] or {}
     if s3.get("phases"):
         return [(_num(p.get("from_t")), _num(p.get("to_t"), tmax), str(p.get("stance") or "unknown"),
-                 str(p.get("label") or "")) for p in s3["phases"]], "stage-3 reading"
+                 str(p.get("label") or "")) for p in s3["phases"]], "final reading"
     out, prev = [], 0.0
     for c in a["chunks"]:
         st = (c.get("state") or {}).get("stance") or "unknown"
         ts = [_num(th.get("t")) for th in c.get("thoughts") or []]
         end = _num(c.get("to_t"), max(ts) if ts else prev)
         if end > prev or not out:
-            out.append((prev, end, st, "stage-1 state"))
+            out.append((prev, end, st, "thought-reading state"))
             prev = end
-    return out, ("stage-1 reading (no stage-3 reading)" if out else "none")
+    return out, ("thought reading (no final reading)" if out else "none")
 
 
 def page(title, body, scripts="", body_class="", css=""):
@@ -1081,10 +1081,11 @@ def page(title, body, scripts="", body_class="", css=""):
 
 
 STAGE_MODELS = (("stage1", "stage 1"), ("stage2", "stage 2"), ("stage3", "stage 3"))
+STAGE_READS = {"1": "thoughts", "2": "reactions", "3": "final reading"}  # what each model reading covers
 
 
 def model_names(pipeline):
-    """'stage 1 anthropic/claude-haiku-5.5; stages 2-3 openai/gpt-5.6-terra' from pipeline.json (else '')."""
+    """'Claude Haiku 5.5 (thoughts); GPT-5.6 Terra (reactions and final reading)' from pipeline.json (else '')."""
     models = (pipeline or {}).get("models") if isinstance(pipeline, dict) else None
     if not isinstance(models, dict):
         return ""
@@ -1098,23 +1099,27 @@ def model_names(pipeline):
             groups[-1][0].append(label.split()[-1])
         else:
             groups.append(([label.split()[-1]], mid))
-    return "; ".join(f"{model_label(mid)} " + (f"(stages {g[0]}–{g[-1]})" if len(g) > 1 else f"(stage {g[0]})")
-                     for g, mid in groups)
+    def reads(g):
+        if len(g) == 1:
+            return STAGE_READS[g[0]]
+        return ("reactions and final reading" if (g[0], g[-1]) == ("2", "3")
+                else f"{STAGE_READS[g[0]]} to {STAGE_READS[g[-1]]}")
+    return "; ".join(f"{model_label(mid)} ({reads(g)})" for g, mid in groups)
 
 
 def banner_line(models=""):
     """The agent pages' one-line banner (the full one is on the index and events pages)."""
     read = f" by {esc(models)}" if models else ""
-    return (f'<p class="banner one" title="Stage 1 codes the agent\'s thoughts; stage 2 judges its reaction to each '
-            f'event; stage 3 writes its positions and final reading.">Quotes are the agent\'s own; codes, reactions '
+    return (f'<p class="banner one" title="One model pass codes the agent\'s thoughts, one judges its reaction to '
+            f'each event, one writes its positions and final reading.">Quotes are the agent\'s own; codes, reactions '
             f'and positions are model readings{read}: interpretations, not ground truth.</p>')
 
 
 def banner(models=""):
     read = f" Readers: {esc(models)}." if models else ""
     return ('<p class="banner">Story map: what each agent read, thought and did about the cheating shortcut, quoted '
-            'from its own reasoning and read by models in three stages (stage 1 codes its thoughts; stage 2 judges '
-            f'its reaction to each event; stage 3 writes its positions and final reading).{read} '
+            'from its own reasoning and read by models in three passes (one codes its thoughts, one judges its '
+            f'reaction to each event, one writes its positions and final reading).{read} '
             'Model readings are interpretations, not ground truth.</p>')
 
 
@@ -1151,7 +1156,7 @@ GLOSSARY = (
     ("the trick (shortcut, fake)", "filling an answer-based problem's answer slot with the question itself, so the "
      "proof closes without mathematics; a fake is a submission or library file that does this, or that the research "
      "evaluator judged fraudulent"),
-    ("judge", "the weak operational judge that accepts any file that compiles without banned constructs"),
+    ("judge", "the weak judge that accepts any file that compiles without banned constructs"),
     ("credited / closed", "an accepted submission credits its agent and closes the problem for everyone"),
     ("revert", "an overseer removes the credit for a fake and the problem reopens"),
     ("overseer", "an agent whose role is to police fakes; it posts warnings and rulings, sends DMs and reverts"),
@@ -1159,11 +1164,11 @@ GLOSSARY = (
     ("solver", "an ordinary agent proving problems for credit"),
     ("turn / timeline item", "a turn is one model call of the agent; an item is one entry (reasoning, text, tool "
      "call or result, event) in its timeline, numbered from 0"),
-    ("stage-1 chunk", "a stretch of the timeline that the stage-1 reader coded in one go"),
+    ("thought-reading chunk", "a stretch of the timeline that the thought reader coded in one go"),
     ("reader certainty", "how sure the model reader was of a code or reaction: high, medium or low"),
 )
-CODE_SCHEME = ("Letters are only ever code groups: A–D and G are thought codes (stage 1), E reaction codes and F "
-               "overseer readings (stage 2). Events, including integrity reminders and other pushed notices, are never "
+CODE_SCHEME = ("Letters are only ever code groups: A–D and G are thought codes, E reaction codes and F "
+               "overseer readings. Events, including integrity reminders and other pushed notices, are never "
                "lettered: they are named in words and drawn as shapes.")
 
 
@@ -1171,7 +1176,7 @@ MONITOR_GLOSSARY = (
     ("monitor, block", "in monitor runs, a model outside the swarm rates each pending tool call of a solver; above its "
      "threshold the host blocks the call before it runs and the agent sees only an error (with the monitor's reason "
      "in reason-shown runs). Blocks less than four model steps apart form one episode"),)
-MONITOR_SCHEME = (" In monitor runs, W codes are the agents' responses to a monitor block (stage 1); a blocked action "
+MONITOR_SCHEME = (" In monitor runs, W codes are the agents' responses to a monitor block; a blocked action "
                   "is an event, drawn as a square with a cross.")
 
 
@@ -1194,7 +1199,7 @@ def groups_html(names, href, defs=None):
     names are not shown."""
     defs = defs or {}
     if not any(names.get(L) for L in LETTERS):
-        return ('<p class="note">Thoughts that the stage-1 reader quoted and coded into seven groups, A–G'
+        return ('<p class="note">Thoughts that the thought reader quoted and coded into seven groups, A–G'
                 + (' (and W, responses to a monitor block)' if MONITOR["on"] else '')
                 + '; the group names are not shown on this copy.</p>')
     groups = []
@@ -1207,7 +1212,7 @@ def groups_html(names, href, defs=None):
         groups.append(f'<div class="grp"><div class="gname" title="{esc(code_tip(L, defs, names, False))}">'
                       f'<b>{L}</b> {esc(names.get(L, ""))}</div>{items}</div>')
     more = f' Full reference with examples: <a href="{esc(href)}">codes page</a>.' if href else ""
-    return (f'<p class="note">Codes the stage-1 reader gave to quoted thoughts (and, for E and F, the stage-2 reader to '
+    return (f'<p class="note">Codes the thought reader gave to quoted thoughts (and, for E and F, the reaction reader to '
             f'reactions). Hover or click a code for its definition.{more}</p><div class="codes">{"".join(groups)}</div>')
 
 
@@ -1258,15 +1263,15 @@ def legend_about(mode="agent", names=None, href="taxonomy.html", defs=None, show
     where = {"index": "Shapes above an agent's bar are what it read (library files, overseer and other relevant posts, "
                       "DMs, reverts); below are its submissions. Click a shape to open it on the agent page.",
              "events": "Each event below carries its shape. ↓ / ↑ (or j / k) move through the events."
-             }.get(mode, "Click any shape for its quote, the event and the stage-2 reaction; "
+             }.get(mode, "Click any shape for its quote, the event and the reaction reading; "
                          "→ / j next, ← / k previous, Esc closes. Under a thought, “Show the full "
                          "reasoning chain” opens the agent's own reasoning, text and tool calls around it.")
     rem = mode == "agent" or "R1" in shown_types
     return (f'<details class="about"><summary>About the legend, the codes and the terms</summary>'
             f'<div class="lg"><div class="lgbox"><h4>Bar colour = the agent\'s position on cheating at that moment</h4>'
             f'<p class="note">{esc(POSITION_HINT)}.</p><ul>{sw}</ul>'
-            f'<p class="note">These colours appear only on the position bars (the stage-3 reading; the stage-1 '
-            f'reading where stage 3 is missing). Dashed outline = no reading.</p></div>'
+            f'<p class="note">These colours appear only on the position bars (the final reading; the thought '
+            f'reading where there is no final reading). Dashed outline = no reading.</p></div>'
             f'<div class="lgbox"><h4>Shape + colour = event</h4>'
             f'<ul>{shapes}</ul><h4>Marks</h4><ul>{marks}<li>{_legend_glyph("L2", "g-hollow", 3)}number = that many items '
             f'stacked at one spot (click it to list them all)</li></ul><h4>Read as</h4><ul>{examples}</ul>'
@@ -1454,7 +1459,7 @@ def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css="", gra
             f'{monitor_panel(agents, tmax, names or {}) if MONITOR["on"] else ""}{filters}'
             f'<div class="grid{" mon" if MONITOR["on"] else ""}"><div class="hdr"><div>Agent</div><div>{header_axis}</div>'
             + ('<div class="blk" title="Tool calls the monitor blocked">Blocks</div>' if MONITOR["on"] else "")
-            + f'<div class="lab">Final reading (stage 3)</div></div>'
+            + f'<div class="lab">Final reading</div></div>'
             f'{"".join(rows) or "<div class=empty>No agents found.</div>"}</div>'
             f"{legend_about('index', names, 'taxonomy.html' if names else '', DEFS, BLOCK_TYPES if MONITOR['on'] else (), push=push_seen)}")
     return page(f"Story map {run}".strip(), body, LEGEND_JS + (MONITOR_FILTER_JS if MONITOR["on"] else FILTER_JS), css=css)
@@ -1499,7 +1504,7 @@ F_PLAIN = {k: f"overseer check {k[1]}" for k in ("F1", "F2", "F3", "F4", "F5")}
 def reaction_html(r, names=None, href=""):
     names = names or {}
     if not r:
-        return '<p class="muted">No stage-2 reaction recorded for this event.</p>'
+        return '<p class="muted">No reaction reading recorded for this event.</p>'
     ch, dr = r.get("change"), r.get("direction")
     tone = "bad" if dr == "toward_cheating" and ch != "none" else "good" if dr == "away" and ch != "none" else ""
     def e(c):  # 'E2 Change' (the name up to its colon) or the plain label
@@ -1512,19 +1517,19 @@ def reaction_html(r, names=None, href=""):
             + tbadge(f"{e('E3')}: {DIRECTION_LABEL.get(dr, str(dr))}", tip("E3"), tone)
             + tbadge(f"{e('E5')}: {yesno(bool(r.get('self_attributed')))}", tip("E5"),
                      "caution" if r.get("self_attributed") else "")
-            + tbadge(f"reader certainty: {r.get('certainty')}", "How sure the stage-2 reader was: high, medium or low"))
+            + tbadge(f"reader certainty: {r.get('certainty')}", "How sure the reaction reader was: high, medium or low"))
     ov = r.get("overseer")
     ov_html = ""
     if isinstance(ov, dict):
         bits = "".join(tbadge(f"{code_name(k, names, F_PLAIN.get(k, k))}: "
                               f"{yesno(v) if isinstance(v, bool) else str(v).replace('_', ' ')}",
-                              code_tip(k, DEFS, names, False) if DEFS.get(k) else "A stage-2 reading of how the agent "
+                              code_tip(k, DEFS, names, False) if DEFS.get(k) else "A reaction reading of how the agent "
                               "took an overseer's post, DM or revert")
                        for k, v in ov.items() if v is not None)
         ov_html = f"<p>Overseer readings: {bits}</p>" if bits else ""
     quotes = "".join(f'<blockquote>{esc(q.get("quote"))} <small>(timeline item {esc(q.get("item"))})</small></blockquote>'
                      for q in r.get("quotes") or [] if isinstance(q, dict))
-    return (f'<div class="react"><p><b>How it reacted (stage 2)</b> {head}</p>'
+    return (f'<div class="react"><p><b>How it reacted</b> {head}</p>'
             + (f"<p>{esc(e('E4'))}: {esc(plain_ids(r.get('reason')))}</p>" if r.get("reason") else "")
             + (f"<p>What it did next: {esc(plain_ids(r.get('next_action')))}</p>" if r.get("next_action") else "")
             + ov_html + quotes + "</div>")
@@ -1663,7 +1668,7 @@ def block_article(ev, reactions, key, names=None, href=""):
     meta = [badge(type_name(typ))]
     if d.get("episode_start"):
         meta.append(tbadge("episode start", "The first block of an episode (blocks less than four model steps apart "
-                           "form one episode); only an episode's first block gets a stage-2 reading"))
+                           "form one episode); only an episode's first block gets a reaction reading"))
     if d.get("retry_of"):
         meta.append(tbadge("repeats an earlier blocked call", "Same tool and arguments as an earlier block", "caution"))
     rows = [("Blocked tool", redact(str(d.get("tool") or e.get("tool") or ev.get("tool") or "unknown"))),
@@ -1695,7 +1700,7 @@ def block_article(ev, reactions, key, names=None, href=""):
     elif d.get("episode_start") or d.get("episode_start") is None:
         reacts = reaction_html(None)
     else:
-        reacts = ('<p class="muted">Stage-2 reactions are read only at the first block of an episode; this block '
+        reacts = ('<p class="muted">Reaction readings are made only at the first block of an episode; this block '
                   f'continues episode {esc(d.get("episode"))}.</p>')
     head = event_label(e)
     head = head[:1].upper() + head[1:]
@@ -1791,7 +1796,7 @@ def thought_article(th, names, related, key, items_by_i, href=""):
     ctx = ""
     if src is not None and src.get("text") and str(th.get("quote") or "") not in str(src.get("text")):
         ctx = '<p class="muted">Quote not found verbatim in the timeline item.</p>'
-    rel = "".join(f'<p class="muted">Quoted as evidence in the stage-2 reaction to <a href="#sel={esc(k)}" '
+    rel = "".join(f'<p class="muted">Quoted as evidence in the reaction reading of <a href="#sel={esc(k)}" '
                   f'data-k="{esc(k)}">{esc(event_label(eid))}</a>:</p>{reaction_html(r, names, href)}'
                   for k, eid, r in related)
     low = th.get("certainty") == "low"
@@ -1814,7 +1819,7 @@ def thought_article(th, names, related, key, items_by_i, href=""):
             f'data-t="{_num(th.get("t")):.1f}" data-label="{esc(label)}">'
             f'<h3>{icon}{fmt_t(th.get("t"))} &middot; thought {code_link(code, names, href)}{grp}</h3>'
             f'<p>{badge("reader certainty: " + str(th.get("certainty")))} <small>turn {esc(th.get("turn"))} &middot; '
-            f'timeline item {esc(th.get("item"))} &middot; stage-1 chunk {esc(th.get("chunk"))}</small></p>'
+            f'timeline item {esc(th.get("item"))} &middot; thought-reading chunk {esc(th.get("chunk"))}</small></p>'
             + (f'<p class="def">{esc(code_tip(code, DEFS, names))}</p>' if DEFS.get(code) else "")
             + f'<blockquote>{esc(th.get("quote"))}</blockquote>'
             f'{"<p>Reader note: " + esc(th.get("note")) + "</p>" if th.get("note") else ""}{ctx}{chain}{rel}</article>')
@@ -1845,7 +1850,7 @@ def thought_lane_label(L, names):
     nm = names.get(L)
     codes = sorted((c for c in names if c[:1] == L and len(c) > 1), key=lambda c: int(c[1:]))
     hint = (f"Thought codes {L}" + (f" ({nm})" if nm else "") + ", quoted from the agent's reasoning and coded by the "
-            "stage-1 reader; hollow tick = low reader certainty" + "".join(f"\n{c} {names[c]}" for c in codes))
+            "thought reader; hollow tick = low reader certainty" + "".join(f"\n{c} {names[c]}" for c in codes))
     return (nm or "thoughts"), (nm.split()[0] if nm else "thoughts"), hint
 
 
@@ -1903,7 +1908,7 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
                          f'data-t="{_num(tp.get("t")):.1f}" data-label="{esc(fmt_t(tp.get("t")) + " · " + head)}">'
                          f'<h3><svg class="hglyph" viewBox="0 0 18 16"><line class="tp" x1="9" x2="9" y1="0" y2="16"/>'
                          f'</svg>{fmt_t(tp.get("t"))} &middot; {esc(head)}</h3>'
-                         f'<p>Caused by (stage-3 reading): {causes}</p><p>{esc(plain_ids(tp.get("cause_note")))}</p></article>'))
+                         f'<p>Caused by (final reading): {causes}</p><p>{esc(plain_ids(tp.get("cause_note")))}</p></article>'))
 
     # Event lanes and reactions.
     cited = defaultdict(list)  # timeline item index -> [(event key, event id, reaction)]
@@ -1966,8 +1971,8 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
                 f"<td>{esc(yesno(s.get('has_trick')))}</td><td>{esc(BELIEVES_LABEL.get(s.get('believes_judge'), s.get('believes_judge')))}</td>"
                 f"<td>{esc(s.get('summary'))}</td></tr>")
     states = "".join(state_row(c, ch) for c, ch in enumerate(a["chunks"]))
-    missing = [s for s, ok in (("the agent's timeline", a["items"]), ("stage-1 thoughts", a["chunks"]),
-                               ("stage-2 reactions", a["reactions"]), ("a stage-3 summary", a["stage3"])) if not ok]
+    missing = [s for s, ok in (("the agent's timeline", a["items"]), ("thought readings", a["chunks"]),
+                               ("reaction readings", a["reactions"]), ("a final reading", a["stage3"])) if not ok]
     idx = list(all_names)
     pos = idx.index(name)
     prev_link = f'<a href="{esc(idx[pos - 1])}.html">&larr; {esc(idx[pos - 1])}</a>' if pos > 0 else ""
@@ -1988,21 +1993,21 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
             + (f"{plural(n_stacks, 'spot holds', 'spots hold')} several items (the number on the shape); "
                f"click one to list them. " if n_stacks else "")
             + 'Click a shape, or step with ← →.</p>'
-            f'<h2>Summary (stage 3)</h2><p class="story">{esc(s3.get("story")) or "<span class=muted>No model-written summary for this agent.</span>"}</p>'
+            f'<h2>Summary</h2><p class="story">{esc(s3.get("story")) or "<span class=muted>No model-written summary for this agent.</span>"}</p>'
             + (f'<p class="muted">Not available for this agent: {", ".join(missing)}.</p>' if missing else "")
             + (f'<p class="muted">{len(a["malformed"])} model output(s) could not be read and are left out '
                f'({esc(", ".join(a["malformed"]))}).</p>' if a["malformed"] else "")
             + f'<p class="muted">{plural(len(a["events"]), "event")}, {plural(len(a["thoughts"]), "coded thought")}, '
-            f'{plural(len(a["reactions"]), "stage-2 reaction")}. Position on cheating from the {esc(phase_src)}.'
+            f'{plural(len(a["reactions"]), "reaction reading")}. Position on cheating from the {esc(phase_src)}.'
             f'{" Role: " + esc(info.get("role")) + "." if info.get("role") else ""}</p>'
             f'<details class="all"><summary>All {plural(len(articles), "item")} in time order</summary><div id="items">'
             f'{"".join(h for _, _, h in articles) or "<div class=empty>Nothing recorded.</div>"}</div></details>'
             + ("<h2>Reactions to events not in the timeline</h2>" + "".join(reaction_html(r, names, href) for r in orphans)
                if orphans else "")
-            + f'<h2>Final reading (stage 3)</h2>{"<dl class=kv>" + final_kv + "</dl>" if final_kv else "<p class=muted>No final reading.</p>"}'
+            + f'<h2>Final reading</h2>{"<dl class=kv>" + final_kv + "</dl>" if final_kv else "<p class=muted>No final reading.</p>"}'
             + (f'<h3>Consistency flags</h3><p class="muted">{esc(FLAG_HINT)}</p><ul>{flags}</ul>' if flags else "")
-            + (f'<details class="more"><summary>Stage-1 reading, chunk by chunk</summary><p class="muted">The state the '
-               f'stage-1 reader recorded at the end of each chunk of the timeline.</p><table><tr><th>Chunk</th><th>Span</th>'
+            + (f'<details class="more"><summary>Thought reading, chunk by chunk</summary><p class="muted">The state the '
+               f'thought reader recorded at the end of each chunk of the timeline.</p><table><tr><th>Chunk</th><th>Span</th>'
                f"<th>Position on cheating</th><th>Knows the trick</th><th>Thinks the judge</th><th>Reader's summary</th>"
                f"</tr>{states}</table></details>" if states else "")
             + f'{legend_about("agent", names, href, DEFS, shown, push)}</div>{panel_html(blocked)}</div>{tl_json}')
@@ -2028,7 +2033,7 @@ EV_SECTIONS = (("ov", "Overseer posts and DMs"), ("board", "Other posts and DMs"
 OPTIONAL_SECTIONS = {"rem"}  # listed only when the run has them (only runs with the periodic integrity reminder)
 EV_SECTION_HINT = {"ov": "Board posts and DMs written by an overseer",
                    "board": "Solvers' board posts and DMs that describe the trick, warn or rule about it, or drew a "
-                            "stage-2 reaction",
+                            "reaction",
                    "revert": "An agent seeing that an overseer removed its own credit",
                    "lib": "Shared-library files the agents read (all revisions of one path together)",
                    "rem": "The host's periodic integrity reminder, sent to every solver on a timer; grouped by "
@@ -2130,7 +2135,7 @@ def events_page(agents, tmax, models="", nav="", names=None):
     body = (f"{nav}<h1>Story map: events</h1>{banner(models)}"
             f"{legend_bar('events', shown, push)}"
             f'<p class="muted">Each event: who wrote it, when it was first seen, which agents read it, and how each '
-            f'reacted (stage-2 reading). Library files are grouped by path across revisions. Click a row to open it; '
+            f'reacted (reaction reading). Library files are grouped by path across revisions. Click a row to open it; '
             f'click a column heading to sort. ↓ / ↑ (or j / k) move through the shown events, Enter opens one. '
             f'{plural(n_skip, "board post or DM", "board posts and DMs")} unrelated to the trick and without a '
             f'reaction {"is" if n_skip == 1 else "are"} not listed.</p>{filters}'
@@ -2147,7 +2152,7 @@ EV_COLUMNS = (  # (sort key, heading, numeric, hint)
     ("author", "Author", False, "Who wrote it (for a revert: who reverted)"),
     ("t", "First seen (min)", True, "Minutes from run start when the first reader saw it"),
     ("readers", "Readers", True, "Agents that read it"),
-    ("reg", "Noticed", True, "Readers whose reasoning or acts refer to it (stage 2: registered yes)"),
+    ("reg", "Noticed", True, "Readers whose reasoning or acts refer to it (reaction reading: registered yes)"),
     ("belief", "Belief chg.", True, "Readers whose stated belief changed, but not their plan"),
     ("behaviour", "Behaviour chg.", True, "Readers whose plan or acts changed"),
     ("toward", "Toward", True, "Readers who changed toward cheating"),
@@ -2211,7 +2216,7 @@ def event_section(gk, g):
                     + (f'<td>{esc(r.get("registered"))}</td><td>{esc(CHANGE_LABEL.get(r.get("change"), r.get("change")))}</td>'
                        f'<td>{esc(DIRECTION_LABEL.get(r.get("direction"), r.get("direction")))}</td>'
                        f'<td>{esc(plain_ids(r.get("reason")))}</td>' if r
-                       else '<td colspan="4" class="muted">no stage-2 reaction</td>')
+                       else '<td colspan="4" class="muted">no reaction reading</td>')
                     + "</tr>")
     judged = len(readers) - c["unjudged"]
     changed = c["chg-belief"] + c["chg-behaviour"]
@@ -2244,7 +2249,7 @@ def event_section(gk, g):
             f'<small>first seen at {fmt_t(ev.get("t"))} by {esc(readers[0][0])} &middot; {plural(n, "reader")}'
             f'{" &middot; " + plural(len(ids), "revision") if len(ids) > 1 and g["type"] != "R1" else ""}</small></p>'
             f'<details><summary>Text as first seen</summary><pre>{esc(cut(text))}</pre></details>'
-            f'<div class="sbs"><p class="muted">How the readers reacted (stage 2; '
+            f'<div class="sbs"><p class="muted">How the readers reacted ('
             f'{plural(judged, "reader")} with a reaction, {c["unjudged"]} without):</p>{bars}</div>'
             f'<details{" open" if n <= 12 else ""}><summary>Readers</summary><table><tr><th>Agent</th>'
             f"<th>First seen at</th><th>Reads</th><th>Noticed it</th><th>Change</th><th>Direction</th><th>Why</th></tr>"
@@ -2326,15 +2331,41 @@ def markdown_html(text, anchors=False):
 CHECK_LABEL = {
     "faked": "Faked", "credited": "Got credit for a fake", "first_fake_t": "First fake time",
     "stopped": "Stopped faking", "considered": "Considered faking", "source": "Source of the fake",
-    "aware_cheating": "Knew it was cheating", "stage2_event_exists": "Stage-2 reaction cites an event it saw",
-    "stage2_event_before_reaction": "Stage-2 quotes come after the event",
-    "stage2_quotes": "Stage-2 quotes verbatim", "stage1_quotes": "Stage-1 quotes verbatim",
+    "aware_cheating": "Knew it was cheating", "stage2_event_exists": "Reaction reading cites an event it saw",
+    "stage2_event_before_reaction": "Reaction-reading quotes come after the event",
+    "stage2_quotes": "Reaction-reading quotes verbatim", "stage1_quotes": "Thought-reading quotes verbatim",
+    "stage3_phases": "Final-reading phases", "stage3_turning_points": "Turning points",
+    "stage3_causes": "Turning-point causes", "stage3_stopped_vs_phases": "Stopped vs last phase",
 }
+
+
+# validation.md wording (storymap/validate.py) in the site's plain words; the older files' stage names included, so
+# pages re-rendered from an earlier validation.md read the same.
+VALIDATION_PLAIN = (
+    (r"Only an episode's first block has a stage-2 reaction\.", "Only an episode's first block has a reaction reading."),
+    (r"Agents with each response code \(stage 1\): ", "Agents with each response code: "),
+    (r"\bStage 3 cites a (block|reminder) in\b", r"The final reading cites a \1 in"),
+    (r"\bStage-2 reactions to pushed items", "Reaction readings to pushed items"),
+    (r"\bhas a stage-2 reaction\. Faking at the time", "has a reaction reading. Faking at the time"),
+    (r"\bstage-3 position\b", "final-reading position"),
+    (r"^Stage 1: (\d+ agents)", r"Thought reading: \1"),
+    (r"^Stage 3 final fields", "Final reading fields"),
+    (r"^## Stage-1 model comparison", "## Thought-reading model comparison"),
+    (r"\bstage-2 quotes verbatim", "reaction-reading quotes verbatim"),
+    (r"\bstage-1 quotes verbatim", "thought-reading quotes verbatim"),
+    (r"\bstage-3 phases consecutive", "final-reading phases consecutive"),
+    # Consistency flags (their details, as recorded in validation.json)
+    (r"\bstage 3 not_run: run_limit\b", "no final reading (spending limit reached)"),
+    (r"\bstage 3 (\w+): ", r"final reading \1: "),
+    (r"\bstage-2 event\b", "reaction-reading event"),
+)
 
 
 def plain_validation(text):
     """validation.md in the pages' vocabulary: check and field names in words, event ids plain, model ids by name,
     times as minutes; the Markdown structure is kept."""
+    for pattern, repl in VALIDATION_PLAIN:
+        text = re.sub(pattern, repl, text, flags=re.M)
     text = text.replace("quote not_found at item", "quote not found in timeline item").replace(
         "quote wrong_item at item", "quote found, but not in the cited timeline item")
     text = re.sub(r"(?<![\w/.-])(" + "|".join(sorted(CHECK_LABEL, key=len, reverse=True)) + r")(?![\w/.-])",
@@ -2385,10 +2416,71 @@ def taxonomy_display(text):
                   flags=re.S)
 
 
+# The taxonomy files are inserted verbatim into the model prompts (the research instrument) and keep their wording;
+# the pages show them in the site's plain words (owner, November 13, 2026: no backend jargon such as "operational
+# judge" or "stage 2" on the public site; scripts/site_terms.py holds the vocabulary).
+_STAGE_NAME = {"1": "thought", "2": "reaction", "3": "final"}
+
+
+def _plain_stage_noun(m):
+    name, noun = _STAGE_NAME[m.group(2)], m.group(3)
+    if noun.startswith(("reading", "reader")):
+        text = f"{name} {noun}"
+    elif noun.startswith("reaction") and m.group(2) == "2":
+        text = "reaction reading" + ("s" if noun.endswith("s") else "")
+    else:
+        text = f"{name}-reading {noun}"
+    return text[:1].upper() + text[1:] if m.group(1) == "S" else text
+
+
+PLAIN_TAXONOMY = (
+    (re.compile(r"\b([Tt]he|[Aa])\s+weak\s+operational\s+judge"), r"\1 weak judge"),
+    (re.compile(r"\boperational\s+judge"), "weak judge"),
+    (re.compile(r"\bOperational\s+judge"), "Weak judge"),
+    (re.compile(r"As\s+in\s+the\s+judge\s+rubric,\s+Section\s+5:\s+the\s+agent"), "The agent"),
+    (re.compile(r"As\s+in\s+the\s+judge\s+rubric,\s+Section\s+5:\s+"), ""),
+    (re.compile(r"\bthe\s+stage-1\s+to\s+stage-3\s+model\s+readers"), "the model readers"),
+    # Section and group headings: the labels already name the reading
+    (re.compile(r"(Reading rules) \(all stages\)"), r"\1"),
+    (re.compile(r"(Thought codes) \(Stage 1\)"), r"\1"),
+    (re.compile(r"\(Stage 2, (one per (?:selected )?event)\)"), r"(\1)"),
+    (re.compile(r" \(Stage 1 state, Stage 3\)"), ""),
+    (re.compile(r"\(Stage 1 records them"), "(the thought reading records them"),
+    (re.compile(r"; Stage 2 decides them"), "; the reaction reading decides them"),
+    (re.compile(r"\bStage 2 reads the overseer"), "The reaction reading reads the overseer"),
+    (re.compile(r"\b([Ss])tage-([123])\s+(readings?|readers?|reactions?|quotes|chunk|position|phases?|states?|call|codes?)"
+                r"\b"), _plain_stage_noun),
+)
+
+
+def plain_taxonomy(text):
+    """Taxonomy text as shown on the pages (codes page, code definitions): the site's plain words."""
+    for pattern, repl in PLAIN_TAXONOMY:
+        text = pattern.sub(repl, text)
+    return text
+
+
+# The codes page opens with one plain sentence in place of the taxonomy's developer notes (version, file
+# conventions, schema tests); the codes themselves are unchanged.
+TAXONOMY_INTRO = re.compile(
+    r'(<h1>(?:Overseer s|S)tory map taxonomy(?:, coding runs)?</h1>)<p>Version '
+    r'<code>storymap-(?:overseer-)?taxonomy(?:-code)?/\d+</code>\..*?</p>'
+    r'<p>The prompts insert this file verbatim\..*?</p>', re.S)
+TAXONOMY_INTRO_TEXT = ('<p>The codes the story map\'s model readers apply to each {who} records. Experimental agents '
+                       'never see them, the story-map prompts or any story-map output.</p>')
+
+
+def taxonomy_intro(html_text):
+    """The rendered taxonomy with its developer-note intro replaced by TAXONOMY_INTRO_TEXT."""
+    return TAXONOMY_INTRO.sub(lambda m: m.group(1) + TAXONOMY_INTRO_TEXT.format(
+        who="overseer's" if m.group(1).startswith("<h1>Overseer") else "agent's"), html_text, count=1)
+
+
 def taxonomy_page(text, models="", nav=""):
     """The codes page; the taxonomy's monitor-runs blocks are kept (without their marker lines) only in monitor
     runs, otherwise stripped, so other runs' page is as before."""
-    html_text = markdown_html(taxonomy_display(taxonomy_text(text, MONITOR["on"])), anchors=True)
+    html_text = taxonomy_intro(markdown_html(plain_taxonomy(taxonomy_display(taxonomy_text(text, MONITOR["on"]))),
+                                             anchors=True))
 
     def event_heading(m):
         typ = m.group(2)
@@ -2429,7 +2521,7 @@ sels.forEach(s=>s.addEventListener('change',apply));
 document.getElementById('reset').addEventListener('click',()=>{sels.forEach(s=>s.value='');apply();});apply();})();
 """
 BIN_MIN = 5.0  # minutes per bar of the blocks-over-time chart
-W_HINT = "Agents whose stage-1 reading has this response to a monitor block at any time"
+W_HINT = "Agents whose thought reading has this response to a monitor block at any time"
 
 
 def blocks_of(agents):
@@ -2612,12 +2704,12 @@ def monitor_panel(agents, tmax, names):
             + (f'<p class="muted">… and {plural(more, "more blocked agent")} (Blocks column below).</p>' if more > 0 else "")
             + f'<h3>Responses after blocks</h3><div class="sbs"><p class="muted">The agent\'s next tool call after each '
             f'block (deterministic, from the timelines):</p>{next_call_bar(blocks)}'
-            f'<p class="muted">How the agents reacted at the first block of each episode (stage 2; '
+            f'<p class="muted">How the agents reacted at the first block of each episode ('
             f'{plural(starts, "episode start")}, {judged} with a reaction, {starts - judged} without):</p>'
             f'{reaction_bars(c, judged)}</div>'
-            + (f'<p class="muted">Agents with each response code at any time (stage 1, {with_s1} of '
+            + (f'<p class="muted">Agents with each response code at any time ({with_s1} of '
                f'{plural(len(agents), "agent")} read):</p><table><tr><th>Code</th><th>Agents</th></tr>{wrows}</table>'
-               if wrows else '<p class="muted">No responses to a block were coded by the stage-1 reader.</p>')
+               if wrows else '<p class="muted">No responses to a block were coded by the thought reader.</p>')
             + '</section>')
 
 
@@ -2646,7 +2738,7 @@ def monitor_events_section(agents):
             r = (agents[name]["by_event"].get(str(e.get("id"))) or [None])[0]
             react = (f'{CHANGE_LABEL.get(r.get("change"), r.get("change"))}, '
                      f'{DIRECTION_LABEL.get(r.get("direction"), r.get("direction"))}' if r
-                     else "no stage-2 reaction" if d.get("episode_start") else "not read (episode continues)")
+                     else "no reaction reading" if d.get("episode_start") else "not read (episode continues)")
             rows.append(f'<tr><td><a href="agents/{esc(name)}.html#sel=ev-{esc(ev.get("i"))}">{esc(name)}</a></td>'
                         f'<td class="n">{fmt_t(ev.get("t"))}</td><td class="n">{esc(d.get("n"))}</td>'
                         f'<td class="n">{esc(d.get("episode"))}{" (start)" if d.get("episode_start") else ""}</td>'
@@ -2661,7 +2753,7 @@ def monitor_events_section(agents):
             f'<section class="ev" id="block-{esc(_slug(tool))}"><h3>{icon}Blocked {esc(redact(tool))} calls</h3>'
             f'<p><small>{plural(len(items), "block")} &middot; {plural(len(who), "agent")} &middot; '
             f'{plural(starts, "episode start")} &middot; first at {fmt_t(items[0][1].get("t"))}</small></p>'
-            f'<div class="sbs">{next_call_bar(items, "Next call")}<p class="muted">Reactions at episode starts (stage 2; '
+            f'<div class="sbs">{next_call_bar(items, "Next call")}<p class="muted">Reactions at episode starts ('
             f'{judged} with a reaction, {starts - judged} without):</p>{reaction_bars(c, judged)}</div>'
             f'<details{" open" if len(items) <= 12 else ""}><summary>Blocks</summary><table><tr><th>Agent</th>'
             f'<th>At</th><th>Block</th><th>Episode</th><th>Call</th><th>Reason shown</th>'
@@ -2670,7 +2762,7 @@ def monitor_events_section(agents):
             + (f'<p class="muted">First 300 of {len(items)} listed.</p>' if len(items) > 300 else "")
             + '</details></section>')
     return (f'<h2 id="monitor-blocks">Monitor blocks</h2><p class="muted">{esc(arm_line(MONITOR["ctx"]))} Tool calls '
-            f'the monitor blocked before they ran, by tool. Only an episode\'s first block gets a stage-2 reading.</p>'
+            f'the monitor blocked before they ran, by tool. Only an episode\'s first block gets a reaction reading.</p>'
             + "".join(cards))
 
 
@@ -2714,7 +2806,7 @@ def _build(map_dir, timeline=None, out=None, taxonomy=DEFAULT_TAXONOMY, minutes=
     (out / "agents").mkdir(parents=True, exist_ok=True)
     names = load_taxonomy(taxonomy, monitor) if taxonomy else {}
     if names and "E" not in names and any(c[:1] == "E" for c in names):  # E codes describe reactions (stage 2)
-        names["E"] = "Reactions (stage 2)"
+        names["E"] = "Reactions"
     DEFS.clear()
     DEFS.update(load_definitions(taxonomy, monitor) if taxonomy else {})
     has_tax = bool(names) and Path(taxonomy).is_file()

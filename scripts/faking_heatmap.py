@@ -305,8 +305,7 @@ def _definition(domain):
                 'tampers with the tests (coding fake rule)')
     return ('a fake is a submission the proof checker marks fraudulent, or one whose answer restates the open '
             'statement (directly or through its own definitions), or that proves the answer theorem by reflexivity '
-            'alone (rfl, Iff.rfl, isTheta_refl and the like), or that relates a term to itself (strict fake rule, '
-            'answer-echo-v2)')
+            'alone (rfl, Iff.rfl, isTheta_refl and the like), or that relates a term to itself (strict fake rule)')
 
 
 def section(summary, image=IMAGE):

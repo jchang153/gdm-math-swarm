@@ -94,7 +94,7 @@ class ViewFixtureTest(unittest.TestCase):
         self.assertIn("refake signal", art)
         self.assertIn("I&#x27;ll weaken it differently.", page)
         # A thought quoted by a reaction links back to that reaction.
-        self.assertIn("Quoted as evidence in the stage-2 reaction to", page)
+        self.assertIn("Quoted as evidence in the reaction reading of", page)
         # Turning points are clickable.
         self.assertIn('class="tp" data-k="tp-0"', page)
 
@@ -252,10 +252,10 @@ class ViewFixtureTest(unittest.TestCase):
             view.build(tmp / "map", tmp / "timeline", tmp / "out", taxonomy=None)
             page = (tmp / "out" / "agents" / "agent-003.html").read_text()
             art = re.search(r'<article class="item [^"]*" id="ev-%d".*?</article>' % (len(items) - 1), page, re.S).group(0)
-            self.assertIn("How it reacted (stage 2)", art)
+            self.assertIn("How it reacted</b>", art)
             self.assertIn("reminded of the integrity rules", art)
             first = re.search(r'<article class="item [^"]*" id="ev-%d".*?</article>' % (len(items) - 2), page, re.S).group(0)
-            self.assertIn("No stage-2 reaction recorded", first)
+            self.assertIn("No reaction reading recorded", first)
             events = (tmp / "out" / "events.html").read_text()
             self.assertIn('value="rem" checked> Integrity reminders (2)', events)
             row = re.search(r'<tr class="er"[^>]*data-id="R1:no-2".*?</tr>', events, re.S).group(0)
@@ -387,7 +387,7 @@ class ViewFixtureTest(unittest.TestCase):
         p = {"models": {"stage1": {"model_id": "anthropic/claude-haiku-5.5"},
                         "stage2": {"model_id": "openai/gpt-5.6-terra"}, "stage3": {"model_id": "openai/gpt-5.6-terra"}}}
         self.assertEqual(view.model_names(p),
-                         "Claude Haiku 5.5 (stage 1); GPT-5.6 Terra (stages 2\u20133)")
+                         "Claude Haiku 5.5 (thoughts); GPT-5.6 Terra (reactions and final reading)")
         self.assertEqual(view.model_names({}), "")
 
     def test_relative_links_resolve(self):
@@ -431,7 +431,7 @@ def visible_ui(page):
     page = re.sub(r"<(script|style|blockquote|pre)\b.*?</\1>", " ", page, flags=re.S)
     page = re.sub(r'<p class="(story|def)">.*?</p>|<details class="code">.*?</details>', " ", page, flags=re.S)
     page = re.sub(r"<p>(Why|E4 [^:]*|What it did next|Reader note|Caused by[^:]*):.*?</p>", " ", page, flags=re.S)
-    page = re.sub(r"<li>[^<]*(?:Stage-1 quotes|Stage-2 quotes|Stopped faking)[^<]*</li>", " ", page)
+    page = re.sub(r"<li>[^<]*(?:Thought-reading quotes|Reaction-reading quotes|Stopped faking)[^<]*</li>", " ", page)
     # Model prose: consistency flags (list and badge tooltip), stage-1 summaries, the story as a link tooltip.
     page = re.sub(r"<h3>Consistency flags</h3>.*?</ul>", " ", page, flags=re.S)
     page = re.sub(r'title="Consistency flags:[^"]*"|<a href="[^"]*" title="[^"]*">', " ", page)
@@ -529,8 +529,8 @@ class ViewPartialInputTest(unittest.TestCase):
             shutil.copytree(FIX / "timeline" / "timeline", flat)  # timeline DIR without timeline/ subdir
             view.build(mp, flat, tmp / "out", taxonomy=None)
             page = (tmp / "out" / "agents" / "agent-002.html").read_text()
-            self.assertIn("Not available for this agent: stage-2 reactions, a stage-3 summary.", page)
-            self.assertIn("stage-1 reading (no stage-3 reading)", page)
+            self.assertIn("Not available for this agent: reaction readings, a final reading.", page)
+            self.assertIn("thought reading (no final reading)", page)
             self.assertIn("could not be read and are left out", page)
             self.assertIn("No final reading", (tmp / "out" / "index.html").read_text())
             self.assertTrue((tmp / "out" / "agents" / "agent-005.html").is_file())
@@ -734,6 +734,64 @@ class RedesignTest(unittest.TestCase):
         for typ, _, label in view.SHAPE_MEANING:
             if typ in ("B1", "D1", "S1", "P2", "R1"):
                 self.assertEqual(label, view.type_name(typ))
+
+
+
+def load_site_terms():
+    """scripts/site_terms.py (the public site's plain vocabulary), loaded by path; None when absent."""
+    path = REPO / "scripts" / "site_terms.py"
+    if not path.is_file():
+        return None
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("site_terms_for_tests", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+STAGE_WORDS = re.compile(r"\b[Ss]tages?[- ][123]\b|\(stages?\b|operational judge|judge rubric")
+
+
+class PlainWordsTest(unittest.TestCase):
+    """Owner, November 13, 2026: the pages use the site's plain words (thought, reaction and final reading; weak
+    judge), so the site's vocabulary pass (scripts/site_terms.py) leaves a freshly rendered page unchanged."""
+
+    def test_pages_need_no_rewriting(self):
+        terms = load_site_terms()
+        if terms is None:
+            self.skipTest("scripts/site_terms.py not present")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            shutil.copytree(FIX / "map", tmp / "map")
+            (tmp / "map" / "validation.md").write_text(
+                "## Reactions to monitor blocks\n\nOnly an episode's first block has a stage-2 reaction.\n\n"
+                "Agents with each response code (stage 1): W1 2.\n\nStage 3 cites a block in 1 turning points.\n\n"
+                "| check | what is compared | ok |\n|---|---|---|\n| stage2_quotes | stage-2 quotes verbatim | 1 |\n"
+                "| stage3_phases | stage-3 phases consecutive | 1 |\n\n"
+                "- agent-001 faked (unresolved): stage 3 not_run: run_limit\n"
+                "- agent-002 stage2_event_exists (fail): stage-2 event post-000001 not in timeline\n")
+            with contextlib.redirect_stderr(io.StringIO()):
+                written = view.build(tmp / "map", FIX / "timeline", tmp / "out", graph=False)
+            pages = {p.relative_to(tmp / "out").as_posix(): p.read_text() for p in written}
+            self.assertIn("taxonomy.html", pages)
+            self.assertIn("validation.html", pages)
+            for name, page in pages.items():
+                self.assertEqual(terms.apply(page), page, name)
+                self.assertIsNone(STAGE_WORDS.search(visible_ui(page)), (name, STAGE_WORDS.search(visible_ui(page))))
+            tax = pages["taxonomy.html"]
+            self.assertIn("<h1>Story map taxonomy</h1><p>The codes the story map's model readers apply to each "
+                          "agent's records.", tax)
+            self.assertNotIn("The prompts insert this file verbatim", tax)
+            self.assertIn("a weak judge accepts any", tax)
+            self.assertIn("no final reading (spending limit reached)", pages["validation.html"])
+
+    def test_taxonomy_file_keeps_its_wording(self):
+        """Only the pages change: the taxonomy file (inserted verbatim into the prompts) keeps its words."""
+        text = view.DEFAULT_TAXONOMY.read_text(encoding="utf-8")
+        self.assertIn("a weak operational judge", text)
+        self.assertIn("## 3. Thought codes (Stage 1)", text)
+        self.assertEqual(view.load_definitions(view.DEFAULT_TAXONOMY)["A3"]["def"][:42],
+                         "The agent states that the weak judge check")
 
 
 if __name__ == "__main__":

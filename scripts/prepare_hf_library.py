@@ -28,6 +28,7 @@ from storymap_site import STORYMAP_DIR, add_storymap_tab, public_files as storym
 from space_navigation import private_space_navigation
 from site_style import themed
 import site_layout
+import site_terms
 
 ROOT = Path(__file__).resolve().parents[1]
 # Behavior judge outputs under RUN/analysis/judge/ (docs/experiment-library.md, "Behavior
@@ -597,6 +598,9 @@ private Hugging Face dataset (Sign in with HF for read access). Do not upload cr
         modules = ['./assets/' + p.name for p in sorted((page.parent / 'assets').glob('*.js'))] if page.parent.name == 'inspect-view' else []
         text = page.read_text() if 'inspect-view' in page.relative_to(output).parts else themed(page.read_text())
         text = site_layout.apply(page.relative_to(output).as_posix(), text)  # dense layout (no-op for other pages)
+        if site_terms.covers(page.relative_to(output).as_posix()) and site_layout.kind(page.relative_to(output).as_posix()) is None \
+                and 'eference-test evaluator' not in text:
+            text = site_terms.apply(text)  # plain words on the other run pages (judge pages, story-map agent pages)
         text = private_space_navigation(text, modules)
         if page.relative_to(output).parts[1:] == ('inspect-view', 'index.html') \
                 and any(category(rel) == 'eval' for rel in moved.get(page.relative_to(output).parts[0], ())):

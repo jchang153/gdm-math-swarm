@@ -206,7 +206,7 @@ class SiteMetadataTests(unittest.TestCase):
         self.assertNotIn("contact", run_profile.profile(results)["overseers"])
         run = "glmflash100-seeded-10ov-glm-180m-notices-enforceonly-r3-20261030T190000Z"
         self.assertEqual(run_profile.series_of(run)[0], "conditions180")
-        self.assertEqual(build_experiment_index.short_title({"run": run}), "10 GLM overseers, enforcement only · r3")
+        self.assertEqual(build_experiment_index.short_title({"run": run}), "10 GLM overseers, enforcement only · run 3")
 
 
 if __name__ == "__main__":

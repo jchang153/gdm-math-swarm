@@ -95,7 +95,7 @@ class ExperimentIndexLinkTests(unittest.TestCase):
             self.assertEqual(entries['judged-run']['links']['Behavior judge'], 'judged-run/analysis/judge/report.html')
             self.assertNotIn('Behavior judge', entries['plain-run']['links'])
             index = (Path(tmp) / 'index.html').read_text()
-            self.assertIn('href="judged-run/analysis/judge/report.html">Behavior judge</a>', index)
+            self.assertIn('href="judged-run/analysis/judge/report.html">Detailed behavior judge</a>', index)
 
 
 class PrepareJudgeOutputsTests(unittest.TestCase):

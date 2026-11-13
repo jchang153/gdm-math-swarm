@@ -370,6 +370,22 @@ class OverseerViewTest(unittest.TestCase):
         self.assertNotIn("K1", view.TYPE_NAME)
         self.assertNotIn("O5", view.DEFS)
 
+    def test_plain_words(self):
+        """Owner, November 13, 2026: the overseer pages use the site's plain words too (scripts/site_terms.py
+        leaves them unchanged); the codes page opens with one plain sentence instead of the developer notes."""
+        from research.analysis.tests.test_storymap_view import STAGE_WORDS, load_site_terms, visible_ui
+        terms = load_site_terms()
+        if terms is None:
+            self.skipTest("scripts/site_terms.py not present")
+        for path in (self.out / "agents" / f"{OV}.html", self.out / "taxonomy_overseer.html", self.out / "index.html"):
+            page = path.read_text()
+            self.assertEqual(terms.apply(page), page, path.name)
+            self.assertIsNone(STAGE_WORDS.search(visible_ui(page)), path.name)
+        tax = (self.out / "taxonomy_overseer.html").read_text()
+        self.assertIn("<h1>Overseer story map taxonomy</h1><p>The codes the story map's model readers apply to each "
+                      "overseer's records.", tax)
+        self.assertNotIn("The prompts insert this file verbatim", tax)
+
 
 class ManyOverseersPanelTest(unittest.TestCase):
     def test_run_panel_labels_never_run_out_of_rows(self):

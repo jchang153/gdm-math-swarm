@@ -128,6 +128,8 @@ STOP_REASONS = {
     'post_depletion_window': 'The run stopped a fixed time after its budget ran out.',
     'startup_timeout': 'The agents did not start in time.',
     'monitor_error': 'The run monitor failed, so the run was stopped.'}
+# Stop reasons in plain words on the summary tile (scripts/site_terms.py vocabulary).
+STOP_WORDS = {'max_run_seconds': 'time limit'}
 EXITS = {
     'harness_completed': 'The agent ended its session on its own with a final reply.',
     'harness_completed_after_truncation': 'Ended on its own after replies were cut off at the output length limit.',
@@ -735,8 +737,7 @@ def outcome_section(m):
             if not key.startswith('monitor.') or (m.get('monitor') or {}).get('present')]
     out = ['<h2 id="outcome-metrics">Outcome metrics</h2>',
            '<p class="muted">Slowdown, cost, fake and genuine submissions for comparing monitor arms, overseer runs '
-           'and baselines (research/analysis/run_metrics.py). Genuine uncredited counts come from the offline '
-           're-judge (scripts/rejudge_submissions.py) when it has run.</p>', table(rows, ('Metric', 'Value'))]
+           'and baselines. Genuine uncredited counts come from the offline re-judge when it has run.</p>', table(rows, ('Metric', 'Value'))]
     defs = [(name, (m.get(name) or {}).get('definition')) for name in ('fakes', 'genuine', 'slowdown', 'cost',
                                                                        'monitor')]
     out.append('<details><summary>Definitions and gaps</summary><ul>'
@@ -830,15 +831,15 @@ def summary_card(results):
     if pilot.get('held_usd') not in (None, '0'):
         spend_note += f'; {cents(pilot["held_usd"])} still held'
     tiles = [('Model', c['model'], c['provider_route'] or c['provider']),
-             ('Prompt variant', c['prompt_variant'] or 'not recorded', 'as recorded in settings.json'
-              if c['prompt_variant'] else 'settings.json names none'),
+             ('Prompt variant', c['prompt_variant'] or 'not recorded', 'as recorded in the run settings'
+              if c['prompt_variant'] else 'the run settings name none'),
              ('Agents', (f'{c["solvers"]} solvers' + (overseer_tile(c['overseer']) if c.get('overseer') else '')
                          + (' + seed' if c.get('seed_agent') else '')) if c.get('overseer') or c.get('seed_agent')
               else c['agents'],
               f'{voluntary} ended on their own · {errors} errors'),
-             ('Duration', duration(results['elapsed_seconds']), f'stop: {results["stop_reason"]}'),
+             ('Duration', duration(results['elapsed_seconds']), f'stop: {STOP_WORDS.get(results["stop_reason"], results["stop_reason"])}'),
              ('Accepted tasks', f'{results["operationally_accepted_tasks"]} of {tasks}',
-              f'{accepted} accepted submission(s); operational only'),
+              f'{accepted} accepted submission(s); weak judge only'),
              ('Genuine tasks', genuine, genuine_note),
              *(coding_results.tiles(results['coding']) if results.get('coding') else ()),
              ('Model cost', spend, spend_note),
@@ -1083,8 +1084,8 @@ def render(results, title, inspect_logs=(), settings=None):
 # Times on the run page (owner, October 25, 2026): every time shows the offset from the run start and the
 # absolute UTC time (scripts/run_clock.py). render() writes the recorded values and restamp_page() converts
 # them, so a published page (with its publication markup) is converted exactly like a fresh one.
-CLOCK_NOTE = ('<p class="muted" data-clock="run-start">Times: offset from the run start (the runtime\'s '
-              'common_start, +0:00) and the absolute time in UTC.</p>')
+CLOCK_NOTE = ('<p class="muted" data-clock="run-start">Times: offset from the run start (+0:00) and the absolute '
+              'time in UTC.</p>')
 _TEXT = re.compile(r'>([^<]+)<')
 _HHMM_CELL = re.compile(r'<td>(\d{2}):(\d{2}) UTC</td>')
 _HHMM_AGENT = re.compile(r'(agent-[\w-]+) \((\d{2}):(\d{2}) UTC\)')

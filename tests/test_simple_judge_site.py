@@ -132,11 +132,11 @@ class HelperTests(unittest.TestCase):
             'cheating_level': {'none': 46, 'considered': 26, 'explored': 0, 'submitted': 25, 'credited': 2,
                                'unclear': 1}}}
         tabbed = site.add_simple_judge_tab(PAGE + spots)
-        self.assertIn('<td>Behavior judge</td><td><span data-sj="1">simplified judge completed (<a href="'
+        self.assertIn('<td>Behavior judge</td><td><span data-sj="1">behavior judge completed (<a href="'
                       'analysis/simple_judge/report.html">report</a>)</span></td>', tabbed)
         counted = site.add_simple_judge_tab(tabbed, report)
         self.assertNotIn('not run', counted.split('<nav', 1)[0] + counted.split('</nav>', 1)[1].split('<ul', 1)[0])
-        line = ('simplified judge: 25 submitted, never credited · 2 credited · 2 whistleblowers, of 100 labelled; '
+        line = ('behavior judge: 25 submitted, never credited · 2 credited · 2 whistleblowers, of 100 labelled; '
                 'each agent counted once, at its highest level '
                 '(<a href="analysis/simple_judge/report.html">report</a>)')
         self.assertIn(f'<p>Behavior judge: <span data-sj="1">{line}</span></p>', counted)
@@ -155,8 +155,8 @@ class HelperTests(unittest.TestCase):
         judged = site.add_simple_judge_tab(JUDGED_PAGE + '<tr><td>Behavior judge</td><td>completed</td></tr>'
                                            '<p>Behavior judge: see <a href="analysis/judge/report.html">x</a></p>',
                                            report)
-        self.assertIn(f'<td>Behavior judge</td><td>completed (rubric 3.1) · <span data-sj="1">{line}</span>', judged)
-        self.assertIn(f'<p>Behavior judge: see <a href="analysis/judge/report.html">x</a> (rubric 3.1); '
+        self.assertIn(f'<td>Behavior judge</td><td>completed (detailed behavior judge) · <span data-sj="1">{line}</span>', judged)
+        self.assertIn(f'<p>Behavior judge: see <a href="analysis/judge/report.html">x</a> (detailed behavior judge); '
                       f'<span data-sj="1">{line}</span></p>', judged)
         self.assertEqual(site.add_simple_judge_tab(judged, report), judged)
         self.assertEqual(site.simple_summary(report)['evaluation_aware'], 24)
@@ -216,7 +216,8 @@ class HelperTests(unittest.TestCase):
                      'first flagged submission +12:36 (18:55:43 UTC)',
                      'first read of an exploit +2:00 (18:45:07 UTC) (by agent-001)', 'Run clock'.lower()[:3]):
             self.assertIn(text, strip_badges(page))  # agent labels sit after agent ids (agent_badges)
-        self.assertIn('18:43:07 UTC (common_start)', page)
+        self.assertIn('18:43:07 UTC, with the absolute UTC time', page)
+        self.assertNotIn('common_start', page)
         self.assertNotIn('<img src=x', page)
         self.assertIn('&lt;img src=x onerror=alert(1)&gt;', page)
         self.assertNotIn('<b>technique</b>', page)

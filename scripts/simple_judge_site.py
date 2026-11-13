@@ -35,14 +35,13 @@ SJ_REPORT = SJ_DIR + '/report.html'
 OLD_REPORT = 'analysis/judge/report.html'
 OLD_FROM_SJ = '../judge/report.html'  # the rubric-3.1 judge's page, relative to the simplified judge's page
 LABEL = 'Behavior judge'
-OLD_LABEL = 'Behavior judge (rubric 3.1)'
+OLD_LABEL = 'Detailed behavior judge'
 CATALOGUE_LABEL = 'Simple behavior judge'
 REPORT_SCHEMA = 'gdm-simple-judge/1'
-HELP_TEXT = ('The simplified behavior judge (default since October 24, 2026): one model call per agent labels '
-             'cheating, whistleblowing and evaluation awareness, with quotes checked word for word by code; '
-             'researcher-only. Its evaluation-awareness counts are not comparable with the rubric-3.1 '
-             'judge\'s (it finds many more).')
-OLD_HELP_TEXT = ('The earlier rubric-3.1 judge\'s reading of the transcripts (multi-stage, model-generated, '
+HELP_TEXT = ('The behavior judge: one model call per agent labels cheating, whistleblowing and evaluation '
+             'awareness, with quotes checked word for word by code; researcher-only. Its evaluation-awareness '
+             'counts are not comparable with the detailed behavior judge\'s (it finds many more).')
+OLD_HELP_TEXT = ('The detailed behavior judge\'s reading of the transcripts (multi-stage, model-generated, '
                  'verified by a second model call); researcher-only.')
 TAB_MARKER = 'data-tab="simple-judge"'
 OLD_MARKER = 'data-tab="judge-rubric-3-1"'
@@ -51,7 +50,7 @@ OLD_TAB = f'<a {OLD_MARKER} href="{OLD_REPORT}">{html.escape(OLD_LABEL)}</a>'
 HELP = f'<li {TAB_MARKER}><strong>{LABEL}</strong>: {html.escape(HELP_TEXT)}</li>'
 OLD_HELP = f'<li {OLD_MARKER}><strong>{html.escape(OLD_LABEL)}</strong>: {html.escape(OLD_HELP_TEXT)}</li>'
 TILE = (f'<div class="tile"><div class="k">{LABEL}</div><div class="v">completed</div>'
-        '<div class="s">simplified judge; see the Behavior judge tab</div></div>')
+        '<div class="s">behavior judge; see the Behavior judge tab</div></div>')
 # A published simplified-judge page must not link the files that stay local.
 UNPUBLISHED_LINK = re.compile(r'''(?:href|src)\s*=\s*["'][^"']*(?:\braw/|(?:cases|run-budgets|adjudication)\.)''',
                               re.I)
@@ -266,16 +265,17 @@ def add_simple_judge_tab(document, report=None):
     if summary:
         main, detail = simple_text(summary)
         tile = (f'<div class="tile"><div class="k">{LABEL}</div><div class="v">{html.escape(main)}</div>'
-                f'<div class="s">simplified judge, {html.escape(detail)}; see the Behavior judge tab</div></div>')
-        inner = f'simplified judge: {html.escape(main)}, {html.escape(detail)} (<a href="{href}">report</a>)'
+                f'<div class="s">behavior judge, {html.escape(detail)}; see the Behavior judge tab</div></div>')
+        inner = f'behavior judge: {html.escape(main)}, {html.escape(detail)} (<a href="{href}">report</a>)'
     else:
         tile = TILE
-        inner = f'simplified judge completed (<a href="{href}">report</a>)'
+        inner = f'behavior judge completed (<a href="{href}">report</a>)'
     document = re.sub(r'<div class="tile"><div class="k">' + LABEL + r'</div><div class="v">[^<]*</div>'
                       r'<div class="s">[^<]*</div></div>', lambda _: tile, document, count=1)
     document = _judge_spot(document, r'<tr><td>' + LABEL + r'</td><td>(.*?)</td></tr>', inner,
-                           first=' (rubric 3.1)', separator=' · ')
-    return _judge_spot(document, r'<p>' + LABEL + r': (.*?)</p>', inner, first=' (rubric 3.1)', separator='; ')
+                           first=' (detailed behavior judge)', separator=' · ')
+    return _judge_spot(document, r'<p>' + LABEL + r': (.*?)</p>', inner, first=' (detailed behavior judge)',
+                       separator='; ')
 
 
 def _add_tab(document):

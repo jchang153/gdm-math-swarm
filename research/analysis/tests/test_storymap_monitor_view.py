@@ -182,13 +182,13 @@ class MonitorViewTest(unittest.TestCase):
         self.assertIn("<dt>Enforced by the host</dt><dd>unknown</dd>", first)
         self.assertIn("<dt>Blocked in the same model step</dt><dd>2 calls</dd>", first)
         self.assertIn("<dt>Its next tool call</dt><dd>retried the identical call (Bash)</dd>", first)
-        self.assertIn("How it reacted (stage 2)", first)
+        self.assertIn("How it reacted</b>", first)
         self.assertIn("<dt>Repeats</dt><dd>blocked action no. 1</dd>", second)
         self.assertIn("continues episode 1", second)
         self.assertIn("<dt>Monitor score</dt><dd>9</dd>", third)
         self.assertIn("<dt>Monitor threshold</dt><dd>7</dd>", third)
         self.assertIn("<dt>Enforced by the host</dt><dd>yes</dd>", third)
-        self.assertIn("No stage-2 reaction recorded", third)
+        self.assertIn("No reaction reading recorded", third)
         p3 = self.files["agents/agent-003.html"]
         self.assertIn("<dt>Reason shown to the agent</dt><dd>Restating the goal", p3)
 

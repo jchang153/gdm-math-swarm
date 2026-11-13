@@ -291,7 +291,7 @@ def _conference_rows(run):
 # --------------------------------------------------------------------------------------------- blocks
 def fakes_block(run, results, settings, gaps):
     _path_setup()
-    out = {'definition': 'strict story-map fake rule (fake_rule.is_fake, answer-echo-v2) over conference '
+    out = {'definition': 'strict story-map fake rule over conference '
                          'submissions, seed and overseers excluded; credited = outcome accepted; fake-minutes as on '
                          'the run catalogue (fraudulent accepted submissions, acceptance to revert or run end)',
            'fakers': None, 'credited_fakers': None, 'fake_submissions': None, 'credited_fake_submissions': None,
@@ -328,8 +328,7 @@ def genuine_block(run, settings, rejudge, gaps):
     seeds, overseers = roles_of(settings)
     excluded = seeds | overseers
     out = {'definition': 'credited: outcome accepted, not reverted, proof checker genuine; uncredited: rejudged '
-                         '(scripts/rejudge_submissions.py) submissions that pass the operational judge and the strict '
-                         'checker rates genuine; tasks distinct',
+                         'submissions that pass the weak judge and the strict checker rates genuine; tasks distinct',
            'credited_submissions': None, 'credited_tasks': None, 'uncredited_submissions': None,
            'uncredited_tasks': None, 'uncredited_only_tasks': None, 'total_tasks': None, 'rejudge': None}
     rows, reverted = _conference_rows(run)
@@ -483,12 +482,12 @@ def _ledger_split(ledger, run_name, gaps):
 def cost_block(run, results, settings, runtime, calls, ledger, gaps):
     seeds, overseers = roles_of(settings)
     pilot = ((results or {}).get('budget') or {}).get('pilot') or {}
-    out = {'definition': 'USD; agent = results.json budget.pilot settled + held minus its monitor subtotal '
-                         '(budget.pilot.monitor: the monitor_admitted requests; runs built before it have no monitor '
-                         'calls in budget.pilot), else the settled inference_finished costs; solver/overseer split '
-                         'from runtime.jsonl; monitor = budget.pilot.monitor settled + held, else settled_usd of '
-                         'monitor_scored events; the ledger rows labelled monitor:<agent> when a ledger copy is '
-                         'given; total = agent + monitor',
+    # Plain words (scripts/site_terms.py); the sources: agents = results.json budget.pilot settled + held minus its
+    # monitor subtotal (budget.pilot.monitor), else the settled inference_finished costs, with the solver/overseer
+    # split from runtime.jsonl; monitor = budget.pilot.monitor settled + held, else settled_usd of monitor_scored
+    # events, else the ledger rows labelled monitor:<agent> when a ledger copy is given.
+    out = {'definition': 'USD of model spending, settled plus still held: the agents (solvers and overseers) and the '
+                         'monitor; total = agents + monitor',
            'total_usd': None, 'budget_pilot_usd': None, 'settled_usd': _number(pilot.get('settled_usd')),
            'held_usd': _number(pilot.get('held_usd')), 'solver_usd': None, 'overseer_usd': None,
            'agent_usd': None, 'monitor_usd': None, 'monitor_share': None, 'usd_per_solver': None,

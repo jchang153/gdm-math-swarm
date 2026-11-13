@@ -89,7 +89,7 @@ EXPECTED_RUBRIC = "gdm-judge-rubric/3.1"
 READABLE_RUBRICS = ("gdm-judge-rubric/3", EXPECTED_RUBRIC)
 SECTION_START = "<!-- behavior-judge:start -->"
 SECTION_END = "<!-- behavior-judge:end -->"
-SECTION_TITLE = "Behavior judge: misbehavior and evaluation awareness"
+SECTION_TITLE = "Detailed behavior judge: misbehavior and evaluation awareness"
 # Researcher-only, host-only copy (git-ignored private/; research/analysis/private_material.py).
 JUDGE_RUBRIC = Path(__file__).resolve().parents[3] / "private" / "research" / "analysis" / "judge_rubric.md"
 # Researcher-only, host-only (git-ignored private/; research/analysis/private_material.py).
@@ -885,7 +885,7 @@ def _banners(report):
 def render_report_html(report):
     if (report.get("plain") or {}).get("layout"):  # rubric v3.1: the plain-language layout
         return render_plain_report_html(report)
-    mode, browser_state, rubric = report["mode"], report["review_page"], report["rubric"]
+    browser_state, rubric = report["review_page"], report["rubric"]
     browser = browser_state["status"] != "missing"
     banners = _banners(report)
     counts, projection = report["counts"], report["paper_projection"]
@@ -918,10 +918,7 @@ def render_report_html(report):
     links = ([("Evidence browser", "review/index.html")] if browser else []) + [
         ("Report JSON", "report.json"), ("Frozen labels", "labels.jsonl")]
     labels = report["labels"] or {}
-    revision = report.get("judge_revision")
-    body = (f"<h1>{esc(SECTION_TITLE)}</h1><p class=\"muted\"><code>{esc(report['run_id'])}</code> · mode "
-            f"{esc(mode)} · rubric {esc(rubric['judge_rubric_version'])}"
-            + (f" · judge revision {esc(revision.split(' (')[0])}" if revision else "") + "</p>"
+    body = (f"<h1>{esc(SECTION_TITLE)}</h1><p class=\"muted\"><code>{esc(report['run_id'])}</code></p>"
             + "".join(f"<p class=\"notice warn\">{esc(b)}</p>" for b in banners)
             + plain
             + f"<h2>Run summary</h2><p>{esc(summary_text(report))}</p>"
@@ -941,7 +938,7 @@ def render_report_html(report):
             f"{'intact' if rubric['frozen_rubric_intact'] else 'NOT intact'}. Frozen-label mapping: "
             f"{esc(', '.join(f'{k} ' + '/'.join(f'{s} {n}' for s, n in v.items()) for k, v in labels.items()) or 'none')}."
             "</p><p>" + " · ".join(f"<a href=\"{esc(href)}\">{esc(name)}</a>" for name, href in links) + "</p>")
-    return rv.page(f"Behavior judge {report['run_id']}", body, REPORT_CSS)
+    return rv.page(f"Detailed behavior judge {report['run_id']}", body, REPORT_CSS)
 
 
 def _plain_summary_html(run_level):
@@ -973,7 +970,7 @@ def render_plain_report_html(report):
     problems involved explained once, the agents with a plain note and a gloss of the group and
     flag names, the evidence cards led by plain explanations, and the technical summary (counts,
     cohort table, spread and reach, technical notes) collapsed after the evidence."""
-    mode, browser_state, rubric = report["mode"], report["review_page"], report["rubric"]
+    browser_state, rubric = report["review_page"], report["rubric"]
     browser = browser_state["status"] != "missing"
     banners = _banners(report)
     counts, projection = report["counts"], report["paper_projection"]
@@ -1016,7 +1013,6 @@ def render_plain_report_html(report):
     links = ([("Evidence browser", "review/index.html")] if browser else []) + [
         ("Report JSON", "report.json"), ("Frozen labels", "labels.jsonl")]
     labels = report["labels"] or {}
-    revision = report.get("judge_revision")
     technical = ("<details><summary>Technical summary: run counts, cohort table, spread and whistleblowing reach, and "
                  "the technical note per agent</summary>"
                  f"<h3>Run summary</h3><p>{esc(summary_text(report))}</p>"
@@ -1028,9 +1024,7 @@ def render_plain_report_html(report):
                  + ("<h3>Technical note per agent</h3><div class=\"scroll\"><table><tr><th>Agent</th><th>Note</th>"
                     "</tr>" + "".join(notes) + "</table></div>" if notes else "")
                  + "</details>")
-    body = (f"<h1>{esc(SECTION_TITLE)}</h1><p class=\"muted\"><code>{esc(report['run_id'])}</code> · mode "
-            f"{esc(mode)} · rubric {esc(rubric['judge_rubric_version'])}"
-            + (f" · judge revision {esc(revision.split(' (')[0])}" if revision else "") + "</p>"
+    body = (f"<h1>{esc(SECTION_TITLE)}</h1><p class=\"muted\"><code>{esc(report['run_id'])}</code></p>"
             + "".join(f"<p class=\"notice warn\">{esc(b)}</p>" for b in banners)
             + lead
             + "<h2>Agents</h2><div class=\"scroll\"><table class=\"agents\"><tr><th>Agent</th><th>Group</th>"
@@ -1050,7 +1044,7 @@ def render_plain_report_html(report):
             f"{esc(', '.join(f'{k} ' + '/'.join(f'{s} {n}' for s, n in v.items()) for k, v in labels.items()) or 'none')}."
             "</p></details><p>" + " · ".join(f"<a href=\"{esc(href)}\">{esc(name)}</a>" for name, href in links)
             + "</p>")
-    return rv.page(f"Behavior judge {report['run_id']}", body, REPORT_CSS)
+    return rv.page(f"Detailed behavior judge {report['run_id']}", body, REPORT_CSS)
 
 
 def render_results_section(report, judge_rel="analysis/judge"):

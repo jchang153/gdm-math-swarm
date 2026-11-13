@@ -59,7 +59,7 @@ STATUS_MEANING = (
     ("idle", "sleeping, waiting or polling with no new review"),
     ("unknown", "no reading for this span"))
 STATUS_TITLE = "Overseer status"
-STATUS_HINT = ("What the overseer was doing at that moment (stage-3 reading): not yet looking, investigating something "
+STATUS_HINT = ("What the overseer was doing at that moment (final reading): not yet looking, investigating something "
                "else, investigating the trick, enforcing, coordinating, idle")
 
 # Status colours: the six hues validated together for the solver pages' position bars (view.TOKENS_*), reused here
@@ -313,7 +313,7 @@ def load_definitions(path):
     def close():
         if cur is None:
             return
-        para = re.sub(r"\s+", " ", re.sub(r"[*`]", "", " ".join(body))).strip()
+        para = V.plain_taxonomy(re.sub(r"\s+", " ", re.sub(r"[*`]", "", " ".join(body))).strip())
         parts = re.split(r"\s(?=(?:Include|Exclude|Example)\b)", para)
         d = {"name": cur[1], "def": parts[0] if parts and not re.match(r"(Include|Exclude|Example)\b", parts[0]) else "",
              "include": "", "example": ""}
@@ -339,7 +339,7 @@ EVENT_TOKEN = r"(?:L1|L2|P1|P2|B1|D1|S1|O1|C1|N1|R1|K1|V1|M1|M2)"
 
 def taxonomy_page(text, models="", nav=""):
     """The overseer codebook with an anchor per code; event headings named in words with their glyph."""
-    html_text = V.markdown_html(text, anchors=True)
+    html_text = V.taxonomy_intro(V.markdown_html(V.plain_taxonomy(text), anchors=True))
 
     def event_heading(m):
         typ = m.group(2)
@@ -718,16 +718,16 @@ class Overseer:
         s3 = self.a["stage3"] or {}
         if s3.get("phases"):
             return [(V._num(p.get("from_t")), V._num(p.get("to_t"), self.tmax), str(p.get("status") or "unknown"),
-                     str(p.get("label") or "")) for p in s3["phases"]], "stage-3 reading"
+                     str(p.get("label") or "")) for p in s3["phases"]], "final reading"
         out, prev = [], 0.0
         for c in self.a["chunks"]:
             st = (c.get("state") or {}).get("status") or "unknown"
             ts = [V._num(th.get("t")) for th in c.get("thoughts") or []]
             end = V._num(c.get("to_t"), max(ts) if ts else prev)
             if end > prev or not out:
-                out.append((prev, end, st, "stage-1 state"))
+                out.append((prev, end, st, "thought-reading state"))
                 prev = end
-        return out, ("stage-1 reading (no stage-3 reading)" if out else "none")
+        return out, ("thought reading (no final reading)" if out else "none")
 
 
 # ------------------------------------------------------------------ shared bits
@@ -776,7 +776,7 @@ def legend_bar():
 
 def groups_html(names, href, defs):
     if not any(names.get(L) for L in LETTERS):
-        return ('<p class="note">Thoughts the stage-1 reader quoted and coded into six groups (O, H, I, T, A, G); the '
+        return ('<p class="note">Thoughts the thought reader quoted and coded into six groups (O, H, I, T, A, G); the '
                 'group names are not shown on this copy.</p>')
     groups = []
     for L in LETTERS:
@@ -787,14 +787,14 @@ def groups_html(names, href, defs):
             + (f' <a href="{V.esc(href)}#code-{c}">more</a>' if href else "") + '</p></details>' for c in codes)
         groups.append(f'<div class="grp"><div class="gname"><b>{L}</b> {V.esc(names.get(L, ""))}</div>{items}</div>')
     more = f' Full reference: <a href="{V.esc(href)}">overseer codes page</a>.' if href else ""
-    return (f'<p class="note">Codes the stage-1 reader gave to the overseer\'s quoted thoughts. Hover or click a code '
+    return (f'<p class="note">Codes the thought reader gave to the overseer\'s quoted thoughts. Hover or click a code '
             f'for its definition.{more}</p><div class="codes">{"".join(groups)}</div>')
 
 
 def reaction_html(r):
     """The stage-2 overseer reaction: registered, change, response, recognised the trick, reason, next act, quotes."""
     if not r:
-        return '<p class="muted">No stage-2 reaction recorded for this event.</p>'
+        return '<p class="muted">No reaction reading recorded for this event.</p>'
     rec = r.get("recognised_trick")
     head = (V.tbadge(f"registered: {REG.get(r.get('registered'), r.get('registered'))}",
                      "Whether the overseer's following items refer to the event's content")
@@ -806,10 +806,10 @@ def reaction_html(r):
                        "Whether its words show it recognised the event's content as the answer-restatement trick "
                        "(not applicable: the event does not concern the trick, or it did not register it)",
                        "bad" if rec is False else "")
-            + V.tbadge(f"reader certainty: {r.get('certainty')}", "How sure the stage-2 reader was"))
+            + V.tbadge(f"reader certainty: {r.get('certainty')}", "How sure the reaction reader was"))
     quotes = "".join(f'<blockquote>{V.esc(q.get("quote"))} <small>(timeline item {V.esc(q.get("item"))})</small>'
                      f'</blockquote>' for q in r.get("quotes") or [] if isinstance(q, dict))
-    return (f'<div class="react"><p><b>How it reacted (stage 2)</b> {head}</p>'
+    return (f'<div class="react"><p><b>How it reacted</b> {head}</p>'
             + (f"<p>Why: {V.esc(plain_ids(r.get('reason')))}</p>" if r.get("reason") else "")
             + (f"<p>What it did next: {V.esc(plain_ids(r.get('next_action')))}</p>" if r.get("next_action") else "")
             + quotes + "</div>")
@@ -914,7 +914,7 @@ def activity_article(row, key, items_by_i):
 
 def thought_article(th, names, related, key, items_by_i, href):
     html_ = V.thought_article(th, names, [], key, items_by_i, href)
-    rel = "".join(f'<p class="muted">Quoted as evidence in the stage-2 reaction to <a href="#sel={V.esc(k)}" '
+    rel = "".join(f'<p class="muted">Quoted as evidence in the reaction reading of <a href="#sel={V.esc(k)}" '
                   f'data-k="{V.esc(k)}">{V.esc(event_label(eid))}</a>:</p>{reaction_html(r)}' for k, eid, r in related)
     return html_[:-len("</article>")] + rel + "</article>" if rel else html_
 
@@ -1080,7 +1080,7 @@ def overseer_page(o, names, defs, tmax, all_names, models="", nav="", href=""):
         articles.append((V._num(tp.get("t")), 0, f'<article class="item k-tp" id="{key}" data-kind="tp" '
                          f'data-t="{V._num(tp.get("t")):.1f}" data-label="{V.esc(V.fmt_t(tp.get("t")) + " · " + head)}">'
                          f'<h3><svg class="hglyph" viewBox="0 0 18 16"><line class="tp" x1="9" x2="9" y1="0" y2="16"/>'
-                         f'</svg>{V.fmt_t(tp.get("t"))} &middot; {V.esc(head)}</h3><p>Caused by (stage-3 reading): '
+                         f'</svg>{V.fmt_t(tp.get("t"))} &middot; {V.esc(head)}</h3><p>Caused by (final reading): '
                          f'{causes}</p><p>{V.esc(plain_ids(tp.get("cause_note")))}</p></article>'))
 
     cited = defaultdict(list)
@@ -1164,8 +1164,8 @@ def overseer_page(o, names, defs, tmax, all_names, models="", nav="", href=""):
                 f"</td><td>{V.esc(V.yesno(s.get('knows_trick')))}</td><td>{V.esc(shown('suspected', s.get('suspected') or []))}"
                 f"</td><td>{V.esc('; '.join(map(str, s.get('open_questions') or [])))}</td><td>{V.esc(s.get('summary'))}</td></tr>")
     states = "".join(state_row(c, ch) for c, ch in enumerate(a["chunks"]))
-    missing = [s for s, ok in (("the overseer's timeline", a["items"]), ("stage-1 thoughts", a["chunks"]),
-                               ("stage-2 reactions", a["reactions"]), ("a stage-3 summary", a["stage3"])) if not ok]
+    missing = [s for s, ok in (("the overseer's timeline", a["items"]), ("thought readings", a["chunks"]),
+                               ("reaction readings", a["reactions"]), ("a final reading", a["stage3"])) if not ok]
     idx = list(all_names)
     pos = idx.index(name)
     prev_link = f'<a href="{V.esc(idx[pos - 1])}.html">&larr; {V.esc(idx[pos - 1])}</a>' if pos > 0 else ""
@@ -1185,15 +1185,15 @@ def overseer_page(o, names, defs, tmax, all_names, models="", nav="", href=""):
             + (f"{V.plural(n_stacks, 'spot holds', 'spots hold')} several items (the number on the shape); "
                f"click one to list them. " if n_stacks else "")
             + 'Click a shape, or step with ← →.</p>'
-            f'<h2>Summary (stage 3)</h2><p class="story">'
+            f'<h2>Summary</h2><p class="story">'
             f'{V.esc(plain_ids(s3.get("story") or "")) or "<span class=muted>No model-written summary for this overseer.</span>"}</p>'
             + (f'<p class="muted">Not available for this overseer: {", ".join(missing)}.</p>' if missing else "")
             + (f'<p class="muted">{len(a["malformed"])} model output(s) could not be read and are left out '
                f'({V.esc(", ".join(a["malformed"]))}).</p>' if a["malformed"] else "")
             + f'<p class="muted">{V.plural(len(o.events), "event")}, {V.plural(len(o.rows), "tool call")}, '
-            f'{V.plural(len(a["thoughts"]), "coded thought")}, {V.plural(len(a["reactions"]), "stage-2 reaction")}. '
+            f'{V.plural(len(a["thoughts"]), "coded thought")}, {V.plural(len(a["reactions"]), "reaction reading")}. '
             f'Status from the {V.esc(phase_src)}.</p>'
-            f'<h2>Final reading (stage 3)</h2>{"<dl class=kv>" + final_kv + "</dl>" if final_kv else "<p class=muted>No final reading.</p>"}'
+            f'<h2>Final reading</h2>{"<dl class=kv>" + final_kv + "</dl>" if final_kv else "<p class=muted>No final reading.</p>"}'
             + (f'<h3>Consistency flags</h3><p class="muted">{V.esc(V.FLAG_HINT)}</p><ul>{flags}</ul>' if flags else "")
             + hard_facts_html(o)
             + f'<details class="all"><summary>All {V.plural(len(articles), "item")} in time order</summary>'
@@ -1202,7 +1202,7 @@ def overseer_page(o, names, defs, tmax, all_names, models="", nav="", href=""):
             + activity_html(o, key_of_row, key_of_event)
             + ("<h2>Reactions to events not in the timeline</h2>" + "".join(reaction_html(r) for r in orphans)
                if orphans else "")
-            + (f'<details class="more"><summary>Stage-1 reading, chunk by chunk</summary><table><tr><th>Chunk</th>'
+            + (f'<details class="more"><summary>Thought reading, chunk by chunk</summary><table><tr><th>Chunk</th>'
                f"<th>Span</th><th>Status</th><th>Knows the trick</th><th>Suspects</th><th>Open questions</th>"
                f"<th>Reader's summary</th></tr>{states}</table></details>" if states else "")
             + f'<details class="about"><summary>About the codes</summary><div class="lg"><div class="lgbox">'
@@ -1240,9 +1240,9 @@ def final_labels(s3):
     out = []
     if f.get("detected_trick"):
         out.append(V.tbadge(f"detected the trick at {V.fmt_t(f.get('detection_t'))}",
-                            "First recognised the answer-restatement trick (stage-3 reading)", "info"))
+                            "First recognised the answer-restatement trick (final reading)", "info"))
     else:
-        out.append(V.tbadge("did not detect the trick", "No recognition of the trick in its words (stage-3 reading)",
+        out.append(V.tbadge("did not detect the trick", "No recognition of the trick in its words (final reading)",
                             "bad"))
     if f.get("confirmed_on_real_t") is not None:
         out.append(V.tbadge(f"confirmed on a real submission at {V.fmt_t(f['confirmed_on_real_t'])}",
@@ -1422,7 +1422,7 @@ def index_block(ovs, ctx, tmax):
             + (" No overseer board in this run." if board is False else "")
             + f'</p><ul class="ovlg">{status_legend()}</ul><ul class="ovlg">{keys}<li>{_glyph("V1", "g-hollow")}revert '
             f'(below the bar)</li></ul><div class="grid"><div class="hdr"><div>Overseer</div><div>{head_axis}</div>'
-            f'<div class="lab">Final reading (stage 3)</div></div>{"".join(strip_row(o, tmax) for o in ovs)}</div>'
+            f'<div class="lab">Final reading</div></div>{"".join(strip_row(o, tmax) for o in ovs)}</div>'
             f'</section>' + run_panel(ovs, ctx, tmax))
 
 

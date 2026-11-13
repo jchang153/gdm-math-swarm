@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 SIMPLE, FULL, NONE = "simple", "full", "none"
 CHOICES = ("auto", SIMPLE, FULL, NONE)
@@ -71,6 +72,21 @@ def label(source, rubric=None):
     if source == FULL:
         return "rubric-3.1 judge" + (f" ({rubric})" if rubric else "")
     return NONE_LABEL
+
+
+# The names the report pages show (scripts/site_terms.py vocabulary): the stored labels and statements keep their
+# version tags; the pages say "behavior judge" and "detailed behavior judge".
+_PLAIN = ((re.compile(r"\b([Ss])implified one-pass (?:behavior )?judge(?: \((?:gdm-simple-judge/\d+)\))?"),
+           lambda m: ("B" if m[1] == "S" else "b") + "ehavior judge"),
+          (re.compile(r"\b([Rr])ubric-3\.1 judge(?: \(gdm-judge-rubric/[\d.]+\))?"),
+           lambda m: ("D" if m[1] == "R" else "d") + "etailed behavior judge"))
+
+
+def plain(text):
+    """A stored judge label or statement as the report pages show it (no rubric names or version tags)."""
+    for pattern, repl in _PLAIN:
+        text = pattern.sub(repl, text)
+    return text
 
 
 def resolve(run_dir, *, preference="auto", judge_dir=None, simple_judge_dir=None):

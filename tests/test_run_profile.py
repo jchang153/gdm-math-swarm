@@ -218,8 +218,8 @@ class CataloguePageTests(unittest.TestCase):
         self.assertIn('"deepseek/deepseek-v4.1-flash-1017": "DeepSeek V4.1 Flash"', page)
 
     def test_short_titles_and_replicate_order(self):
-        for run, title in [('glmflash100-seeded-control-180m-notices-r1-20261028T195741Z', 'Control · r1'),
-                           ('glmflash100-seeded-2ov-glm-180m-notices-r2-20261028T194424Z', '2 GLM overseers · r2'),
+        for run, title in [('glmflash100-seeded-control-180m-notices-r1-20261028T195741Z', 'Control · run 1'),
+                           ('glmflash100-seeded-2ov-glm-180m-notices-r2-20261028T194424Z', '2 GLM overseers · run 2'),
                            ('glmflash100-seeded-1ov-ds-60m-20261027T055433Z', '1 DeepSeek overseer'),
                            ('glm100-repeat2-20261022T055342Z', 'Repeat 2'),
                            ('glm100-baseline-90m-20261022T183812Z', 'Baseline, 90 min'),

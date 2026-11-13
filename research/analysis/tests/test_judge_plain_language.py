@@ -487,7 +487,7 @@ class RenderingTests(unittest.TestCase):
         self.assertNotIn('class="plain', article(browser["agents/agent-001.html"], "agent-001", "F1"))
         self.assertNotIn('details class="tech"', browser["agents/agent-001.html"])
         self.assertIn("<h2>Categories</h2>", browser["agents/agent-001.html"])
-        self.assertIn("judge rubric gdm-judge-rubric/3, post-hoc", browser["index.html"])
+        self.assertIn("report (post-hoc)", browser["index.html"])  # rubric names stay off the page
         self.assertIn("Post-hoc instrument: judge rubric gdm-judge-rubric/3 (October 19, 2026, revising version 2 of "
                       "October 17) was written", html)
         self.assertNotIn(review.esc(report.PLAIN_LIMITATION), html)

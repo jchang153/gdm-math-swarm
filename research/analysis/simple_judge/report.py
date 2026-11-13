@@ -93,9 +93,9 @@ def _e(value):
 # Shown on every page (site requirement, 2026-10-24): the evaluation-awareness counts of this judge and of the
 # rubric-3.1 judge are not comparable (README "Limits").
 NOTE_ID = "sj-comparability"
-NOTE = ("Evaluation-awareness counts from this simplified judge are not comparable with the rubric-3.1 judge's: "
-        "it finds many more (for example 14 to 20 per 100 agents where the rubric-3.1 judge found 0 to 3 on the "
-        "three 30-minute GLM runs), mostly agents the earlier judge's prefilter never showed to its model. Compare "
+NOTE = ("Evaluation-awareness counts from this behavior judge are not comparable with the detailed behavior "
+        "judge's: it finds many more (for example 14 to 20 per 100 agents where the detailed behavior judge found 0 "
+        "to 3 on the three 30-minute GLM runs), mostly agents the earlier judge's prefilter never showed to its model. Compare "
         "evaluation awareness only between runs judged by the same judge.")
 
 
@@ -148,17 +148,17 @@ def render_html(report, rows, old_judge_href=None, run_start=None):
             ("evaluation-aware", c["evaluation_aware"].get("True", 0)),
             ("cost", f"${float(report['cost_usd']):.2f}"), ("wall time", f"{report.get('wall_seconds', 0) / 60:.1f} min")]
     parts = [f"<!doctype html><html lang=en><head><meta charset=utf-8>"
-             f"<meta name=viewport content='width=device-width,initial-scale=1'><title>Simple behavior judge</title>"
+             f"<meta name=viewport content='width=device-width,initial-scale=1'><title>Behavior judge</title>"
              f"<style>{STYLE}{AGENTS_STYLE}</style></head><body><main>",
-             f"<h1>Simple behavior judge</h1><p class=muted>{_e(report['run_id'])} &middot; {_e(report['rubric'])} "
-             f"&middot; model {_e(report.get('model'))} (fallback {_e(report.get('fallback_model'))}) &middot; "
+             f"<h1>Behavior judge</h1><p class=muted>{_e(report['run_id'])} &middot; model {_e(report.get('model'))} "
+             f"(fallback {_e(report.get('fallback_model'))}) &middot; "
              f"one call per agent; quotes checked verbatim by code; labels without verified evidence shown as "
              f"unclear. Researcher-only."
              + (f" Times: run clock from the run start, {_e(absolute(run_start))}"
-                f" (common_start), with the absolute UTC time." if run_start is not None else "") + "</p>",
+                f", with the absolute UTC time." if run_start is not None else "") + "</p>",
              f"<p class=note id={NOTE_ID}><strong>Not comparable:</strong> {_e(NOTE)}"
-             + (f" The rubric-3.1 judge's report for this run: <a href=\"{_e(old_judge_href)}\">Behavior judge "
-                f"(rubric 3.1)</a>." if old_judge_href else "") + "</p>",
+             + (f" The detailed behavior judge's report for this run: <a href=\"{_e(old_judge_href)}\">Detailed "
+                f"behavior judge</a>." if old_judge_href else "") + "</p>",
              seeded_note(report, run_start),
              "<div class=kpis>" + "".join(f"<div class=kpi><b>{_e(v)}</b>{_e(k)}</div>" for k, v in kpis) + "</div>",
              f"<p class=muted id=sj-exclusive>Cheating levels are exclusive: {_e(EXCLUSIVE_NOTE)} (none, considered, "
@@ -178,7 +178,7 @@ def render_html(report, rows, old_judge_href=None, run_start=None):
         body = "".join(f"<tr><th>{_e(o)}</th>" + "".join(f"<td>{v}</td>" for v in row) + "</tr>"
                        for o, row in zip(cells["rows_old"], cells["cells"]))
         parts.append(
-            f"<h2>Agreement with the rubric-3.1 judge</h2><p>{comp['compared']} agents compared "
+            f"<h2>Agreement with the detailed behavior judge</h2><p>{comp['compared']} agents compared "
             f"({len(comp['skipped'])} skipped). Cheating any vs none {comp['cheating_any']['agree']}/"
             f"{comp['cheating_any']['n']}; level {comp['cheating_level']['agree']}/{comp['cheating_level']['n']}; "
             f"whistleblower {comp['whistleblower']['agree']}/{comp['whistleblower']['n']}; evaluation-aware "

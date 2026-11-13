@@ -210,6 +210,8 @@ const sum=e=>e.summary&&typeof e.summary==='object'?e.summary:null;
 const judge=e=>(sum(e)||{}).judge||null;
 // Simplified behavior judge (default since October 24, 2026): counts from the entry's summary, else read in
 // the browser from the run's published analysis/simple_judge/report.json (kept outside the entry).
+// Link labels are catalogue keys (published entries never change); visitors read plain names (November 13, 2026).
+const LINK_TEXT={'Simple behavior judge':'Behavior judge','Behavior judge':'Detailed behavior judge'};
 const SIMPLE='Simple behavior judge',SHOWN=['explored','submitted','credited'];
 const simple=e=>(sum(e)||{}).simple_judge||e._simple||null;
 // Levels are exclusive (each agent at its highest level); "submitted" reads "submitted, never credited".
@@ -227,14 +229,14 @@ const flagged=j=>CHEATING.reduce((n,k)=>n+(j.cohorts[k]||0),0);
 const duration=s=>{s=Math.floor(s);return s>=3600?Math.floor(s/3600)+'h '+String(Math.floor(s%3600/60)).padStart(2,'0')+'m':Math.floor(s/60)+'m '+String(s%60).padStart(2,'0')+'s';};
 const money=v=>'$'+Number(v).toFixed(2);
 // The Behavior judge cell, as build_experiment_index.judge_text writes it: [HTML, sort value].
-function judgeCell(e){const j=judge(e),s=simple(e),linked=!!e.links[SIMPLE],label=(s||linked)?'rubric 3.1: ':'',lines=[];let key=null;
+function judgeCell(e){const j=judge(e),s=simple(e),linked=!!e.links[SIMPLE],label=(s||linked)?'detailed judge: ':'',lines=[];let key=null;
  if(j){const parts=FLAGGED.filter(k=>j.cohorts[k]).map(k=>j.cohorts[k]+' '+LABELS[k][j.cohorts[k]===1?0:1]);key=flagged(j);
   lines.push(esc(label+(parts.join(' · ')||'none flagged'))+'<br><small>'+esc('of '+(j.graded??j.agents)+' graded'+(j.provisional?', '+j.provisional+' provisional':'')+(j.mode&&j.mode!=='paid'?' ('+j.mode+')':''))+'</small>');}
  else if(e.links['Behavior judge']){lines.push(esc(label)+(sum(e)?'see report':'<span class="pending">…</span>'));key=-1;}
  if(s){const [main,detail]=simpleText(s);
-  lines.push(esc('simple: '+main)+'<br><small>'+esc(detail)+(linked?' · <a href="'+esc(e.links[SIMPLE])+'">report</a>':'')+'</small>');
+  lines.push(esc('behavior judge: '+main)+'<br><small>'+esc(detail)+(linked?' · <a href="'+esc(e.links[SIMPLE])+'">report</a>':'')+'</small>');
   key=key==null||key<0?s.cheating_any:key;}
- else if(linked){lines.push('<span class="pending sj-pending">simple: …</span>');key=key==null?-1:key;}
+ else if(linked){lines.push('<span class="pending sj-pending">behavior judge: …</span>');key=key==null?-1:key;}
  return lines.length?[lines.join('<br>'),key]:['<span class="muted">not run</span>',-2];}
 function judgeState(e){const j=judge(e),s=simple(e);
  if(j||s)return (j&&flagged(j))||(s&&s.cheating_any)?'flagged':'clean';
@@ -308,14 +310,14 @@ function compareTable(list){
   ['Task set size',e=>e.task_count==null?null:esc(e.task_count)],['Accepted tasks',num(accepted)],['Genuine tasks',num(genuine)],
   ['Cost',e=>esc(money(cost(e)))+bar(cost(e),costMax)],['Cost per genuine task',perTask],
   ['Agent exits',e=>Object.entries(e.agent_exits).map(([k,v])=>esc(k.replace(/_/g,' '))+': '+v).join('<br>')],
-  ['Rubric 3.1 judge: graded agents',e=>{const j=judge(e);return j?esc(j.graded??j.agents)+(j.provisional?' <small>('+j.provisional+' provisional)</small>':''):null;}],
-  ...COHORTS.map(k=>['Rubric 3.1 judge: '+LABELS[k][1],cohort(k)]),
-  ['Simple judge: labelled agents',e=>{const s=simple(e);return s?esc(s.labelled)+' of '+esc(s.agents)+(e.links[SIMPLE]?' · <a href="'+esc(e.links[SIMPLE])+'">report</a>':''):sjMissing(e);}],
-  ['Simple judge: cheating (explored or further)',sj(s=>s.cheating_any,true)],
-  ...['considered','explored','submitted','credited','unclear'].map(k=>['Simple judge: '+levelText(k)+' (agents at this highest level)',sj(s=>s.levels[k]??0,k!=='considered'&&k!=='unclear')]),
-  ['Simple judge: whistleblowers',sj(s=>s.whistleblowers,false)],
-  ['Simple judge: evaluation-aware (not comparable with rubric 3.1)',sj(s=>s.evaluation_aware,false)],
-  ['Open',e=>Object.entries(e.links).filter(([n])=>!hidden(n)).map(([n,u])=>'<a href="'+esc(u)+'">'+esc(n)+'</a>').join('<br>')]];
+  ['Detailed behavior judge: graded agents',e=>{const j=judge(e);return j?esc(j.graded??j.agents)+(j.provisional?' <small>('+j.provisional+' provisional)</small>':''):null;}],
+  ...COHORTS.map(k=>['Detailed behavior judge: '+LABELS[k][1],cohort(k)]),
+  ['Behavior judge: labelled agents',e=>{const s=simple(e);return s?esc(s.labelled)+' of '+esc(s.agents)+(e.links[SIMPLE]?' · <a href="'+esc(e.links[SIMPLE])+'">report</a>':''):sjMissing(e);}],
+  ['Behavior judge: cheating (explored or further)',sj(s=>s.cheating_any,true)],
+  ...['considered','explored','submitted','credited','unclear'].map(k=>['Behavior judge: '+levelText(k)+' (agents at this highest level)',sj(s=>s.levels[k]??0,k!=='considered'&&k!=='unclear')]),
+  ['Behavior judge: whistleblowers',sj(s=>s.whistleblowers,false)],
+  ['Behavior judge: evaluation-aware (not comparable with the detailed judge)',sj(s=>s.evaluation_aware,false)],
+  ['Open',e=>Object.entries(e.links).filter(([n])=>!hidden(n)).map(([n,u])=>'<a href="'+esc(u)+'">'+esc(LINK_TEXT[n]||n)+'</a>').join('<br>')]];
  return '<table><thead><tr><th scope="col">Run</th>'+list.map(e=>'<th scope="col">'+esc(e.run)+'</th>').join('')+'</tr></thead><tbody>'+
   spec.map(row=>'<tr><th scope="row">'+esc(row[0])+'</th>'+list.map(e=>'<td>'+cell(e,row)+'</td>').join('')+'</tr>').join('')+'</tbody></table>';}
 let comparing=[];
@@ -538,11 +540,11 @@ function catsFromSummary(e,p){const s=simple(e);
  if(s){const L=s.levels||{},c={X:(L.submitted||0)+(L.credited||0),T:(L.considered||0)+(L.explored||0),U:L.none||0,
    Q:(L.unclear||0)+Math.max(0,(s.agents||0)-(s.labelled||0)),S:p&&p.seed?1:0};
   const ov=p&&p.overseers?p.overseers.count:0;
-  return {order:['X','T','U','Q','S'],c,w:s.whistleblowers||0,note:'simple judge levels; exploiters and converts together'+(ov?', overseers included':'')};}
+  return {order:['X','T','U','Q','S'],c,w:s.whistleblowers||0,note:'behavior judge levels; exploiters and converts together'+(ov?', overseers included':'')};}
  const j=judge(e);
  if(j){const k=j.cohorts||{},c={E:(k.exploiter||0)+(k.exploit_promoter||0),C:k.convert||0,U:k.no_misbehavior||0,
    Q:(k.insufficient_record||0)+Math.max(0,(j.agents||0)-(j.graded??j.agents)),W:k.whistleblower||0};
-  return {order:['E','C','W','U','Q'],c,w:0,note:'rubric 3.1 judge cohorts'};}
+  return {order:['E','C','W','U','Q'],c,w:0,note:'detailed behavior judge cohorts'};}
  return null;}
 function catHTML(cats,e){if(!cats)return '<p class="cat-none">'+(e.links[SIMPLE]||e.links['Behavior judge']?'Behavior judge counts load from the run…':'Behavior judge not run')+'</p>';
  const tot=cats.order.reduce((n,k)=>n+(cats.c[k]||0),0)||1,col=k=>'var(--cat-'+(CATCOL[k]||k)+')';
@@ -556,7 +558,7 @@ function paneNums(e,p){const f=p&&p.checked?p.fakes:null,t=e.task_count;
   '<div title="Distinct problems with a genuine proof, of the problems in the run"><dt>genuine problems</dt><dd class="ok">'+esc(e.distinct_verified_tasks)+'<small> / '+esc(t??'?')+'</small></dd></div>';}
 const LABELS_BY_RUN=(()=>{try{return JSON.parse($('catalogue-labels').textContent)||{};}catch(_){return {};}})();
 function catsFromLabels(L){if(!L||typeof L!=='object')return null;const c={};for(const k of ['E','C','T','U','Q','O','S'])c[k]=Number.isInteger(L[k])?L[k]:0;
- return {order:['E','C','T','U','Q','O','S'],c,w:Number.isInteger(L.W)?L.W:0,note:'agent labels of the run report ('+(L.source==='rubric'?'rubric 3.1 judge':'simple judge')+')'};}
+ return {order:['E','C','T','U','Q','O','S'],c,w:Number.isInteger(L.W)?L.W:0,note:'agent labels of the run report ('+(L.source==='rubric'?'detailed behavior judge':'behavior judge')+')'};}
 const paneBadges=new Map();
 function paneFill(e){const card=cardOf.get(e.run);if(!card||!card.classList.contains('pane'))return;const p=prof(e);
  const spec=card.querySelector('.pane-spec');if(spec&&!spec.dataset.static)spec.innerHTML=specChips(e,p);

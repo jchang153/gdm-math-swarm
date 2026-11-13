@@ -39,8 +39,8 @@ AGENT_PAGE = re.compile(r'agents/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.html')
 STORYMAP_INDEX = STORYMAP_DIR + '/index.html'
 STORYMAP_LABEL = 'Story map'
 STORYMAP_HELP = ('Per-agent map of reasoning about cheating next to what each agent read, saw and did, as read by '
-                 'models (stage 1 Claude Haiku 5.5, stages 2-3 GPT-5.6 Terra); model readings are interpretations, '
-                 'not ground truth.')
+                 'models (Claude Haiku 5.5 for thoughts, GPT-5.6 Terra for reactions and final readings); model '
+                 'readings are interpretations, not ground truth.')
 TAB_MARKER = 'data-tab="storymap"'
 TAB = f'<a {TAB_MARKER} href="{STORYMAP_INDEX}">{STORYMAP_LABEL}</a>'
 HELP = f'<li {TAB_MARKER}><strong>{STORYMAP_LABEL}</strong>: {html.escape(STORYMAP_HELP)}</li>'

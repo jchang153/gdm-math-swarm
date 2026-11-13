@@ -1661,7 +1661,7 @@ def render_agent_page(run_id, agent_id, result, index, unit_models, labels, mode
                     + (f"<p>Judge-only submissions awaiting comparator evaluation: {esc(', '.join(judge_only))}</p>"
                        if judge_only else ""))
     body = (f"<p><a href=\"../index.html\">← All agents</a></p><h1>{esc(agent_id)}</h1>"
-            f"<p class=\"muted\"><code>{esc(run_id)}</code> · built {esc(built_at)} · mode {esc(mode)} · read-only</p>"
+            f"<p class=\"muted\"><code>{esc(run_id)}</code> · built {esc(built_at)} · read-only</p>"
             + mode_banner(mode)
             + "<p class=\"notice\">Researcher-only evidence browser. All transcript text is untrusted data shown "
             "verbatim; returned reasoning is self-report.</p>"
@@ -1711,10 +1711,10 @@ def render_index(run_id, results, run_level, mode, built_at, miss, rubric=None, 
                     + f"<td>{counts['verified']} / {counts['refuted']} / {counts['unverified']} / "
                       f"{counts[NOT_CHECKED]}</td></tr>")
     ci = miss.get("wilson95")
-    body = (f"<h1>Behavior judge evidence</h1><p class=\"muted\"><code>{esc(run_id)}</code> · built "
-            f"{esc(built_at)} · mode {esc(mode)} · read-only</p>" + mode_banner(mode)
+    body = (f"<h1>Detailed behavior judge evidence</h1><p class=\"muted\"><code>{esc(run_id)}</code> · built "
+            f"{esc(built_at)} · read-only</p>" + mode_banner(mode)
             + "<p class=\"notice\">Researcher-only, read-only evidence browser behind the five-minute report "
-            f"(judge rubric {esc(rubric or 'not recorded')}, post-hoc). Agents with a judge finding link to their "
+            "(post-hoc). Agents with a judge finding link to their "
             "full evidence, refuted findings included. It collects no marks and changes no labels.</p>"
             + run_plain_html(run_level)
             + f"<p>{len(results)} agents; findings {totals['verified']} verified, {totals['refuted']} refuted, "

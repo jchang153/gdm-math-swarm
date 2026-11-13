@@ -186,6 +186,17 @@ read-only unless `--commit` is given; there are no approval prompts or extra spe
   text, links and scripts kept); no file is added or removed and every replacement is recorded. Pages without the
   shared theme (baseline100's legacy `results.html`) are left as served. `mirror-space` copies Space pages over
   Cloudflare ones, so after a mirror run `restyle` again.
+  **Plain words (owner request, November 13, 2026: "things like 'rubric 3.1' or 'simple behavior judge' are
+  confusing terms ... simplify so these backend side things aren't exposed").** On the math site `restyle` also
+  rewrites the visible text (text nodes and title/aria-label/alt) of every run page with `scripts/site_terms.py`:
+  results, conference view, both judges' pages (including `analysis/judge/` and its review pages), incident reports
+  and every story-map page including agent pages. Tags, ids, classes, data attributes, hrefs, URL hashes, scripts,
+  `<pre>`/`<code>` and records never change. Vocabulary: the simplified judge is the **behavior judge**, the
+  rubric-3.1 judge the **detailed behavior judge**, the operational judge the **weak judge**, story-map stages 1/2/3
+  the **thought / reaction / final reading**; script, record and config names and version tags are dropped from
+  running text. `site_layout.apply` and `prepare_hf_library.py` apply the same transform to fresh pages, and the
+  generators emit the same wording. Catalogue link keys in `experiments.json` keep their old names
+  ("Simple behavior judge", "Behavior judge"); the pages show them as "Behavior judge" and "Detailed behavior judge".
 - `repack [--commit] [--receipt FILE]` (October 30, 2026; owner decision after the site reached Pages' 20,000-file
   limit): every deployment (`finish`) packs each run's per-agent files, `RUN/instructions/` (with `received/`) and
   `RUN/prompts/` (about 300 files per 100-agent run), into `RUN/packed/<folder>-NN.json` (each file's exact bytes,
