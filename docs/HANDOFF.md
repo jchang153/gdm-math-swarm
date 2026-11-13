@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-12 PT by Claude (Opus 5.5) log-viewer agent (item 41: log viewer with HF sign-in).
+Last updated: 2026-11-12 PT by Claude (Opus 5.5) log-viewer agent (item 41: log viewer live).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -87,7 +87,8 @@ model bridge routes its model calls to OpenRouter, so any model can drive it.
   receipts in `runs/phase-b/cloudflare/receipts/`. Everything public on the HF Space is mirrored there; nothing
   private (Inspect logs, raw records) is on Cloudflare: R2 is not enabled on the account and the wrangler login
   cannot manage Access, so no private Cloudflare store exists (owner step if wanted: enable R2 and Zero Trust in
-  the dashboard). Inspect View pages show a "logs are private" bar linking the HF logs dataset folder. The HF Space
+  the dashboard). Inspect links go to the separate log viewer https://gdm-math-swarm-viewer.pages.dev (HF sign-in, logs read
+  straight from the private dataset; item 41); the old Inspect View pages show a "logs are private" bar linking it. The HF Space
   and HF logs dataset are untouched; the owner decides on deleting them. Details: `docs/experiment-library.md`,
   "Cloudflare site".
 - **Former results site:** the HF Space (URL under "Hosts and access"). **Public since 2026-10-24 (the owner made it
@@ -1869,7 +1870,7 @@ is being merged into main via `collab-env`.
       `timeline/monitor_reasons.json` for all 12 (every block joined: score, short reason, enforced); shown as
       "Monitor's reason (not shown / shown to the agent)". Display only; stages unchanged.
 
-41. **IN FLIGHT 2026-11-12: log viewer with HF sign-in** (owner approval verbatim in docs/plan.md, "Log viewer with
+41. **LIVE 2026-11-12 ~16:55 PT: log viewer with HF sign-in** (owner approval verbatim in docs/plan.md, "Log viewer with
     HF sign-in (November 12, 2026)"; details and threat model in docs/experiment-library.md, same title).
     - **Design:** a separate free Pages project `gdm-math-swarm-viewer` (https://gdm-math-swarm-viewer.pages.dev)
       serves one Inspect View copy, one page per run (`RUN/`), sign-in and a strict CSP; the `.eval` logs come
@@ -1877,13 +1878,18 @@ is being merged into main via `collab-env`.
       origin only, at most 8 h). No log is on Cloudflare. Main-site Inspect links point at the viewer; the old
       `RUN/inspect-view/` pages stay as fallback with a bar linking the viewer.
     - **Code:** `scripts/log_viewer.py`, `scripts/cf_site/viewer/`, `publish_cloudflare.py` (`viewer` command,
-      `verify --viewer`; `viewer --commit` creates it, then every math-site `--commit` deploys it first), `scripts/cf_site/private-logs.js`
-      (viewer link), `tests/test_log_viewer.py`.
-    - **Owner step:** create the HF OAuth app (redirect URI `https://gdm-math-swarm-viewer.pages.dev/signin`,
-      homepage `https://gdm-math-swarm-viewer.pages.dev`, scopes `openid profile read-repos`) and give the client ID;
-      export it as `GDM_HF_OAUTH_CLIENT_ID` (HANDOFF.local.md) before a math-site `--commit` (otherwise the served
+      `verify --viewer`; the viewer now exists, so every math-site `--commit` deploys it first),
+      `scripts/cf_site/private-logs.js` (viewer link), `tests/test_log_viewer.py`.
+    - **HF OAuth app:** created by the owner 2026-11-12 (public app, PKCE, no secret; redirect URI
+      `https://gdm-math-swarm-viewer.pages.dev/signin`; scopes `openid profile read-repos`; 8 h tokens). Client ID in
+      HANDOFF.local.md: **export `GDM_HF_OAUTH_CLIENT_ID` before every math-site `--commit`** (otherwise the served
       viewer's `viewer.json` keeps the last one).
-    - **Deploy:** waits for item 40's story-map deploy (one deploy at a time).
+    - **Deployed (`viewer --commit`, receipt `runs/phase-b/cloudflare/receipts/viewer-20261112.json`):** project
+      created with `wrangler pages project create --force` (wrangler 4.154 otherwise delegates to Pages-in-Workers
+      and fails); viewer deployment `52a87a6c` (232 files, 97 runs, sign-in configured); math site deployment
+      `ecb8df93` on top of `885340f2` (item 40's catalogue), 385 pages with viewer links; both verifies ok.
+      The twelve 180-minute 2026-10-28 runs have no dataset commit on the site, so no viewer page ("kept offline").
+    - **Pending:** the owner's one-time real sign-in test (organization grant, private-dataset 206 through the CDN).
 
 ## Next steps / open items
 

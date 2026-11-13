@@ -101,6 +101,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1540,7 +1541,13 @@ def ensure_viewer_project(workdir, runner=subprocess.run):
     # "Pages in Workers", which fails without a static-files folder; November 12, 2026).
     run_wrangler(['pages', 'project', 'create', log_viewer.PROJECT, '--production-branch', BRANCH, '--force'],
                  workdir, runner)
-    return deployments(workdir, runner, log_viewer.PROJECT)
+    for attempt in range(12):  # the new project can take a few seconds to be listed (November 12, 2026)
+        try:
+            return deployments(workdir, runner, log_viewer.PROJECT)
+        except RuntimeError as error:
+            if attempt == 11 or ('not found' not in str(error).lower() and '8000007' not in str(error)):
+                raise
+            time.sleep(10)
 
 
 def deploy_viewer(viewer, message, workdir, runner=subprocess.run):
