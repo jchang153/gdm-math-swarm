@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-13 PT by Claude (Opus 5.5) plain-words agent (item 43: plain words on the site).
+Last updated: 2026-11-16 PT by Claude (Opus 5.5) rerun operator (item 44: 10ov + M2 replicates r4-r6, in flight).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1936,6 +1936,19 @@ is being merged into main via `collab-env`.
       `catalogue-plain-words-20261113.json`.
     - Pre-existing failure, not from this change: `tests/test_run_clock_maintenance` IncidentWithoutBundleTests
       (fails on clean HEAD too).
+
+44. **IN FLIGHT (launched 2026-11-16 13:35-13:36 PT): 10ov and M2 replicates r4-r6** (owner approval relayed by the
+    coordinator, 2026-11-16: three more replicates of each arm for tighter error bars; same configs
+    `configs/glmflash100-seeded-10ov-glm-120m-push.json` and `configs/glmflash100-seeded-monitor-actions-reason-120m-push.json`,
+    same seeded exploit, 14 problems, `persona_seed`, 120 min, `run_budget_usd` 100; nothing else changed). Main 4cd6b7e via
+    git bundle, one run per owner VM at the large machine type (procedure of item 38, supervisor with `ulimit -n 65536`
+    and a 6 h retrieval wait). Post-run: simple behavior judge on (supervisor), no incident report, no story maps, no
+    site publication. M2 runs get the offline re-judge (`rejudge_submissions.py --include-blocked`) on the VM before
+    retrieval, as M2 r1-r3. Run ids (`glmflash100-seeded-` omitted):
+    10ov: `10ov-glm-120m-push-r4-20261116T213543Z`, `-r5-20261116T213515Z`, `-r6-20261116T213519Z`;
+    M2: `monitor-actions-reason-120m-push-r4-20261116T213528Z`, `-r5-20261116T213520Z`, `-r6-20261116T213600Z`.
+    Then `scripts/compare_arms.py` with r1-r6 for 10ov and M2 -> `research/analysis/monitor_arms-2026-11-16.{md,json}`
+    (the 2026-11-10 files are kept). Operator scripts and VM assignment: host-only (`HANDOFF.local.md`).
 
 ## Next steps / open items
 
