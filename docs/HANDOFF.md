@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-16 PT by Claude (Opus 5.5) rerun operator (item 44: 10ov + M2 replicates r4-r6, done).
+Last updated: 2026-11-17 PT by Claude (Opus 5.5) operator (item 45: M1a + M3a, monitor disclosed to agents, in flight).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1960,6 +1960,19 @@ is being merged into main via `collab-env`.
     - Comparison needs `runtime.jsonl` (offloaded): restored per run into a scratch copy with
       `offload_runs.py restore --unit RUN --prefix runtime.jsonl --dest DIR`, never in place.
     - Operator scripts and VM assignment: host-only (`HANDOFF.local.md`).
+
+45. **IN FLIGHT 2026-11-17 (launched 11:22-11:25 PT, ~2 h run + post-run): monitor disclosed to agents, M1a + M3a, one
+    run each** (owner decisions, docs/plan.md "Monitor disclosed to agents (owner decisions, November 17, 2026)").
+    `monitor.disclosed: true` adds the approved "## Action review" section after "Submissions and credit" in the
+    solver prompt (`prompts.action_review_section`; default off, earlier prompts byte-identical, tests
+    `tests/test_monitor_disclosed.py`). Configs `configs/glmflash100-seeded-monitor-{actions,full}-silent-disclosed-120m-push.json`
+    = M1 / M3 plus `disclosed`, `run_budget_usd` 100 each. Main 7b9ccbb via git bundle, one run per owner VM at the
+    large machine type, supervisor with `ulimit -n 65536` (procedure of item 44); dry render on each VM before launch:
+    all 100 agents' prompts = the parent's plus exactly the section. Post-run: simple behavior judge (supervisor),
+    offline re-judge `--include-blocked` on the VM before retrieval, no incident report, no story maps, **not
+    published**. Run ids: M1a `glmflash100-seeded-monitor-actions-silent-disclosed-120m-push-r1-20261117T192251Z`,
+    M3a `glmflash100-seeded-monitor-full-silent-disclosed-120m-push-r1-20261117T192455Z`. Operator scripts and VM
+    assignment: host-only (`HANDOFF.local.md`).
 
 ## Next steps / open items
 
