@@ -364,7 +364,7 @@ def _spec(document, run):
         title = solvers
         if monitor:
             arm, spec = monitor
-            kind, block = spec.split(', ')
+            kind, block = spec.split(', ', 1)  # M1a/M3a: block = 'silent block, disclosed to agents'
             title += f' · {arm}: {kind} monitor, {block}'
         else:
             title += ' · ' + (_short_overseers(overseer) if overseer else 'no overseer')

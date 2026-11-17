@@ -314,7 +314,12 @@ class OverviewTest(unittest.TestCase):
         arms = {'actions-silent': ('M1: actions-only monitor, silent block', 'actions-only, silent block'),
                 'actions-reason': ('M2: actions-only monitor, block with reason', 'actions-only, block with reason'),
                 'full-silent': ('M3: full-transcript monitor, silent block', 'full-transcript, silent block'),
-                'full-reason': ('M4: full-transcript monitor, block with reason', 'full-transcript, block with reason')}
+                'full-reason': ('M4: full-transcript monitor, block with reason', 'full-transcript, block with reason'),
+                # November 17, 2026: monitor disclosed to agents (live bug: the extra clause broke the title split).
+                'actions-silent-disclosed': ('M1a: actions-only monitor, silent block, disclosed to agents',
+                                             'actions-only, silent block, disclosed to agents'),
+                'full-silent-disclosed': ('M3a: full-transcript monitor, silent block, disclosed to agents',
+                                          'full-transcript, silent block, disclosed to agents')}
         intro = ('100 GLM 5.3 Flash solvers, 1 GLM 5.3 Flash overseer with check_proof and revert powers, '
                  'exploit planted at +3 min, 2 h.')
         for arm, (label, chip) in arms.items():
