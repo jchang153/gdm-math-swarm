@@ -246,7 +246,7 @@ def plain_ids(text):
 def shown(key, value):
     key = str(key)
     if key == "latency_min" and isinstance(value, (int, float)) and not isinstance(value, bool):
-        return f"{value:.1f} min"
+        return V.fmt_hms(value)
     if key in VALUE_LABEL and isinstance(value, str):
         return VALUE_LABEL[key].get(value, value)
     if key == "suspected" and isinstance(value, list):
@@ -495,7 +495,7 @@ def event_title(ev, known_fakers_at=None):
         if d.get("credited_agent"):
             bits.append(f"credit of {d['credited_agent']}" + (" (the seed)" if d.get("seed") else ""))
         if isinstance(d.get("latency_min"), (int, float)):
-            bits.append(f"{d['latency_min']:.1f} min after acceptance")
+            bits.append(f"{V.fmt_hms(d['latency_min'])} after acceptance")
         if e.get("fake"):
             bits.append("a fake")
         if d.get("duplicate"):
@@ -833,7 +833,7 @@ def event_article(o, ev, reactions, key):
         meta.append(V.badge("reverted" if e.get("outcome") == "reverted" else "revert failed",
                             "info" if e.get("outcome") == "reverted" else "caution"))
         if isinstance(d.get("latency_min"), (int, float)):
-            meta.append(V.tbadge(f"{d['latency_min']:.1f} min after acceptance",
+            meta.append(V.tbadge(f"{V.fmt_hms(d['latency_min'])} after acceptance",
                                  "Time from the submission's acceptance to this revert"))
     elif e.get("author") and typ not in ("S1", "O1", "M2"):
         meta.append(V.badge("by " + V._who(e), "info" if V.is_overseer(e) else ""))
@@ -879,7 +879,7 @@ def event_article(o, ev, reactions, key):
     cite = [ev.get("i")] + [q.get("item") for r in reactions for q in r.get("quotes") or [] if isinstance(q, dict)]
     chain = V.chain_box(ev.get("turn"), cite, "Show what surrounded it: the overseer's reasoning and tool calls",
                         before=0, after=1)
-    return (f'<article class="item {k}" id="{key}" data-kind="exp" data-t="{V._num(ev.get("t")):.1f}" '
+    return (f'<article class="item {k}" id="{key}" data-kind="exp" data-t="{V._num(ev.get("t")):.3f}" '
             f'data-label="{V.esc(V.fmt_t(ev.get("t")) + " · " + head[:110])}">'
             f'<h3>{icon}{V.fmt_t(ev.get("t"))} &middot; {V.esc(head)}</h3>'
             f'<p>{"".join(meta)} <small>turn {V.esc(ev.get("turn"))} &middot; timeline item {V.esc(ev.get("i"))}'
@@ -905,7 +905,7 @@ def activity_article(row, key, items_by_i):
     icon = f'<svg class="hglyph" viewBox="-9 -9 18 18">{ov_shape(typ, 0, 0, 5.2, cls, None, "")}</svg>'
     chain = V.chain_box(row.get("turn"), [row.get("i")], "Show the call, its result and the reasoning around it",
                         before=0, after=0)
-    return (f'<article class="item" id="{key}" data-kind="act" data-t="{V._num(row.get("t")):.1f}" '
+    return (f'<article class="item" id="{key}" data-kind="act" data-t="{V._num(row.get("t")):.3f}" '
             f'data-label="{V.esc(V.fmt_t(row.get("t")) + " · " + head[:110])}">'
             f'<h3>{icon}{V.fmt_t(row.get("t"))} &middot; {V.esc(head)}</h3><p>{"".join(meta)} <small>turn '
             f'{V.esc(row.get("turn"))} &middot; timeline item {V.esc(row.get("i"))}</small></p>'
@@ -969,7 +969,7 @@ def hard_facts_html(o):
         lat = [V._num((ev["event"].get("detail") or {}).get("latency_min")) for ev in o.events
                if ev["event"].get("type") == "V1" and isinstance((ev["event"].get("detail") or {}).get("latency_min"),
                                                                  (int, float))]
-    lat_s = ", ".join(f"{x:.1f}" for x in lat) + " min" if lat else "no reverts with a known acceptance time"
+    lat_s = ", ".join(V.fmt_hms(x) for x in lat) if lat else "no reverts with a known acceptance time"
     targets = hf.get("dm_targets")
     if targets is None:
         targets = [{"t": ev.get("t"), "to": (ev["event"].get("detail") or {}).get("to"),
@@ -1078,7 +1078,7 @@ def overseer_page(o, names, defs, tmax, all_names, models="", nav="", href=""):
                            for c in tp.get("cause_event_ids") or []) or "none named"
         head = f"turning point: {fr} → {to}"
         articles.append((V._num(tp.get("t")), 0, f'<article class="item k-tp" id="{key}" data-kind="tp" '
-                         f'data-t="{V._num(tp.get("t")):.1f}" data-label="{V.esc(V.fmt_t(tp.get("t")) + " · " + head)}">'
+                         f'data-t="{V._num(tp.get("t")):.3f}" data-label="{V.esc(V.fmt_t(tp.get("t")) + " · " + head)}">'
                          f'<h3><svg class="hglyph" viewBox="0 0 18 16"><line class="tp" x1="9" x2="9" y1="0" y2="16"/>'
                          f'</svg>{V.fmt_t(tp.get("t"))} &middot; {V.esc(head)}</h3><p>Caused by (final reading): '
                          f'{causes}</p><p>{V.esc(plain_ids(tp.get("cause_note")))}</p></article>'))
@@ -1181,7 +1181,7 @@ def overseer_page(o, names, defs, tmax, all_names, models="", nav="", href=""):
             f'{groups_html(names, href, defs)}</div></template>'
             f'<div class="layout"><div class="main"><div class="tl"><div class="tl-labels">{"".join(labels)}</div>'
             f'<div class="tl-plot"><svg class="plot" height="{bottom + 18}">{"".join(svg)}</svg></div></div>'
-            f'<p class="tlcap">Minutes from run start (0–{int(tmax)}). '
+            f'<p class="tlcap">Run time (0–{V.fmt_tick(tmax)}). '
             + (f"{V.plural(n_stacks, 'spot holds', 'spots hold')} several items (the number on the shape); "
                f"click one to list them. " if n_stacks else "")
             + 'Click a shape, or step with ← →.</p>'
@@ -1330,7 +1330,7 @@ def run_panel(ovs, ctx, tmax):
     while t <= tmax + 1e-9:
         x = V.pct(t, tmax)
         anchor = "end" if t + step > tmax + 1e-9 else "start" if t == 0 else "middle"
-        svg.append(f'<text x="{x:.2f}%" y="{H - 6}" text-anchor="{anchor}">{t}</text>')
+        svg.append(f'<text x="{x:.2f}%" y="{H - 6}" text-anchor="{anchor}">{V.fmt_tick(t)}</text>')
         t += step
     for c, cls, label in curves:
         pts = [(V._num(p[0]), V._num(p[1])) for p in _with_seed(ctx, c)]
@@ -1394,7 +1394,7 @@ def run_panel(ovs, ctx, tmax):
           '</svg>an overseer\'s first moment (labelled)</li></ul>')
     return (f'<section class="ovrun"><h2>Solver fakes and overseer moments</h2>'
             f'<p class="muted">Counts from the run\'s records (solver fakers: solvers only; accepted and standing '
-            f'fakes: the solvers\' and the seed\'s planted fake): step lines over the run, 0–{int(tmax)} min. Vertical lines: each overseer\'s first library listing, check of the seed\'s fake, check '
+            f'fakes: the solvers\' and the seed\'s planted fake): step lines over the run, 0–{V.fmt_tick(tmax)}. Vertical lines: each overseer\'s first library listing, check of the seed\'s fake, check '
             f'of a real submission, revert, public post, DM and overseer-board post. Hover, tap or Tab to a line for its '
             f'counts (← → move between lines).{V.esc(seed_s)}</p>{lg}'
             f'<svg class="ovchart{" quiet" if quiet else ""}" height="{H}" role="group" '

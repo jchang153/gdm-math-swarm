@@ -268,7 +268,7 @@ class OverseerViewTest(unittest.TestCase):
         self.assertRegex(self.page, r'class="g g-own kf" data-k="ev-23"')  # DM to a known faker
         self.assertRegex(self.page, r'class="g g-own" data-k="ev-36"[^>]*data-stack="ev-36 ev-39"')  # own post shown
         self.assertIn('class="sl"', self.page)  # the sleep span
-        self.assertIn("4.2 min after acceptance", self.page)
+        self.assertIn("4m 12s after acceptance", self.page)
         self.assertIn("known faker", self.page)
 
     def test_panel_reaction_story_and_facts(self):
@@ -282,10 +282,10 @@ class OverseerViewTest(unittest.TestCase):
         self.assertIn("Hard facts", self.page)
         hf = re.search(r"<h2>Hard facts.*?</table>", self.page, re.S).group(0)
         self.assertIn("first check of the seed&#x27;s fake", hf)
-        self.assertRegex(hf, r"first successful revert</td><td class=\"n\"><a href=\"#sel=ev-14\"[^>]*>12\.2 min</a>"
+        self.assertRegex(hf, r"first successful revert</td><td class=\"n\"><a href=\"#sel=ev-14\"[^>]*>12m 12s</a>"
                              r"</td><td class=\"n\">1</td><td class=\"n\">2</td><td class=\"n\">1</td>")
         # the seed's planted fake (accepted at 0.8 min, never reverted) counts from the first moments on
-        self.assertRegex(hf, r"first library listing</td><td class=\"n\"><a [^>]*>1\.0 min</a></td>"
+        self.assertRegex(hf, r"first library listing</td><td class=\"n\"><a [^>]*>1m 00s</a></td>"
                              r"<td class=\"n\">0</td><td class=\"n\">1</td><td class=\"n\">1</td>")
         self.assertIn("Overseer board in this run: yes", self.page)
         self.assertIn('<a href="#sel=ev-11" data-k="ev-11">proof check no. 2 (sub-000014)</a>', self.page)
@@ -307,7 +307,7 @@ class OverseerViewTest(unittest.TestCase):
         self.assertIn('class="cv-standing"', chart)
         marks = re.findall(r'<g class="mkr" tabindex="0" role="img" aria-label="([^"]+)"', chart)
         self.assertEqual(len(marks), 7)
-        self.assertTrue(any("first successful revert at 12.2 min" in m and "1 solver had faked" in m for m in marks))
+        self.assertTrue(any("first successful revert at 12m 12s" in m and "1 solver had faked" in m for m in marks))
         self.assertIn(vo.INDEX_JS, self.index)
         self.assertIn('href="taxonomy_overseer.html"', self.index)
 
@@ -415,7 +415,7 @@ class OverseerOnlyTest(unittest.TestCase):
             self.assertIn('<section class="ovs">', index)
             self.assertIn('<section class="ovrun">', index)
             self.assertNotIn("0 agents.", index)
-            self.assertIn("(0–60)", index)  # overseer_context.json run_minutes
+            self.assertIn("(0–1h)", index)  # overseer_context.json run_minutes
             both = tmp / "both"
             view.build(W4 / "map", W4 / "timeline", both, overseer_map=om, overseer_timeline=ot, minutes=60)
             view.build(tmp / "empty", None, tmp / "again", overseer_map=om, overseer_timeline=ot, minutes=60)

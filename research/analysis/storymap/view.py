@@ -57,6 +57,9 @@ REPO = Path(__file__).resolve().parents[3]
 if str(REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO / "scripts"))
 from site_style import themed  # noqa: E402  (shared light/dark tokens and toggle, no external loads)
+if str(REPO) not in sys.path:
+    sys.path.append(str(REPO))
+from research.analysis.storymap.timefmt import FMT_JS, fmt_hms, fmt_minutes_in_text, fmt_tick  # noqa: E402
 
 DEFAULT_TAXONOMY = Path(__file__).resolve().parent / "taxonomy.md"  # public copy (owner, November 2, 2026)
 AXIS_MIN = 180.0
@@ -163,7 +166,7 @@ def event_label(e_or_id, typ=None):
             return f"integrity reminder no. {m.group(1)}"
         at = rest.rsplit("@", 1)[1] if "@" in rest else None
         try:
-            return f"integrity reminder at {float(at):.1f} min"
+            return f"integrity reminder at {fmt_hms(float(at))}"
         except (TypeError, ValueError):
             return type_name(typ)
     if typ in BLOCK_TYPES:  # 'X1:agent-032:block-001' -> 'blocked action no. 1 (Bash)'
@@ -385,7 +388,7 @@ details.legend{position:static}table.evt thead{display:none}table.evt,table.evt 
 tr.er{display:grid;grid-template-columns:26px 1fr auto auto;gap:0 8px;border-top:1px solid var(--line);padding:4px 0}
 tr.er>td{border:none;padding:1px 0}tr.er>td:nth-child(3),tr.er>td:nth-child(n+6):nth-child(-n+10){display:none}
 tr.er>td.ex{grid-column:1/-1;width:auto;max-width:none;display:block;white-space:nowrap}
-tr.er>td:nth-child(4)::after{content:" min"}tr.er>td:nth-child(5)::after{content:" readers";color:var(--muted)}
+tr.er>td:nth-child(5)::after{content:" readers";color:var(--muted)}
 tr.xr{display:block}tr.xr>td{display:block}.sb{grid-template-columns:1fr;gap:2px}.sbar{width:100%}}
 @media (max-height:599px){details.legend{position:static}}
 """
@@ -416,7 +419,7 @@ const stackOf={};document.querySelectorAll('.tl [data-stack]').forEach(g=>g.data
 function ok(a){return !kind.value||a.dataset.kind===kind.value;}
 function list(){return all.filter(ok);}
 function status(){const L=list(),src=cur&&document.getElementById(cur),i=src?L.indexOf(src):-1;
-const t=src?' · '+src.dataset.t+' min':'';
+const t=src?' · '+fmtHMS(src.dataset.t):'';
 pos.textContent=src?(i>=0?(i+1)+' of '+L.length:'('+kind.selectedOptions[0].text.toLowerCase()+': '+L.length+')')+t
 :L.length+' '+(kind.value?kind.selectedOptions[0].text.toLowerCase():'items');
 const ix=src?all.indexOf(src):-1;
@@ -488,7 +491,7 @@ const rows=R.filter(r=>r[2]>=lo&&r[2]<=hi);let h='<div class="cbar"><button type
 '<button type="button" data-act="close">Collapse</button></div><ol>';let turn=null;
 for(const r of rows){const[i,t,tu,kd,tool,text,cut]=r;if(tu!==turn){turn=tu;h+='<li class="turn">Turn '+tu+'</li>';}
 const c=cite.has(i),body=hl(text||'',c?(sp[i]||[]):[],c?q:''),more=cut?'<span class="muted"> [cut '+cut+' characters]</span>':'',
-head='<div class="h">'+t.toFixed(1)+' min · '+(KIND[kd]||kd)+(tool?' · '+esc(tool):'')+' · item '+i+
+head='<div class="h">'+fmtHMS(t)+' · '+(KIND[kd]||kd)+(tool?' · '+esc(tool):'')+' · item '+i+
 (c?' · <b>cited</b>':'')+'</div>';
 if(kd==='tool_result'||kd==='tool_call'){const long=(text||'').length>220;
 h+='<li'+(c?' class="cited"':'')+'>'+head+(long&&!c?'<details><summary>'+esc((text||'').slice(0,160))+'…</summary><div class="code">'
@@ -774,12 +777,12 @@ def esc(v):
 
 
 def fmt_t(t):
-    """Every time in the UI: minutes from run start, one decimal."""
-    return "?" if t is None else f"{max(_num(t), 0.0):.1f} min"  # a few setup items sit a moment before 0
+    """Every time in the UI: run time as hours / minutes / seconds ('7m 40s', storymap/timefmt.py)."""
+    return "?" if t is None else fmt_hms(t)  # a few setup items sit a moment before 0 (shown as 0s)
 
 
 def fmt_span(a, b):
-    return f"{max(_num(a), 0.0):.1f}\u2013{max(_num(b), 0.0):.1f} min"
+    return f"{fmt_hms(a)}\u2013{fmt_hms(b)}"
 
 
 def plural(n, one, many=None):
@@ -796,13 +799,14 @@ def yesno(v):
 
 
 def tidy_times(text):
-    """Extractor summaries in the pages' words: '... at 12.771' -> '... at 12.8 min', 'FAKE (iffrfl_main)' ->
+    """Extractor summaries in the pages' words: '... at 12.771' -> '... at 12m 46s', 'FAKE (iffrfl_main)' ->
     'fake (answer theorem proved by Iff.rfl alone)', outcome codes in words."""
     text = re.sub(r"\bFAKE \((\w+)\)", lambda m: "fake (" + VALUE_LABEL["form"].get(m.group(1), m.group(1)) + ")",
                   str(text))
     text = re.sub(r"\b(" + "|".join(k for k in OUTCOME_LABEL if "_" in k) + r")\b", lambda m: OUTCOME_LABEL[m.group(1)],
                   text)
-    return re.sub(r"\b(at|seen at) (-?\d+\.\d+)\b(?! min)", lambda m: f"{m.group(1)} {fmt_t(float(m.group(2)))}",
+    text = fmt_minutes_in_text(text)  # '7.7 min after acceptance' -> '7m 42s after acceptance'
+    return re.sub(r"\b(at|seen at) (-?\d+\.\d+)\b(?! ?min)", lambda m: f"{m.group(1)} {fmt_t(float(m.group(2)))}",
                   str(text))
 
 
@@ -1076,7 +1080,7 @@ def page(title, body, scripts="", body_class="", css=""):
            f'<meta name="robots" content="noindex"><title>{esc(title)}</title>'
            f'<style>{CSS}{MONITOR_CSS if MONITOR["on"] else ""}{css}</style></head>'
            f'<body{f" class={chr(34)}{body_class}{chr(34)}" if body_class else ""}>{body}'
-           f'{"<script>" + scripts + "</script>" if scripts else ""}</body></html>')
+           f'{"<script>" + FMT_JS + scripts + "</script>" if scripts else ""}</body></html>')
     return themed(doc)
 
 
@@ -1302,7 +1306,7 @@ def axis_svg(tmax, y, h, labels=True):
         out.append(f'<line class="tick" x1="{x:.2f}%" x2="{x:.2f}%" y1="{y}" y2="{y + h}"/>')
         if labels:
             anchor = "end" if t + step > tmax + 1e-9 else "start" if t == 0 else "middle"
-            out.append(f'<text x="{x:.2f}%" y="{y + h + 13}" text-anchor="{anchor}">{t}</text>')
+            out.append(f'<text x="{x:.2f}%" y="{y + h + 13}" text-anchor="{anchor}">{fmt_tick(t)}</text>')
         t += step
     return "".join(out)
 
@@ -1433,7 +1437,7 @@ def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css="", gra
                     + (f'<div class="blk" title="Monitor blocks of this agent">{nblk}</div>' if MONITOR["on"] else "")
                     + f'<div class="labels">{final_labels(a["stage3"])}</div></div>')
     header_axis = ("<svg>" + "".join(
-        f'<text x="{pct(t, tmax):.2f}%" y="12" text-anchor="{"start" if t == 0 else "end" if t + tick_step(tmax) > tmax else "middle"}">{t}</text>'
+        f'<text x="{pct(t, tmax):.2f}%" y="12" text-anchor="{"start" if t == 0 else "end" if t + tick_step(tmax) > tmax else "middle"}">{fmt_tick(t)}</text>'
         for t in range(0, int(tmax) + 1, tick_step(tmax))) + "</svg>")
 
     def sel(name, label, options, hint):
@@ -1454,8 +1458,8 @@ def index_page(agents, pipeline, tmax, nav="", names=None, extra="", css="", gra
     body = (f"{nav}<h1>Story map{(': ' + esc(run)) if run else ''}</h1>{graph_link(graph)}{sample_note(sample)}"
             f'{banner(model_names(pipeline))}'
             f"{legend_bar('index', BLOCK_TYPES if MONITOR['on'] else (), push=push_seen)}"
-            f'<p class="muted">{len(agents)} agents. {SOURCE_TITLE}: {summary}. Time axis: minutes from run start '
-            f'(0–{int(tmax)}). A number on a shape counts the items stacked there.</p>{extra}'
+            f'<p class="muted">{len(agents)} agents. {SOURCE_TITLE}: {summary}. Time axis: run time '
+            f'(0–{fmt_tick(tmax)}). A number on a shape counts the items stacked there.</p>{extra}'
             f'{monitor_panel(agents, tmax, names or {}) if MONITOR["on"] else ""}{filters}'
             f'<div class="grid{" mon" if MONITOR["on"] else ""}"><div class="hdr"><div>Agent</div><div>{header_axis}</div>'
             + ('<div class="blk" title="Tool calls the monitor blocked">Blocks</div>' if MONITOR["on"] else "")
@@ -1473,7 +1477,7 @@ def overseer_only_index(ov, tmax, nav, graph=False):
     body = (f"{nav}<h1>Story map{(': ' + esc(run)) if run else ''}</h1>{graph_link(graph)}"
             f"{banner(model_names(ov.pipeline))}"
             f'<p class="muted">Overseers only: no solver story map was made for this run, so solvers appear only in '
-            f'the run-level fake counts below. Time axis: minutes from run start (0–{int(tmax)}).</p>{block}')
+            f'the run-level fake counts below. Time axis: run time (0–{fmt_tick(tmax)}).</p>{block}')
     return page(f"Story map {run}".strip(), body, css=css)
 
 
@@ -1708,7 +1712,7 @@ def block_article(ev, reactions, key, names=None, href=""):
     cite = [ev.get("i")] + [q.get("item") for r in reactions for q in r.get("quotes") or [] if isinstance(q, dict)]
     chain = chain_box(ev.get("turn"), cite, "Show what surrounded it: the agent's reasoning and tool calls",
                       before=0, after=1)
-    return (f'<article class="item" id="{key}" data-kind="blk" data-t="{_num(ev.get("t")):.1f}" '
+    return (f'<article class="item" id="{key}" data-kind="blk" data-t="{_num(ev.get("t")):.3f}" '
             f'data-label="{esc(fmt_t(ev.get("t")) + " · " + head[:110])}">'
             f'<h3>{icon}{fmt_t(ev.get("t"))} &middot; {esc(head)}</h3>'
             f'<p>{"".join(meta)} <small>turn {esc(ev.get("turn"))} &middot; timeline item {esc(ev.get("i"))}</small></p>'
@@ -1760,7 +1764,7 @@ def event_article(name, ev, reactions, key, names=None, href="", together=0):
     cite = [ev.get("i")] + [q.get("item") for r in reactions for q in r.get("quotes") or [] if isinstance(q, dict)]
     chain = chain_box(ev.get("turn"), cite, "Show what surrounded it: the agent's reasoning and tool calls",
                       before=0, after=1)
-    return (f'<article class="item {k}" id="{key}" data-kind="{kind}" data-t="{_num(ev.get("t")):.1f}" '
+    return (f'<article class="item {k}" id="{key}" data-kind="{kind}" data-t="{_num(ev.get("t")):.3f}" '
             f'data-label="{esc(fmt_t(ev.get("t")) + " · " + head[:110])}">'
             f'<h3>{icon}{fmt_t(ev.get("t"))} &middot; {esc(head)}</h3>'
             f'<p>{"".join(meta)} <small>turn {esc(ev.get("turn"))} &middot; timeline item {esc(ev.get("i"))}</small></p>'
@@ -1816,7 +1820,7 @@ def thought_article(th, names, related, key, items_by_i, href=""):
                           before=1, after=0, quote=str(th.get("quote") or ""), spans=spans)
     label = f"{fmt_t(th.get('t'))} · thought {code_name(code, names, code)}"
     return (f'<article class="item k-th{" g-th-low" if low else ""}" id="{key}" data-kind="th" '
-            f'data-t="{_num(th.get("t")):.1f}" data-label="{esc(label)}">'
+            f'data-t="{_num(th.get("t")):.3f}" data-label="{esc(label)}">'
             f'<h3>{icon}{fmt_t(th.get("t"))} &middot; thought {code_link(code, names, href)}{grp}</h3>'
             f'<p>{badge("reader certainty: " + str(th.get("certainty")))} <small>turn {esc(th.get("turn"))} &middot; '
             f'timeline item {esc(th.get("item"))} &middot; thought-reading chunk {esc(th.get("chunk"))}</small></p>'
@@ -1905,7 +1909,7 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
         head = (f'turning point: position on cheating {STANCE_LABEL.get(tp.get("from"), tp.get("from"))} → '
                 f'{STANCE_LABEL.get(tp.get("to"), tp.get("to"))}')
         articles.append((_num(tp.get("t")), 0, f'<article class="item k-tp" id="{key}" data-kind="tp" '
-                         f'data-t="{_num(tp.get("t")):.1f}" data-label="{esc(fmt_t(tp.get("t")) + " · " + head)}">'
+                         f'data-t="{_num(tp.get("t")):.3f}" data-label="{esc(fmt_t(tp.get("t")) + " · " + head)}">'
                          f'<h3><svg class="hglyph" viewBox="0 0 18 16"><line class="tp" x1="9" x2="9" y1="0" y2="16"/>'
                          f'</svg>{fmt_t(tp.get("t"))} &middot; {esc(head)}</h3>'
                          f'<p>Caused by (final reading): {causes}</p><p>{esc(plain_ids(tp.get("cause_note")))}</p></article>'))
@@ -1989,7 +1993,7 @@ def agent_page(a, names, tmax, all_names, models="", nav="", href=""):
             f'code groups</h4>{groups_html(names, href, DEFS)}</div></template>'
             f'<div class="layout"><div class="main"><div class="tl"><div class="tl-labels">{"".join(labels)}</div>'
             f'<div class="tl-plot"><svg class="plot" height="{H}">{"".join(svg)}</svg></div></div>'
-            f'<p class="tlcap">Minutes from run start (0–{int(tmax)}). '
+            f'<p class="tlcap">Run time (0–{fmt_tick(tmax)}). '
             + (f"{plural(n_stacks, 'spot holds', 'spots hold')} several items (the number on the shape); "
                f"click one to list them. " if n_stacks else "")
             + 'Click a shape, or step with ← →.</p>'
@@ -2150,7 +2154,7 @@ def events_page(agents, tmax, models="", nav="", names=None):
 EV_COLUMNS = (  # (sort key, heading, numeric, hint)
     ("shape", "", False, "Event shape, as on the maps"), ("kind", "Kind", False, "Section"),
     ("author", "Author", False, "Who wrote it (for a revert: who reverted)"),
-    ("t", "First seen (min)", True, "Minutes from run start when the first reader saw it"),
+    ("t", "First seen", True, "Run time when the first reader saw it"),
     ("readers", "Readers", True, "Agents that read it"),
     ("reg", "Noticed", True, "Readers whose reasoning or acts refer to it (reaction reading: registered yes)"),
     ("belief", "Belief chg.", True, "Readers whose stated belief changed, but not their plan"),
@@ -2175,12 +2179,13 @@ def event_row(gk, g):
     who = " ".join([str(e.get("author") or "")] + readers)
     q = " ".join([title, text[:TEXT_CAP], *[TAG_LABEL.get(x, x) for x in e.get("tags") or []],
                   "fake" if g["fake"] else ""]).lower()
-    vals = {"t": f"{max(_num(ev.get('t')), 0):.1f}", "readers": n, "reg": c["reg-yes"], "belief": c["chg-belief"],
+    vals = {"t": f"{max(_num(ev.get('t')), 0):.3f}", "readers": n, "reg": c["reg-yes"], "belief": c["chg-belief"],
             "behaviour": c["chg-behaviour"], "toward": c["dir-toward_cheating"], "away": c["dir-away"]}
 
     def num(k):
         v = vals[k]
-        return f'<td class="n" data-v="{v}">{v if v or k in ("readers", "t") else "<span class=muted>0</span>"}</td>'
+        shown = fmt_hms(v) if k == "t" else v if v or k == "readers" else "<span class=muted>0</span>"
+        return f'<td class="n" data-v="{v}">{shown}</td>'
     kind = type_name(e.get("type")) + (" (fake)" if g["fake"] else "")
     author = _who(e) if e.get("author") else "host (automatic)" if e.get("type") == "R1" else "—"
     return (f'<tr class="er" tabindex="0" data-id="{esc(gk)}" data-sec="{sec}" data-dir="{dirs}" data-chg="{chgs}" '
@@ -2372,7 +2377,8 @@ def plain_validation(text):
                   lambda m: CHECK_LABEL[m.group(1)], text)
     text = re.sub(r"\b(?:anthropic|openai|google)/[a-z0-9.\-]+", lambda m: model_label(m.group(0)), text)
     text = text.replace("Jaccard", "overlap (Jaccard)").replace("+/-", "\u00b1")
-    text = re.sub(r"\b(stop at|at) (\d+\.\d+)\b", lambda m: f"{m.group(1)} {fmt_t(float(m.group(2)))}", text)
+    text = fmt_minutes_in_text(text)
+    text = re.sub(r"\b(stop at|at) (\d+\.\d+)\b(?! ?min)", lambda m: f"{m.group(1)} {fmt_t(float(m.group(2)))}", text)
     return plain_ids(text)
 
 

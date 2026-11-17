@@ -204,7 +204,7 @@ html.overlay header { padding-right: 64px; }
     <div class="row"><svg class="shape" viewBox="-8 -8 16 16"><path d="M0-7L6 0 0 7-6 0Z" fill="var(--s-none)"/></svg>overseer</div>
     <div class="row"><svg class="shape" viewBox="-8 -8 16 16"><circle r="6.5" fill="none" stroke="var(--muted)" stroke-width="1.3" stroke-dasharray="3 2"/><circle r="3.5" fill="var(--faint)"/></svg>dashed zone: solvers without a story map, by whether they have faked (no stance)</div>
     <div class="row"><svg class="shape" viewBox="-8 -8 16 16"><path id="starpath" fill="var(--s-none)"/></svg>seed agent</div>
-    <h2>Edges (decay, half-life <span id="hl">10</span> min)</h2>
+    <h2>Edges (decay, half-life <span id="hl">10m</span>)</h2>
     <div id="edgeToggles"></div>
     <label class="row"><input type="checkbox" id="tgAnim" checked>event animations</label>
     <label class="row"><input type="checkbox" id="tgLabels">agent labels</label>
@@ -280,7 +280,7 @@ const EDGE_OF = { dm: "dm", library_read: "library", board_read: "board", revert
 const $ = (id) => document.getElementById(id);
 const stage = $("stage"), canvas = $("graph"), ctx = canvas.getContext("2d");
 const tip = $("tip");
-$("hl").textContent = HALF_LIFE;
+$("hl").textContent = HALF_LIFE + "m";
 $("starpath").setAttribute("d", starPath(0, 0, 7.5, 3.2));
 
 if (!GRAPH || !Array.isArray(GRAPH.nodes)) { $("empty").style.display = "flex"; return; }
@@ -770,7 +770,8 @@ function followCamera() {
 
 // ---------- time controls ----------
 const scrub = $("scrub");
-function fmtT(t) { const neg = t < 0; t = Math.abs(t); const m = Math.floor(t), s = Math.floor((t - m) * 60); return (neg ? "−" : "") + m + ":" + String(s).padStart(2, "0"); }
+// Run time as hours / minutes / seconds ("45s", "7m 40s", "1h 03m 12s"), as research/analysis/storymap/timefmt.py
+function fmtT(t) { t = +t || 0; const neg = t < 0, T = Math.round(Math.abs(t) * 60), h = Math.floor(T / 3600), m = Math.floor(T % 3600 / 60), s = T % 60, p = (v) => String(v).padStart(2, "0"), g = neg && T ? "−" : ""; return h ? `${g}${h}h ${p(m)}m ${p(s)}s` : m ? `${g}${m}m ${p(s)}s` : `${g}${s}s`; }
 function setTime(t, fromScrub) {
   t = Math.max(tMin, Math.min(tMax, t));
   const back = t < tNow; tNow = t;
@@ -1090,7 +1091,7 @@ function frame(now) {
   if (sim.alpha() > sim.alphaMin()) sim.tick();
   followCamera();
   draw(ANIM_SEC * Math.max(playing ? speed : 5, 1) / 60);
-  document.getElementById("clock").innerHTML = `${fmtT(tNow)} <span>/ ${fmtT(tMax)} run min</span>`;
+  document.getElementById("clock").innerHTML = `${fmtT(tNow)} <span>/ ${fmtT(tMax)}</span>`;
   $("cursor").style.left = `calc(${100 * (tNow - tMin) / (tMax - tMin)}% - 1px)`;
   renderStanceLegend(); renderFeed(); renderMsgs(); if (hover && hover !== locked) renderTip(); if (locked) renderFollow();
   requestAnimationFrame(frame);

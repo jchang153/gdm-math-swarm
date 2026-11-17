@@ -88,7 +88,7 @@ class ViewFixtureTest(unittest.TestCase):
         for k in keys:
             self.assertIn(f'id="{k}"', page)
         # The revert event shows its stage-2 reaction (refake signal) and the thought quote.
-        art = re.search(r'<article class="item k-fake" id="ev-\d+"[^>]*><h3><svg[^>]*>.*?</svg>145\.0 min.*?</article>',
+        art = re.search(r'<article class="item k-fake" id="ev-\d+"[^>]*><h3><svg[^>]*>.*?</svg>2h 25m 00s.*?</article>',
                         page, re.S).group(0)
         self.assertIn("reads the revert as a detector to evade", art)
         self.assertIn("refake signal", art)
@@ -210,7 +210,7 @@ class ViewFixtureTest(unittest.TestCase):
             view.build(FIX / "map", tmp / "timeline", tmp / "out", taxonomy=None)
             page = (tmp / "out" / "agents" / "agent-003.html").read_text()
             lanes = page.split('<div class="tl">', 1)[1].split('<p class="tlcap">', 1)[0]
-            self.assertRegex(lanes, r'<g class="g g-rem" data-k="ev-\d+"[^>]*><title>Integrity reminder · 160\.0 min')
+            self.assertRegex(lanes, r'<g class="g g-rem" data-k="ev-\d+"[^>]*><title>Integrity reminder · 2h 40m 00s')
             self.assertIn('<span class="lf">Saw: integrity reminders</span>', lanes)  # its own lane
             strip = re.search(r'<details class="legend" open>.*?</details>', page, re.S).group(0)
             full = page[page.index('<details class="about">'):page.index('<details class="terms">')]
@@ -228,8 +228,8 @@ class ViewFixtureTest(unittest.TestCase):
     def test_reminder_reactions_on_agent_and_events_pages(self):
         # Each R1 delivery's stage-2 reaction shows on the agent page and is counted in the events page's reminder
         # group (grouped by delivery number); turning points citing a reminder name it with its minute.
-        self.assertEqual(view.event_label("R1:agent-003@21.962"), "integrity reminder at 22.0 min")
-        self.assertEqual(view.plain_ids("caused by R1:agent-003@7.8"), "caused by integrity reminder at 7.8 min")
+        self.assertEqual(view.event_label("R1:agent-003@21.962"), "integrity reminder at 21m 58s")
+        self.assertEqual(view.plain_ids("caused by R1:agent-003@7.8"), "caused by integrity reminder at 7m 48s")
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             shutil.copytree(FIX / "timeline", tmp / "timeline")
@@ -265,11 +265,11 @@ class ViewFixtureTest(unittest.TestCase):
 
     def test_tooltips_name_what_each_mark_is(self):
         page = self.pages["agent-003"]
-        self.assertRegex(page, r'class="ph-\w+"[^>]*><title>Position on cheating: [\w ]+ · \d+\.\d–\d+\.\d min')
-        self.assertRegex(page, r'data-k="ev-\d+"[^>]*><title>[A-Z][^<]* · \d+\.\d min')
+        self.assertRegex(page, r'class="ph-\w+"[^>]*><title>Position on cheating: [\w ]+ · (?:\d+h )?(?:\d+m )?\d+s–(?:\d+h )?(?:\d+m )?\d+s')
+        self.assertRegex(page, r'data-k="ev-\d+"[^>]*><title>[A-Z][^<]* · (?:\d+h )?(?:\d+m )?\d+s')
         self.assertRegex(page, r'data-k="th-\d+"[^>]*><title>Thought ')
-        self.assertRegex(page, r"<title>Turning point · \d+\.\d min")
-        self.assertNotRegex(visible_ui(page), r"\bt=\d|\d{4}-\d\d-\d\dT")  # one time format: minutes
+        self.assertRegex(page, r"<title>Turning point · (?:\d+h )?(?:\d+m )?\d+s")
+        self.assertNotRegex(visible_ui(page), r"\bt=\d|\d{4}-\d\d-\d\dT")  # one time format: hours / minutes / seconds
         self.assertRegex(self.index, r'<a href="agents/agent-00\d\.html#sel=ev-\d+"><svg x="[\d.]+%" y="[\d.]+">'
                                      r'<g class="g [^"]*" data-p="[\d.]+"><title>')
 
@@ -331,7 +331,7 @@ class ViewFixtureTest(unittest.TestCase):
         self.assertRegex(self.index, r'<span class="badge b-caution" title="[^"]+">\d+ consistency flags?</span>')
         self.assertEqual(view.model_label("google/gemini-3.8-flash"), "Gemini 3.8 Flash")
         self.assertEqual(view.model_label("openai/gpt-6-luna"), "GPT-6 Luna")
-        self.assertEqual(view._shown("submitted_at", 20.259), "20.3 min")
+        self.assertEqual(view._shown("submitted_at", 20.259), "20m 16s")
         self.assertEqual(view._shown("credited", True), "yes")
         self.assertEqual(view._shown("stop_cause_event_ids", ["B1:post-000006"]), "board post post-000006")
         self.assertEqual(view._shown("count", 2.5), 2.5)
@@ -585,10 +585,10 @@ class RedesignTest(unittest.TestCase):
             self.assertEqual(view.run_minutes(run / "analysis" / "storymap"), 120.0)
             view.build(run / "analysis" / "storymap", FIX / "timeline", tmp / "out", taxonomy=None)
             page = (tmp / "out" / "agents" / "agent-003.html").read_text()
-            self.assertIn("Minutes from run start (0\u2013120)", page)
-            self.assertIn(">120</text>", page)
-            self.assertNotIn(">180</text>", page)
-            self.assertIn("(0\u2013120)", (tmp / "out" / "index.html").read_text())
+            self.assertIn("Run time (0\u20132h)", page)
+            self.assertIn(">2h</text>", page)
+            self.assertNotIn(">3h</text>", page)
+            self.assertIn("(0\u20132h)", (tmp / "out" / "index.html").read_text())
 
     def test_stacked_items_are_counted_and_listed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -677,7 +677,7 @@ class RedesignTest(unittest.TestCase):
                                                                                "thoughts": [rec], "items": {}}))
             view.build(tmp / "map", FIX / "timeline", tmp / "out", taxonomy=None)
             page = (tmp / "out" / "agents" / "agent-003.html").read_text()
-            box = re.search(r'<article class="item k-th[^"]*" id="th-\d+"[^>]*data-t="%.1f".*?<div class="chain"([^>]*)>'
+            box = re.search(r'<article class="item k-th[^"]*" id="th-\d+"[^>]*data-t="%.3f".*?<div class="chain"([^>]*)>'
                             % th["t"], page, re.S).group(1)
             self.assertIn(f'data-lo0="{max(th["turn"] - 2, 0)}" data-hi0="{th["turn"]}"', box)
             self.assertIn(f'data-spans="{th["item"]}:{start}:{start + len(th["quote"])}"', box)
@@ -705,7 +705,7 @@ class RedesignTest(unittest.TestCase):
             art = re.search(r'<article class="item[^"]*" id="ev-%d".*?</article>' % (len(items) - 2), page, re.S).group(0)
             self.assertIn(">delivered unasked</span>", art)
             self.assertIn(">delivered together: item 1 of 2</span>", art)
-            self.assertIn("<dt>Delivered with</dt><dd>board post post-000077, integrity reminder at 120.0 min</dd>", art)
+            self.assertIn("<dt>Delivered with</dt><dd>board post post-000077, integrity reminder at 2h 00m 00s</dd>", art)
             for hidden in ("toolu_x", "push-000004", "Request seq", "Placement"):
                 self.assertNotIn(hidden, art)
             bar = re.search(r'<details class="legend" open>.*?</details>', page, re.S).group(0)
