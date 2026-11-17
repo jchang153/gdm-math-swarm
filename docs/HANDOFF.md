@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-17 PT by Claude (Opus 5.5) operator (item 45: M1a + M3a, monitor disclosed to agents, in flight).
+Last updated: 2026-11-17 PT by Claude (Opus 5.5) publisher (item 44: r4-r6 published on the site; item 45 in flight).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -1943,8 +1943,8 @@ is being merged into main via `collab-env`.
     `configs/glmflash100-seeded-monitor-actions-reason-120m-push.json`, same seeded exploit, 14 problems, `persona_seed`,
     120 min, `run_budget_usd` 100; nothing else changed). Main 4cd6b7e via git bundle, one run per owner VM at the large
     machine type (procedure of item 38; supervisor started with `ulimit -n 65536`: no open-file errors this time).
-    Post-run: simple behavior judge (supervisor), no incident report, no story maps, **not published** on the site
-    (fetch preview only). M2 runs got the offline re-judge (`rejudge_submissions.py --include-blocked`, 326-361 rows)
+    Post-run: simple behavior judge (supervisor), no incident report, no story maps; **published on the site
+    2026-11-17 PT** (below). M2 runs got the offline re-judge (`rejudge_submissions.py --include-blocked`, 326-361 rows)
     on the VM before retrieval, as M2 r1-r3; `rejudge.jsonl` and the rebuilt results are on the Mac only. Raw runs
     are in the private logs dataset (supervisor upload). All six ran the full 120 min. Run ids
     (`glmflash100-seeded-` omitted):
@@ -1960,6 +1960,19 @@ is being merged into main via `collab-env`.
     - Comparison needs `runtime.jsonl` (offloaded): restored per run into a scratch copy with
       `offload_runs.py restore --unit RUN --prefix runtime.jsonl --dest DIR`, never in place.
     - Operator scripts and VM assignment: host-only (`HANDOFF.local.md`).
+    - **PUBLISHED 2026-11-17 (11:26-13:56 PT), free path (no story maps, incident reports or paid calls):** the
+      supervisor's site bundles had been deleted after the fetch preview, so each run was restored from the logs
+      dataset into a scratchpad copy (`offload_runs.py restore --dest`, never in place), then conference view
+      (byte-identical to the supervisor's), Inspect View bundle and `prepare_hf_library.py` there, monitor-text
+      privacy grep (0 hits), preview, `publish --dataset-commit <run's upload commit> --commit`, one deploy at a
+      time. M2 pages are the v1 pages without the re-judged counts, as M2 r1-r3 (rejudge.jsonl is not in the
+      dataset). Deployments: 10ov r4 `15e07caf`, r5 `d69b84f1`, r6 `8c4b86bc`; M2 r4 `737612a5`, r5 `32aaf829`
+      (built-in verify timed out reading the site; a separate `verify --run` passed 9/9,
+      receipts/RUN.verify-only.json), r6 `fba547f8` (last; site 115 runs, 7,884 files; final verify 9/9 ok). Receipts
+      `runs/phase-b/cloudflare/receipts/RUN.json`; final `verify` receipt
+      `replicates-r4r6-20261117-verify.json`. Offline transcripts (`export_transcripts.py`) not made: it only
+      accepts a run under the repository's runs/ with its raw records, which stay offloaded; they are never
+      published. Example: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-10ov-glm-120m-push-r4-20261116T213543Z/results.html
 
 45. **IN FLIGHT 2026-11-17 (launched 11:22-11:25 PT, ~2 h run + post-run): monitor disclosed to agents, M1a + M3a, one
     run each** (owner decisions, docs/plan.md "Monitor disclosed to agents (owner decisions, November 17, 2026)").
