@@ -9,7 +9,7 @@ scripts (``fmtHMS``, ``fmtTick``); tests check both agree.
 
 import re
 
-__all__ = ["fmt_hms", "fmt_tick", "fmt_span", "fmt_minutes_in_text", "FMT_JS"]
+__all__ = ["fmt_hms", "fmt_tick", "fmt_span", "fmt_minutes_in_text", "fmt_times_in_prose", "FMT_JS"]
 
 
 def _num(v):
@@ -59,6 +59,26 @@ def fmt_minutes_in_text(text):
     if text is None:
         return text
     return _MIN_IN_TEXT.sub(lambda m: fmt_hms(float(m.group(1))) if "." in m.group(1) else m.group(0), str(text))
+
+
+_RANGE_IN_TEXT = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?) ?[\u2013-] ?(\d+(?:\.\d+)?) ?(?:min|mins|minutes)\b")
+_AT_IN_TEXT = re.compile(r"\b(at|At|by|By|after|After|until|Until|before|Before|around|Around|near|since|Since) "
+                         r"(\d+\.\d+)(?![\d.]|\s*(?:%|s\b|sec|seconds?\b|h\b|hours?\b|x\b))")
+
+
+def fmt_times_in_prose(text):
+    """Model-written prose (story-map stories, notes, flags): run minutes as h/m/s. Covers 'At 8.913–10.231
+    minutes' (a range), '7.66 min' and a bare decimal minute after a time word ('at 11.969', 'by 40.5'); integers
+    without a unit and agent quotes are never touched (callers pass prose fields only)."""
+    if not isinstance(text, str):
+        return text
+
+    def rng(m):
+        a, b = m.group(1), m.group(2)
+        return f"{fmt_hms(float(a))}\u2013{fmt_hms(float(b))}" if "." in a + b else m.group(0)
+    text = _RANGE_IN_TEXT.sub(rng, text)
+    text = fmt_minutes_in_text(text)
+    return _AT_IN_TEXT.sub(lambda m: f"{m.group(1)} {fmt_hms(float(m.group(2)))}", text)
 
 
 FMT_JS = r"""

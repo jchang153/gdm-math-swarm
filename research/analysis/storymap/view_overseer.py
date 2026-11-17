@@ -870,7 +870,7 @@ def event_article(o, ev, reactions, key):
     head = event_label(e)
     head = head[:1].upper() + head[1:]
     text = ev.get("text")
-    if typ in ("L2", "S1", "P2", "L1", "P1"):
+    if typ in ("L2", "S1", "P2", "L1", "P1", "K1", "V1"):  # host summaries (V1: "reverted, 7.7 min after ...")
         text = V.tidy_times(text)
     if typ == "M2" and d.get("message") and not text:
         text = d.get("message")
@@ -1013,7 +1013,7 @@ def activity_html(o, key_of_row, key_of_event):
                     else V.fmt_t(r.get("t")))
             ok = "failed" if r.get("ok") is False else "ok" if r.get("ok") is True else "—"
             rows.append(f'<tr><td class="n">{when}</td><td>{V.esc(r.get("tool"))}</td><td>{ok}</td>'
-                        f'<td class="sm">{V.esc(V.redact(str(r.get("summary") or "")))}</td></tr>')
+                        f'<td class="sm">{V.esc(V.redact(V.tidy_times(str(r.get("summary") or ""))))}</td></tr>')
         failed = sum(r.get("ok") is False for r in by[c])
         parts.append(f'<details><summary>{V.esc(CATEGORY_LABEL.get(c, c).capitalize())}: {len(by[c])}'
                      + (f" ({failed} failed)" if failed else "") + '</summary><table class="acts"><tr><th>At</th>'

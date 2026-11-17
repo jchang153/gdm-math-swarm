@@ -59,7 +59,8 @@ if str(REPO / "scripts") not in sys.path:
 from site_style import themed  # noqa: E402  (shared light/dark tokens and toggle, no external loads)
 if str(REPO) not in sys.path:
     sys.path.append(str(REPO))
-from research.analysis.storymap.timefmt import FMT_JS, fmt_hms, fmt_minutes_in_text, fmt_tick  # noqa: E402
+from research.analysis.storymap.timefmt import (FMT_JS, fmt_hms, fmt_minutes_in_text, fmt_tick,  # noqa: E402
+                                               fmt_times_in_prose)
 
 DEFAULT_TAXONOMY = Path(__file__).resolve().parent / "taxonomy.md"  # public copy (owner, November 2, 2026)
 AXIS_MIN = 180.0
@@ -640,6 +641,21 @@ def timeline_dir(path):
     return path / "timeline" if (path / "timeline").is_dir() else path
 
 
+# Model-written prose fields of the stage records: their run minutes are shown as h/m/s (fmt_times_in_prose).
+# Quotes (``quote``, ``quotes``) are agent text and are never changed (they are also matched against the timeline).
+PROSE_KEYS = frozenset({"story", "consistency_flags", "label", "cause_note", "reason", "summary", "open_questions",
+                        "note", "next_action", "selected_because", "check_problems"})
+
+
+def prose_times(rec, key=None):
+    """A stage record with run minutes in its prose fields as hours / minutes / seconds (display only)."""
+    if isinstance(rec, dict):
+        return {k: prose_times(v, k) for k, v in rec.items()}
+    if isinstance(rec, list):
+        return [prose_times(v, key) for v in rec]
+    return fmt_times_in_prose(rec) if isinstance(rec, str) and key in PROSE_KEYS else rec
+
+
 def load(map_dir, timeline=None):
     """All agents' data: {agent: {items, events, thoughts, chunks, reactions, stage3, index}}."""
     map_dir = Path(map_dir)
@@ -655,20 +671,20 @@ def load(map_dir, timeline=None):
             agents[name]["items"] = [r for r in _read_jsonl(tdir / f"{name}.jsonl") if "_malformed" not in r]
     for p in sorted((map_dir / "stage1").glob("*.jsonl")):
         for row in _read_jsonl(p):
-            out = _unwrap(row, "thoughts")
+            out = prose_times(_unwrap(row, "thoughts"))
             (agents[p.stem]["chunks"].append(out) if out else agents[p.stem]["malformed"].append(f"stage1 {p.name}"))
     for p in sorted((map_dir / "stage2").glob("*.jsonl")):
         for row in _read_jsonl(p):
-            out = _unwrap(row, "event_id")
+            out = prose_times(_unwrap(row, "event_id"))
             (agents[p.stem]["reactions"].append(out) if out else agents[p.stem]["malformed"].append(f"stage2 {p.name}"))
     for p in sorted((map_dir / "stage3").glob("*.json")):
-        out = _unwrap(_read_json(p), "final")
+        out = prose_times(_unwrap(_read_json(p), "final"))
         if out:
             agents[p.stem]["stage3"] = out
         else:
             agents[p.stem]["malformed"].append(f"stage3 {p.name}")
     for row in _read_jsonl(map_dir / "map.jsonl"):
-        out = _unwrap(row, "final")
+        out = prose_times(_unwrap(row, "final"))
         if out and out.get("agent") and agents[out["agent"]]["stage3"] is None:
             agents[out["agent"]]["stage3"] = out
     for name, a in agents.items():

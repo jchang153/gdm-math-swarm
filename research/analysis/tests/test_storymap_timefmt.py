@@ -13,7 +13,8 @@ import unittest
 from pathlib import Path
 
 from research.analysis.storymap import view
-from research.analysis.storymap.timefmt import FMT_JS, fmt_hms, fmt_minutes_in_text, fmt_span, fmt_tick
+from research.analysis.storymap.timefmt import (FMT_JS, fmt_hms, fmt_minutes_in_text, fmt_span, fmt_tick,
+                                               fmt_times_in_prose)
 
 REPO = Path(__file__).resolve().parents[3]
 CASES = [0, 0.004, 0.5, 0.75, 1, 7.66, 7.7, 12.3, 59.99, 60, 63.2, 145, 179.999, 180, -0.2]
@@ -43,10 +44,24 @@ class PythonFormatTest(unittest.TestCase):
         self.assertEqual(fmt_minutes_in_text("within 2 min; half-life 10 min"), "within 2 min; half-life 10 min")
         self.assertEqual(fmt_minutes_in_text("v1.5 min-width"), "v1.5 min-width")
 
+    def test_prose(self):
+        self.assertEqual(fmt_times_in_prose("At 8.913\u201310.231 minutes, agent-084 read it. At 11.969 it read "
+                                            "agent-101's fake and by 40.5 min it stopped."),
+                         "At 8m 55s\u201310m 14s, agent-084 read it. At 11m 58s it read agent-101's fake and by 40m 30s "
+                         "it stopped.")
+        self.assertEqual(fmt_times_in_prose("at 3 of 5 tasks, at 0.85 s, 2 hours, item 12.5"),
+                         "at 3 of 5 tasks, at 0.85 s, 2 hours, item 12.5")
+        rec = view.prose_times({"story": "At 7.39 minutes it read", "quote": "at 7.39 minutes I", "thoughts": [
+            {"note": "plan at 14.398", "quote": "wait 14.398 min"}]})
+        self.assertEqual(rec, {"story": "At 7m 23s it read", "quote": "at 7.39 minutes I", "thoughts": [
+            {"note": "plan at 14m 24s", "quote": "wait 14.398 min"}]})
+
     def test_view_uses_it(self):
         self.assertEqual(view.fmt_t(7.66), "7m 40s")
         self.assertEqual(view.fmt_span(0, 63.2), "0s–1h 03m 12s")
         self.assertEqual(view.tidy_times("accepted at 12.771"), "accepted at 12m 46s")
+        self.assertEqual(view.tidy_times("sub-000001 by agent-101 (seed, FAKE) reverted, 15.5 min after acceptance"),
+                         "sub-000001 by agent-101 (seed, FAKE) reverted, 15m 30s after acceptance")
         self.assertIn("FMT_JS", dir(view))
 
 
