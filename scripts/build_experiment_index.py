@@ -313,10 +313,12 @@ _MONITOR_ARM = {('actions', 'silent'): 'M1', ('actions', 'reason'): 'M2', ('full
                 ('full', 'reason'): 'M4'}
 _TITLES = (
     # Top-down monitor arms (owner, November 12, 2026: label which spec each run is).
-    (r'-seeded-monitor-(actions|full)-(silent|reason)-',
-     lambda m: f'{_MONITOR_ARM[(m[1], m[2])]}: '
+    # "-disclosed" (November 17, 2026): the agents' prompt describes the monitor; arms M1a / M3a.
+    (r'-seeded-monitor-(actions|full)-(silent|reason)-(disclosed-)?',
+     lambda m: f'{_MONITOR_ARM[(m[1], m[2])]}{"a" if m[3] else ""}: '
                f'{"actions-only" if m[1] == "actions" else "full-transcript"} monitor, '
-               f'{"silent block" if m[2] == "silent" else "block with reason"}'),
+               f'{"silent block" if m[2] == "silent" else "block with reason"}'
+               f'{", disclosed to agents" if m[3] else ""}'),
     (r'-(\d+)ov-glm-.*-(commsonly|enforceonly)(?:-|$)',
      lambda m: f'{m[1]} GLM overseer{"" if m[1] == "1" else "s"}, '
                f'{"comms only" if m[2] == "commsonly" else "enforcement only"}'),

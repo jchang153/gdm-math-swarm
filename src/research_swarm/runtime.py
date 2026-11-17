@@ -2078,7 +2078,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             if code:
                 from .coding.prompts import build_code_prompt
                 return build_code_prompt(agent, persona, listing, variant, reviewing)
-            return build_prompt(agent, persona, listing, variant, reviewing)
+            return build_prompt(agent, persona, listing, variant, reviewing, monitor=monitor_options)
 
         definitions = agent_tool_definitions(config, neutral)
         live_monitor = None

@@ -311,7 +311,7 @@ def _short_overseers(part):
 
 
 # Top-down monitor arms (owner, November 12, 2026): the same M1-M4 labels as scripts/build_experiment_index.py.
-_MONITOR_RUN = re.compile(r'-seeded-monitor-(actions|full)-(silent|reason)-')
+_MONITOR_RUN = re.compile(r'-seeded-monitor-(actions|full)-(silent|reason)-(disclosed-)?')  # disclosed: M1a / M3a
 _MONITOR_ARM = {('actions', 'silent'): 'M1', ('actions', 'reason'): 'M2', ('full', 'silent'): 'M3',
                 ('full', 'reason'): 'M4'}
 
@@ -321,8 +321,10 @@ def _monitor(run):
     m = _MONITOR_RUN.search(run)
     if not m:
         return None
-    return (_MONITOR_ARM[(m[1], m[2])], f'{"actions-only" if m[1] == "actions" else "full-transcript"}, '
-                                       f'{"silent block" if m[2] == "silent" else "block with reason"}')
+    return (_MONITOR_ARM[(m[1], m[2])] + ('a' if m[3] else ''),
+            f'{"actions-only" if m[1] == "actions" else "full-transcript"}, '
+            f'{"silent block" if m[2] == "silent" else "block with reason"}'
+            f'{", disclosed to agents" if m[3] else ""}')
 
 
 def _spec(document, run):

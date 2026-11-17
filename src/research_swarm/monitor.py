@@ -355,7 +355,9 @@ def decide(scores, threshold, show_reason):
 # ---------------------------------------------------------------------------
 # Config (top-level "monitor" block)
 
-MONITOR_KEYS = frozenset({"enabled", "read", "show_reason", "threshold", "lookback", "max_output_chars"})
+# ``disclosed`` (default false): the solver prompt describes the monitor (prompts.action_review_section;
+# docs/plan.md, "Monitor disclosed to agents (owner decisions, November 17, 2026)").
+MONITOR_KEYS = frozenset({"enabled", "read", "show_reason", "threshold", "lookback", "max_output_chars", "disclosed"})
 
 
 def monitor_problems(config):
@@ -371,6 +373,8 @@ def monitor_problems(config):
         problems.append(f"monitor has unknown keys {unknown}")
     if not isinstance(block.get("enabled", False), bool):
         problems.append("monitor.enabled must be true or false")
+    if not isinstance(block.get("disclosed", False), bool):
+        problems.append("monitor.disclosed must be true or false")
     if block.get("enabled") is not True:
         return problems
     if block.get("read") not in READ_MODES:
@@ -402,6 +406,8 @@ def monitor_settings(config):
     return {"enabled": True, "read": block["read"], "show_reason": block["show_reason"],
             "threshold": block["threshold"], "lookback": block.get("lookback", DEFAULT_LOOKBACK),
             "max_output_chars": block.get("max_output_chars", DEFAULT_MAX_OUTPUT_CHARS),
+            # Recorded only when on, so earlier runs' effective settings are unchanged.
+            **({"disclosed": True} if block.get("disclosed") is True else {}),
             "prompt_version": MONITOR_PROMPT_VERSION}
 
 
