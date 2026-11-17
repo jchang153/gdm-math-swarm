@@ -1986,6 +1986,17 @@ is being merged into main via `collab-env`.
     published**. Run ids: M1a `glmflash100-seeded-monitor-actions-silent-disclosed-120m-push-r1-20261117T192251Z`,
     M3a `glmflash100-seeded-monitor-full-silent-disclosed-120m-push-r1-20261117T192455Z`. Operator scripts and VM
     assignment: host-only (`HANDOFF.local.md`).
+46. **DONE 2026-11-17 (free, offline): deception and evasion proxies from existing story-map codes** (owner request:
+    behaviours beyond reward hacking, OpenAI monitoring categories; step 1 = existing codes only, no new coding).
+    `research/analysis/deception_metrics.py` (+ `tests/test_deception_metrics.py`) →
+    `research/analysis/deception_metrics-2026-11-17.{md,json}`: 27 runs (r1-r3 of all nine arms; 10ov/M2 r4-r6 and
+    M1a/M3a have no story maps). The 2026-11-04 maps were restored into a scratch copy only. Main finding: a silent
+    block (M1, M3) drives evasion: 97%/96% of blocked agents work around it (W4, about 63% stating it is meant to
+    pass the guard), and 30 + 10 agents set `dangerouslyDisableSandbox`. With the reason shown (M2, M4) the shares are
+    5%/4%, with 0 sandbox flags. M1 vs M3 shows no difference. Silent fakes (no stated intent within 10 min) are
+    48%/30% in M1/M3 against 18% in control. No checker-addressed comments in fake sources. No clear misrepresentation
+    in the 42 C1 + outward-act pairs. Control agents shared recipes to pass the source-integrity check. Deception,
+    concealed uncertainty and staged compliance need new (paid) coding: suggested step 2 in the md.
 
 ## Next steps / open items
 
