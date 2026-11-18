@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-17 ~16:05 PT by Claude (Opus 5.5) site privacy agent (item 47: site redaction and privacy gate live, deployment d19a3557).
+Last updated: 2026-11-18 ~09:35 PT by Claude (Opus 5.5) story-map agent (item 51: story-map times in h/m/s live, deployments a5640791, 8daca472).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -2131,6 +2131,35 @@ is being merged into main via `collab-env`.
       left for the owner.
     - **Local files:** `runs/RUN/analysis/{storymap,simple_judge}/` and the re-rendered `results.html` are on the Mac
       only (not offloaded: the dataset is at ~97 of 100 GB). The scratchpad restore (~2.3 GB) is deletable.
+
+51. **LIVE 2026-11-18 (~09:30 PT; started 11-17 14:15 PT): story-map times as hours / minutes / seconds** (owner, chat
+    ~14:15 PST Nov 17: "all story maps should list times in terms of hour / min / sec instead of like '7.66' minutes").
+    - **Format:** `45s`, `7m 40s`, `1h 03m 12s` (seconds rounded half up); axis ticks `0m`, `30m`, `1h`, `1h 30m`;
+      spans `7m 40s–12m 18s`. Records (graph.json, map.jsonl, stage files) stay in minutes; display only.
+    - **Code** (d93e579, 178fd2e): shared formatter `research/analysis/storymap/timefmt.py` (Python `fmt_hms`,
+      `fmt_tick`, `fmt_span`, `fmt_minutes_in_text`, `fmt_times_in_prose`; `FMT_JS` for page scripts). `view.py` /
+      `view_overseer.py`: item headers, tooltips, tables (events "First seen" column, sorted on the raw minute), revert
+      latencies, reminder labels, phase spans, axis labels, captions, validation text, panel/chain scripts; model
+      prose fields of the stage records (stories, notes, labels, cause notes, flags: "At 8.913–10.231 minutes",
+      "at 11.969") rewritten at load (`view.prose_times`; agent quotes never changed); overseer revert/check summaries.
+      `data-t` now has 3 decimals. Interaction-graph viewer (`storymap_graph_template.html`, shared `_graph/viewer.js`):
+      clock and times in the same format. Tests `research/analysis/tests/test_storymap_timefmt.py` (Python and JS
+      agree, via node); storymap suite 260 OK.
+    - **Re-rendered all 56 published story maps** (no paid calls): monitor runs from local records, the other 44 from a
+      read-only restore of only the needed story-map records (stage1-3, map.jsonl, evidence, timeline, pipeline,
+      validation) from the logs dataset into the operator scratchpad (`hms/restore`, ~3 GB, deletable; nothing
+      restored in place, dataset untouched). Graph files copied from the live site unchanged. Checked against the live
+      pages (visible text with times normalized): identical apart from times and current plain-word validation labels;
+      the 5 hand-added index notes (gemini4argon / gpt6luna / grok47 "No readable reasoning", 10ov r2/r3 "Overseer
+      story map incomplete") re-inserted from the live bytes. Remaining decimal minutes on the pages are agent-written
+      text (tool calls, quotes), left as is.
+    - **Deployed:** `storymap --commit` (56 runs, 5,593 pages replaced, 0 added/removed, under the redaction gate of
+      item 47) -> `a5640791` (verify ok, 9/9); then `restyle --commit` for the same runs (the storymap screen refuses
+      top-bar links, so the bar and plain words come from restyle; 915 pages) -> `8daca472` on base `0122a59e`
+      (verify ok). Receipts `runs/phase-b/cloudflare/receipts/storymap-hms-20261117.json`,
+      `restyle-storymap-hms-20261117.json`. Live curl spot-check (4 runs, index + events): top bar present, 0
+      decimal-minute strings in visible text, h/m/s times shown, notes kept; `_graph/viewer.js` serves the new format.
+    - Not done: the ImpossibleBench site's 2 coding-run story maps were not re-rendered (math site only).
 
 ## Next steps / open items
 
