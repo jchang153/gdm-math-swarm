@@ -640,6 +640,10 @@ class StoryMap:
         sha = sha256_text("\0".join((model_id, client.route.effort, system, user)))
         return Path(folder) / f"{_safe(name)}-{sha[:16]}.json", sha
 
+    def max_tokens_of(self, stage):
+        """Output limit of a stage's requests (add-on passes such as storymap/deception.py override it)."""
+        return MAX_TOKENS[stage]
+
     async def unit(self, *, stage, model_id, folder, name, unit_id, system, user, context=None, parse=None):
         """One content-addressed model unit: the request, one repair on a malformed reply, the outcome."""
         path, sha = self.unit_path(folder, name, model_id, system, user)
@@ -652,7 +656,7 @@ class StoryMap:
                 self.used.append({"stage": stage, "model": model_id, "path": path, "reused": True})
                 return unit
         client = self.pool.get(model_id)
-        max_tokens = MAX_TOKENS[stage]
+        max_tokens = self.max_tokens_of(stage)
         purpose = f"storymap_s{stage}"
         if unit is None:
             unit = {"schema": UNIT_SCHEMA, "unit_id": unit_id, "stage": stage, "purpose": purpose,
@@ -897,8 +901,9 @@ class StoryMap:
         stats = {}
         for entry in self.used:
             unit = read_json(entry["path"]) or {}
-            key = f"{STAGE_NAMES[entry['stage']]}:{entry['model']}"
-            row = stats.setdefault(key, {"stage": STAGE_NAMES[entry["stage"]], "model": entry["model"], "units": 0,
+            name = STAGE_NAMES.get(entry["stage"], f"stage{entry['stage']}")
+            key = f"{name}:{entry['model']}"
+            row = stats.setdefault(key, {"stage": name, "model": entry["model"], "units": 0,
                                          "ok": 0, "failed": 0, "pending": 0, "reused_units": 0, "repairs": 0,
                                          "requests": 0, "prompt_tokens": 0, "completion_tokens": 0,
                                          "reasoning_tokens": 0, "cached_tokens": 0, "cache_write_tokens": 0,
@@ -1061,12 +1066,17 @@ def _budget(args, run_dir, prior_usd, rtj=None):
             "basis": "override" if args.run_limit is not None else "default", "prior_usd": str(prior)}
 
 
-def build(args, run_dir, out_dir, model_ids, log, *, schema_module=None, transport=None):
-    """(StoryMap, metadata) for one invocation: route settings, ledger, budget, clients."""
+def build(args, run_dir, out_dir, model_ids, log, *, schema_module=None, transport=None, label=None,
+          story_class=None, budget_purpose=None):
+    """(StoryMap, metadata) for one invocation: route settings, ledger, budget, clients.
+
+    ``label``, ``story_class`` and ``budget_purpose``: an add-on pass (storymap/deception.py) bills its own judging
+    run (its own ledger label, hence its own budget), with its own StoryMap subclass; defaults are the solver or
+    overseer map's."""
     from research.analysis.judge.client import FakeTransport, RunLimit, committed_for_judging
     overseer = bool(getattr(args, "overseer", False))
     # The overseer map is its own judging run: its label never matches the solver map's ``:storymap-<run>:``.
-    label = f"storymap-overseer-{run_dir.name}" if overseer else f"storymap-{run_dir.name}"
+    label = label or (f"storymap-overseer-{run_dir.name}" if overseer else f"storymap-{run_dir.name}")
     if overseer:
         from . import domain as domain_mod
         if domain_mod.run_domain(run_dir) != domain_mod.LEAN:
@@ -1106,22 +1116,23 @@ def build(args, run_dir, out_dir, model_ids, log, *, schema_module=None, transpo
         rtj.record_run_budget(out_dir, {"limit_usd": limit["limit_usd"], "source": limit["source"],
                                         "basis": limit["basis"], "prior_usd": prior["committed_usd"],
                                         "ledger_run_id": run_limit.run_id, "label_run_id": label,
-                                        "purpose": "storymap-overseer" if overseer else "storymap"},
+                                        "purpose": budget_purpose or ("storymap-overseer" if overseer else "storymap")},
                                run_dir=run_dir, ledger=ledger)
     pool = ModelPool(ledger_path=ledger, archive_root=out_dir / "raw", anthropic_settings=anthropic,
                      extra_settings=extra, scope=scope, run_limit=run_limit, run_id=label, **common)
     from . import domain as domain_mod
     domain = domain_mod.run_domain(run_dir)   # coding runs use the coding prompts and taxonomy (same codes)
     if schema_module is not None:
-        schema = SchemaAdapter(schema_module)
+        schema = schema_module if isinstance(schema_module, SchemaAdapter) else SchemaAdapter(schema_module)
     elif overseer:
         schema = SchemaAdapter(load_overseer_schema_module())
     else:
         schema = SchemaAdapter(domain_mod.schema_module(domain, load_schema_module()))
-    story = StoryMap(timeline_dir=args.timeline, out_dir=out_dir, pool=pool, schema=schema, run_id=run_dir.name,
-                     mode="mock" if args.mock else "paid", log=log, chunk_tokens=args.chunk_tokens,
-                     retry_failed=args.retry_failed, run_limit=run_limit,
-                     agent_concurrency=args.agent_concurrency or None, overseer=overseer)
+    story = (story_class or StoryMap)(
+        timeline_dir=args.timeline, out_dir=out_dir, pool=pool, schema=schema, run_id=run_dir.name,
+        mode="mock" if args.mock else "paid", log=log, chunk_tokens=args.chunk_tokens,
+        retry_failed=args.retry_failed, run_limit=run_limit,
+        agent_concurrency=args.agent_concurrency or None, overseer=overseer)
     meta = {"ledger": str(ledger), "scope": scope, "ledger_label_run_id": label,
             "budget_rule": "--run-limit, else RUN/settings.json behavior_judge_max_usd, else $50; earlier "
                            "invocations into this output directory count against it"}

@@ -97,3 +97,20 @@ def test_fmt_hms_and_mean_ci():
     s = dm.mean_ci([1.0, 2.0, 3.0])
     assert s["n"] == 3 and abs(s["mean"] - 2.0) < 1e-9 and abs(s["half_width"] - 4.303 / 3 ** 0.5) < 1e-6
     assert dm.mean_ci([None])["mean"] is None
+
+
+def test_h_metrics_from_the_deception_addon(tmp_path):
+    d = tmp_path / "storymap"
+    assert dm.h_metrics("no-such-run", str(d), ["agent-001"]) is None   # add-on not run: not coded, not zero
+    _write(d / "deception" / "hcodes.jsonl", [
+        {"agent": "agent-001", "code": "H2", "certainty": "high", "valid": True, "quote": "q", "t": 1.0},
+        {"agent": "agent-001", "code": "H2", "certainty": "low", "valid": True, "quote": "q", "t": 2.0},
+        {"agent": "agent-002", "code": "H1", "variant": "concealed_uncertainty", "certainty": "medium",
+         "valid": True, "quote": "q", "t": 3.0},
+        {"agent": "agent-002", "code": "H4", "certainty": "high", "valid": False, "quote": "q", "t": 4.0},
+        {"agent": "agent-101", "code": "H3", "certainty": "high", "valid": True, "quote": "q", "t": 5.0}])
+    _write(d / "deception" / "stageh" / "agent-001.jsonl", [{}])
+    h = dm.h_metrics("no-such-run", str(d), ["agent-001", "agent-002"])
+    assert (h["agents_h2"], h["agents_h2_high"], h["agents_h1"], h["agents_h1_concealed"]) == (1, 1, 1, 1)
+    assert (h["agents_h3"], h["agents_h4"]) == (0, 0)          # the seed is not a solver; invalid codes ignored
+    assert (h["h_codes_valid"], h["h_codes_invalid"], h["h_agents_read"]) == (3, 1, 1)

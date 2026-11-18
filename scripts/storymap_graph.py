@@ -15,7 +15,12 @@ Contract (schema ``storymap-graph/1``)::
      "events":  [{"t", "type", "src", "dst", "fake", "problem", "text"}]  (sorted by t),
      "maps":    {agent: {"phases": [{"t_from", "t_to", "stance", "label"}], "turning_points": [{"t", "from", "to"}],
                  "story": stage-3 story (<= 200 chars)}}   (the hover card's miniature story map),
-     "codes":   {code: public name}, "codes_overseer": {code: public name}}
+     "codes":   {code: public name}, "codes_overseer": {code: public name},
+     "addons":  {"deception": {"version", "taxonomy_version", "taxonomy_sha256", "prompt_sha256", "codes", "agents"}}}
+
+When the map folder holds ``deception/hcodes.jsonl`` (the deception add-on, storymap/deception.py), its valid H codes
+join ``thoughts`` with ``"addon": "deception"`` and ``certainty``, their names join ``codes``, and ``addons`` records
+the add-on's versions; without it the graph is unchanged.
 
 Times are run minutes from the conference's ``run_started_at``, the story maps' origin (storymap/extract.py ``mins``).
 
@@ -424,6 +429,10 @@ def build_graph(run_dir, map_dir=None, overseer_map=None):
         ocodes = {c: onames[c] for c in sorted(oused) if c in onames}
         if ocodes:
             graph['codes_overseer'] = ocodes
+    if map_dir and (Path(map_dir) / 'deception' / 'hcodes.jsonl').is_file():
+        # The deception add-on's valid H codes (storymap/deception.py), versioned under addons.deception.
+        from research.analysis.storymap import deception
+        graph = deception.merge_from_dir(graph, Path(map_dir) / 'deception')
     return graph
 
 

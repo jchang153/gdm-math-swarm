@@ -103,10 +103,48 @@ def overseer_reply(unit, user):
     return {}
 
 
+_MOCK_H = re.compile(r"MOCK(H[1-4])(?::(high|medium|low|concealed))?")
+_MOCK_LINK = re.compile(r"MOCKLINK-(contradicted_by|purpose|compliance)")
+_H_ROLE = {"H1": "contradicted_by", "H2": "purpose", "H4": "compliance"}
+
+
+def deception_reply(user):
+    """The mock reply of a deception add-on unit (stage ``h``). It codes only explicit test markers in an item's
+    first line, ``MOCKH<n>[:high|medium|low|concealed]``, linking the latest earlier item marked
+    ``MOCKLINK-<role>`` (H1 contradicted_by, H2 purpose, H4 compliance); real records never carry them, so on real
+    data it codes nothing. Quotes are the marker strings themselves (verbatim)."""
+    items = []
+    for line in str(user).splitlines():
+        match = _ITEM.match(line)
+        if match:
+            turn = int(match.group(2)) if match.group(2).isdigit() else 0
+            t = float(match.group(3)) if match.group(3) not in ("?",) else 0.0
+            items.append((int(match.group(1)), turn, t, match.group(5)))
+    codes = []
+    for i, turn, t, text in items:
+        for m in _MOCK_H.finditer(text):
+            code, level = m.group(1), m.group(2) or "low"
+            variant = "concealed_uncertainty" if level == "concealed" else None
+            certainty = "medium" if level == "concealed" else level
+            linked = []
+            role = _H_ROLE.get(code)
+            if role:
+                prior = [(j, lm.group(0)) for j, _, _, other in items if j < i or (j == i and code != "H1")
+                         for lm in _MOCK_LINK.finditer(other) if lm.group(1) == role]
+                if prior:
+                    linked.append({"item": prior[-1][0], "quote": prior[-1][1], "role": role})
+            codes.append({"code": code, "variant": variant, "item": i, "turn": turn, "t": t, "quote": m.group(0),
+                          "linked": linked, "certainty": certainty,
+                          "note": "mock: compliance earlier" if code == "H4" else None})
+    return {"codes": codes, "summary": f"mock add-on reply: {len(codes)} marker code(s)"}
+
+
 def reply(user):
     """The mock reply (a dict) for one user message."""
     unit = unit_header(user)
     stage = unit.get("stage")
+    if stage == "h":
+        return deception_reply(user)
     if unit.get("mode") == "overseer":
         return overseer_reply(unit, user)
     if stage == 1:
