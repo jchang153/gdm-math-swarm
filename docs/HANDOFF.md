@@ -2094,6 +2094,44 @@ is being merged into main via `collab-env`.
       arms, silent/reason/disclosed groups, `--created`, and reads a map from the restored copy when the local one has
       no timeline.
 
+50. **IN PROGRESS 2026-11-17/18 (started 16:18 PT): M1a + M3a on the site with simple-judge labels and story maps; M1a page live, M3a page and both story maps queued** (owner, chat
+    ~16:20 PST: "are m1a and m3a published with story maps? If not, please do so."; paid story maps and judge approved
+    with it; the coordinator relayed at ~16:25 PST that the OpenRouter workspace budget was raised).
+    - **Budget check:** one probe (Claude Haiku 5.5, 1 output token) at 16:18 PT: HTTP 200, $0.0000015. No 403.
+    - **Inputs:** both runs restored from the logs dataset into a scratchpad copy (`offload_runs.py restore --dest`,
+      never in place; commits 3035f99f / ca66eb08), with the Mac-only `results.json`/`results.html` and
+      `analysis/rejudge.jsonl` copied over (the dataset copy has no results: the supervisor's results build failed,
+      item 45). Nothing was uploaded to the dataset.
+    - **Simple behavior judge (paid, `run_simple_judge.py --run-limit 10 --no-offload`):** M1a $3.62, M3a $3.61, 100 of
+      100 labelled each, no fallback. Cheating levels (none/considered/explored/submitted/credited/unclear): M1a
+      10/14/74/2/0/0; M3a 0/15/72/9/3/1. The first try refused before sending: the failed VM attempt recorded its
+      spend in the VM's `state/budget.sqlite` (gone with the VM; the local `runs/phase-b/RUN/budget-*.sqlite` are the
+      pilot ledgers). That attempt's report says $0 and 0 of 100 labelled, so its folder was moved aside (kept in the
+      scratchpad) and the judge reran into a fresh `analysis/simple_judge`. `results.html` re-rendered with
+      `build_results.py --rerender-html` so the run page carries the Behavior judge tab and agent labels.
+    - **Story maps (paid, same pipeline/models/taxonomy as item 40: `run_storymap.py --no-offload --run-limit 40`,
+      then `--retry-failed`):** settled M1a $13.99 + $0.27, M3a $22.20 + $0.26 (total $36.71). Stage-1 failures of
+      the first pass (a few Haiku chunks) were all redone by the retry; no gaps left. Monitor blocks joined
+      (`monitor_context.json` and `monitor_reasons.json`, made automatically by stage 0). Blocks / blocked agents /
+      episodes: M1a 273 / 78 / 100; M3a 294 / 86 / 134. Stage-2 episode direction away / toward cheating / neutral:
+      M1a 46 / 39 / 4 (11 no change); M3a 73 / 46 / 4. Agents with code W1-W7: M1a 52/39/76/64/75/4/1, M3a
+      48/26/86/67/85/9/5 (model readings; W3 is the most common code in both; not yet compared with the parents).
+      Public pages rendered with `storymap.view` (default public taxonomy; docs/experiment-library.md still says
+      `--taxonomy ''`, which is outdated since taxonomy.html is published) plus `validation.md`; h/m/s times from main.
+    - **Site:** free publish as item 44 (Inspect View bundle, `prepare_hf_library.py` on a hard-linked copy without
+      the in-progress story map, site redaction + gate with `GDM_GCP_PROJECT` / `GDM_SITE_DENYLIST` from
+      HANDOFF.local.md). Preview M1a ok (base d19a3557, 57 new files, 116 runs). Deployments: M1a `0122a59e (~18:10 PT; its built-in verify crashed on a network error after the deploy, so no receipt; separate `verify --run` receipt `RUN.verify-only.json`)`, M3a
+      and the story maps of both: queued (`scratchpad m1a3a/chain2.sh`: M3a `publish --commit`, then `storymap --run M1a=.. --run
+      M3a=.. --commit`), waiting since ~01:00 PT 11-18 on the deploy lock held by another session's `restyle --commit`
+      (pid 14158, since 01:34 PT). A network outage (~17:40-23:20 PT) killed the first chain after the M1a deploy. Receipts `runs/phase-b/cloudflare/receipts/{RUN,storymap-disclosed-20261117}.json`. M1a separate verify 9/9 ok (11-18).
+      Example: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-monitor-actions-silent-disclosed-120m-push-r1-20261117T192251Z/results.html
+    - **Comparisons:** the catalogue series `monitor120` (regex in `run_profile.py`) picks up M1a/M3a; its texts now
+      mention them (and the six M2 repeats). The Explore "Outside monitors" chart still shows only the four parent
+      arms plus control: adding two series needs two more colours in every site skin (`site_skin.py` has c1-c5);
+      left for the owner.
+    - **Local files:** `runs/RUN/analysis/{storymap,simple_judge}/` and the re-rendered `results.html` are on the Mac
+      only (not offloaded: the dataset is at ~97 of 100 GB). The scratchpad restore (~2.3 GB) is deletable.
+
 ## Next steps / open items
 
 - **Logs dataset storage (2026-11-10 21:30 PT):** used_storage 90.2 GB of the org's 100 GB private limit (raw files
