@@ -28,6 +28,7 @@ from storymap_site import STORYMAP_DIR, add_storymap_tab, public_files as storym
 from space_navigation import private_space_navigation
 from site_style import themed
 import site_layout
+import site_redact
 import site_terms
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -609,6 +610,15 @@ private Hugging Face dataset (Sign in with HF for read access). Do not upload cr
     # Sign in with HF (the viewer's own OAuth token for the private dataset); no external libraries.
     if not args.records_in_space:
         (output / dataset_logs.SIGNIN_FILE).write_text(private_space_navigation(themed(dataset_logs.signin_page())))
+    # Site privacy (owner, November 17, 2026): host paths and names, deny-listed identifiers, researcher-only
+    # records and provider key figures are redacted from every public file (site_redact.redact).
+    terms = site_redact.denylist()
+    for path in sorted(output.rglob('*')):
+        if path.is_file() and path.relative_to(output).parts[0] != DATASET_DIR:
+            data = path.read_bytes()
+            redacted = site_redact.redact(path.relative_to(output).as_posix(), data, terms)
+            if redacted != data:
+                path.write_bytes(redacted)
     files = {str(p.relative_to(output)): {'bytes': p.stat().st_size,
              'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
              for p in sorted(output.rglob('*')) if p.is_file() and p.relative_to(output).parts[0] != DATASET_DIR}

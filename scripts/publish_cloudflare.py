@@ -35,6 +35,11 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
         (RUN/<group>/404.html: the viewer, which renders a packed page in place). Every deployment packs every run
         the same way (plans work on the unpacked site); unpacking is checked to reproduce every original byte for
         byte.
+    publish_cloudflare.py redact [--commit] [--receipt FILE]
+        Apply the site privacy redaction (scripts/site_redact.py; owner decision, November 17, 2026) to every
+        served file. Every deployment applies it anyway (``finish``) and the gate refuses any file that still
+        holds host paths or names, deny-listed identifiers, researcher-only records or provider key figures; this
+        command deploys only that, with no other change.
     publish_cloudflare.py withdraw --run RUN [--run RUN ...] [--commit] [--receipt FILE]
         Remove runs already recorded in data/library-unlisted.json from the site (every file of each run; the
         catalogue is re-rendered without them). Other runs never change; private copies are untouched.
@@ -120,6 +125,7 @@ import explore_page  # noqa: E402
 import site_style  # noqa: E402
 import site_terms  # noqa: E402
 import simple_judge_site  # noqa: E402
+import site_redact  # noqa: E402
 import storymap_site  # noqa: E402
 from publish_hf_library import (SECRET, load_bundle, merge_entries, packed_text,  # noqa: E402
                                 safe_path)
@@ -494,16 +500,49 @@ fetch(base + 'packed/index.json').then(r => r.json()).then(async index => {
             f'<ul id="list"></ul></details></div><script>{script}</script></body></html>')
     return themed(body).encode('utf-8')
 
-def site_gate(name, data):
+_DENY = []
+
+
+def deny_terms():
+    """The deny-listed identifiers (site_redact.denylist: environment and HANDOFF.local.md), read once."""
+    if not _DENY:
+        _DENY.append(tuple(site_redact.denylist()))
+    return _DENY[0]
+
+
+def redact_site(files, terms=None):
+    """Every file with the site privacy redaction applied (site_redact.redact); (files, {name: rules})."""
+    terms = deny_terms() if terms is None else terms
+    out, changed = {}, {}
+    for name, data in files.items():
+        new = site_redact.redact(name, data, terms)
+        if new is not data and new != data:
+            changed[name] = True
+        out[name] = new
+    return out, sorted(changed)
+
+
+def site_gate(name, data, terms=None):
     """The last screen of every deployed file: path rules, host-only and credential file names, Pages special
-    files, the credential screen (packed captured files included), no private category, Cloudflare's per-file
-    limit. Raises ValueError; returns the bytes."""
+    files, the credential screen (packed captured files included), the privacy screen (site_redact.violations:
+    host paths and names, deny-listed identifiers, researcher-only records, provider key figures; packed files
+    included), no private category, Cloudflare's per-file limit. Raises ValueError; returns the bytes."""
     path = safe_path(name)  # no dot-folders, no traversal, no credential file names
     if path.name.lower() in {'.env', 'host.env'} or path.parts[0] == 'functions' or path.name in PAGES_SPECIAL:
         raise ValueError('Pages special or host-only file refused: ' + name)
     if (SECRET.search(data) or SECRET.search(packed_text(name, data))
             or any(SECRET.search(entry) for entry in packed_run_entries(name, data))):
         raise ValueError('Credential-like content; deploy refused: ' + name)
+    terms = deny_terms() if terms is None else terms
+    parts = [(name, data), (None, packed_text(name, data))]
+    if is_pack_file(name):  # each packed file under its own run path
+        run = name.split('/')[0]
+        parts += [(f'{run}/{relative}', _entry_bytes(entry))
+                  for relative, entry in json.loads(data)['files'].items()]
+    for part_name, part in parts:
+        hits = site_redact.violations(part, terms, part_name) if part else []
+        if hits:  # site privacy (owner, November 17, 2026): host details, researcher-only records, key figures
+            raise ValueError(f'Private content ({", ".join(hits)}); deploy refused: {name}')
     if private_category(name) is not None:
         raise ValueError(f'{name} is private ({private_category(name)}) and is never deployed to the public site')
     if len(data) > MAX_FILE_BYTES:
@@ -1286,6 +1325,10 @@ def finish(files, base_manifest, plan, project=None, site=None, consume=False, v
     files, repointed = repoint_private_links(unpack_site(files))
     if repointed:
         plan['repointed_private_links'] = repointed
+    files, redacted = redact_site(files)  # site privacy (owner, November 17, 2026): every deployment
+    if redacted:
+        plan['redacted_files'] = len(redacted)
+        plan['redacted_runs'] = sorted({run_of(n) or n for n in redacted})
     if site.key == DEFAULT_SITE if viewer is None else viewer:  # math site: Inspect links go to the log viewer
         files, changed = apply_viewer(files)
         if changed:
@@ -1694,6 +1737,7 @@ def main(argv=None):
     restyle.add_argument('--run', action='append', help='only this run\'s pages (repeatable; default all runs)')
     repack = sub.add_parser('repack', help='pack every run\'s pack groups (per-agent files, sources, story map '
                                            'agent pages, judge files; lossless)')
+    redact = sub.add_parser('redact', help='apply the site privacy redaction to every served file (no other change)')
     withdraw = sub.add_parser('withdraw', help='remove recorded unlisted runs (all their files) from the site')
     withdraw.add_argument('--run', action='append', required=True, help='run to remove (repeatable)')
     story = sub.add_parser('storymap', help='add the agent story map pages to runs already on the site')
@@ -1713,7 +1757,7 @@ def main(argv=None):
     labels = sub.add_parser('judge-labels', help='rewrite the simplified judge\'s level wording on the site')
     labels.add_argument('--run', action='append', help='only this run (repeatable; default every judged run)')
     view = sub.add_parser('viewer', help='sync the log viewer origin (HF sign-in) and the math site\'s links to it')
-    for command in (mirror, bundle, restyle, withdraw, repack, story, heat, cat, labels, fix, view):
+    for command in (mirror, bundle, restyle, withdraw, repack, redact, story, heat, cat, labels, fix, view):
         command.add_argument('--site', choices=sorted(SITES), default=DEFAULT_SITE,
                              help='which library (default gdm, the math site; ib: the ImpossibleBench site)')
         command.add_argument('--commit', action='store_true', help='deploy; otherwise only plan')
@@ -1744,6 +1788,9 @@ def main(argv=None):
         parser.error('the log viewer serves the math library only')
     if args.command == 'mirror-space' and not site.mirror_space:
         parser.error(f'mirror-space copies the math library\'s HF Space; not for --site {site.key}')
+    if getattr(args, 'commit', False) and not deny_terms():
+        parser.error('no deny-listed identifiers loaded (GDM_GCP_PROJECT / GDM_SITE_DENYLIST, or HANDOFF.local.md); '
+                     'the privacy gate needs them to deploy')
     # Every committing command holds the deploy lock from reading the served site to verifying its deployment
     # (scripts/deploy_lock.py; production race, November 6, 2026). Plans without --commit never wait.
     with (deploy_lock.held(what=f'{args.command} --commit') if getattr(args, 'commit', False) else
@@ -1775,6 +1822,9 @@ def main(argv=None):
         elif args.command == 'repack':
             files, plan = plan_repack(base_files)
             message = f'Repack per-agent files of {len(plan["source"]["runs"])} run(s)'
+        elif args.command == 'redact':  # finish applies the redaction to every file (as on every deployment)
+            files, plan = dict(base_files), {'source': {'kind': 'redact'}}
+            message = 'Site privacy redaction'
         elif args.command == 'catalogue':
             files, plan = plan_catalogue(base_files, unlisted, site=site)
             message = 'Re-render the catalogue'

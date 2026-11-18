@@ -25,3 +25,10 @@ HANDOFF.local.md
 # captured instructions), kept host-only under the original repository paths (README.md,
 # "Private material").
 private/
+
+# Local tool state (never tracked): wrangler cache, Claude Code local settings, worktrees and launch
+# configurations (host paths)
+.wrangler/
+.claude/settings.local.json
+.claude/worktrees/
+.claude/launch.json

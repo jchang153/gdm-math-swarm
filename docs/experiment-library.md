@@ -20,6 +20,17 @@ Cloudflare Dashboard", code 10042; enabling it needs the owner to accept terms a
 the wrangler login has no Zero Trust/Access scope. So the private files stay where they were: the private HF logs
 dataset and the researchers' machines (`runs/`).
 
+**Privacy redaction and gate (owner decision, November 17, 2026; docs/plan.md, "Site privacy redaction").**
+`scripts/site_redact.py` runs at bundle preparation (`prepare_hf_library.py`) and on every deployment
+(`publish_cloudflare.finish`, on the unpacked site, before packing): host paths become repository-relative or `~`,
+internal host names `vm-host`, the cloud project and VM names `<redacted>`; researcher-only objects and
+`statement_defects` are removed from JSON records; `provider_limit` keeps its pass/fail checks but not the key's
+usage/limit figures. The gate (`site_gate`) refuses any file, pack entries included, that still holds one of them
+(or a `/Users/` path). The real identifiers are read at run time from `GDM_GCP_PROJECT` / `GDM_SITE_DENYLIST`
+(environment or the Git-ignored `HANDOFF.local.md`; add new VM names to `GDM_SITE_DENYLIST` there); `--commit`
+refuses to start without them. `publish_cloudflare.py redact [--commit]` deploys only the redaction. The logs
+dataset's name may appear in links (owner: "you can keep the name public").
+
 **Inspect View on Cloudflare.** Each run's `inspect-view/index.html` carries `scripts/cf_site/private-logs.js`
 (inlined, `id="private-logs"`) instead of the HF sign-in shim (the HF `signin.html` is not deployed: HF OAuth only
 works on the Space host; since November 12, 2026 sign-in happens on the separate log viewer origin, below, and this

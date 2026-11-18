@@ -88,5 +88,10 @@ only in the Git-ignored private/ directory under its original paths (README.md,
 "Private material"); never commit it outside private/. Infrastructure details (cloud
 project, VM and snapshot names, accounts, the logs dataset, balances) go only in the
 Git-ignored HANDOFF.local.md or environment variables, never in tracked files.
+Exception (owner decision, November 17, 2026; docs/plan.md, "Site privacy redaction"):
+the private HF logs dataset's name may appear on the public site in links to private
+records (the dataset itself stays private). Every site deployment redacts host paths,
+cloud project and VM names, researcher-only records and provider key figures, and its
+gate refuses any file that still holds them (scripts/site_redact.py).
 
 Render mathematical formulas in LaTeX unless referring specifically to code.

@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-17 PT by Claude (Opus 5.5) operator (item 45: M1a + M3a done; judge blocked by the OpenRouter workspace budget).
+Last updated: 2026-11-17 ~16:05 PT by Claude (Opus 5.5) site privacy agent (item 47: site redaction and privacy gate live, deployment d19a3557).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -2004,6 +2004,39 @@ is being merged into main via `collab-env`.
     - Post-run bug fixed (056ffb7): the M1a/M3a title broke `site_layout._spec`, so the supervisor's results build
       failed (no site bundle); results were rebuilt on the restarted VMs. Operator scripts and VM assignment: host-only
       (`HANDOFF.local.md`).
+47. **LIVE 2026-11-17 (~15:55 PT): site privacy redaction and gate** (owner decision, chat ~12:30 PST: "go ahead and fix
+    those site fixes. you can keep the name public."; docs/plan.md "Site privacy redaction (owner decision, November 17,
+    2026)"). A read-only audit found host details on the public site. New `scripts/site_redact.py`, applied at bundle
+    preparation (`prepare_hf_library.py`) and on every deployment (`publish_cloudflare.finish`, unpacked site, before
+    packing); new subcommand `publish_cloudflare.py redact [--commit]`; tests `tests/test_site_redact.py`.
+    - **Redacted (844 files, 115 runs):** `run_budget.owner` / `owner` (internal host -> `vm-host`, 220 fields),
+      VM home paths -> repository-relative or `~` (`ledger_path` 115, `provider_limit.record` 110, `note` 220,
+      `run_dir` 119, `validation_record` 44, judge `spend.run_ledger` 50, `compose_working_dir` 3, Inspect View
+      `abs_log_dir` in 91 pages plus 1 nested page, 2 RECOVERY.md), cloud project / VM names -> `<redacted>` (baseline100 `results.json`
+      `shutdown`, glm100-repeat2 `results.json`, 1 nested status/index); `provider_limit` usage/limit/expiry fields
+      dropped in all 115 `settings.json` (both `effective` and `preflight` evidence; pass/fail checks kept, "key already
+      has usage N" warnings -> "(redacted)"); `statement_defects` (researcher-only table) dropped from 382 judge agent
+      results of 14 runs (cache100, gemini10, glm-baseline, glm-overseer, glm-overseer-powers, glm-rule6,
+      glm10-baseline-2h, glm100-baseline-30m, glm100-repeat2, glm100-repeat3, owner-gemini4/glm53/gpt56/opus55),
+      repacked. No numeric value changed (checked field by field).
+    - **Kept on purpose:** results.json's top-level `seeded` record (`"researcher_only": true`, 97 runs) is the public
+      "Seeded source (researcher-only)" section of every seeded run page (hidden from agents, not readers); the gate
+      allows it only there. Inspect's bundled JS example path `/Users/alice/scans` is exempt. The logs dataset name
+      stays in links (owner).
+    - **Gate (`site_gate`, every file and every pack entry):** refuses the cloud project and VM names (read at run time
+      from `GDM_GCP_PROJECT` / `GDM_SITE_DENYLIST`, env or HANDOFF.local.md; `--commit` refuses to start without them;
+      **add new VM names to `GDM_SITE_DENYLIST` in HANDOFF.local.md**), `.c.<project>.internal` hosts, `/home/ext_`,
+      `ext_*_edu` user names, `/Users/` paths, `"researcher_only": true` / `statement_defects` (outside the seeded
+      record), provider usage/limit fields.
+    - Deployment `d19a3557` (`redact --commit`, base `fba547f8`, the six r4-r6 runs included; 7,884 files, unchanged); built-in verify 9/9 ok, including `served_bytes` (the root index.html mismatch
+      before is gone); receipts `site-redaction-20261117{-preview,,-verify}.json` (separate `verify` also ok). Live rescan with curl
+      (1,057 files: all runs' settings.json, run-budget.json, results.json, summary.json, inspect-view/index.html,
+      judge reports, results.html, root pages and the 14 runs' packed judge files) for the real identifiers and
+      patterns: 3,380 hits before, **0 after** (cloud project, VM names, `.internal` hosts, `/home/ext_`, `/Users/`,
+      `researcher_only`, provider fields, `"statement_defects":` keys; the 14 runs' 382 packed judge agent files hold
+      none; 14 judge `pipeline.json` keep the source path `defects_source: research/analysis/judge/statement_defects.json`,
+      a file name, not its contents).
+    - Repo: `.gitignore` adds `.wrangler/`, `.claude/settings.local.json`, `.claude/worktrees/`, `.claude/launch.json`.
 
 ## Next steps / open items
 

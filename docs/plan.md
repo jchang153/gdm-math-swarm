@@ -2442,3 +2442,28 @@ Implementation (operator, November 17, 2026): `research_swarm.prompts.action_rev
 `build_prompt(monitor=...)`; `monitor.disclosed` validated in `monitor_problems` and recorded in settings.json
 (`config.monitor.disclosed` and `effective.monitor.disclosed`, the latter only when true); M1a / M3a titles in the
 catalogue and run pages (run id contains `-disclosed-`). Tests `tests/test_monitor_disclosed.py`.
+
+## Site privacy redaction (owner decision, November 17, 2026)
+
+A read-only audit (November 17, 2026) found host details on the public site: the ledger owner in every run's
+`settings.json` / `run-budget.json` (VM name, zone, cloud project, internal host name), absolute VM home paths
+(`ledger_path`, `provider_limit.record`, `note`, `analysis/summary.json`, Inspect View `abs_log_dir`), the cloud
+project and VM name in one run's `results.json`, the provider key's usage figures (`effective.provider_limit`), and
+a copy of the researcher-only statement-defect table in the old transcript judge's per-agent results (14 runs).
+
+Approved (owner, chat, 2026-11-17 ~12:30 PST): "go ahead and fix those site fixes. you can keep the name public."
+
+Decided:
+- Every public site file is redacted at bundle preparation and on every deployment (`scripts/site_redact.py`):
+  absolute paths become repository-relative (`runs/<id>/...`) or `~`, internal host names `vm-host`, the cloud
+  project and VM names `<redacted>`; researcher-only objects and `statement_defects` are removed; the provider
+  key's usage/limit figures are dropped (the gate's pass/fail flags stay). Nothing else changes (results numbers
+  unchanged).
+- The site gate refuses any file (packed files included) with the cloud project or deny-listed VM names, the
+  `.internal` host form, `/home/ext_` or `/Users/` paths, `"researcher_only": true`, `statement_defects` or
+  provider usage/limit fields. The real identifiers come at run time from the environment or the Git-ignored
+  `HANDOFF.local.md` (`GDM_GCP_PROJECT`, `GDM_SITE_DENYLIST`), never from tracked files; a deploy refuses to
+  start without them.
+- "Keep the name public": the private HF logs dataset's name may appear on the public site in links to private
+  records; the dataset stays private and neither it nor the HF Space changes. AGENTS.md records the exception.
+
