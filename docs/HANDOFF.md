@@ -2094,7 +2094,7 @@ is being merged into main via `collab-env`.
       arms, silent/reason/disclosed groups, `--created`, and reads a map from the restored copy when the local one has
       no timeline.
 
-50. **IN PROGRESS 2026-11-17/18 (started 16:18 PT): M1a + M3a on the site with simple-judge labels and story maps; M1a page live, M3a page and both story maps queued** (owner, chat
+50. **DONE 2026-11-18 (10:55 PT; started 11-17 16:18 PT): M1a + M3a on the site with simple-judge labels and story maps** (owner, chat
     ~16:20 PST: "are m1a and m3a published with story maps? If not, please do so."; paid story maps and judge approved
     with it; the coordinator relayed at ~16:25 PST that the OpenRouter workspace budget was raised).
     - **Budget check:** one probe (Claude Haiku 5.5, 1 output token) at 16:18 PT: HTTP 200, $0.0000015. No 403.
@@ -2121,9 +2121,10 @@ is being merged into main via `collab-env`.
     - **Site:** free publish as item 44 (Inspect View bundle, `prepare_hf_library.py` on a hard-linked copy without
       the in-progress story map, site redaction + gate with `GDM_GCP_PROJECT` / `GDM_SITE_DENYLIST` from
       HANDOFF.local.md). Preview M1a ok (base d19a3557, 57 new files, 116 runs). Deployments: M1a `0122a59e (~18:10 PT; its built-in verify crashed on a network error after the deploy, so no receipt; separate `verify --run` receipt `RUN.verify-only.json`)`, M3a
-      and the story maps of both: queued (`scratchpad m1a3a/chain2.sh`: M3a `publish --commit`, then `storymap --run M1a=.. --run
-      M3a=.. --commit`), waiting since ~01:00 PT 11-18 on the deploy lock held by another session's `restyle --commit`
-      (pid 14158, since 01:34 PT). A network outage (~17:40-23:20 PT) killed the first chain after the M1a deploy. Receipts `runs/phase-b/cloudflare/receipts/{RUN,storymap-disclosed-20261117}.json`. M1a separate verify 9/9 ok (11-18).
+      `72216c52` (~10:20 PT 11-18; built-in verify ok), story maps of both `d2613976` (~10:55 PT 11-18; built-in verify
+      ok; both `analysis/storymap/` pages 200 and both results pages carry the Story map tab). M3a and the maps waited
+      ~9 h on the deploy lock (another session's `restyle --commit`, pid 14158, from 01:34 PT); a network outage
+      (~17:40-23:20 PT 11-17) had killed the first chain after the M1a deploy. Receipts `runs/phase-b/cloudflare/receipts/{RUN,storymap-disclosed-20261117}.json`. M1a separate verify 9/9 ok (11-18).
       Example: https://gdm-math-swarm-experiments.pages.dev/glmflash100-seeded-monitor-actions-silent-disclosed-120m-push-r1-20261117T192251Z/results.html
     - **Comparisons:** the catalogue series `monitor120` (regex in `run_profile.py`) picks up M1a/M3a; its texts now
       mention them (and the six M2 repeats). The Explore "Outside monitors" chart still shows only the four parent
