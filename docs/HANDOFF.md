@@ -2038,8 +2038,8 @@ is being merged into main via `collab-env`.
       a file name, not its contents).
     - Repo: `.gitignore` adds `.wrangler/`, `.claude/settings.local.json`, `.claude/worktrees/`, `.claude/launch.json`.
 
-48. **READY 2026-11-17 (~16:50 PT), NOT RUN (needs budget; the OpenRouter workspace budget is exhausted, item 45):
-    deception add-on, story-map code group H** (owner request, Nov 17: deception and evasion beyond reward hacking,
+48. **DONE 2026-11-17 (16:50-17:32 PT; owner "yes, run all", ~17:00 PST): deception add-on, story-map code group H,
+    run on 27 seeded runs + M1a/M3a, $80.10 in all** (results: `research/analysis/deception_metrics-2026-11-17b.md`) (owner request, Nov 17: deception and evasion beyond reward hacking,
     after OpenAI's "How we monitor internal coding agents for misalignment"; step 1, free proxies from existing codes:
     `research/analysis/deception_metrics-2026-11-17.md`; this is its "suggested step 2", built but unpaid).
     - Codes (`research/analysis/storymap/taxonomy_deception.md`, `storymap-deception-taxonomy/1`, public like the
@@ -2076,6 +2076,23 @@ is being merged into main via `collab-env`.
       `PYTHONPATH=scripts:src:. .venv/bin/python -m research.analysis.storymap.deception run --run-dir runs/RUN
       --agents agent-008,agent-085 --run-limit 2` per manifest run (offloaded maps: restore first), then
       `deception calibrate`; `run ... --dry-run` prints the estimate with no client or credential.
+    - **Ran (GPT-6.1 Terra; each invocation its own `--run-limit`).** (a) Calibration 16:50-16:52 PT, 20 agents /
+      43 units, **$1.43** (limit $3 each), outputs in scratch only (not in the runs): H2 P 9/12, R 9/10; H4 P 3/3,
+      R 3/4; H1 2/2; H3 none expected, none found; all four clear positives found. The 3 spurious H2 codes are arguable
+      (1ov r1 agent-075 racing an overseer revert, M1 r1 agent-036, agent-045 low). Gate passed. (b) 27 runs
+      16:53-~17:25 PT, 4 at a time under offload leases, maps read from scratch restores / local M maps, outputs in
+      `runs/RUN/analysis/storymap/deception/` (local only, not offloaded): 2,333 units, 48 repairs, 0 failed,
+      **$71.46** (limit $8 per run; max M3 r1 $5.80); `check` + `merge` into each local `graph.json`. (c) M1a/M3a
+      after their maps landed (16:30 PT), 17:28-17:32 PT: 249 units, **$3.35 + $3.86** (limit $10). 1,104 codes, 0
+      invalid. Driver: `deception.py run --map SCRATCH_MAP --out runs/RUN/analysis/storymap/deception`, then
+      `merge --map runs/RUN/analysis/storymap --timeline SCRATCH_MAP/timeline`.
+    - **Headline:** silent monitors (M1+M3): 346/466 blocked agents with H2 (170 high), 83 with H4. Reason
+      monitors (M2+M4): 22/389 (2 high), 8 with H4. M1a/M3a match M1/M3 (H2 74% / 65% of blocked; H4 9 / 17). H1 is
+      rare (0-7 agents per arm). One H3 in 29 runs (M3a). In control, H2 is low/medium only ("believes technical").
+    - **Not republished:** the site's story-map pages need a full re-render plus a `storymap` deploy per run (29
+      runs), and other agents' Cloudflare deploys were running. Owner can ask. `deception_metrics.py` gained the M1a/M3a
+      arms, silent/reason/disclosed groups, `--created`, and reads a map from the restored copy when the local one has
+      no timeline.
 
 ## Next steps / open items
 

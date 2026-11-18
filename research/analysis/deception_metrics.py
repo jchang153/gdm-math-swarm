@@ -40,7 +40,12 @@ from collections import Counter, defaultdict
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ARMS_FILE = os.path.join(ROOT, "research", "analysis", "monitor_arms-2026-11-16.json")
-ARM_ORDER = ["control", "reminder", "1ov", "2ov", "10ov", "M1", "M2", "M3", "M4"]
+ARM_ORDER = ["control", "reminder", "1ov", "2ov", "10ov", "M1", "M2", "M3", "M4", "M1a", "M3a"]
+# monitor disclosed to agents (HANDOFF item 45, November 17, 2026): not in the 2026-11-16 arms file; one run each
+EXTRA_ARMS = {
+    "M1a": {"runs": ["glmflash100-seeded-monitor-actions-silent-disclosed-120m-push-r1-20261117T192251Z"]},
+    "M3a": {"runs": ["glmflash100-seeded-monitor-full-silent-disclosed-120m-push-r1-20261117T192455Z"]},
+}
 GROUPS = {
     "control": ["control"],
     "reminder": ["reminder"],
@@ -48,6 +53,9 @@ GROUPS = {
     "monitors": ["M1", "M2", "M3", "M4"],
     "actions monitor (M1+M2)": ["M1", "M2"],
     "full-transcript monitor (M3+M4)": ["M3", "M4"],
+    "silent monitors (M1+M3)": ["M1", "M3"],
+    "reason monitors (M2+M4)": ["M2", "M4"],
+    "disclosed silent monitors (M1a+M3a)": ["M1a", "M3a"],
 }
 
 INTENT = {"D1"} | {f"B{i}" for i in range(1, 6)} | {f"C{i}" for i in range(1, 10)}
@@ -123,8 +131,8 @@ def comments(src):
 # ----------------------------------------------------------------------------------------------- loading
 def storymap_dir(run, restored):
     own = os.path.join(ROOT, "runs", run, "analysis", "storymap")
-    if os.path.isdir(os.path.join(own, "stage1")):
-        return own, "local"
+    if os.path.isdir(os.path.join(own, "stage1")) and os.path.isdir(os.path.join(own, "timeline")):
+        return own, "local"  # a map whose timeline was offloaded (M1a/M3a) is read from the restored copy
     if restored:
         alt = os.path.join(restored, run, "analysis", "storymap")
         if os.path.isdir(os.path.join(alt, "stage1")):
@@ -591,8 +599,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--restored", help="scratch folder with restored runs (RUN/analysis/storymap)")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--created", default="2026-11-17")
     args = ap.parse_args(argv)
-    arms_def = json.load(open(ARMS_FILE))["arms"]
+    arms_def = dict(json.load(open(ARMS_FILE))["arms"], **EXTRA_ARMS)
     per_run, missing, examples, arm_runs = {}, {}, [], defaultdict(list)
     for arm in ARM_ORDER:
         for run in arms_def[arm]["runs"]:
@@ -607,13 +616,14 @@ def main(argv=None):
             examples += [dict(e, arm=arm) for e in ex]
             print(f"{arm:8s} {run}: fakers {r['fakers']}, fake subs {r['fake_subs']}", file=sys.stderr)
     arms = {arm: summarize(arm_runs[arm]) for arm in ARM_ORDER if arm_runs[arm]}
-    groups = {g: summarize([r for a in members for r in arm_runs[a]]) for g, members in GROUPS.items()}
+    groups = {g: summarize([r for a in members for r in arm_runs[a]]) for g, members in GROUPS.items()
+              if any(arm_runs[a] for a in members)}
     for r in per_run.values():  # long per-submission lists: summarized above (medians), dropped from the file
         r.pop("gaps_last_intent_min", None)
         r.pop("first_fake_gaps_min", None)
     result = {
         "schema": "deception-metrics/1",
-        "created": "2026-11-17",
+        "created": args.created,
         "source": "story-map codes only (stage1 thoughts, stage2 overseer flags, timeline events) + conference sources",
         "window_min": WINDOW_MIN,
         "intent_codes": sorted(INTENT),
