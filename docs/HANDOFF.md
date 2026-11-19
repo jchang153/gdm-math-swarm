@@ -2265,8 +2265,11 @@ is being merged into main via `collab-env`.
       served page and refuses any other change; the log viewer asks HF for the organization grant only for an
       organization's dataset (`dataset_logs.ORG_NAME`); a user's own dataset is covered by `read-repos`. Notice and
       viewer wording now say "read access" instead of "organization members".
-    - Site: `dataset-rename` deployed to the math site and the log viewer (receipt
-      `runs/phase-b/cloudflare/receipts/dataset-rename-20261119.json`; status in `private/ops/hf-move/PLAN.md`).
+    - Site: `dataset-rename --commit` 14:33-15:04 PST: 329 pages renamed (Inspect pages, conference views, results
+      pages, judge reports of 105 runs); viewer rebuilt for 105 runs with no organization grant; `verify` and
+      `verify --viewer` ok; a token range fetch of a pinned .eval under the new id answered 206. Receipt
+      `runs/phase-b/cloudflare/receipts/dataset-rename-20261119.json`; log in `private/ops/hf-move/PLAN.md`.
+      Owner check open: sign in on the log viewer and confirm a transcript loads.
     - Consequence: only the owner's HF account can read the dataset now (HF user repos have no collaborators); the
       other organization member lost access, accepted by the owner.
     - VMs (all TERMINATED, not started for this): their `~/.config/gdm-math-swarm/logs-dataset` still holds the old
