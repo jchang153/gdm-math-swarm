@@ -309,17 +309,17 @@ def card_order(entry):
 
 # Short card titles from the run ID (redesign, October 29, 2026): the condition in a few words; the full condition
 # sentence moves into the card's details. First match wins; otherwise the model's display name.
-_MONITOR_ARM = {('actions', 'silent'): 'M1', ('actions', 'reason'): 'M2', ('full', 'silent'): 'M3',
+_MONITOR_ARM = {('actions', 'silent'): 'M1', ('actions', 'reason'): 'M3', ('full', 'silent'): 'M2',
                 ('full', 'reason'): 'M4'}
-_REVIEWER_ARM = {('rollback', 'reason'): 'A1', ('rollback', 'silent'): 'A2', ('revert', 'reason'): 'A3',
-                 ('revert', 'silent'): 'A4'}
+_REVIEWER_ARM = {('rollback', 'reason'): 'A3', ('rollback', 'silent'): 'A1', ('revert', 'reason'): 'A4',
+                 ('revert', 'silent'): 'A2'}
 _TITLES = (
     # Asynchronous reviewer arms A1-A4 (owner, November 18, 2026; docs/plan.md).
     (r'-seeded-reviewer-(rollback|revert)-(reason|silent)-',
      lambda m: f'{_REVIEWER_ARM[(m[1], m[2])]}: async reviewer, {m[1]}, '
                f'{"reason shown" if m[2] == "reason" else "silent"}'),
     # Top-down monitor arms (owner, November 12, 2026: label which spec each run is).
-    # "-disclosed" (November 17, 2026): the agents' prompt describes the monitor; arms M1a / M3a.
+    # "-disclosed" (November 17, 2026): the agents' prompt describes the monitor; arms M1a / M2a.
     (r'-seeded-monitor-(actions|full)-(silent|reason)-(disclosed-)?',
      lambda m: f'{_MONITOR_ARM[(m[1], m[2])]}{"a" if m[3] else ""}: '
                f'{"actions-only" if m[1] == "actions" else "full-transcript"} monitor, '

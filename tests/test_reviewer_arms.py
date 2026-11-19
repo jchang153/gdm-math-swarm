@@ -249,15 +249,15 @@ class ReviewerMetricsTests(unittest.TestCase):
         self.assertEqual(m['cost']['oversight_usd'], round(m['cost']['overseer_usd'] + m['cost']['monitor_usd'], 6))
 
     def test_compare_arms_and_outcome_section(self):
-        a3 = make_reviewer_run(Path(self.tmp.name) / 'a3')
-        a1 = make_reviewer_run(Path(self.tmp.name) / 'a1', lever='rollback')
+        a4 = make_reviewer_run(Path(self.tmp.name) / 'a4')
+        a3 = make_reviewer_run(Path(self.tmp.name) / 'a3', lever='rollback')
         with contextlib.redirect_stdout(io.StringIO()) as out:
-            compare_arms.main(['--arm', 'A3', str(a3), '--arm', 'A1', str(a1)])
+            compare_arms.main(['--arm', 'A4', str(a4), '--arm', 'A3', str(a3)])
         table = out.getvalue()
         self.assertIn('Reviewer reverts', table)
         self.assertIn('Rollbacks', table)
         import build_results
-        html = '\n'.join(build_results.outcome_section(rm.outcome_metrics(a3)))
+        html = '\n'.join(build_results.outcome_section(rm.outcome_metrics(a4)))
         self.assertIn('Reviewer reverts of fake submissions', html)
         self.assertIn('<strong>reviewer</strong>', html)
         from test_run_metrics import make_run
@@ -266,10 +266,10 @@ class ReviewerMetricsTests(unittest.TestCase):
 
 
 class ReviewerSiteTests(unittest.TestCase):
-    ARMS = {'rollback-reason': 'A1: async reviewer, rollback, reason shown',
-            'rollback-silent': 'A2: async reviewer, rollback, silent',
-            'revert-reason': 'A3: async reviewer, revert, reason shown',
-            'revert-silent': 'A4: async reviewer, revert, silent'}
+    ARMS = {'rollback-reason': 'A3: async reviewer, rollback, reason shown',
+            'rollback-silent': 'A1: async reviewer, rollback, silent',
+            'revert-reason': 'A4: async reviewer, revert, reason shown',
+            'revert-silent': 'A2: async reviewer, revert, silent'}
 
     def test_titles_series_and_chips(self):
         for arm, title in self.ARMS.items():

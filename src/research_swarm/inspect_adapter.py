@@ -1096,7 +1096,7 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     barrier, with no admission, provider call or transcript event. Every later request carries each
     blocked call's result as exactly its block message (``apply_block_results``).
 
-    ``rollback`` (a rollback.RollbackManager, or None: unchanged behaviour; reviewer arms A1/A2):
+    ``rollback`` (a rollback.RollbackManager, or None: unchanged behaviour; reviewer arms A1/A3):
     after the token-counter normalization, ``before_request`` executes a pending rollback at this
     request boundary, splices every rolled-back span out of the history (the reviewer observes the
     spliced view) and starts this request's file snapshot; ``after_response`` keys the response's

@@ -1856,7 +1856,7 @@ class ConferenceService:
 
     # ------------------------------------------------------- asynchronous reviewer
     # docs/plan.md, "Asynchronous reviewer arms A1–A4 (owner decisions, November 18, 2026)": a reviewer
-    # outside the swarm (research_swarm.review_live) reverts accepted submissions and, in A3, notifies the
+    # outside the swarm (research_swarm.review_live) reverts accepted submissions and, in A4, notifies the
     # authors by direct message. It is not a participant: never registered, listed or shown in get_status;
     # its events carry agent_id ``reviewer`` (async_review.REVIEWER_ID) and tool ``reviewer``.
 

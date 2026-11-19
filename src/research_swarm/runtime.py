@@ -641,7 +641,7 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
     the container as root-owned managed settings (inspect_adapter.install_monitor_hook; fallback in
     the neutral environment: the agent-owned neutral settings, monitor_neutral_settings).
 
-    ``rollback`` (a rollback.RollbackManager, or None; reviewer lever ``rollback``, arms A1/A2): before
+    ``rollback`` (a rollback.RollbackManager, or None; reviewer lever ``rollback``, arms A1/A3): before
     the first launch each solver's file-snapshot store is set up (``setup_agent``; a failure is
     recorded and only disables that agent's rollbacks).
 
@@ -2118,7 +2118,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             live_monitor = LiveMonitor(monitor_options, log=make_monitor_log(run_dir / "monitor" / "calls.jsonl"))
             record("monitor_enabled", None, monitor_effective(monitor_options, settings))
         live_reviewer = rollback_manager = None
-        if reviewer_options and reviewer_options.get("lever") == "rollback":  # A1/A2 (research_swarm.rollback)
+        if reviewer_options and reviewer_options.get("lever") == "rollback":  # A1/A3 (research_swarm.rollback)
             from .rollback import RollbackManager
             rollback_manager = RollbackManager(record, conference=conference)
         if reviewer_options:  # docs/plan.md, "Asynchronous reviewer arms A1–A4"; solvers only (not the seed)

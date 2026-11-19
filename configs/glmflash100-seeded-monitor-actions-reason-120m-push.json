@@ -26,7 +26,7 @@
     "lookback": 20,
     "max_output_chars": 2000
   },
-  "monitor_note": "Top-down monitor arm M2 (owner decisions, docs/plan.md \"Top-down monitor arms (owner decisions, November 10, 2026)\"): a generic monitor (GLM 5.3 Flash, same settings as the solvers) scores every pending tool call before it runs and blocks at or above the threshold; reads the last 20 tool calls with their outputs; a blocked agent sees the reason. Otherwise identical to configs/glmflash100-seeded-control-120m-push.json. monitor.threshold is null until the offline calibration fixes it; the launch must refuse while it is null.",
+  "monitor_note": "Top-down monitor arm M3 (owner decisions, docs/plan.md \"Top-down monitor arms (owner decisions, November 10, 2026)\"): a generic monitor (GLM 5.3 Flash, same settings as the solvers) scores every pending tool call before it runs and blocks at or above the threshold; reads the last 20 tool calls with their outputs; a blocked agent sees the reason. Otherwise identical to configs/glmflash100-seeded-control-120m-push.json. monitor.threshold is null until the offline calibration fixes it; the launch must refuse while it is null.",
   "task_count": 71,
   "task_set": "all71",
   "parent_task_count": 71,

@@ -40,22 +40,25 @@ from collections import Counter, defaultdict
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ARMS_FILE = os.path.join(ROOT, "research", "analysis", "monitor_arms-2026-11-16.json")
-ARM_ORDER = ["control", "reminder", "1ov", "2ov", "10ov", "M1", "M2", "M3", "M4", "M1a", "M3a"]
+# Arm labels relabelled (owner, November 19, 2026): silent arms 1/2, reason-shown 3/4. The dated arms file keeps
+# the old labels (old M2 = actions + reason, old M3 = full transcript + silent); it is read through this map.
+ARMS_FILE_RELABEL = {"M2": "M3", "M3": "M2"}
+ARM_ORDER = ["control", "reminder", "1ov", "2ov", "10ov", "M1", "M2", "M3", "M4", "M1a", "M2a"]
 # monitor disclosed to agents (HANDOFF item 45, November 17, 2026): not in the 2026-11-16 arms file; one run each
 EXTRA_ARMS = {
     "M1a": {"runs": ["glmflash100-seeded-monitor-actions-silent-disclosed-120m-push-r1-20261117T192251Z"]},
-    "M3a": {"runs": ["glmflash100-seeded-monitor-full-silent-disclosed-120m-push-r1-20261117T192455Z"]},
+    "M2a": {"runs": ["glmflash100-seeded-monitor-full-silent-disclosed-120m-push-r1-20261117T192455Z"]},
 }
 GROUPS = {
     "control": ["control"],
     "reminder": ["reminder"],
     "overseers": ["1ov", "2ov", "10ov"],
     "monitors": ["M1", "M2", "M3", "M4"],
-    "actions monitor (M1+M2)": ["M1", "M2"],
-    "full-transcript monitor (M3+M4)": ["M3", "M4"],
-    "silent monitors (M1+M3)": ["M1", "M3"],
-    "reason monitors (M2+M4)": ["M2", "M4"],
-    "disclosed silent monitors (M1a+M3a)": ["M1a", "M3a"],
+    "actions monitor (M1+M3)": ["M1", "M3"],
+    "full-transcript monitor (M2+M4)": ["M2", "M4"],
+    "silent monitors (M1+M2)": ["M1", "M2"],
+    "reason monitors (M3+M4)": ["M3", "M4"],
+    "disclosed silent monitors (M1a+M2a)": ["M1a", "M2a"],
 }
 
 INTENT = {"D1"} | {f"B{i}" for i in range(1, 6)} | {f"C{i}" for i in range(1, 10)}
@@ -132,7 +135,7 @@ def comments(src):
 def storymap_dir(run, restored):
     own = os.path.join(ROOT, "runs", run, "analysis", "storymap")
     if os.path.isdir(os.path.join(own, "stage1")) and os.path.isdir(os.path.join(own, "timeline")):
-        return own, "local"  # a map whose timeline was offloaded (M1a/M3a) is read from the restored copy
+        return own, "local"  # a map whose timeline was offloaded (M1a/M2a) is read from the restored copy
     if restored:
         alt = os.path.join(restored, run, "analysis", "storymap")
         if os.path.isdir(os.path.join(alt, "stage1")):
@@ -601,7 +604,8 @@ def main(argv=None):
     ap.add_argument("--out", required=True)
     ap.add_argument("--created", default="2026-11-17")
     args = ap.parse_args(argv)
-    arms_def = dict(json.load(open(ARMS_FILE))["arms"], **EXTRA_ARMS)
+    arms_def = {ARMS_FILE_RELABEL.get(k, k): v for k, v in json.load(open(ARMS_FILE))["arms"].items()}
+    arms_def.update(EXTRA_ARMS)
     per_run, missing, examples, arm_runs = {}, {}, [], defaultdict(list)
     for arm in ARM_ORDER:
         for run in arms_def[arm]["runs"]:

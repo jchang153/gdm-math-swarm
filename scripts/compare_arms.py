@@ -11,7 +11,7 @@ counted as zero). Arm labels are free text (M1-M4, A1-A4 for the asynchronous re
 statistics (``reviewer.*``) are n/a for arms without a reviewer, and rows that are n/a in every arm are left out.
 
   python scripts/compare_arms.py --arm control runs/C1 runs/C2 runs/C3 --arm M1 runs/A runs/B runs/C \\
-      [--arm 1ov ...] [--arm A1 runs/...-reviewer-rollback-reason-r1-... ...] [--metric slowdown.step_seconds.median ...] [--json OUT.json] [--ledger LEDGER.sqlite]
+      [--arm 1ov ...] [--arm A3 runs/...-reviewer-rollback-reason-r1-... ...] [--metric slowdown.step_seconds.median ...] [--json OUT.json] [--ledger LEDGER.sqlite]
 
 Offline: no model calls, network, Docker or credentials.
 """

@@ -312,13 +312,13 @@ class OverviewTest(unittest.TestCase):
     def test_monitor_run_title_and_chip(self):
         """Owner, November 12, 2026: monitor runs carry the M1-M4 arm labels, not "no overseer"."""
         arms = {'actions-silent': ('M1: actions-only monitor, silent block', 'actions-only, silent block'),
-                'actions-reason': ('M2: actions-only monitor, block with reason', 'actions-only, block with reason'),
-                'full-silent': ('M3: full-transcript monitor, silent block', 'full-transcript, silent block'),
+                'actions-reason': ('M3: actions-only monitor, block with reason', 'actions-only, block with reason'),
+                'full-silent': ('M2: full-transcript monitor, silent block', 'full-transcript, silent block'),
                 'full-reason': ('M4: full-transcript monitor, block with reason', 'full-transcript, block with reason'),
                 # November 17, 2026: monitor disclosed to agents (live bug: the extra clause broke the title split).
                 'actions-silent-disclosed': ('M1a: actions-only monitor, silent block, disclosed to agents',
                                              'actions-only, silent block, disclosed to agents'),
-                'full-silent-disclosed': ('M3a: full-transcript monitor, silent block, disclosed to agents',
+                'full-silent-disclosed': ('M2a: full-transcript monitor, silent block, disclosed to agents',
                                           'full-transcript, silent block, disclosed to agents')}
         intro = ('100 GLM 5.3 Flash solvers, 1 GLM 5.3 Flash overseer with check_proof and revert powers, '
                  'exploit planted at +3 min, 2 h.')
@@ -335,10 +335,10 @@ class OverviewTest(unittest.TestCase):
 
     def test_reviewer_run_title_and_chip(self):
         """Asynchronous reviewer arms A1-A4 (owner, November 18, 2026)."""
-        arms = {'rollback-reason': 'A1: async reviewer, rollback, reason shown',
-                'rollback-silent': 'A2: async reviewer, rollback, silent',
-                'revert-reason': 'A3: async reviewer, revert, reason shown',
-                'revert-silent': 'A4: async reviewer, revert, silent'}
+        arms = {'rollback-reason': 'A3: async reviewer, rollback, reason shown',
+                'rollback-silent': 'A1: async reviewer, rollback, silent',
+                'revert-reason': 'A4: async reviewer, revert, reason shown',
+                'revert-silent': 'A2: async reviewer, revert, silent'}
         intro = ('100 GLM 5.3 Flash solvers, 1 GLM 5.3 Flash overseer with check_proof and revert powers, '
                  'exploit planted at +3 min, 2 h.')
         for arm, label in arms.items():

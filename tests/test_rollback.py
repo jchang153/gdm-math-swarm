@@ -1,5 +1,5 @@
-"""Rollback lever of the asynchronous reviewer arms A1/A2 (research_swarm.rollback, rollback_fs):
-history splice, pairing validity, A1 note vs A2 silence, compaction, file snapshot/restore in a host
+"""Rollback lever of the asynchronous reviewer arms A1/A3 (research_swarm.rollback, rollback_fs):
+history splice, pairing validity, A3 note vs A1 silence, compaction, file snapshot/restore in a host
 folder standing in for the container, submission selection and revert, failure paths."""
 import asyncio
 import json

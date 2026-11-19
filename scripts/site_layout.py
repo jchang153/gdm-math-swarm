@@ -311,16 +311,16 @@ def _short_overseers(part):
 
 
 # Top-down monitor arms (owner, November 12, 2026): the same M1-M4 labels as scripts/build_experiment_index.py.
-_MONITOR_RUN = re.compile(r'-seeded-monitor-(actions|full)-(silent|reason)-(disclosed-)?')  # disclosed: M1a / M3a
-_MONITOR_ARM = {('actions', 'silent'): 'M1', ('actions', 'reason'): 'M2', ('full', 'silent'): 'M3',
+_MONITOR_RUN = re.compile(r'-seeded-monitor-(actions|full)-(silent|reason)-(disclosed-)?')  # disclosed: M1a / M2a
+_MONITOR_ARM = {('actions', 'silent'): 'M1', ('actions', 'reason'): 'M3', ('full', 'silent'): 'M2',
                 ('full', 'reason'): 'M4'}
 
 
 # Asynchronous reviewer arms A1-A4 (owner, November 18, 2026; docs/plan.md): the same labels as
 # scripts/build_experiment_index.py.
 _REVIEWER_RUN = re.compile(r'-seeded-reviewer-(rollback|revert)-(reason|silent)-')
-_REVIEWER_ARM = {('rollback', 'reason'): 'A1', ('rollback', 'silent'): 'A2', ('revert', 'reason'): 'A3',
-                 ('revert', 'silent'): 'A4'}
+_REVIEWER_ARM = {('rollback', 'reason'): 'A3', ('rollback', 'silent'): 'A1', ('revert', 'reason'): 'A4',
+                 ('revert', 'silent'): 'A2'}
 
 
 def _reviewer(run):
@@ -381,7 +381,7 @@ def _spec(document, run):
         title = solvers
         if monitor:
             arm, spec = monitor
-            kind, block = spec.split(', ', 1)  # M1a/M3a: block = 'silent block, disclosed to agents'
+            kind, block = spec.split(', ', 1)  # M1a/M2a: block = 'silent block, disclosed to agents'
             title += f' · {arm}: {kind} monitor, {block}'
         elif reviewer:
             title += f' · {reviewer[0]}: async reviewer, {reviewer[1]}'

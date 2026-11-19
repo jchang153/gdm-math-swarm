@@ -14,8 +14,8 @@ November 18, 2026)"; prompt and parsing in research_swarm.async_review).
   (``review``): an empty window makes no call; otherwise one call on the agent's own model and frozen
   settings, admitted and settled in the run's ledger with agent label ``reviewer:<agent>``, ModelEvents
   kept out of the agent's transcript, capped at 600 s. Any failure is logged and nothing is done.
-  At score >= threshold the lever acts: ``revert`` (A3/A4: ConferenceService.reviewer_revert for each
-  eligible problem, async_review.revert_plan; A3 DMs each author) or ``rollback`` (A1/A2: the rollback
+  At score >= threshold the lever acts: ``revert`` (A2/A4: ConferenceService.reviewer_revert for each
+  eligible problem, async_review.revert_plan; A4 DMs each author) or ``rollback`` (A1/A3: the rollback
   API of research_swarm.rollback, see ``apply_rollback``).
 
 Records: runtime events ``review_admitted`` (request_id, reserved_usd; run accounting), ``review_scored``,
@@ -77,7 +77,7 @@ class RollbackContext:
 async def apply_rollback(context, agent_id, cut_tool_use_id, note) -> dict:
     """Stub until research_swarm.rollback provides ``apply`` (WS2). Expected contract: set ``agent_id``
     back to before ``cut_tool_use_id`` (conversation cut, files restored, later submissions reverted),
-    deliver ``note`` (A1) or nothing (A2, None) and return a JSON-serializable dict for the
+    deliver ``note`` (A3) or nothing (A1, None) and return a JSON-serializable dict for the
     ``review_rollback`` event."""
     raise NotImplementedError("rollback is not implemented yet (research_swarm.rollback.apply)")
 

@@ -1,4 +1,4 @@
-"""Rollback lever of the asynchronous reviewer arms A1 (reason shown) and A2 (silent).
+"""Rollback lever of the asynchronous reviewer arms A3 (reason shown) and A1 (silent).
 
 docs/plan.md, "Asynchronous reviewer arms A1–A4 (owner decisions, November 18, 2026)". Given agent X
 and a cut tool call C (the earliest misbehaving call the reviewer names), X is set back to just before
@@ -8,8 +8,8 @@ C without restarting its Claude Code process:
     the assistant turn issuing C has that turn and everything after it up to the rollback moment (the
     "span") removed, so the model never sees it again; Claude Code keeps its own full history and the
     splice is re-applied identically to each request (like the push and block pins of
-    inspect_adapter), which keeps the prompt-cache prefix before the cut intact. A1 adds one user
-    message with the reviewer's note at the cut (the same object on every request); A2 adds nothing.
+    inspect_adapter), which keeps the prompt-cache prefix before the cut intact. A3 adds one user
+    message with the reviewer's note at the cut (the same object on every request); A1 adds nothing.
     A splice is applied only when the result keeps tool_use/tool_result pairing valid.
 (b) files: host-driven snapshots of X's private files taken at the start of every request with
     tools, i.e. after every earlier tool call finished and before any tool call of the coming
@@ -20,7 +20,7 @@ C without restarting its Claude Code process:
     issued C.
 (c) submissions: X's accepted submissions made at or after that request are reverted (revert by
     problem, through the ``revert`` callable supplied by the reviewer loop).
-(d) A1: the note; A2: none.
+(d) A3: the note; A1: none.
 
 The rollback itself runs at X's next model request (inside the bridge filter, ``before_request``):
 at that moment Claude Code has finished every tool call of its previous response, so no tool of X
@@ -136,7 +136,7 @@ def _is_compaction(message):
 @dataclasses.dataclass
 class Splice:
     """One rollback's removal: from the assistant turn issuing ``cut_id``, ``length`` messages, the
-    last of which has ``end_sig``; ``note_message`` (A1) is inserted in their place."""
+    last of which has ``end_sig``; ``note_message`` (A3) is inserted in their place."""
     cut_id: str
     length: int
     end_sig: tuple
@@ -391,7 +391,7 @@ def _consume(task):
 
 
 class RollbackManager:
-    """One run's rollback lever (every reviewed agent of an A1/A2 run).
+    """One run's rollback lever (every reviewed agent of an A1/A3 run).
 
     ``record(kind, agent_id, payload)``: the run's event recorder. ``store_dir``: host folder of the
     snapshot stores; by default a private (0700) temporary folder outside the run directory, removed
@@ -597,8 +597,8 @@ class RollbackManager:
         return await self.apply_rollback(agent_id, cut_tool_use_id, note)
 
     async def apply_rollback(self, agent_id, cut_tool_use_id, note=None, timeout=None):
-        """Roll ``agent_id`` back to just before tool call ``cut_tool_use_id``; ``note`` (A1) is the
-        exact user message shown at the cut, None (A2) shows nothing. Waits for the agent's next model
+        """Roll ``agent_id`` back to just before tool call ``cut_tool_use_id``; ``note`` (A3) is the
+        exact user message shown at the cut, None (A1) shows nothing. Waits for the agent's next model
         request (at most ``timeout``, default CLAIM_TIMEOUT_SECONDS). Returns the record for a
         ``review_rollback`` event; on any failure ``ok`` is False and the agent is unchanged."""
         base = {"agent": agent_id, "cut_tool_use_id": cut_tool_use_id, "version": ROLLBACK_VERSION,

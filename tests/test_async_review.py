@@ -1,7 +1,7 @@
 """Asynchronous reviewer arms A1-A4 (docs/plan.md, "Asynchronous reviewer arms A1–A4 (owner decisions,
 November 18, 2026)"): the pure review-v1 prompt, time-based window, parsing, revert eligibility and config
 (research_swarm.async_review); the conference's reviewer revert and DM; the live reviewer
-(research_swarm.review_live) with a mock model, ledger labels, revert + DM in A3, no DM in A4, the rollback
+(research_swarm.review_live) with a mock model, ledger labels, revert + DM in A4, no DM in A2, the rollback
 call site, failure paths; and the bridge filter's per-call timestamps. No network, no paid calls."""
 import asyncio
 import json
@@ -16,7 +16,7 @@ from tests.test_conference import GOOD, FakeJudge, agents, make_tasks
 from tests.test_inspect_adapter import HAVE_INSPECT, run_ledger
 
 ROOT = Path(__file__).resolve().parents[1]
-ARMS = {"A1": ("rollback", True), "A2": ("rollback", False), "A3": ("revert", True), "A4": ("revert", False)}
+ARMS = {"A1": ("rollback", False), "A2": ("revert", False), "A3": ("rollback", True), "A4": ("revert", True)}
 
 
 def config_path(lever, reason):
@@ -378,7 +378,7 @@ class LiveReviewerTests(unittest.TestCase):
         self.assertEqual(self.kinds("review_scored")[0]["action"]["why"], "first_bad_call_not_in_window")
         self.model.text = reviewer_reply(95, first_bad_call="t3")
         self.review()
-        self.assertEqual(seen, [None])  # A2: no note
+        self.assertEqual(seen, [None])  # A1: no note
 
     def test_rollback_stub_until_ws2(self):
         from research_swarm import review_live
