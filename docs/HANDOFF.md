@@ -2250,8 +2250,35 @@ is being merged into main via `collab-env`.
     OFFLOADED.json again. `publish_cloudflare.py publish --run` never asks a missing bucket: every dataset link
     stays pinned to HF (`default_hf_subset`), and a raw run is restored from HF by its OFFLOADED.json.
 
+54. **DONE 2026-11-19 (afternoon PST): private HF logs dataset moved to the owner's HF PRO account** (owner, chat:
+    "yes, let's do pro plus the move", then "Can you do everything else for me?"; docs/plan.md "HF logs dataset moved
+    to the owner's PRO account"). Reason: the organization was 77 MB over its free 100 GB private quota and HF
+    answered 403 to every private download. The owner subscribed to PRO (1 TB private); the main session moved the
+    repo with `HfApi.move_repo` at the owner's request, keeping the repo name. New id only in HANDOFF.local.md
+    (`GDM_LOGS_DATASET`) and on the public site's private-record links (allowed by "Site privacy redaction").
+    Commits are unchanged, so every commit-pinned record and link stays valid; the old id still redirects on HF.
+    Verified: private, a file download 200 with the existing fine-grained local token (no new token was needed).
+    - Local config and records: `private/ops/hf-move/move_followup.py --apply` (idempotent, strictly old id -> new
+      id, backups under `private/ops/hf-move/backup/`): HANDOFF.local.md, operator scripts, and the run/phase JSON
+      records; raw console logs and content-addressed site caches are left as written.
+    - Code (e17f933): `publish_cloudflare.py dataset-rename --from OLD --to NEW` rewrites the dataset links of every
+      served page and refuses any other change; the log viewer asks HF for the organization grant only for an
+      organization's dataset (`dataset_logs.ORG_NAME`); a user's own dataset is covered by `read-repos`. Notice and
+      viewer wording now say "read access" instead of "organization members".
+    - Site: `dataset-rename` deployed to the math site and the log viewer (receipt
+      `runs/phase-b/cloudflare/receipts/dataset-rename-20261119.json`; status in `private/ops/hf-move/PLAN.md`).
+    - Consequence: only the owner's HF account can read the dataset now (HF user repos have no collaborators); the
+      other organization member lost access, accepted by the owner.
+    - VMs (all TERMINATED, not started for this): their `~/.config/gdm-math-swarm/logs-dataset` still holds the old
+      id, which redirects, and their upload token is the existing fine-grained token. Test at the next run (the
+      supervisor's `hf-upload.json` outcome); rewrite `logs-dataset` with the new id when a VM is next up
+      (`scripts/vm_hf_setup.py` writes it); the owner replaces a VM's token only if its upload fails
+      (commands in `private/ops/hf-move/PLAN.md`).
+
 ## Next steps / open items
 
+- **Logs dataset storage (2026-11-19):** the dataset is now in the owner's PRO account (1 TB private; item 54), so
+  the 100 GB organization limit below no longer applies.
 - **Logs dataset storage (2026-11-10 21:30 PT):** used_storage 90.2 GB of the org's 100 GB private limit (raw files
   99.85 GB); new runs can still offload for now, about 7 runs of headroom. Owner decision 2026-11-10: do not delete
   anything (resume bundles ~23 GB were considered; they feed story-map extraction, and squashing would break pinned

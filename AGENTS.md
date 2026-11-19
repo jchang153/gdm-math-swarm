@@ -65,7 +65,8 @@ exports are derived views. Raw runs are Git-ignored and require separate backup.
 The shared experiment library is the public Cloudflare Pages site
 https://gdm-math-swarm-experiments.pages.dev (owner decision, October 27, 2026); it
 replaces the former HF Space, which the owner will retire separately. Do not change or
-delete the HF Space or the private HF logs dataset (named in HANDOFF.local.md).
+delete the HF Space or the private HF logs dataset (in the owner's own HF account since
+November 19, 2026; name in HANDOFF.local.md), nor delete or modify the dataset's contents without approval.
 Private files (Inspect logs, raw records, snapshots, timelines, resume bundles) never
 go to the public site. Follow docs/experiment-library.md for preparation, privacy and
 guarded updates; preserve other collaborators' runs and never upload host credentials

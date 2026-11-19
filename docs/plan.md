@@ -2641,3 +2641,28 @@ configured (`GDM_RUNS_BUCKET`, `~/.config/gdm-math-swarm/runs-bucket`) or the ru
 a bucket is configured and the GCS upload succeeded does HF get the viewable subset. Explicit `--hf-categories` or
 `GDM_HF_CATEGORIES` still select the subset with those categories. `publish --run` without a bucket never asks
 it: pages keep every dataset link pinned to HF, and a raw run is restored from the dataset by its OFFLOADED.json.
+
+## HF logs dataset moved to the owner's PRO account (owner decision, November 19, 2026)
+
+Owner (chat, November 19, 2026): "yes, let's do pro plus the move", then "Can you do everything else for me?".
+
+Reason: the organization that owned the private HF logs dataset was 77 MB over its free 100 GB private quota, and
+HF locked the dataset (HTTP 403 on every private download), so neither the log viewer nor restores worked.
+
+Approved and done:
+
+- The owner subscribed to HF PRO on their personal account (1 TB private storage).
+- The dataset was transferred from the organization to the owner's personal account, keeping its repository name
+  (done by the main session with `HfApi.move_repo` at the owner's request). Its commits are unchanged, so every
+  commit-pinned record and link stays valid; HF still redirects the old id. The new id is host-only
+  (`GDM_LOGS_DATASET`, HANDOFF.local.md) except on the public site's private-record links, which the "Site privacy
+  redaction" decision already allows.
+- The existing fine-grained token still reads and writes the moved dataset; a new token is created only if an
+  upload or download fails.
+- The site's dataset links and the log viewer were rewritten to the new id (`publish_cloudflare.py dataset-rename`).
+  The viewer no longer asks for the organization grant for a dataset in a user's account: HF's `read-repos` scope
+  covers the user's own repositories.
+
+Consequence, accepted by the owner: HF user repositories have no collaborators, so only the owner's account can read
+the dataset; the other organization member (collaborator) lost access to it. The rule against deleting or modifying
+the dataset's contents without owner approval is unchanged.
