@@ -1061,7 +1061,7 @@ def monitor_neutral_settings(path=MONITOR_USER_HOOK_PATH):
 
 
 def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", archive=None, stop=None,
-                  neutral=False, model_override=None, push=None, monitor=None):
+                  neutral=False, model_override=None, push=None, monitor=None, review=None):
     """Bridge GenerateFilter: barrier, admission, frozen settings, settlement.
 
     The returned coroutine function carries ``.state`` which the solver reads at
@@ -1094,6 +1094,12 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     proxy (a request that is ``monitor.parse_lookup``); it is answered here from the store, before the
     barrier, with no admission, provider call or transcript event. Every later request carries each
     blocked call's result as exactly its block message (``apply_block_results``).
+
+    ``review`` (a review_live.ReviewHistory, or None: unchanged behaviour): the asynchronous reviewer's
+    observations (docs/plan.md, "Asynchronous reviewer arms A1–A4"). Every request's history (after the
+    neutral rewrite and counter normalization, before push blocks) and the model it goes to are kept, and
+    each tool_use_id's first-seen wall time is recorded when the response carrying it returns. Requests,
+    responses and billing are unchanged.
     """
     from inspect_ai.model import Model
     from inspect_ai.util import LimitExceededError
@@ -1142,6 +1148,11 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
                         "tool_use_id": message.tool_call_id, "cli_text": _short(message.text, 2000),
                         "cli_error": message.error is not None, "replaced_with": blocked[message.tool_call_id]})
             messages, _ = apply_block_results(messages, blocked)
+        if review is not None:
+            try:
+                review.observe_request(agent_id, messages, model_override or model)
+            except Exception as ex:  # observation only: never affects the agent's request
+                record("review_observe_error", agent_id, {"stage": "request", "error": type(ex).__name__})
         await barrier.ready(agent_id)
         if stop is not None and stop.is_set():
             deny("run_stopped")
@@ -1183,6 +1194,11 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
             if monitor is not None and output.choices and output.message.tool_calls:
                 # Synchronous: the CLI receives the response only after its calls are scored.
                 await _score(model_override or model, messages, output, request_id, time.monotonic() - began)
+            if review is not None and output.choices and output.message.tool_calls:
+                try:
+                    review.observe_output(agent_id, output.message)
+                except Exception as ex:
+                    record("review_observe_error", agent_id, {"stage": "output", "error": type(ex).__name__})
             return output
         finally:
             state["in_flight"] -= 1

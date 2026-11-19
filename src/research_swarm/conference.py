@@ -1816,6 +1816,18 @@ class ConferenceService:
         reason = self._text(a["reason"], "reason")
         if not reason.strip():
             raise ToolError("'reason' must not be empty.")
+        public_id, credited, _ = self._revert_accepted(agent_id, problem_id, reason, "revert_submission", call_id)
+        return {"ok": True, "problem_id": problem_id, "reverted_submission": public_id,
+                "previously_credited_agent": credited, "status": "open",
+                "message": f"The accepted submission for {problem_id} by {credited} was reverted: the credit was "
+                           "removed, the solution was withdrawn from the shared library, and the problem is open "
+                           "again. Nobody was notified."}
+
+    def _revert_accepted(self, actor, problem_id, reason, tool, call_id):
+        """Revert ``problem_id``'s accepted submission (credit removed, library entry withdrawn, problem
+        reopened) on behalf of ``actor``; (public submission id, credited agent, submission id). Raises
+        ToolError when the problem has no accepted submission."""
+        agent_id = actor
         with self._transaction() as db:
             row = db.execute("SELECT status, credited_agent, accepted_at, accepted_submission, library_artifact "
                              "FROM tasks WHERE task_id = ?", (problem_id,)).fetchone()
@@ -1837,14 +1849,84 @@ class ConferenceService:
                 "problem_id": problem_id, "submission_id": submission_id, "public_submission_id": public_id,
                 "credited_agent": credited, "accepted_at": _iso(accepted_at),
                 "artifact_id": None if artifact is None else f"lib-{artifact:06d}", "library_path": library_path,
-                "reason": reason, "reversion_id": reversion}, "revert_submission", call_id)
+                "reason": reason, "reversion_id": reversion}, tool, call_id)
             self._emit("task_reopened", agent_id, {"problem_id": problem_id, "submission_id": submission_id},
-                       "revert_submission", call_id)
-        return {"ok": True, "problem_id": problem_id, "reverted_submission": public_id,
-                "previously_credited_agent": credited, "status": "open",
-                "message": f"The accepted submission for {problem_id} by {credited} was reverted: the credit was "
-                           "removed, the solution was withdrawn from the shared library, and the problem is open "
-                           "again. Nobody was notified."}
+                       tool, call_id)
+        return public_id, credited, submission_id
+
+    # ------------------------------------------------------- asynchronous reviewer
+    # docs/plan.md, "Asynchronous reviewer arms A1–A4 (owner decisions, November 18, 2026)": a reviewer
+    # outside the swarm (research_swarm.review_live) reverts accepted submissions and, in A3, notifies the
+    # authors by direct message. It is not a participant: never registered, listed or shown in get_status;
+    # its events carry agent_id ``reviewer`` (async_review.REVIEWER_ID) and tool ``reviewer``.
+
+    def _reviewer_call(self, fn):
+        with self._activity:
+            if self._closing:
+                raise ToolError("The conference is closed.")
+            self._in_flight += 1
+        try:
+            return fn()
+        finally:
+            with self._activity:
+                self._in_flight -= 1
+                self._activity.notify_all()
+
+    def accepted_submissions(self) -> dict:
+        """{problem_id: {"credited_agent", "submission_id", "public_submission_id"}} of every problem that
+        currently has an accepted submission (seeded ones included)."""
+        with self._lock:
+            if self._closed:
+                return {}
+            rows = self._db.execute(
+                "SELECT t.task_id, t.credited_agent, t.accepted_submission, s.public_id FROM tasks t "
+                "JOIN submissions s ON s.submission_id = t.accepted_submission "
+                "WHERE t.status = 'closed' AND t.accepted_submission IS NOT NULL").fetchall()
+        return {task: {"credited_agent": credited, "submission_id": f"sub-{submission:06d}",
+                       "public_submission_id": public_id} for task, credited, submission, public_id in rows}
+
+    def reviewer_revert(self, problem_id, reason, reviewer="reviewer", reviewed_agent=None) -> dict | None:
+        """Revert ``problem_id``'s accepted submission as the reviewer (like an overseer's revert_submission,
+        nobody notified here). Returns {"problem_id", "submission_id", "public_submission_id", "author"}, or
+        None when the problem has no accepted submission (any more) or the service is closing."""
+        if problem_id not in self._tasks:
+            return None
+        call_id = "call-" + uuid.uuid4().hex[:16]
+        reason = _safe_text(str(reason or "").strip()) or "(no reason given)"
+        try:
+            public_id, credited, submission_id = self._reviewer_call(
+                lambda: self._revert_accepted(reviewer, problem_id, reason, "reviewer", call_id))
+        except ToolError:
+            return None
+        if reviewed_agent is not None:
+            self._record_quietly("reviewer_revert", reviewer, {"problem_id": problem_id,
+                                                               "submission_id": submission_id,
+                                                               "author": credited, "reviewed_agent": reviewed_agent},
+                                 "reviewer", call_id)
+        return {"problem_id": problem_id, "submission_id": submission_id, "public_submission_id": public_id,
+                "author": credited}
+
+    def reviewer_message(self, recipient, body, sender="reviewer") -> str | None:
+        """A direct message from the reviewer to ``recipient`` (delivered like any DM: push or get_messages,
+        sender shown as ``sender``). Returns the public message id, or None when it could not be stored."""
+        body = _safe_text(str(body or ""))
+
+        def send():
+            with self._transaction() as db:
+                if not self._known_agent(db, recipient):
+                    return None
+                now = self._clock()
+                public_id = self._new_public_id(db, "messages", "dm")
+                message_id = db.execute("INSERT INTO messages (sender, recipient, body, sent_at, public_id) "
+                                        "VALUES (?, ?, ?, ?, ?)", (sender, recipient, body, now, public_id)).lastrowid
+                self._emit("dm_sent", sender, {"message_id": f"dm-{message_id:06d}", "public_message_id": public_id,
+                                               "recipient": recipient, "message": body, "reviewer": True},
+                           "reviewer", None)
+                return public_id
+        try:
+            return self._reviewer_call(send)
+        except ToolError:
+            return None
 
     def _check_proof(self, agent_id, args, call_id):
         a = self._arguments(args, ("problem_id",), ("file_path", "source"))

@@ -474,6 +474,12 @@ def make_monitor_log(path):
     return log
 
 
+def reviewer_effective(options, settings):
+    """settings.json ``effective.reviewer`` (review_live.reviewer_effective)."""
+    from .review_live import reviewer_effective as effective
+    return effective(options, settings)
+
+
 def monitor_effective(options, settings):
     """settings.json ``effective.monitor``: the monitor's settings, prompt version, model and hook."""
     from .inspect_adapter import MANAGED_SETTINGS_DIR, MONITOR_HOOK_PATH, MONITOR_TIMEOUT_SECONDS
@@ -611,7 +617,7 @@ def restart_delay(consecutive_quick):
 def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, run_dir, record, clock,
                 system_prompt_mode="replace", auto_memory=True, in_flight_grace=IN_FLIGHT_GRACE_SECONDS,
                 auto_restart=False, neutral=False, roles=None, definitions_for=None, continue_for=None,
-                env_for=None, resume=None, monitor_hook=False):
+                env_for=None, resume=None, monitor_hook=False, reviewer=None):
     """Solver running one genuine Claude Code peer inside its own sandbox.
 
     ``roles`` ({agent_id: "solver"|"overseer"}, oversight.roles), ``definitions_for(agent_id)``
@@ -633,6 +639,9 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
     ``monitor_hook`` (top-down monitor): before the first launch the PreToolUse hook is installed in
     the container as root-owned managed settings (inspect_adapter.install_monitor_hook; fallback in
     the neutral environment: the agent-owned neutral settings, monitor_neutral_settings).
+
+    ``reviewer`` (a review_live.LiveReviewer, or None): the asynchronous reviewer's loop for this agent
+    runs in the agent's own task group (solvers only; overseers are never reviewed) and ends with it.
 
     ``resume`` (a resume_bundle.ResumeBundler, or None): after the final snapshot poll each
     agent's resume state is saved (docs/runtime.md, "Resume bundle"), and every
@@ -793,6 +802,8 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
                         group.start_soon(snapshots.run, sbox)
                         if resume is not None and resume.checkpoint_minutes:
                             group.start_soon(resume.run_checkpoints, sbox, agent_id, resume_fields)
+                        if reviewer is not None and (role or "solver") == "solver":
+                            group.start_soon(reviewer.run, agent_id, sbox)
                 finally:
                     with anyio.CancelScope(shield=True):
                         try:
@@ -1252,6 +1263,12 @@ def integrity_reminder_settings(config):
     return float(block["interval_seconds"]), block["text"]
 
 
+def reviewer_launch_problems(config):
+    """The ``reviewer`` block's problems (research_swarm.async_review.reviewer_problems)."""
+    from .async_review import reviewer_problems
+    return reviewer_problems(config)
+
+
 def monitor_launch_problems(config):
     """The ``monitor`` block's problems (research_swarm.monitor.monitor_problems)."""
     from .monitor import monitor_problems
@@ -1366,6 +1383,7 @@ def preflight(config, repo_root):
     blockers.extend(push_delivery_problems(config))  # docs/plan.md, "Unread notices", "Push delivery"
     blockers.extend(integrity_reminder_problems(config))  # docs/plan.md, "periodic integrity reminder"
     blockers.extend(monitor_launch_problems(config))  # docs/plan.md, "Top-down monitor arms"
+    blockers.extend(reviewer_launch_problems(config))  # docs/plan.md, "Asynchronous reviewer arms A1–A4"
     allocation = None
     try:
         allocation = persona_counts_for(config, personas_for(config, int(config.get("agent_count", APPROVED_AGENT_COUNT)),
@@ -1979,6 +1997,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
         integrity_reminder = integrity_reminder_settings(config)  # off unless configured
         from .monitor import monitor_settings
         monitor_options = monitor_settings(config)  # None: no monitor (absent or disabled)
+        from .async_review import reviewer_settings
+        reviewer_options = reviewer_settings(config)  # None: no asynchronous reviewer
         if integrity_reminder is not None:  # docs/plan.md, "Baseline with periodic integrity reminder"
             max_seconds = config.get("max_run_seconds")
             last_boundary = (None if not isinstance(max_seconds, (int, float)) or isinstance(max_seconds, bool)
@@ -2036,6 +2056,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "conference_participants": len(conference_ids),
             "seeded": None if seed is None else seeded_settings(config),
             **({"monitor": monitor_effective(monitor_options, settings)} if monitor_options else {}),
+            **({"reviewer": reviewer_effective(reviewer_options, settings)} if reviewer_options else {}),
             "overseer": None if overseer is None else oversight.effective_overseer(overseer, proof_checker,
                                                                                     overseer_settings,
                                                                                     domain=domain)}
@@ -2086,6 +2107,14 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             from .inspect_adapter import LiveMonitor
             live_monitor = LiveMonitor(monitor_options, log=make_monitor_log(run_dir / "monitor" / "calls.jsonl"))
             record("monitor_enabled", None, monitor_effective(monitor_options, settings))
+        live_reviewer = None
+        if reviewer_options:  # docs/plan.md, "Asynchronous reviewer arms A1–A4"; solvers only (not the seed)
+            from .review_live import LiveReviewer, make_review_log
+            live_reviewer = LiveReviewer(reviewer_options, ledger=ledger, provider_settings=settings, record=record,
+                                         conference=conference, solver_ids=solver_ids, barrier=barrier,
+                                         stop=clock.stop, scope="pilot", neutral=neutral,
+                                         log=make_review_log(run_dir / "review" / "calls.jsonl"), run_dir=run_dir)
+            record("reviewer_enabled", None, reviewer_effective(reviewer_options, settings))
 
         def filter_for(agent):
             # Overseers with their own model reserve, request and settle with its settings.
@@ -2093,7 +2122,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             return budget_filter(agent, ledger, overseer_settings if own else settings, barrier, record, "pilot",
                                  archive, clock.stop, **neutral_args, model_override=overseer_model if own else None,
                                  push=conference if push else None,
-                                 **({"monitor": live_monitor} if live_monitor is not None else {}))
+                                 **({"monitor": live_monitor} if live_monitor is not None else {}),
+                                 **({"review": live_reviewer.history} if live_reviewer is not None else {}))
 
         solver = peer_solver(conference=conference, definitions=definitions, personas=personas,
                              prompt_for=prompt_for, roles=({a: r for a, r in roles.items() if a in agent_ids}
@@ -2105,7 +2135,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                              run_dir=run_dir, record=record, clock=clock, system_prompt_mode=mode,
                              auto_memory=auto_memory, in_flight_grace=in_flight_grace,
                              auto_restart=config.get("auto_restart") is True, resume=resume, **neutral_args,
-                             **({"monitor_hook": True} if live_monitor is not None else {}))
+                             **({"monitor_hook": True} if live_monitor is not None else {}),
+                             **({"reviewer": live_reviewer} if live_reviewer is not None else {}))
         task = build_task(agent_ids=agent_ids, files=agent_files(task_files), solver=solver, compose=compose,
                           metadata={"condition": condition_label(variant, track), "prompt_variant": variant,
                                     "persona_reviewing": reviewing, "personas": personas, "persona_seed": persona_seed,
