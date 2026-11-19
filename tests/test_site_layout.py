@@ -333,6 +333,22 @@ class OverviewTest(unittest.TestCase):
         # Non-monitor runs unchanged.
         self.assertIn('<li><b>Oversight</b>', site_layout.apply('results.html', RUN_PAGE))
 
+    def test_reviewer_run_title_and_chip(self):
+        """Asynchronous reviewer arms A1-A4 (owner, November 18, 2026)."""
+        arms = {'rollback-reason': 'A1: async reviewer, rollback, reason shown',
+                'rollback-silent': 'A2: async reviewer, rollback, silent',
+                'revert-reason': 'A3: async reviewer, revert, reason shown',
+                'revert-silent': 'A4: async reviewer, revert, silent'}
+        intro = ('100 GLM 5.3 Flash solvers, 1 GLM 5.3 Flash overseer with check_proof and revert powers, '
+                 'exploit planted at +3 min, 2 h.')
+        for arm, label in arms.items():
+            run = f'glmflash100-seeded-reviewer-{arm}-120m-push-r2-20261119T014006Z'
+            page = site_layout.apply('results.html', RUN_PAGE.replace(RUN_ID, run).replace(
+                intro, '100 GLM 5.3 Flash solvers, no overseer, exploit planted at +3 min, 2 h.'))
+            self.assertIn(f'100 GLM 5.3 Flash solvers · {label} · 2 h · pushed messages · run 2', page)
+            self.assertIn(f'<li><b>Reviewer</b>asynchronous, {label.split(", ", 1)[1]}</li>', page)
+            self.assertNotIn('<b>Oversight</b>', page)
+
     def test_storymap_publish_rerenders_the_overview_graph(self):
         """Live bug, November 12, 2026: a run page rendered before its story map kept the fakes pane after the
         storymap command added the tab; plan_storymap now re-renders the overview from the new files."""

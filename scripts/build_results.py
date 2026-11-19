@@ -199,7 +199,7 @@ def read_runtime(run, stop_utc=None):
     """Single pass over runtime.jsonl."""
     out = {'start': None, 'stop': None, 'reason': None, 'elapsed': None, 'exits': collections.Counter(),
            'budget_exits': [], 'restarts': 0, 'admitted': {}, 'finished': {}, 'unbilled': set(), 'monitor': set(),
-           'tokens': collections.Counter(), 'agents': collections.defaultdict(lambda: {
+           'reviewer': set(), 'tokens': collections.Counter(), 'agents': collections.defaultdict(lambda: {
                'requests': 0, 'finished': 0, 'unbilled': 0, 'restarts': 0, 'exit': None, 'exit_at': None})}
     for event in json_lines(run / 'runtime.jsonl'):
         kind, payload, agent = event.get('kind'), event.get('payload') or {}, event.get('agent_id')
@@ -226,6 +226,19 @@ def read_runtime(run, stop_utc=None):
             # in the run's spending; not an agent request, so the per-agent counts stay agents only.
             out['admitted'][payload['request_id']] = Decimal(payload.get('reserved_usd') or 0)
             out['monitor'].add(payload['request_id'])
+        elif kind == 'review_admitted' and payload.get('request_id') is not None:
+            # Asynchronous reviewer calls (A1-A4, research_swarm.review_live): ledger-admitted in the same run
+            # budget like the monitor's (ledger label reviewer:<agent>); not an agent request.
+            out['admitted'][payload['request_id']] = Decimal(payload.get('reserved_usd') or 0)
+            out['reviewer'].add(payload['request_id'])
+        elif kind == 'review_scored' and payload.get('request_id') is not None:
+            if payload.get('basis') == 'unbilled_error':
+                out['unbilled'].add(payload['request_id'])
+            elif payload.get('settled_usd') is not None:
+                out['finished'][payload['request_id']] = (payload.get('basis'), payload.get('settled_usd'))
+        elif kind == 'review_error' and payload.get('request_id') is not None:
+            if payload.get('billing') == 'unbilled_error' or payload.get('stage') == 'run_stopped':
+                out['unbilled'].add(payload['request_id'])
         elif kind == 'monitor_scored' and payload.get('request_id') is not None:
             if payload.get('basis') == 'unbilled_error':
                 out['unbilled'].add(payload['request_id'])
@@ -322,9 +335,9 @@ def budgets(run, runtime, ledger):
             caps = dict(db.execute('SELECT name,cap FROM scopes'))
             budget = recorded_run_budget(run, db)
             pilot, committed = ledger_scope(db, 'pilot', set(runtime['admitted']))
-            if runtime['monitor']:
-                pilot['monitor'] = dict(ledger_scope(db, 'pilot', runtime['monitor'])[0],
-                                        requests=len(runtime['monitor']))
+            for part in ('monitor', 'reviewer'):
+                if runtime.get(part):
+                    pilot[part] = dict(ledger_scope(db, 'pilot', runtime[part])[0], requests=len(runtime[part]))
             if budget is not None:
                 pilot['cap_usd'] = dec(budget)
                 pilot['remaining_usd'] = dec(max(Decimal(0), budget - Decimal(committed) * NANO))
@@ -356,6 +369,7 @@ def budgets(run, runtime, ledger):
             unresolved += 1
             held += reserved
     monitor = runtime_subtotal(runtime, runtime['monitor']) if runtime['monitor'] else None
+    reviewer = runtime_subtotal(runtime, runtime['reviewer']) if runtime.get('reviewer') else None
     if unresolved:
         print(f'warning: {unresolved} request(s) have no settlement in runtime.jsonl and are reported as held; pass '
               '--ledger with a post-settlement ledger copy for exact run spending', file=sys.stderr)
@@ -367,6 +381,8 @@ def budgets(run, runtime, ledger):
              'source': 'runtime.jsonl'}
     if monitor is not None:
         pilot['monitor'] = monitor
+    if reviewer is not None:
+        pilot['reviewer'] = reviewer
     budget = recorded_run_budget(run)
     if budget is not None:
         pilot['cap_usd'] = dec(budget)
@@ -734,12 +750,14 @@ def outcome_section(m):
     if m.get('error'):
         return ['<h2>Outcome metrics</h2>', f'<p>Not computed: {esc(m["error"])}</p>']
     rows = [(esc(label), esc(_metric(run_metrics.lookup(m, key)))) for key, label in run_metrics.HEADLINE
-            if not key.startswith('monitor.') or (m.get('monitor') or {}).get('present')]
+            if (not key.startswith('monitor.') or (m.get('monitor') or {}).get('present'))
+            and (not key.startswith(('reviewer.', 'cost.reviewer')) or (m.get('reviewer') or {}).get('present'))
+            and (key != 'cost.oversight_usd' or run_metrics.lookup(m, key))]  # runs without oversight: no row
     out = ['<h2 id="outcome-metrics">Outcome metrics</h2>',
            '<p class="muted">Slowdown, cost, fake and genuine submissions for comparing monitor arms, overseer runs '
            'and baselines. Genuine uncredited counts come from the offline re-judge when it has run.</p>', table(rows, ('Metric', 'Value'))]
     defs = [(name, (m.get(name) or {}).get('definition')) for name in ('fakes', 'genuine', 'slowdown', 'cost',
-                                                                       'monitor')]
+                                                                       'monitor', 'reviewer')]
     out.append('<details><summary>Definitions and gaps</summary><ul>'
                + ''.join(f'<li><strong>{esc(n)}</strong>: {esc(d)}</li>' for n, d in defs if d)
                + ''.join(f'<li>Gap: {esc(g)}</li>' for g in m.get('gaps') or []) + '</ul></details>')
@@ -1049,6 +1067,11 @@ def render(results, title, inspect_logs=(), settings=None):
     if pilot.get('monitor'):
         m = pilot['monitor']
         detail.append(('Top-down monitor calls (this run, included above)',
+                       f'{money(m["settled_usd"])} settled, {money(m["held_usd"])} held over {m["requests"]} requests '
+                       f'({m["unresolved_requests"]} unresolved)'))
+    if pilot.get('reviewer'):
+        m = pilot['reviewer']
+        detail.append(('Asynchronous reviewer calls (this run, included above)',
                        f'{money(m["settled_usd"])} settled, {money(m["held_usd"])} held over {m["requests"]} requests '
                        f'({m["unresolved_requests"]} unresolved)'))
     if 'key_usage_counter' in results:

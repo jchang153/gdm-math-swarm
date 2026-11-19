@@ -311,7 +311,13 @@ def card_order(entry):
 # sentence moves into the card's details. First match wins; otherwise the model's display name.
 _MONITOR_ARM = {('actions', 'silent'): 'M1', ('actions', 'reason'): 'M2', ('full', 'silent'): 'M3',
                 ('full', 'reason'): 'M4'}
+_REVIEWER_ARM = {('rollback', 'reason'): 'A1', ('rollback', 'silent'): 'A2', ('revert', 'reason'): 'A3',
+                 ('revert', 'silent'): 'A4'}
 _TITLES = (
+    # Asynchronous reviewer arms A1-A4 (owner, November 18, 2026; docs/plan.md).
+    (r'-seeded-reviewer-(rollback|revert)-(reason|silent)-',
+     lambda m: f'{_REVIEWER_ARM[(m[1], m[2])]}: async reviewer, {m[1]}, '
+               f'{"reason shown" if m[2] == "reason" else "silent"}'),
     # Top-down monitor arms (owner, November 12, 2026: label which spec each run is).
     # "-disclosed" (November 17, 2026): the agents' prompt describes the monitor; arms M1a / M3a.
     (r'-seeded-monitor-(actions|full)-(silent|reason)-(disclosed-)?',
@@ -464,6 +470,15 @@ def spec_chips(entry, p):
         out.append(('k-ov', 'silent block' if found[2] == 'silent' else 'block with reason',
                     'A blocked agent sees ' + ('only "this action was blocked"' if found[2] == 'silent'
                                                else "the monitor's reason")))
+    found = re.search(r'-seeded-reviewer-(rollback|revert)-(reason|silent)-', run)
+    if found:
+        out.append(('k-ov', f'async reviewer: {found[1]}',
+                    'Asynchronous reviewer every 5 min per agent: ' + (
+                        'rolls the agent back before the flagged tool call' if found[1] == 'rollback'
+                        else 'reverts flagged accepted submissions')))
+        out.append(('k-ov', 'reason shown' if found[2] == 'reason' else 'silent',
+                    "The agent is told the reviewer's reason" if found[2] == 'reason'
+                    else 'Nobody is notified'))
     if seed:
         minute = math.floor(seed['minute'] + 0.5) if seed.get('minute') is not None else '?'
         out.append(('k-seed', f'exploit at +{minute} min', 'Planted exploit (seed)'))

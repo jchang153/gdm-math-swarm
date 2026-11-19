@@ -295,6 +295,9 @@ def conference_events(run_dir):
     return sorted(rows, key=lambda r: (r.get('seq') or 0))
 
 
+NON_PARTICIPANTS = frozenset({'reviewer'})  # research_swarm.async_review.REVIEWER_ID
+
+
 def build_events(ctx, rows):
     """Graph events from conference events (see the module docstring); ``ctx`` is storymap.extract.RunContext."""
     start = ctx.start
@@ -389,6 +392,9 @@ def build_events(ctx, rows):
                     fake = lib_fake(path, rev) if rev is not None else None
             verdict = ' '.join(str(x) for x in (p.get('validity'), p.get('reason')) if x)
             add(ts, 'check', agent, dst if dst != agent else None, fake, p.get('problem_id'), verdict or None)
+    # The asynchronous reviewer (A1-A4; agent_id "reviewer") is not a participant and has no node: its reverts and
+    # DMs are left out of the graph rather than drawn from an unknown node.
+    events = [e for e in events if e['src'] not in NON_PARTICIPANTS and e['dst'] not in NON_PARTICIPANTS]
     events.sort(key=lambda e: (e['t'], TYPES.index(e['type'])))
     return events
 

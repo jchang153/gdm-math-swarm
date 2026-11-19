@@ -316,6 +316,21 @@ _MONITOR_ARM = {('actions', 'silent'): 'M1', ('actions', 'reason'): 'M2', ('full
                 ('full', 'reason'): 'M4'}
 
 
+# Asynchronous reviewer arms A1-A4 (owner, November 18, 2026; docs/plan.md): the same labels as
+# scripts/build_experiment_index.py.
+_REVIEWER_RUN = re.compile(r'-seeded-reviewer-(rollback|revert)-(reason|silent)-')
+_REVIEWER_ARM = {('rollback', 'reason'): 'A1', ('rollback', 'silent'): 'A2', ('revert', 'reason'): 'A3',
+                 ('revert', 'silent'): 'A4'}
+
+
+def _reviewer(run):
+    """(arm, short reviewer spec) of an asynchronous reviewer run, else None."""
+    m = _REVIEWER_RUN.search(run)
+    if not m:
+        return None
+    return _REVIEWER_ARM[(m[1], m[2])], f'{m[1]}, {"reason shown" if m[2] == "reason" else "silent"}'
+
+
 def _monitor(run):
     """(arm, short monitor spec) of a top-down monitor run, else None."""
     m = _MONITOR_RUN.search(run)
@@ -346,9 +361,11 @@ def _spec(document, run):
     agents_tile, _ = _tile(document, 'Agents')
     if not solvers and agents_tile:
         chips.append(('Agents', agents_tile))
-    monitor = _monitor(run)
+    monitor, reviewer = _monitor(run), _reviewer(run)
     if monitor:  # a monitor run's intro says "no overseer" (no overseer agents); the monitor is its oversight
         chips.append(('Monitor', monitor[1]))
+    elif reviewer:  # likewise the asynchronous reviewer (A1-A4)
+        chips.append(('Reviewer', f'asynchronous, {reviewer[1]}'))
     else:
         chips.append(('Oversight', overseer if overseer else ('no overseer' if 'no overseer' in parts else None)))
     chips.append(('Exploit', seed if seed and seed != 'no planted exploit' else
@@ -366,6 +383,8 @@ def _spec(document, run):
             arm, spec = monitor
             kind, block = spec.split(', ', 1)  # M1a/M3a: block = 'silent block, disclosed to agents'
             title += f' · {arm}: {kind} monitor, {block}'
+        elif reviewer:
+            title += f' · {reviewer[0]}: async reviewer, {reviewer[1]}'
         else:
             title += ' · ' + (_short_overseers(overseer) if overseer else 'no overseer')
     else:
