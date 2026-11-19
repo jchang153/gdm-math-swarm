@@ -219,9 +219,10 @@ VM=<owner VM name from HANDOFF.local.md>
      `inference_finished` events.
 7. **Afterwards:** the supervisor runs reconciliation, evaluation, the behavior
    judge, the incident report, builds results and the site bundle on the VM, **uploads the whole run to the
-   private GCS run bucket** (`gcs-upload.json`) and **only the viewable subset to the private logs dataset**
-   (`hf-upload.json`; item 53, docs/plan.md "Run storage: GCS archive, HF viewable subset, nothing local") and
-   packages only the core, then waits for `retrieved.marker`.
+   private GCS run bucket** (`gcs-upload.json`) when one is configured and **to the private logs dataset**
+   (`hf-upload.json`): the FULL run while no bucket exists or when the GCS upload failed, only the viewable subset
+   once the GCS upload succeeded (item 53, docs/plan.md "Run storage: GCS archive, HF viewable subset, nothing
+   local" and its 2026-11-19 note) and packages only the core, then waits for `retrieved.marker`.
    - **Never copy `runs/<RUN_ID>` back.** From your computer:
      `PYTHONPATH=scripts:src:. .venv/bin/python scripts/fetch_run.py --vm $VM --run <RUN_ID> [--publish]`
      (core into `runs/<RUN_ID>/`, records and ledger backups into `runs/phase-b/<RUN_ID>/`, Cloudflare publish
@@ -311,7 +312,8 @@ The full reference is `private/docs/gcp-vm.md` (host-only) and `docs/validation.
    defaults to the bucket when the run has `GCS.json` and `GDM_RUNS_BUCKET` is set).
    **Run storage (owner decision, 2026-11-19; item 53):** the private GCS bucket `$GDM_RUNS_BUCKET`
    (HANDOFF.local.md) is the complete archive (`runs/<RUN>/`, `runs/phase-b/<RUN>/`; `scripts/gcs_runs.py`); HF keeps
-   only what the site links or the log viewer reads; this computer keeps only each run's index. Offload:
+   only what the site links or the log viewer reads; this computer keeps only each run's index. **Until a bucket
+   exists, HF keeps full runs (owner, 2026-11-19; item 53).** Offload:
    `PYTHONPATH=scripts:src:. .venv/bin/python scripts/offload_runs.py offload --to gcs --unit RUN | --all`.
    Publish in one command: `scripts/publish_cloudflare.py publish --run RUN [--commit]` (local site bundle, else
    restored from the bucket into a scratch folder deleted after planning).
@@ -2238,6 +2240,15 @@ is being merged into main via `collab-env`.
     `logging.write`+`monitoring.write` scopes: with VMs stopped, set scopes to include `storage-rw` and grant the
     service account `roles/storage.objectAdmin` on the bucket, and write the bucket name to
     `~/.config/gdm-math-swarm/runs-bucket` on each VM. A separate migration agent moves the existing local runs.
+    **2026-11-19 ~15:45 PST: until a bucket exists, HF keeps full runs** (owner, chat ~15:30 PST: "yes, go ahead
+    and do both"; the logs dataset now lives in the owner's own account, name only in HANDOFF.local.md / env vars).
+    `upload_run.py --hf-scope {auto,full,subset}`: the VM post-run uploads the FULL run to HF exactly as before
+    bc5e06a (resume bundles, snapshots, phase records, OFFLOADED.json manifests; schema `gdm-run-upload/1`)
+    whenever no bucket is configured or the run's GCS upload failed; only a configured bucket plus a successful
+    GCS upload gives HF the viewable subset. `--hf-categories` / `GDM_HF_CATEGORIES` still override (subset with
+    those categories). `hf-upload.json` records `hf_scope` and `hf_scope_reason`; completed-phase.tgz carries
+    OFFLOADED.json again. `publish_cloudflare.py publish --run` never asks a missing bucket: every dataset link
+    stays pinned to HF (`default_hf_subset`), and a raw run is restored from HF by its OFFLOADED.json.
 
 ## Next steps / open items
 

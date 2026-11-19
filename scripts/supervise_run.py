@@ -82,9 +82,13 @@ ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
       through ``gcloud storage``: the VM needs access scope storage-rw (or cloud-platform) and bucket IAM
       (e.g. Storage Object Admin on the bucket) for that service account. No HF token reaches this step.
       --no-gcs skips it;
-   b. only the VIEWABLE subset (what the public site links to or the log viewer reads: the site bundle's
-      dataset files in dataset_logs.hf_categories(), GDM_HF_CATEGORIES overriding) to the private logs dataset
-      (``scripts/upload_run.py``, add-only, verified by SHA-256; resume bundles and snapshots stay in the bucket).
+   b. the run to the private logs dataset (``scripts/upload_run.py``, add-only, verified by SHA-256). Until a
+      bucket exists HF keeps full runs (owner, November 19, 2026): only when step 6a uploaded the run to the
+      bucket does HF get the VIEWABLE subset (``--hf-scope subset``: what the public site links to or the log
+      viewer reads, dataset_logs.hf_categories(); resume bundles and snapshots stay in the bucket); with no
+      bucket, or when the GCS upload failed, it gets the FULL run as before the bucket (``--hf-scope full``: run
+      and phase records with resume bundles, snapshots and the site bundle's dataset files, plus OFFLOADED.json
+      manifests). GDM_HF_CATEGORIES (explicit categories) overrides both.
       The HF credential is the VM host's own token file (--hf-token-file, default
       ~/.config/gdm-math-swarm/hf-upload-token, mode 600) given to that one step as HF_TOKEN_PATH; the dataset
       name is GDM_LOGS_DATASET or ~/.config/gdm-math-swarm/logs-dataset. Without either, the upload is recorded
@@ -93,8 +97,9 @@ ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
    c. a ``--phase-only`` GCS re-sync so hf-upload.json and gcs-upload.json reach the bucket (recorded in
       gcs-upload.json under ``records_sync``);
 7. packages only what the operator's computer keeps, with SHA-256 checksums: completed-core.tgz (the run's
-   core: conference/, evaluations/, oversight/, top-level files up to 1 MiB except runtime.jsonl),
-   completed-phase.tgz (ledger backups, logs, records, hf-upload.json and gcs-upload.json; ledgers never go to the
+   core: conference/, evaluations/, oversight/, top-level files up to 1 MiB except runtime.jsonl, and the full HF
+   upload's OFFLOADED.json), completed-phase.tgz (ledger backups, logs, records, hf-upload.json, gcs-upload.json
+   and, after a full HF upload, OFFLOADED.json; ledgers never go to the
    dataset) and completed-site.tgz (the site bundle without its dataset files); the full run is never
    packaged for retrieval. Then it waits up to --retrieval-wait seconds for a ``retrieved.marker`` in the phase
    directory (scripts/fetch_run.py fetches, verifies and touches it);
@@ -983,9 +988,19 @@ class Supervisor:
             return None, None, f"no logs dataset name (GDM_LOGS_DATASET or {DEFAULT_DATASET_FILE})"
         return token, dataset, None
 
+    def hf_scope(self):
+        """(scope, reason) of step 6b: 'subset' only when step 6a uploaded the complete run to the bucket, else
+        'full' (owner decision, November 19, 2026: "Until a bucket exists, HF keeps full runs"). Explicit
+        GDM_HF_CATEGORIES still wins inside upload_run.py."""
+        gcs = self.gcs_record or {}
+        if gcs.get("outcome") == "uploaded" and gcs.get("exit") == 0:
+            return "subset", "the complete run is in the GCS archive bucket (step 6a)"
+        return "full", f"no successful GCS upload (step 6a: {gcs.get('outcome') or 'not run'})"
+
     def upload(self, code):
-        """Step 6b: the viewable subset to the private logs dataset (scripts/upload_run.py --target hf). Never
-        raises and never changes the worker exit; the outcome is in hf-upload.json."""
+        """Step 6b: the run to the private logs dataset (scripts/upload_run.py --target hf): the full run unless
+        step 6a archived it in the bucket (``hf_scope``). Never raises and never changes the worker exit; the
+        outcome is in hf-upload.json."""
         target = self.phase / "hf-upload.json"
         record = {"utc": now(), "run_dir": str(self.run), "worker_exit": code}
         try:
@@ -1004,6 +1019,9 @@ class Supervisor:
                                  str(self.phase), "--record", str(target)]
                     if (bundle / "archive-manifest.json").is_file():
                         arguments += ["--site-bundle", str(bundle)]
+                    scope, scope_reason = self.hf_scope()
+                    record.update(hf_scope=scope, hf_scope_reason=scope_reason)
+                    arguments += ["--hf-scope", scope]
                     env = {"HF_TOKEN_PATH": str(token), "GDM_LOGS_DATASET": dataset,
                            "PYTHONPATH": "scripts:src:.", "HF_HUB_DISABLE_TELEMETRY": "1"}
                     if os.environ.get("GDM_HF_CATEGORIES"):
@@ -1142,7 +1160,8 @@ class Supervisor:
         selected = ["budget-final.sqlite", "budget-before-launch.sqlite", "budget-after-pilot.sqlite",
                     "budget-results.sqlite", "pilot.exit", "pilot.log", "supervisor-console.log", "worker.exit",
                     "live-checkpoint.json", "launch-budget.json", self.config_path.name, "behavior-judge.json",
-                    "incident-report.json", "site-steps.json", "hf-upload.json", "gcs-upload.json", *LIVE_FILES] + [
+                    "incident-report.json", "site-steps.json", "hf-upload.json", "gcs-upload.json", "OFFLOADED.json",
+                    *LIVE_FILES] + [
                         a + b for a in FOLLOW_UPS + JUDGE_STEPS + SITE_STEPS + (UPLOAD_STEP, GCS_STEP, GCS_SYNC_STEP)
                         for b in (".log", ".exit")]
         with tarfile.open(self.phase / "completed-phase.tgz", "w:gz") as tar:
@@ -1271,7 +1290,7 @@ def parse_args(argv=None):
     parser.add_argument("--no-postrun", action="store_true", help="skip the reconcile/evaluate/timeline steps and the judge")
     parser.add_argument("--no-shutdown", action="store_true", help="leave the VM running at the end")
     parser.add_argument("--no-upload", action="store_true",
-                        help="do not upload the viewable subset to the private logs dataset")
+                        help="do not upload the run (full or viewable subset) to the private logs dataset")
     parser.add_argument("--no-gcs", action="store_true",
                         help="do not archive the run in the private GCS bucket (it stays on the VM)")
     parser.add_argument("--hf-token-file", default=str(DEFAULT_TOKEN_FILE),

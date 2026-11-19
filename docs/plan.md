@@ -2631,3 +2631,13 @@ with only the `logging.write` and `monitoring.write` access scopes, so VMs canno
 owner (with the VMs stopped) sets the scopes to include `storage-rw` (or `cloud-platform`) and grants that service
 account `roles/storage.objectAdmin` (or objectCreator plus objectViewer) on the bucket. Until then the VM records
 `skipped_no_bucket` or a failed GCS step, and the run stays complete on the VM.
+
+Until a bucket exists, HF keeps full runs (owner, 2026-11-19). Owner (chat, November 19, 2026, ~15:30 PST, on
+the proposal to keep full runs on HF while the bucket is missing, the dataset now in the owner's own account):
+"yes, go ahead and do both". The VM post-run uploads the FULL run to the logs dataset exactly as before the bucket
+(`upload_run.py --hf-scope full`: run and phase records with resume bundles, snapshots and the site bundle's
+dataset files, OFFLOADED.json manifests, `hf-upload.json` schema `gdm-run-upload/1`) whenever no bucket is
+configured (`GDM_RUNS_BUCKET`, `~/.config/gdm-math-swarm/runs-bucket`) or the run's GCS upload failed; only when
+a bucket is configured and the GCS upload succeeded does HF get the viewable subset. Explicit `--hf-categories` or
+`GDM_HF_CATEGORIES` still select the subset with those categories. `publish --run` without a bucket never asks
+it: pages keep every dataset link pinned to HF, and a raw run is restored from the dataset by its OFFLOADED.json.

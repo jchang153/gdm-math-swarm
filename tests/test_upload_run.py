@@ -3,6 +3,7 @@ bundle accepted by publish_hf_library.load_dataset_files, and scripts/fetch_run.
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tarfile
@@ -98,10 +99,15 @@ class UploadRunTests(unittest.TestCase):
             'run-x/snapshots.tar.gz': {'bytes': len(snap), 'sha256': hashlib.sha256(snap).hexdigest()}}}))
         self.snap = snap
         self.dataset = FakeDataset()
+        # Hermetic: no archive bucket unless a test sets one (GDM_RUNS_BUCKET or the VM's runs-bucket file).
         self.patches = [mock.patch('huggingface_hub.HfApi', self.dataset),
-                        mock.patch.dict(offload_runs.hf_visibility.EXPECTED, {('dataset', REPO): (True, 'test')})]
+                        mock.patch.dict(offload_runs.hf_visibility.EXPECTED, {('dataset', REPO): (True, 'test')}),
+                        mock.patch.dict(os.environ, {}),
+                        mock.patch.object(upload_run.gcs_runs, 'BUCKET_FILE', self.tmp / 'no-runs-bucket')]
         for patch in self.patches:
             patch.start()
+        os.environ.pop('GDM_RUNS_BUCKET', None)
+        os.environ.pop('GDM_HF_CATEGORIES', None)
 
     def tearDown(self):
         for patch in self.patches:
@@ -130,6 +136,110 @@ class UploadRunTests(unittest.TestCase):
         self.assertFalse((self.run / 'OFFLOADED.json').exists())
         # Nothing is deleted on the VM.
         self.assertTrue((self.run / 'runtime.jsonl').exists() and (self.run / 'snapshots').is_dir())
+
+    def test_full_scope_uploads_the_whole_run_as_before_the_bucket(self):
+        # November 19, 2026: until a bucket exists, HF keeps full runs (the upload before bc5e06a, unchanged).
+        result = upload_run.upload_full(self.run, self.phase, self.phase / 'site-bundle', repo=REPO,
+                                        api=self.dataset, work=self.tmp / 'work', stamp='upload-test',
+                                        log=lambda m: None)
+        self.assertEqual((result['outcome'], result['schema'], result['hf_scope']),
+                         ('uploaded', upload_run.FULL_SCHEMA, 'full'))
+        self.assertEqual(len(self.dataset.commits), 2)   # data, then the manifests
+        files = self.dataset.files
+        # The site bundle's dataset files at their exact paths (pages pinned to the commit link them).
+        self.assertIn('run-x/inspect/x.eval', files)
+        self.assertEqual(files['run-x/snapshots.tar.gz'], self.snap)
+        self.assertIn('run-x/upload-test/OFFLOADED.json', files)
+        self.assertIn('phase-b/run-x/upload-test/OFFLOADED.json', files)
+        manifest = json.loads((self.run / 'OFFLOADED.json').read_text())
+        recorded = {r['path'] for r in manifest['files']}
+        self.assertTrue({'results.json', 'runtime.jsonl', 'conference/state.sqlite', 'inspect/x.eval',
+                         'snapshots/agent-001/a.txt'} <= recorded)
+        # Nothing is deleted on the VM.
+        self.assertTrue((self.run / 'runtime.jsonl').exists() and (self.run / 'snapshots').is_dir())
+        # The resume archive goes up only as a copy without the agents' session keys.
+        excluded = manifest['excluded_by_screen']
+        self.assertEqual(excluded[0]['repacked_without'], ['home/.agent/sessions/1.abc.key'])
+        repacked = files[excluded[0]['repacked_dataset_path']]
+        with tarfile.open(fileobj=io.BytesIO(repacked)) as tar:
+            self.assertEqual(tar.getnames(), ['home/notes.md'])
+        # Ledgers, packaged tarballs, the site bundle and live files never go to the dataset.
+        members = set()
+        for path, data in files.items():
+            if path.endswith('.tar.gz') and '/upload-test/' in path:
+                with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+                    members |= {f'{path}:{m}' for m in tar.getnames()}
+        self.assertFalse([m for m in [*files, *members] if 'budget' in m or 'completed-' in m or 'status' in m])
+        phase = json.loads((self.phase / 'OFFLOADED.json').read_text())
+        self.assertEqual({r['path'] for r in phase['files']}, {'pilot.log'})
+        reasons = {r['path']: r['reason'] for r in phase['local_only']}
+        self.assertIn('budget ledger', reasons['budget-final.sqlite'])
+        for name in ('completed-phase.tgz', 'supervisor-status.json', 'site-bundle/archive-manifest.json'):
+            self.assertIn(name, reasons)
+
+    def scope_of_main(self, *extra):
+        """Run main for the hf target with both upload functions stubbed; returns (called, record)."""
+        called = []
+
+        def stub(kind):
+            def run(*args, **kwargs):
+                called.append((kind, kwargs.get('categories')))
+                return {'outcome': 'uploaded', 'dataset_commit': 'c' * 40}
+            return run
+        record = self.tmp / 'hf-upload.json'
+        with mock.patch.object(upload_run, 'upload', stub('subset')), \
+                mock.patch.object(upload_run, 'upload_full', stub('full')):
+            code = upload_run.main(['--run-dir', str(self.run), '--phase-dir', str(self.phase), '--site-bundle',
+                                    str(self.phase / 'site-bundle'), '--record', str(record), *extra])
+        self.assertEqual(code, 0)
+        self.assertEqual(len(called), 1)
+        return called[0], json.loads(record.read_text())
+
+    def write_gcs_record(self, outcome, **fields):
+        write(self.phase / 'gcs-upload.json', json.dumps({'outcome': outcome, 'target': 'gcs', **fields}))
+
+    def test_scope_no_bucket_is_full(self):
+        # No bucket configured: the full run, even with a (stale) successful GCS record.
+        self.write_gcs_record('uploaded', exit=0)
+        (kind, _), record = self.scope_of_main()
+        self.assertEqual(kind, 'full')
+        self.assertEqual((record['hf_scope'], record['schema']), ('full', upload_run.FULL_SCHEMA))
+        self.assertIn('no archive bucket', record['hf_scope_reason'])
+
+    def test_scope_bucket_and_successful_gcs_upload_is_subset(self):
+        os.environ['GDM_RUNS_BUCKET'] = 'gs://test-bucket'
+        self.write_gcs_record('uploaded', exit=0)
+        (kind, categories), record = self.scope_of_main()
+        self.assertEqual((kind, set(categories)), ('subset', set(dataset_logs.HF_SUBSET_DEFAULT)))
+        self.assertEqual((record['hf_scope'], record['schema']), ('subset', upload_run.SCHEMA))
+        # The VM's runs-bucket file counts as a configured bucket too.
+        del os.environ['GDM_RUNS_BUCKET']
+        (self.tmp / 'no-runs-bucket').write_text('gs://test-bucket\n')
+        self.assertEqual(self.scope_of_main()[0][0], 'subset')
+
+    def test_scope_bucket_but_failed_or_missing_gcs_upload_is_full(self):
+        os.environ['GDM_RUNS_BUCKET'] = 'gs://test-bucket'
+        for setup in (lambda: self.write_gcs_record('failed', exit=2),
+                      lambda: self.write_gcs_record('uploaded', exit=2),
+                      lambda: self.write_gcs_record('failed_no_gcloud'),
+                      lambda: (self.phase / 'gcs-upload.json').unlink()):
+            setup()
+            (kind, _), record = self.scope_of_main()
+            self.assertEqual((kind, record['hf_scope']), ('full', 'full'))
+
+    def test_scope_overrides_are_respected(self):
+        # Explicit categories (argument or GDM_HF_CATEGORIES) select the subset with them, with or without a bucket
+        # and over --hf-scope full; --hf-scope itself wins over the automatic choice.
+        (kind, categories), record = self.scope_of_main('--hf-categories', 'eval,jsonl')
+        self.assertEqual((kind, set(categories), record['hf_scope']), ('subset', {'eval', 'jsonl'}, 'subset'))
+        os.environ['GDM_HF_CATEGORIES'] = 'eval'
+        (kind, categories), _ = self.scope_of_main('--hf-scope', 'full')
+        self.assertEqual((kind, set(categories)), ('subset', {'eval'}))
+        del os.environ['GDM_HF_CATEGORIES']
+        self.assertEqual(self.scope_of_main('--hf-scope', 'subset')[0][0], 'subset')
+        os.environ['GDM_RUNS_BUCKET'] = 'gs://test-bucket'
+        self.write_gcs_record('uploaded', exit=0)
+        self.assertEqual(self.scope_of_main('--hf-scope', 'full')[0][0], 'full')
 
     def test_never_overwrites_and_refuses_a_public_dataset(self):
         self.dataset.files['run-x/inspect/x.eval'] = b'other bytes'
@@ -316,7 +426,7 @@ class ConcurrentUploadTests(unittest.TestCase):
                 raise RuntimeError('Invalid rev id: abc')
             return {'outcome': 'uploaded', 'dataset_commit': 'c' * 40}
         with tempfile.TemporaryDirectory() as folder, mock.patch.object(upload_run, 'upload', flaky), \
-                mock.patch.object(upload_run.time, 'sleep'):
+                mock.patch.object(upload_run, 'upload_full', flaky), mock.patch.object(upload_run.time, 'sleep'):
             record = Path(folder) / 'r.json'
             self.assertEqual(upload_run.main(['--run-dir', folder, '--record', str(record)]), 0)
             self.assertEqual(json.loads(record.read_text())['outcome'], 'uploaded')

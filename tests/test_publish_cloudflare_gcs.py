@@ -166,6 +166,37 @@ class BundleForRunTests(unittest.TestCase):
             write(runs, {f'{RUN}/OFFLOADED.json': '{}'})
             self.assertFalse(cf.local_run_complete(runs / RUN))
 
+    def test_no_bucket_restores_the_raw_run_from_the_logs_dataset(self):
+        # Until a bucket exists HF keeps full runs (owner, November 19, 2026): the bucket is never asked.
+        restored = []
+
+        def hf_restore(run, dest):
+            restored.append((run, dest))
+            write(dest, {'inspect/a.eval': 'PK', 'results.json': '{}'})
+
+        def runner(command, **kwargs):
+            out = Path(command[command.index('--output-dir') + 1])
+            write(out, {'archive-manifest.json': '{}'})
+            return type('Done', (), {'returncode': 0, 'stdout': '', 'stderr': ''})()
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict('os.environ', {'GDM_RUNS_BUCKET': ''}), \
+                patch.object(gcs_runs, 'BUCKET_FILE', Path(tmp) / 'absent'), \
+                patch.object(gcs_runs, 'GcloudStore', side_effect=AssertionError('bucket asked')):
+            runs = Path(tmp) / 'runs'
+            write(runs, {f'{RUN}/results.json': '{}', f'{RUN}/OFFLOADED.json': '{}',
+                         f'phase-b/{RUN}/inspect-view/index.html': '<html></html>',
+                         f'phase-b/{RUN}/hf-upload.json': json.dumps({
+                             'schema': 'gdm-run-upload/1', 'outcome': 'uploaded', 'dataset_commit': COMMIT})})
+            work = Path(tmp) / 'work'
+            found = cf.bundle_for_run(RUN, work, runner=runner, runs_root=runs, hf_restore=hf_restore)
+            self.assertEqual(found['resolved'], 'raw run restored from the logs dataset')
+            self.assertEqual(restored, [(RUN, work / 'runs' / RUN)])
+            self.assertEqual(found['dataset_commit'], COMMIT)
+            self.assertEqual(found['hf_subset'], frozenset(dataset_logs.CATEGORIES))   # a full upload
+            (runs / RUN / 'OFFLOADED.json').unlink()
+            with self.assertRaisesRegex(ValueError, 'no archive bucket configured'):
+                cf.bundle_for_run(RUN, work, runner=runner, runs_root=runs, hf_restore=hf_restore)
+
     def test_nothing_anywhere_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaisesRegex(ValueError, 'no site bundle and no complete run'):
@@ -182,6 +213,17 @@ class SubsetLinkTests(unittest.TestCase):
     def link(self, path, kind='blob'):
         return f'<a href="{REPO}/{kind}/{dataset_logs.COMMIT_PLACEHOLDER}/{path}">x</a>'
 
+    def test_default_subset_follows_the_bucket(self):
+        # Until a bucket exists HF keeps full runs; with one, the viewable subset; GDM_HF_CATEGORIES overrides.
+        with tempfile.TemporaryDirectory() as tmp, patch.object(gcs_runs, 'BUCKET_FILE', Path(tmp) / 'absent'):
+            with patch.dict('os.environ', {'GDM_RUNS_BUCKET': '', 'GDM_HF_CATEGORIES': ''}):
+                self.assertEqual(cf.default_hf_subset(), frozenset(dataset_logs.CATEGORIES))
+            with patch.dict('os.environ', {'GDM_RUNS_BUCKET': 'gs://test-bucket', 'GDM_HF_CATEGORIES': ''}):
+                self.assertEqual(cf.default_hf_subset(), frozenset(dataset_logs.HF_SUBSET_DEFAULT))
+            with patch.dict('os.environ', {'GDM_RUNS_BUCKET': '', 'GDM_HF_CATEGORIES': 'eval'}):
+                self.assertEqual(cf.default_hf_subset(), {'eval'})
+
+    @patch.dict('os.environ', {'GDM_RUNS_BUCKET': 'gs://test-bucket', 'GDM_HF_CATEGORIES': ''})
     @patch.object(cf, 'render_catalogue', side_effect=fake_catalogue)
     def test_non_subset_files_repointed_and_not_checked(self, _):
         page = ('<html>' + self.link(f'{RUN}/resume/state.tar.gz') + self.link(f'{RUN}/snapshots.tar.gz', 'resolve')

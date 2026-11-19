@@ -21,14 +21,17 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
         --replace-pages only the bundle runs' .html pages may change; each replacement is recorded), the
         catalogue is merged newest first. Files of the bundle's dataset-files/ (private) are never deployed;
         with --dataset-commit (the HF logs-dataset commit that holds them) pages link there, otherwise links to
-        them point to the site's private-records notice. With a dataset commit only the HF subset
-        (dataset_logs.hf_categories(); not resume bundles or snapshots for new runs) is checked in and linked to the
-        dataset; other dataset files are in the GCS archive and their links go to the notice.
+        them point to the site's private-records notice. With a dataset commit only the categories the run's HF
+        upload holds are checked in and linked to the dataset: hf-upload.json's (--run), else ``default_hf_subset``
+        (every category while no archive bucket is configured: until a bucket exists HF keeps full runs, owner,
+        November 19, 2026; with a bucket, dataset_logs.hf_categories(), without resume bundles or snapshots); other
+        dataset files are in the GCS archive and their links go to the notice.
         --run RUN (owner decision, November 19, 2026: "publish = restore from GCS, build, publish, delete local
         copy") resolves the bundle itself (``bundle_for_run``): runs/phase-b/RUN/site-bundle/ (local, else restored
         from the GDM_RUNS_BUCKET archive), else one built by prepare_hf_library.py from the local raw run or the run
-        restored from the bucket; the dataset commit defaults to runs/phase-b/RUN/hf-upload.json's. Restored and
-        built copies live in a scratch folder deleted after planning.
+        restored from the bucket (without a bucket: from the logs dataset, by the run's OFFLOADED.json); the dataset
+        commit defaults to runs/phase-b/RUN/hf-upload.json's. Restored and built copies live in a scratch folder
+        deleted after planning.
     publish_cloudflare.py restyle [--run RUN ...] [--commit] [--receipt FILE]
         Re-render the layout of pages already on the site (``site_layout.apply``: results.html, the conference
         view and the simplified judge report of every run, or only the given runs) and the root pages from the
@@ -957,6 +960,21 @@ DATASET_PATH_LINK = re.compile(r'href="https://huggingface\.co/datasets/[^"/]+/[
                                + re.escape(dataset_logs.COMMIT_PLACEHOLDER) + r'/([^"]*)"')
 
 
+def default_hf_subset():
+    """The dataset categories assumed in the logs dataset when the run's upload record does not say: explicit
+    GDM_HF_CATEGORIES; else the viewable subset (dataset_logs.HF_SUBSET_DEFAULT) only when an archive bucket is
+    configured (GDM_RUNS_BUCKET or ~/.config/gdm-math-swarm/runs-bucket); else every category (owner decision,
+    November 19, 2026: "Until a bucket exists, HF keeps full runs")."""
+    if os.environ.get('GDM_HF_CATEGORIES', '').strip():
+        return dataset_logs.hf_categories()
+    import gcs_runs
+    try:
+        bucket = gcs_runs.bucket_url()
+    except ValueError:
+        bucket = None
+    return dataset_logs.hf_categories() if bucket else frozenset(dataset_logs.CATEGORIES)
+
+
 def off_hf_links(document, page, subset):
     """Links of a prepared page (dataset placeholder) to dataset files whose category is not in the HF subset
     (``subset``: dataset_logs.hf_categories(); resume bundles and snapshot archives by default) repointed to the
@@ -981,10 +999,11 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
     whose dataset files are already in the logs dataset (left on the VM) needs ``dataset_commit``; ``remote``
     defaults to dataset_checker(dataset_commit).
 
-    With a dataset commit, only the HF subset (``hf_subset``, default dataset_logs.hf_categories(); owner decision,
-    November 19, 2026) is in the logs dataset: dataset files of other categories are accepted as private (they are
-    in the GCS archive) without asking ``remote``, and page links to them go to the private-records notice."""
-    subset = dataset_logs.hf_categories() if hf_subset is None else frozenset(hf_subset)
+    With a dataset commit, only the HF subset (``hf_subset``, default ``default_hf_subset()``: every category while
+    no bucket is configured; owner decisions, November 19, 2026) is in the logs dataset: dataset files of other
+    categories are accepted as private (they are in the GCS archive) without asking ``remote``, and page links to
+    them go to the private-records notice."""
+    subset = default_hf_subset() if hf_subset is None else frozenset(hf_subset)
     bucket_only = []
     if dataset_commit:
         checker = remote if remote is not None else dataset_checker(dataset_commit)
@@ -1830,7 +1849,14 @@ def prepare_env():
     return env
 
 
-def bundle_for_run(run, workdir, store=None, runner=subprocess.run, runs_root=RUNS, log=print):
+def hf_restore_run(run, dest):
+    """Restore the whole run from the logs dataset (offload_runs.restore by runs/RUN/OFFLOADED.json) into ``dest``."""
+    import offload_runs
+    return offload_runs.restore(run, dest=dest)
+
+
+def bundle_for_run(run, workdir, store=None, runner=subprocess.run, runs_root=RUNS, log=print,
+                   hf_restore=hf_restore_run):
     """The prepared bundle of ``run`` for ``publish --run``, resolved into ``workdir`` (a scratch folder the
     caller deletes after planning). Returns {'bundle': Path, 'dataset_commit': str or None, 'resolved': kind,
     'hf_subset': the categories hf-upload.json says are in the logs dataset (recorded_subset), or None}.
@@ -1840,10 +1866,19 @@ def bundle_for_run(run, workdir, store=None, runner=subprocess.run, runs_root=RU
     prepare_hf_library.py from the local raw run when complete (``local_run_complete``), otherwise from runs/RUN
     restored from the bucket, with the Inspect View bundle runs/phase-b/RUN/inspect-view/ (local, else restored).
     The dataset commit is runs/phase-b/RUN/hf-upload.json's (local index, else the bucket's copy). ``store`` is a
-    gcs_runs store (default GcloudStore from GDM_RUNS_BUCKET, created only when the bucket is needed)."""
+    gcs_runs store (default GcloudStore from GDM_RUNS_BUCKET, created only when the bucket is needed).
+
+    Without a store and without a configured bucket (until a bucket exists HF keeps full runs: owner decision,
+    November 19, 2026) the bucket is never asked: (b) is skipped, the raw run of (c) is restored from the logs
+    dataset (``hf_restore``, by the local runs/RUN/OFFLOADED.json the full HF upload wrote), and the Inspect View
+    bundle must be local."""
     import gcs_runs
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', run):
         raise ValueError('Invalid run ID: ' + run)
+    try:
+        use_bucket = store is not None or gcs_runs.bucket_url() is not None
+    except ValueError:   # a malformed GDM_RUNS_BUCKET: let the store report it
+        use_bucket = True
     runs_root, workdir = Path(runs_root), Path(workdir)
     phase_local, phase_tmp = runs_root / 'phase-b' / run, workdir / 'phase'
     unit = f'phase-b/{run}'
@@ -1866,6 +1901,8 @@ def bundle_for_run(run, workdir, store=None, runner=subprocess.run, runs_root=RU
         nonlocal subset
         if (phase_local / HF_UPLOAD).is_file():
             record = phase_local / HF_UPLOAD
+        elif not use_bucket:
+            return None
         else:
             try:
                 in_bucket = HF_UPLOAD in phase_listing()
@@ -1881,13 +1918,19 @@ def bundle_for_run(run, workdir, store=None, runner=subprocess.run, runs_root=RU
         found = commit()
         return {'bundle': phase_local / SITE_BUNDLE, 'dataset_commit': found, 'resolved': 'local site-bundle',
                 'hf_subset': subset}
-    if f'{SITE_BUNDLE}/archive-manifest.json' in phase_listing():
+    if use_bucket and f'{SITE_BUNDLE}/archive-manifest.json' in phase_listing():
         bundle = restore_phase(SITE_BUNDLE + '/')
         found = commit()
         return {'bundle': bundle, 'dataset_commit': found, 'resolved': 'site-bundle restored from the bucket',
                 'hf_subset': subset}
     if local_run_complete(runs_root / run):
         runs_dir, resolved = runs_root, 'local raw run'
+    elif not use_bucket:
+        if not (runs_root / run / 'OFFLOADED.json').is_file():
+            raise ValueError(f'{run}: no site bundle and no complete run locally, no archive bucket configured '
+                             '(GDM_RUNS_BUCKET) and no runs/RUN/OFFLOADED.json to restore from the logs dataset')
+        runs_dir, resolved = workdir / 'runs', 'raw run restored from the logs dataset'
+        hf_restore(run, runs_dir / run)
     else:
         store = gcs_runs.store_for(store=store)
         if not gcs_runs.has_unit(run, store=store):
@@ -1896,7 +1939,7 @@ def bundle_for_run(run, workdir, store=None, runner=subprocess.run, runs_root=RU
         gcs_runs.restore_unit(run, dest=runs_dir / run, store=store, log=log)
     if (phase_local / INSPECT_VIEW / 'index.html').is_file():
         viewer = phase_local / INSPECT_VIEW
-    elif f'{INSPECT_VIEW}/index.html' in phase_listing():
+    elif use_bucket and f'{INSPECT_VIEW}/index.html' in phase_listing():
         viewer = restore_phase(INSPECT_VIEW + '/')
     else:
         raise ValueError(f'{run}: no Inspect View bundle (runs/phase-b/{run}/{INSPECT_VIEW}/index.html, locally '

@@ -144,6 +144,9 @@ class SuperviseRunTests(unittest.TestCase):
         self.assertEqual((record["outcome"], record["exit"]), ("uploaded", 0))
         self.assertEqual(record["env"], {"HF_TOKEN_PATH": str(token), "GDM_LOGS_DATASET": "org/logs"})
         self.assertIn("--phase-dir", record["args"])
+        # No archive bucket: HF keeps the full run (owner, November 19, 2026).
+        self.assertEqual(record["args"][record["args"].index("--hf-scope") + 1], "full")
+        self.assertEqual(record["hf_scope"], "full")
         status = json.loads((self.phase / "supervisor-status.json").read_text())
         self.assertEqual(status["stage"], "done_vm_left_running")
         import tarfile
@@ -211,6 +214,9 @@ class SuperviseRunTests(unittest.TestCase):
         self.assertEqual((gcs["records_sync"]["outcome"], gcs["records_sync"]["kind"]), ("uploaded", "gcs-sync"))
         self.assertIn("--phase-only", gcs["records_sync"]["args"])
         self.assertEqual((hf["outcome"], hf["kind"]), ("uploaded", "hf"))
+        # The complete run is in the bucket: HF gets only the viewable subset.
+        self.assertEqual(hf["args"][hf["args"].index("--hf-scope") + 1], "subset")
+        self.assertEqual(hf["hf_scope"], "subset")
         self.assertEqual(ready["gcs_upload"], {"outcome": "uploaded", "uploaded_files": 3, "reason": None,
                                                "records_sync": "uploaded"})
         self.assertEqual(ready["hf_upload"]["outcome"], "uploaded")
@@ -228,6 +234,9 @@ class SuperviseRunTests(unittest.TestCase):
         self.assertEqual((gcs["outcome"], gcs["exit"]), ("failed", 2))
         self.assertEqual(gcs["records_sync"]["outcome"], "uploaded")
         self.assertEqual(hf["outcome"], "uploaded")
+        # The GCS upload failed: HF falls back to the full run.
+        self.assertEqual(hf["args"][hf["args"].index("--hf-scope") + 1], "full")
+        self.assertIn("failed", hf["hf_scope_reason"])
 
     def test_hf_failure_does_not_block_gcs(self):
         token = self.gcs_setup("hf")

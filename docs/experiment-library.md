@@ -1640,17 +1640,25 @@ two sections above for new runs and new offloads (earlier dataset uploads stay a
   picks the bucket when the run has `GCS.json` (or no `OFFLOADED.json`) and `GDM_RUNS_BUCKET` is set.
 - **VM post-run** (`scripts/supervise_run.py`): `upload_run.py --target gcs` uploads the full run and phase
   folder (site bundle, Inspect View bundle and ledgers included; nothing deleted on the VM; `PHASE/gcs-upload.json`),
-  then `upload_run.py --target hf` uploads only the viewable subset of the site bundle's `dataset-files/` to the
-  logs dataset (`dataset_logs.HF_SUBSET_DEFAULT`: Inspect logs, raw JSONL, timeline, transcripts, databases;
-  `--hf-categories` or `GDM_HF_CATEGORIES` override; no resume bundles, snapshots or `completed-*.tgz`;
-  `PHASE/hf-upload.json`, schema `gdm-run-upload/2`, no OFFLOADED.json), then re-syncs the phase records to the
-  bucket. Neither failure blocks the other. The VM needs the access scope `storage-rw` (or `cloud-platform`) and
+  then `upload_run.py --target hf` uploads to the logs dataset, then re-syncs the phase records to the bucket.
+  **Until a bucket exists, HF keeps full runs (owner, 2026-11-19):** with no bucket configured, or when the GCS
+  upload failed, the HF step uploads the FULL run as before the bucket (`--hf-scope full`: run and phase records,
+  resume bundles, snapshots and the site bundle's dataset files; OFFLOADED.json manifests; `PHASE/hf-upload.json`
+  schema `gdm-run-upload/1`). Only when a bucket is configured and the GCS upload succeeded does it upload just
+  the viewable subset of the site bundle's `dataset-files/` (`--hf-scope subset`; `dataset_logs.HF_SUBSET_DEFAULT`:
+  Inspect logs, raw JSONL, timeline, transcripts, databases; no resume bundles, snapshots or `completed-*.tgz`;
+  schema `gdm-run-upload/2`, no OFFLOADED.json). `--hf-categories` or `GDM_HF_CATEGORIES` override both (the
+  subset with those categories). `hf-upload.json` records `hf_scope` and `hf_scope_reason`. Neither failure
+  blocks the other. The VM needs the access scope `storage-rw` (or `cloud-platform`) and
   bucket IAM (`roles/storage.objectAdmin`) for its service account; `--no-gcs` skips the bucket step.
 - **Publishing:** `publish_cloudflare.py publish --run RUN [--dataset-commit SHA] [--commit]` uses
   `runs/phase-b/RUN/site-bundle/` when present, else restores it from the bucket, else builds a bundle with
   `prepare_hf_library.py` from the local raw run or one restored from the bucket (with the restored Inspect View
   bundle); the scratch copy is deleted after planning. The dataset commit defaults to `hf-upload.json`'s. Links to
   dataset files outside the recorded HF subset (resume bundles, snapshots) point to the private-records notice.
+  Without a bucket (and with `--bundle`, no upload record) every category is assumed on HF, so every dataset link
+  stays pinned to the dataset; a raw run is then restored from the dataset by its local `OFFLOADED.json`, and the
+  Inspect View bundle must be local.
 
 ## Near-live mirror
 
