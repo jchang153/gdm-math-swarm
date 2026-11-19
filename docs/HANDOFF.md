@@ -2177,6 +2177,12 @@ is being merged into main via `collab-env`.
     - COLLECTION: private HF logs dataset at 97.15 / 100 GB; only ~3 of 12 uploads will fit. Do not treat a failed
       upload (hf-upload.json not "uploaded") as backed up: fetch raw runs locally and keep VM disks until backed up.
       Then resize VMs back and verify TERMINATED. Light results only (no story maps) unless the owner asks.
+    - 2026-11-18 ~17:30 PST: A4 r3 (16:38) and A1 r1 (17:22) died when Ubuntu's apt-daily-upgrade restarted systemd and,
+      with linger off, systemd stopped the user manager (tmux, supervisor, run_pilot). Not a code bug. Owner approved
+      (~17:40): `sudo loginctl enable-linger` on all 12 run VMs (done, Linger=yes) and relaunch of both from c48c552:
+      A1 r1 `...rollback-reason-120m-push-r1-20261119T014113Z`, A4 r3 `...revert-silent-120m-push-r3-20261119T014145Z`
+      (end ~19:45 PST). Dead dirs renamed -ABORTED on the VM disks only. The private launch script now refuses to
+      start unless Linger=yes.
     - Meeting figures (owner, 2026-11-18, 6 PM PT meeting): research/analysis/figures/meeting-2026-11-18/ (scripts +
       PNGs, not committed yet) and a private Claude Slides deck.
 
@@ -2251,6 +2257,7 @@ is being merged into main via `collab-env`.
 
 ## Known gotchas
 
+- **VM runs die on automatic upgrades without linger** (2026-11-18): apt-daily-upgrade restarts systemd; with user lingering off the user manager (and tmux, supervisor, run_pilot) is stopped mid-run with no traceback, leaving orphaned containers. Enable `loginctl enable-linger` before launching.
 - **Anthropic refusals.** Anthropic models can refuse to analyze some transcripts
   (GLM's), citing "reverse engineering / duplicating model outputs". The incident
   pipeline falls back automatically.
