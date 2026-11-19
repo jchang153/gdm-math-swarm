@@ -40,7 +40,7 @@
         if (window.top !== window) viewer.target = '_blank';  // the viewer refuses to be framed
         viewer.textContent = 'Read them in the log viewer with HF sign-in';
         viewer.style.fontWeight = '600';
-        bar.append(' ', viewer, ' (organization members only).');
+        bar.append(' ', viewer, ' (HF read access to the logs dataset required).');
       } else if (config.records) {
         const link = document.createElement('a');
         link.href = config.records;
@@ -48,7 +48,7 @@
         link.rel = 'noopener';
         link.textContent = 'Open them in the private logs dataset';
         link.style.fontWeight = '600';
-        bar.append(' ', link, ' (organization members only).');
+        bar.append(' ', link, ' (HF read access to the logs dataset required).');
       } else {
         bar.append(' They are kept offline by the researchers.');
       }

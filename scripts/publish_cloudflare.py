@@ -83,6 +83,12 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
         its highest level. RUN/results.html (Behavior judge tile, Run table row and line; counts from the served
         RUN/analysis/simple_judge/report.json) and RUN/analysis/simple_judge/report.html change, only in those
         words; stored labels, report.json and every other file are unchanged.
+    publish_cloudflare.py dataset-rename --from OLD --to NEW [--commit] [--receipt FILE]
+        Point every link to the private HF logs dataset OLD (owner/name) at NEW (owner decision, November 19, 2026:
+        the dataset moved from the organization to the owner's account, its commits unchanged): in every served
+        text file only https://huggingface.co/datasets/OLD (the dataset part of the link) changes (any other change
+        is refused, and no link to OLD may remain). The viewer sync then rebuilds the log viewer for NEW. A site with no such link
+        plans zero changes (count 0 in the receipt) rather than failing.
     publish_cloudflare.py verify [--url URL] [--full] [--run RUN ...]
         Read-only check of the served site against its site-manifest.json (see ``verify``).
 
@@ -1306,6 +1312,70 @@ def plan_judge_labels(base_files, runs=None):
                    'replaced_pages': replaced, 'skipped_pages': skipped}
 
 
+def _dataset_link(repo):
+    """A link to the HF dataset ``repo`` (owner/name): plain or JSON-escaped slashes (html.escape leaves such a
+    link unchanged, so there is no HTML-escaped form), with or without anything after the name."""
+    sep = r'(?:/|\\/)'
+    owner, name = repo.split('/')
+    return (r'https:' + sep + sep + r'huggingface\.co' + sep + 'datasets' + sep + re.escape(owner) + sep
+            + re.escape(name) + r'(?![A-Za-z0-9_.-])')
+
+
+def plan_dataset_rename(base_files, old, new):
+    """The site with every link to the HF logs dataset ``old`` pointed at ``new`` (both owner/name; owner decision,
+    November 19, 2026: the dataset moved to the owner's account with its commits unchanged, so commit-pinned links
+    only need the repository swapped). ``base_files`` is the unpacked site (main() unpacks; finish packs again), so
+    pack entries are plain files here. In each text file (strict UTF-8; binary files and files that are not valid
+    UTF-8 are skipped) ``https://huggingface.co/datasets/OLD`` (followed by ``/`` or the end of the link; also with
+    JSON-escaped slashes) becomes ``.../NEW``, its slash style kept. Refuses any other change, and any mention of
+    ``huggingface.co/datasets/OLD`` left anywhere afterwards (log_viewer.build refuses runs read from two datasets).
+    Generated files (site manifest, 404, private notice) are rebuilt by finish. A site without such links is not an
+    error: the plan reports 0 renamed files."""
+    for value in (old, new):
+        if not log_viewer.REPO.fullmatch(value or ''):
+            raise ValueError(f'Expected a dataset owner/name: {value!r}')
+    if old == new:
+        raise ValueError('--from and --to are the same dataset')
+    link = re.compile(_dataset_link(old))
+    token = re.compile('(' + _dataset_link(old) + '|' + _dataset_link(new) + ')')
+    left = re.compile(r'huggingface\.co(?:/|\\/)datasets(?:/|\\/)' + re.escape(old).replace('/', r'(?:/|\\/)')
+                      + r'(?![A-Za-z0-9_.-])')
+
+    def swap(match):
+        slash = '\\/' if '\\/' in match.group(0) else '/'
+        return 'https:' + slash * 2 + 'huggingface.co' + slash + 'datasets' + slash + new.replace('/', slash)
+
+    files, replaced, skipped = dict(base_files), [], 0
+    for name, data in sorted(base_files.items()):
+        if name in GENERATED:
+            continue
+        if b'\x00' in data:
+            skipped += 1
+            continue
+        try:
+            text = data.decode('utf-8')
+        except UnicodeDecodeError:
+            skipped += 1
+            continue
+        changed = link.sub(swap, text)
+        if left.search(changed):
+            raise ValueError(f'{name}: a link to the old dataset would remain')
+        if changed == text:
+            continue
+        # Independent check: outside the dataset links the text is identical, and every link names the new dataset.
+        before, after = token.split(text), token.split(changed)
+        if len(before) != len(after) or before[::2] != after[::2] or \
+                any(not re.fullmatch(_dataset_link(new), t) for t in after[1::2]):
+            raise ValueError(f'{name}: the rename would change more than the dataset links')
+        encoded = changed.encode('utf-8')
+        replaced.append({'path': name, 'old': digest(data), 'new': digest(encoded)})
+        files[name] = encoded
+    return files, {'source': {'kind': 'dataset-rename', 'from': old, 'to': new}, 'added_files': 0,
+                   'replaced_pages': replaced, 'renamed_files': len(replaced),
+                   'inspect_pages_renamed': sum(1 for r in replaced if is_inspect_page(r['path'])),
+                   'skipped_binary_files': skipped}
+
+
 def plan_catalogue(base_files, unlisted, site=None):
     """The site with only its catalogue re-rendered from its entries (index.html and experiments.json; Story map
     links follow the story map pages on the site). No run file changes."""
@@ -1994,8 +2064,12 @@ def main(argv=None):
     fix.add_argument('--remove', action='append', default=[], help='PATH: run-relative served record to remove')
     labels = sub.add_parser('judge-labels', help='rewrite the simplified judge\'s level wording on the site')
     labels.add_argument('--run', action='append', help='only this run (repeatable; default every judged run)')
+    rename = sub.add_parser('dataset-rename', help='point every link to the HF logs dataset at its new owner/name')
+    rename.add_argument('--from', dest='old', required=True, help='the dataset\'s former id (owner/name)')
+    rename.add_argument('--to', dest='new', required=True, help='its new id (owner/name)')
     view = sub.add_parser('viewer', help='sync the log viewer origin (HF sign-in) and the math site\'s links to it')
-    for command in (mirror, bundle, restyle, withdraw, repack, redact, story, heat, cat, labels, fix, view):
+    for command in (mirror, bundle, restyle, withdraw, repack, redact, story, heat, cat, labels, fix, rename,
+                    view):
         command.add_argument('--site', choices=sorted(SITES), default=DEFAULT_SITE,
                              help='which library (default gdm, the math site; ib: the ImpossibleBench site)')
         command.add_argument('--commit', action='store_true', help='deploy; otherwise only plan')
@@ -2025,6 +2099,12 @@ def main(argv=None):
     site = SITES[args.site]
     if args.command == 'viewer' and site.key != DEFAULT_SITE:
         parser.error('the log viewer serves the math library only')
+    if args.command == 'dataset-rename':
+        for value in (args.old, args.new):
+            if not log_viewer.REPO.fullmatch(value):
+                parser.error('--from and --to must be dataset ids (owner/name)')
+        if args.old == args.new:
+            parser.error('--from and --to are the same dataset')
     if args.command == 'mirror-space' and not site.mirror_space:
         parser.error(f'mirror-space copies the math library\'s HF Space; not for --site {site.key}')
     if getattr(args, 'commit', False) and not deny_terms():
@@ -2085,6 +2165,9 @@ def main(argv=None):
         elif args.command == 'judge-labels':
             files, plan = plan_judge_labels(base_files, args.run)
             message = f'Judge level wording on {len(plan["replaced_pages"])} page(s)'
+        elif args.command == 'dataset-rename':
+            files, plan = plan_dataset_rename(base_files, args.old, args.new)
+            message = f'Logs dataset renamed in {plan["renamed_files"]} file(s)'
         elif args.command == 'viewer':
             files, plan = dict(base_files), {'source': {'kind': 'viewer'}}
             message = 'Log viewer links'

@@ -17,9 +17,12 @@ only, and is forgotten when you close the tab or sign out (at most 8 hours).</p>
 <p><button id="signin" type="button" hidden>Sign in with HF</button>
 <button id="signout" type="button" class="secondary" hidden>Sign out</button></p>
 <p id="next"></p>
-<p class="muted">At the HF consent screen, grant access to the organization <strong id="org"></strong> only. The
-sign-in asks for <code>read-repos</code>: read-only, but it covers every repository of each organization you grant,
-so grant no other organization.</p>
+<p class="muted" id="org-advice" hidden>At the HF consent screen, grant access to the organization
+<strong id="org"></strong> only. The sign-in asks for <code>read-repos</code>: read-only, but it covers every
+repository of each organization you grant, so grant no other organization.</p>
+<p class="muted" id="owner-advice" hidden>The logs are in the owner's private HF dataset: only accounts with read
+access to it (the owner) can view them. At the HF consent screen no organization needs to be granted; the sign-in
+asks for <code>read-repos</code> (read-only, your own repositories).</p>
 <p class="muted"><a href="./">All runs</a></p>
 </main>
 <script src="signin.js"></script>

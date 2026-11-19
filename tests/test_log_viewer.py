@@ -117,10 +117,30 @@ class Build(unittest.TestCase):
         signin = viewer['signin.html'].decode()
         self.assertIn('data-client-id="client-id-1234"', signin)
         self.assertIn(f'data-redirect-uri="{log_viewer.URL}/signin"', signin)
-        self.assertIn(f'data-org-ids="{dataset_logs.ORG_IDS}" data-org-name="org-x"', signin)
+        # a dataset outside the organization (a user's own): no organization grant is asked for
+        self.assertIn('data-org-ids="" data-org-name=""', signin)
+        self.assertIn('id="owner-advice"', signin)
         self.assertNotIn('<script>', signin)
         self.assertIn(f'href="{RUN}/"', viewer['index.html'].decode())
         self.assertEqual(json.loads(viewer[log_viewer.CONFIG])['client_id'], 'client-id-1234')
+
+    def test_organization_dataset_asks_for_the_organization(self):
+        org = f'{dataset_logs.ORG_NAME}/logs-x'
+        files = {n: d.replace(DATASET.encode(), org.encode()) for n, d in site().items()}
+        files, _ = cf.apply_viewer(files)
+        viewer, config = log_viewer.build(files, cf.catalogue(files), 'client-id-1234')
+        self.assertEqual(config['runs'][RUN]['dataset'], org)
+        signin = viewer['signin.html'].decode()
+        self.assertIn(f'data-org-ids="{dataset_logs.ORG_IDS}" data-org-name="{dataset_logs.ORG_NAME}"', signin)
+        self.assertIn('id="org-advice"', signin)
+        # the same page for a user's dataset (the logs moved to the owner's account, November 19, 2026)
+        user = log_viewer.signin_page('client-id-1234', 'user')
+        self.assertIn('data-org-ids="" data-org-name=""', user)
+        self.assertNotIn(dataset_logs.ORG_IDS, user)
+        for name in ('signin.js', log_viewer.AUTH):  # generic wording, true for both owners
+            self.assertNotIn(b'organization members only', viewer[name])
+        self.assertIn(b"'org-advice' : 'owner-advice'", viewer['signin.js'])
+        self.assertNotIn('Members of the organization', viewer['index.html'].decode())
 
     def test_without_client_id_sign_in_is_disabled(self):
         viewer, config = log_viewer.build(site(), [], None)

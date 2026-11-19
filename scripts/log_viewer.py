@@ -1,5 +1,6 @@
-"""The log viewer: a separate Cloudflare Pages origin where organization members read the private Inspect logs with
-their own HF sign-in (owner approval, November 12, 2026; docs/experiment-library.md, "Log viewer with HF sign-in").
+"""The log viewer: a separate Cloudflare Pages origin where accounts with read access to the private logs dataset read
+its Inspect logs with their own HF sign-in (owner approval, November 12, 2026; docs/experiment-library.md, "Log
+viewer with HF sign-in").
 
 The public library (scripts/publish_cloudflare.py) renders agent-written content, so no token ever lives on its
 origin. The viewer origin hosts only: one copy of the (byte-identical) Inspect View assets, one page per run
@@ -192,10 +193,15 @@ def viewer_page(document, run, settings, assets):
     return document[:head.end()] + script + document[head.end():]
 
 
-def signin_page(client_id, org_name):
+def signin_page(client_id, owner):
+    """The sign-in page. ``owner``: the logs dataset's owner (first path segment). Only a dataset of the organization
+    ``dataset_logs.ORG_NAME`` asks HF for that organization's grant (``orgIds``) and shows the organization advice;
+    a dataset in a user's own account (moved there November 19, 2026) needs no organization: HF's ``read-repos``
+    covers the user's personal repositories, so ``orgIds`` is left empty and the page says so."""
+    org = owner if owner == dataset_logs.ORG_NAME else ''
     text = (SOURCE / 'signin.html').read_text(encoding='utf-8')
     for key, value in (('__CLIENT_ID__', client_id or ''), ('__REDIRECT_URI__', REDIRECT_URI if client_id else ''),
-                       ('__ORG_IDS__', dataset_logs.ORG_IDS), ('__ORG_NAME__', org_name)):
+                       ('__ORG_IDS__', dataset_logs.ORG_IDS if org else ''), ('__ORG_NAME__', org)):
         text = text.replace(key, html.escape(value, quote=True))
     return text
 
@@ -222,8 +228,8 @@ def index_page(entries, runs, client_id):
 <main>
 <h1>Inspect log viewer</h1>
 <p>The agent transcripts (Inspect logs) of the <a href="https://gdm-math-swarm-experiments.pages.dev/experiments.html">experiment
-library</a> are private. Members of the organization read them here with their own Hugging Face sign-in; the logs
-come straight from the private HF dataset to your browser and are never stored on this site.</p>
+library</a> are private. Accounts with read access to the private logs dataset read them here with their own Hugging
+Face sign-in; the logs come straight from the private HF dataset to your browser and are never stored on this site.</p>
 {state}<p><a href="signin">Sign in with HF</a> (or sign out)</p>
 <ul>
 {chr(10).join(items)}
@@ -271,10 +277,10 @@ def build(files, entries, client_id=None):
         if relative in shared and relative in assets and shared[relative] != assets[relative]:
             raise ValueError('Inline script name clashes with an asset: ' + relative)
         out[relative] = data
-    org = next(iter(datasets)).split('/')[0] if datasets else ''
+    owner = next(iter(datasets)).split('/')[0] if datasets else ''
     for name in ('viewer.css', 'signin.js', AUTH):
         out[name] = (SOURCE / name).read_bytes()
-    out['signin.html'] = signin_page(client_id, org).encode()
+    out['signin.html'] = signin_page(client_id, owner).encode()
     out['index.html'] = index_page(entries, runs, client_id).encode()
     out['_headers'] = HEADERS.encode()
     out['robots.txt'] = b'User-agent: *\nDisallow: /\n'

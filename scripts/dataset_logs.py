@@ -40,6 +40,9 @@ import hf_visibility
 DATASET_REPO = hf_visibility.DATASET_REPO  # private; its expected visibility is recorded in hf_visibility.py
 # The organization the sign-in asks the viewer to grant (HF "orgIds"); its public ID, not a secret.
 ORG_IDS = '6ad1650e6daadd58425fcb95'
+# Its name (public). The log viewer asks for the organization grant only when the logs dataset belongs to it; a
+# dataset in a user's own account is covered by read-repos without any organization (November 19, 2026).
+ORG_NAME = 'gdm-math-swarm'
 HUB = 'https://huggingface.co'
 SITE = Path(__file__).resolve().parent / 'hf_site'
 SHIM_FILE = 'evallog-fetch.js'

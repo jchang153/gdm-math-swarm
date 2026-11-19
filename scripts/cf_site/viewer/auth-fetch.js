@@ -2,7 +2,7 @@
 // viewer's own HF sign-in (docs/experiment-library.md, "Log viewer with HF sign-in"). Served from the separate
 // log-viewer origin only (never the public library's origin, which renders agent-written content), loaded first
 // in each viewer page as an external script (CSP script-src 'self'), with its settings as data-* attributes:
-//   data-dataset  the dataset repository (organization/name)
+//   data-dataset  the dataset repository (owner/name: an organization or a user)
 //   data-commit   the dataset commit the run's logs were published at (links are immutable)
 //   data-path     the logs' folder in the dataset (RUN/inspect)
 //   data-signin   the sign-in page of this origin
@@ -102,8 +102,8 @@
       title.textContent = 'These Inspect logs are private';
       const text = document.createElement('p');
       text.style.margin = '0 0 16px';
-      text.textContent = 'Sign in with Hugging Face to view them. Only members of the organization that owns the '
-        + 'private logs dataset can read them; the logs go straight from Hugging Face to your browser.';
+      text.textContent = 'Sign in with Hugging Face to view them. Only accounts with read access to the private logs '
+        + 'dataset can read them; the logs go straight from Hugging Face to your browser.';
       const signin = new URL(config.signin || '/signin', location.origin);
       signin.searchParams.set('return', location.pathname);
       const button = document.createElement('a');
@@ -131,7 +131,7 @@
     if (method !== 'GET' && method !== 'HEAD') return inner(input, options);
     const stored = token();
     if (!stored) {
-      banner('This run\'s Inspect logs are in a private HF dataset (organization members only).', false);
+      banner('This run\'s Inspect logs are in a private HF dataset (read access required).', false);
       return Promise.resolve(new Response('Sign in with HF to read this Inspect log.',
         { status: 401, statusText: 'Sign in with HF', headers: { 'content-type': 'text/plain' } }));
     }
@@ -146,8 +146,8 @@
       cache: 'no-store', signal: (options && options.signal) || (request && request.signal) || undefined,
     }).then((response) => {
       if (response.status === 401 || response.status === 403 || response.status === 404) {
-        banner(`The HF dataset refused this log (HTTP ${response.status}): the sign-in may have expired or may `
-          + 'not include the organization.', true);
+        banner(`The HF dataset refused this log (HTTP ${response.status}): the sign-in may have expired or the `
+          + 'account may have no read access to the dataset.', true);
       }
       return response;
     });
@@ -161,7 +161,7 @@
       banner('Signed in with HF until ' + new Date(stored.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         + ' (this tab only).', true);
     } else {
-      banner('This run\'s Inspect logs are in a private HF dataset (organization members only).', false);
+      banner('This run\'s Inspect logs are in a private HF dataset (read access required).', false);
       privateState();
     }
   }

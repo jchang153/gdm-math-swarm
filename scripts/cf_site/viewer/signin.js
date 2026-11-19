@@ -20,7 +20,9 @@
   const params = new URLSearchParams(location.search);
   if (location.search) history.replaceState(null, '', location.pathname);
 
+  // An organization's dataset asks for that organization's grant; a user's own dataset needs none.
   document.getElementById('org').textContent = root.orgName || '';
+  document.getElementById(root.orgName ? 'org-advice' : 'owner-advice').hidden = false;
   function say(text, error) { status.textContent = text; status.className = error ? 'error' : ''; }
   // Only a path on this origin, never another origin.
   function safeReturn(value) {
@@ -122,7 +124,7 @@
       finish().catch((error) => say('Sign-in failed: ' + error.message, true));
       return;
     } else if (!stored()) {
-      say('Not signed in. The logs are private: sign in with HF (organization members only) to view them.');
+      say('Not signed in. The logs are private: sign in with HF (an account with read access to the logs dataset) to view them.');
     }
     refresh();
     if (stored()) showNext(target);
