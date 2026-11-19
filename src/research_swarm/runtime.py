@@ -617,7 +617,8 @@ def restart_delay(consecutive_quick):
 def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, run_dir, record, clock,
                 system_prompt_mode="replace", auto_memory=True, in_flight_grace=IN_FLIGHT_GRACE_SECONDS,
                 auto_restart=False, neutral=False, roles=None, definitions_for=None, continue_for=None,
-                env_for=None, resume=None, monitor_hook=False, reviewer=None):
+                env_for=None, resume=None, monitor_hook=False, reviewer=None,
+                rollback=None):
     """Solver running one genuine Claude Code peer inside its own sandbox.
 
     ``roles`` ({agent_id: "solver"|"overseer"}, oversight.roles), ``definitions_for(agent_id)``
@@ -639,6 +640,10 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
     ``monitor_hook`` (top-down monitor): before the first launch the PreToolUse hook is installed in
     the container as root-owned managed settings (inspect_adapter.install_monitor_hook; fallback in
     the neutral environment: the agent-owned neutral settings, monitor_neutral_settings).
+
+    ``rollback`` (a rollback.RollbackManager, or None; reviewer lever ``rollback``, arms A1/A2): before
+    the first launch each solver's file-snapshot store is set up (``setup_agent``; a failure is
+    recorded and only disables that agent's rollbacks).
 
     ``reviewer`` (a review_live.LiveReviewer, or None): the asynchronous reviewer's loop for this agent
     runs in the agent's own task group (solvers only; overseers are never reviewed) and ends with it.
@@ -680,6 +685,11 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
                 except Exception as ex:
                     record("monitor_hook_error", agent_id, {"type": type(ex).__name__})
                 record("monitor_hook_installed", agent_id, {"mode": hook})
+            if rollback is not None and (role or "solver") == "solver":
+                try:
+                    await rollback.setup_agent(agent_id, sbox)  # records rollback_setup(_error)
+                except Exception as ex:
+                    record("rollback_setup_error", agent_id, {"error": type(ex).__name__})
             if neutral:
                 # Before the first launch: the neutral Claude Code user settings (no attribution
                 # reminder) in the moved state directory. A failure is recorded; the bridge
@@ -2107,13 +2117,17 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             from .inspect_adapter import LiveMonitor
             live_monitor = LiveMonitor(monitor_options, log=make_monitor_log(run_dir / "monitor" / "calls.jsonl"))
             record("monitor_enabled", None, monitor_effective(monitor_options, settings))
-        live_reviewer = None
+        live_reviewer = rollback_manager = None
+        if reviewer_options and reviewer_options.get("lever") == "rollback":  # A1/A2 (research_swarm.rollback)
+            from .rollback import RollbackManager
+            rollback_manager = RollbackManager(record, conference=conference)
         if reviewer_options:  # docs/plan.md, "Asynchronous reviewer arms A1–A4"; solvers only (not the seed)
             from .review_live import LiveReviewer, make_review_log
             live_reviewer = LiveReviewer(reviewer_options, ledger=ledger, provider_settings=settings, record=record,
                                          conference=conference, solver_ids=solver_ids, barrier=barrier,
                                          stop=clock.stop, scope="pilot", neutral=neutral,
-                                         log=make_review_log(run_dir / "review" / "calls.jsonl"), run_dir=run_dir)
+                                         log=make_review_log(run_dir / "review" / "calls.jsonl"), run_dir=run_dir,
+                                         **({"rollback": rollback_manager.apply} if rollback_manager else {}))
             record("reviewer_enabled", None, reviewer_effective(reviewer_options, settings))
 
         def filter_for(agent):
@@ -2123,7 +2137,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                  archive, clock.stop, **neutral_args, model_override=overseer_model if own else None,
                                  push=conference if push else None,
                                  **({"monitor": live_monitor} if live_monitor is not None else {}),
-                                 **({"review": live_reviewer.history} if live_reviewer is not None else {}))
+                                 **({"review": live_reviewer.history} if live_reviewer is not None else {}),
+                                 **({"rollback": rollback_manager} if rollback_manager is not None else {}))
 
         solver = peer_solver(conference=conference, definitions=definitions, personas=personas,
                              prompt_for=prompt_for, roles=({a: r for a, r in roles.items() if a in agent_ids}
@@ -2136,7 +2151,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                              auto_memory=auto_memory, in_flight_grace=in_flight_grace,
                              auto_restart=config.get("auto_restart") is True, resume=resume, **neutral_args,
                              **({"monitor_hook": True} if live_monitor is not None else {}),
-                             **({"reviewer": live_reviewer} if live_reviewer is not None else {}))
+                             **({"reviewer": live_reviewer} if live_reviewer is not None else {}),
+                             **({"rollback": rollback_manager} if rollback_manager is not None else {}))
         task = build_task(agent_ids=agent_ids, files=agent_files(task_files), solver=solver, compose=compose,
                           metadata={"condition": condition_label(variant, track), "prompt_variant": variant,
                                     "persona_reviewing": reviewing, "personas": personas, "persona_seed": persona_seed,

@@ -1061,7 +1061,8 @@ def monitor_neutral_settings(path=MONITOR_USER_HOOK_PATH):
 
 
 def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", archive=None, stop=None,
-                  neutral=False, model_override=None, push=None, monitor=None, review=None):
+                  neutral=False, model_override=None, push=None, monitor=None, review=None,
+                  rollback=None):
     """Bridge GenerateFilter: barrier, admission, frozen settings, settlement.
 
     The returned coroutine function carries ``.state`` which the solver reads at
@@ -1094,6 +1095,12 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
     proxy (a request that is ``monitor.parse_lookup``); it is answered here from the store, before the
     barrier, with no admission, provider call or transcript event. Every later request carries each
     blocked call's result as exactly its block message (``apply_block_results``).
+
+    ``rollback`` (a rollback.RollbackManager, or None: unchanged behaviour; reviewer arms A1/A2):
+    after the token-counter normalization, ``before_request`` executes a pending rollback at this
+    request boundary, splices every rolled-back span out of the history (the reviewer observes the
+    spliced view) and starts this request's file snapshot; ``after_response`` keys the response's
+    tool calls to that snapshot before the response returns to the CLI.
 
     ``review`` (a review_live.ReviewHistory, or None: unchanged behaviour): the asynchronous reviewer's
     observations (docs/plan.md, "Asynchronous reviewer arms A1–A4"). Every request's history (after the
@@ -1139,6 +1146,10 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
         # them as system messages breaks provider prefix caching; preserve their
         # text and chronological position without mutating the scaffold history.
         messages, normalized_counters = normalize_token_counters(messages)
+        rollback_token = None
+        if rollback is not None:  # never raises
+            messages, rollback_info = await rollback.before_request(agent_id, messages, tools)
+            rollback_token = rollback_info["token"]
         if monitor is not None:
             blocked = monitor.store.blocked(agent_id)
             for message in messages:  # what the CLI reported for a blocked call, recorded once
@@ -1199,9 +1210,14 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
                     review.observe_output(agent_id, output.message)
                 except Exception as ex:
                     record("review_observe_error", agent_id, {"stage": "output", "error": type(ex).__name__})
+            if rollback is not None:  # before the CLI runs any of these calls
+                await rollback.after_response(agent_id, rollback_token, output)
+                rollback_token = None
             return output
         finally:
             state["in_flight"] -= 1
+            if rollback is not None:
+                rollback.release(agent_id, rollback_token)
 
     def _answer_lookup(model, lookup):
         from inspect_ai.model import ModelOutput

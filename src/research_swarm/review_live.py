@@ -393,7 +393,7 @@ class LiveReviewer:
         payload = {"agent": agent_id, "cut_tool_use_id": cut, "actions": len(cut_ids), "note": note,
                    **(result if isinstance(result, dict) else {"result": result})}
         self.record("review_rollback", agent_id, payload)
-        return {"acted": True, "kind": "rollback", **payload}
+        return {"acted": payload.get("ok", True) is not False, "kind": "rollback", **payload}
 
 
 def reviewer_effective(options, settings):
