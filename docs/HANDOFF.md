@@ -2278,6 +2278,28 @@ is being merged into main via `collab-env`.
       (`scripts/vm_hf_setup.py` writes it); the owner replaces a VM's token only if its upload fails
       (commands in `private/ops/hf-move/PLAN.md`).
 
+55. **2026-11-19 (afternoon PST): A1-A4 analysis, local offload, control VM (stopped)**
+    - **A1-A4 record analysis** (no paid calls; new labels; write-ups and figures in
+      research/analysis/reviewer-a1a4-2026-11-19/: fakers.md, reason.md, steptime-cost-genuine.md, detector.md).
+      Async review cannot prevent first fakes (A3: 24.7/25 fakers faked before any action; exploit-to-submit median
+      2.4-2.8 min vs 5-min cadence); on credited fake-minutes A3 (103) is near M3/M4 (45/191; control 2,168).
+      Silent arms loop (A1 re-exploits ~0.8 min after a rollback, median 13 rollbacks/agent; reoffence A1 0.86,
+      A3 0.004); reason spills over socially (A4 new fakers after first board warning 6/11/20 vs A2 61/68/68).
+      A1 slowness = rollback waits + prompt-cache collapse (80% vs 95-97%). Reviewer precision 95-98%, recall 54-89%
+      (submit_solution shows only a path). 0 genuine submissions undone. Gaps: A4 r1-r3 and A2 r2 per-review records
+      were not analysed (offloaded while HF was locked); restorable now.
+    - **Figures** (uncommitted, research/analysis/figures/meeting-2026-11-18/): arm_bars_6metrics_reviewer-2026-11-19
+      (all arms incl. A1-A4, +-SEM), interventions_bars-2026-11-19 (M1-M4 vs A1-A4), Pareto figures relabelled
+      (pareto_fakers.py copy in scratch-keep/).
+    - **Local disk** (owner priority): Mac free 5 GB -> ~91 GB. Removed ~/opt/anaconda3 and 3 old miniforge envs,
+      conda/npm caches, the Cloudflare content cache (refetchable), offloaded 94 units to the moved HF dataset
+      (incl. the 8 Nov 19 runs whose upload failed, now uploaded in full) and archived 549 budget ledgers there
+      (kept budget-final.sqlite locally). runs/ 49 -> 13 GB. Records: private/ops/hf-offload/.
+    - **Control VM** (docs/plan.md "Always-on Claude control VM"): built (Remote Control, linger, deny rules), then
+      STOPPED by owner decision ("keep everything on my mac for now, and kill that claude code"): service disabled,
+      VM TERMINATED, disk kept. Details in HANDOFF.local.md and private/ops/control-vm/.
+    - **GCS** (item 53) blocked: owner's group lacks storage.buckets.create; needs a project admin.
+
 ## Next steps / open items
 
 - **Logs dataset storage (2026-11-19):** the dataset is now in the owner's PRO account (1 TB private; item 54), so
