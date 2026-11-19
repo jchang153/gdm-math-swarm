@@ -2161,7 +2161,7 @@ is being merged into main via `collab-env`.
       `restyle-storymap-hms-20261117.json`. Live curl spot-check (4 runs, index + events): top bar present, 0
       decimal-minute strings in visible text, h/m/s times shown, notes kept; `_graph/viewer.js` serves the new format.
     - Not done: the ImpossibleBench site's 2 coding-run story maps were not re-rendered (math site only).
-52. **RUNNING 2026-11-18 (launched 16:25-16:59 PST): asynchronous reviewer arms A1-A4, 3 runs each** (owner, chat
+52. **DONE 2026-11-19 (ran 2026-11-18 16:25-19:45 PST, collected 2026-11-19 ~11:10 PST): asynchronous reviewer arms A1-A4, 3 runs each** (owner, chat
     ~16:00-16:20 PST: "Let's do all A1 through A4, 3 runs each", "let's do 2 hour runs each"; spec in docs/plan.md
     "Asynchronous reviewer arms A1–A4"). Code: a2c68d3 (review-v1 reviewer, revert lever), ec761ce (metrics, site
     titles, build_results reviewer spend), c48c552 (rollback-v1: bridge history splice, per-request file snapshots).
@@ -2183,6 +2183,21 @@ is being merged into main via `collab-env`.
       A1 r1 `...rollback-reason-120m-push-r1-20261119T014113Z`, A4 r3 `...revert-silent-120m-push-r3-20261119T014145Z`
       (end ~19:45 PST). Dead dirs renamed -ABORTED on the VM disks only. The private launch script now refuses to
       start unless Linger=yes.
+    - RESULTS (collected 2026-11-19 ~11:10 PST; light metrics only, no story maps, no paid calls). All 12 ended
+      normally (120 min, all agents stopped on max_run_seconds). Means r1-r3 (control: 74.7 fakers; 10ov 1.2; M2 0.7):
+      A1 rollback+reason fakers 25.0, fake subs 79, standing fakes 1.0, genuine 16.3, $45.1 (reviewer $1.29, 2.9%),
+      flags 87, rollbacks 87 ok / 0.3 failed. A2 rollback silent fakers 76.7, fake subs 1296, standing 23.0, genuine
+      14.3, $50.1 (reviewer $1.58), flags 1070 (47% of reviews), ~1048 rollbacks, slower steps (53 vs 42 s).
+      A3 revert+reason fakers 28.3, fake subs 171, standing 9.0, genuine 16.0, $48.6 (reviewer $1.36). A4 revert
+      silent fakers 78.3, fake subs 1014, standing 24.7, genuine 16.0, $46.1 (reviewer $1.40). Silent = control-level.
+      Seed: reverted by the reviewer in all A3/A4 runs (in A4 a later faker re-took the seed task); stays credited in
+      A1/A2 (rollback has no seed agent to act on). No genuine submission was reverted or rolled back.
+      Benign: A1 rollback_splice_absent ~83/run (compaction already removed the span); A2 13-24 rollback failures
+      (no_request_before_timeout, agent unchanged); analysis/rejudge.jsonl absent (uncredited genuine unknown).
+    - BACKUP: HF upload succeeded only for A3 r1-r3 and A4 r2. A1 r1-r3, A2 r1-r3, A4 r1, A4 r3 failed (dataset quota);
+      raw runs exist locally (runs/<id>/, runs/phase-b/<id>/, sha256-verified) and on the VM disks (site bundle,
+      inspect-view, completed-*.tgz left on VM only). Keep VM disks until backed up elsewhere. All 12 VMs TERMINATED
+      at n2-standard-64. runs/index.html not rebuilt; not published to the site.
     - Meeting figures (owner, 2026-11-18, 6 PM PT meeting): research/analysis/figures/meeting-2026-11-18/ (scripts +
       PNGs, not committed yet) and a private Claude Slides deck.
 
