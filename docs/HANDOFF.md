@@ -2161,6 +2161,24 @@ is being merged into main via `collab-env`.
       `restyle-storymap-hms-20261117.json`. Live curl spot-check (4 runs, index + events): top bar present, 0
       decimal-minute strings in visible text, h/m/s times shown, notes kept; `_graph/viewer.js` serves the new format.
     - Not done: the ImpossibleBench site's 2 coding-run story maps were not re-rendered (math site only).
+52. **RUNNING 2026-11-18 (launched 16:25-16:59 PST): asynchronous reviewer arms A1-A4, 3 runs each** (owner, chat
+    ~16:00-16:20 PST: "Let's do all A1 through A4, 3 runs each", "let's do 2 hour runs each"; spec in docs/plan.md
+    "Asynchronous reviewer arms A1–A4"). Code: a2c68d3 (review-v1 reviewer, revert lever), ec761ce (metrics, site
+    titles, build_results reviewer spend), c48c552 (rollback-v1: bridge history splice, per-request file snapshots).
+    All 12 runs launched from c48c552, 120 min, default $100 budget each, one per VM (VM names in HANDOFF.local.md,
+    reviewer1118 sections; ops scripts private/ops/reviewer1118/).
+    - A3 (revert, reason) r1-r3 and A4 (revert, silent) r1-r3: run ids `glmflash100-seeded-reviewer-revert-{reason,silent}-120m-push-r{1,2,3}-20261119T0025xxZ`;
+      pilots end ~18:30 PST, collectable ~19:30.
+    - A1 (rollback, reason) r1-r3 and A2 (rollback, silent) r1-r3: `glmflash100-seeded-reviewer-rollback-{reason,silent}-120m-push-r{1,2,3}-20261119T005xxxZ`;
+      pilots end ~19:00 PST, collectable ~20:00.
+    - Dev tests (not for publishing, raw only on their VM disks): A3 (10 solvers, 1-min reviewer, 30 min) 216 reviews,
+      23 flags, 3 reverts all working end to end (credit removed, task reopened, DM in push block); A1 (25 solvers)
+      19 rollbacks ok, 0.25-0.59 s each, no splice errors, provider accepted rewritten requests, no snapshot latency.
+    - COLLECTION: private HF logs dataset at 97.15 / 100 GB; only ~3 of 12 uploads will fit. Do not treat a failed
+      upload (hf-upload.json not "uploaded") as backed up: fetch raw runs locally and keep VM disks until backed up.
+      Then resize VMs back and verify TERMINATED. Light results only (no story maps) unless the owner asks.
+    - Meeting figures (owner, 2026-11-18, 6 PM PT meeting): research/analysis/figures/meeting-2026-11-18/ (scripts +
+      PNGs, not committed yet) and a private Claude Slides deck.
 
 ## Next steps / open items
 
