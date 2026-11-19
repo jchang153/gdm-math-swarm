@@ -71,18 +71,31 @@ ignored runs/phase-b/<run>/ folders). In a tmux session on the VM it:
    incident report, which needs results.json), ``export_conference.py``, the Inspect View bundle (``python -I -m
    inspect_ai view bundle`` from a scratch folder outside the checkout, so no .env is loaded) into
    PHASE/inspect-view/ and ``prepare_hf_library.py`` into PHASE/site-bundle/ (the Cloudflare publication input);
-6. uploads the whole run and its phase records straight to the private logs dataset with
-   ``scripts/upload_run.py`` (docs/plan.md, "Runs go from the VM to the logs dataset, never to the owner's
-   computer (October 29, 2026)"): also after a failed or stopped run, add-only, verified by SHA-256, budget
-   ledgers and credential files never uploaded, nothing deleted on the VM. The HF credential is the VM host's
-   own token file (--hf-token-file, default ~/.config/gdm-math-swarm/hf-upload-token, mode 600) given to that one
-   step as HF_TOKEN_PATH; the dataset name is GDM_LOGS_DATASET or ~/.config/gdm-math-swarm/logs-dataset. Without
-   either, the upload is recorded as ``skipped_no_credential`` in hf-upload.json and the run stays on the VM
-   (rerun scripts/upload_run.py there later). --no-upload skips this step;
+6. archives and uploads the run (docs/plan.md, "Run storage: GCS archive, HF viewable subset, nothing local
+   (November 19, 2026)"), also after a failed or stopped run, nothing deleted on the VM; neither upload changes
+   the worker exit and a failure of one never blocks the other:
+   a. the COMPLETE run and its phase folder (site bundle, Inspect View bundle and budget ledgers included) to
+      the private GCS archive bucket (``scripts/upload_run.py --target gcs``, gcs_runs.offload_unit: replace,
+      keep all, verified by size and MD5; credential files never uploaded), recorded in gcs-upload.json. The
+      bucket is GDM_RUNS_BUCKET or ~/.config/gdm-math-swarm/runs-bucket; without either the step is recorded as
+      ``skipped_no_bucket``, without ``gcloud`` as ``failed_no_gcloud``. The VM's own service account writes
+      through ``gcloud storage``: the VM needs access scope storage-rw (or cloud-platform) and bucket IAM
+      (e.g. Storage Object Admin on the bucket) for that service account. No HF token reaches this step.
+      --no-gcs skips it;
+   b. only the VIEWABLE subset (what the public site links to or the log viewer reads: the site bundle's
+      dataset files in dataset_logs.hf_categories(), GDM_HF_CATEGORIES overriding) to the private logs dataset
+      (``scripts/upload_run.py``, add-only, verified by SHA-256; resume bundles and snapshots stay in the bucket).
+      The HF credential is the VM host's own token file (--hf-token-file, default
+      ~/.config/gdm-math-swarm/hf-upload-token, mode 600) given to that one step as HF_TOKEN_PATH; the dataset
+      name is GDM_LOGS_DATASET or ~/.config/gdm-math-swarm/logs-dataset. Without either, the upload is recorded
+      as ``skipped_no_credential`` in hf-upload.json (rerun scripts/upload_run.py there later). --no-upload
+      skips this step;
+   c. a ``--phase-only`` GCS re-sync so hf-upload.json and gcs-upload.json reach the bucket (recorded in
+      gcs-upload.json under ``records_sync``);
 7. packages only what the operator's computer keeps, with SHA-256 checksums: completed-core.tgz (the run's
-   core: conference/, evaluations/, oversight/, top-level files up to 1 MiB except runtime.jsonl, and
-   OFFLOADED.json), completed-phase.tgz (ledger backups, logs, records; ledgers never go to the dataset) and
-   completed-site.tgz (the site bundle without its dataset files, which are in the dataset); the full run is never
+   core: conference/, evaluations/, oversight/, top-level files up to 1 MiB except runtime.jsonl),
+   completed-phase.tgz (ledger backups, logs, records, hf-upload.json and gcs-upload.json; ledgers never go to the
+   dataset) and completed-site.tgz (the site bundle without its dataset files); the full run is never
    packaged for retrieval. Then it waits up to --retrieval-wait seconds for a ``retrieved.marker`` in the phase
    directory (scripts/fetch_run.py fetches, verifies and touches it);
 8. shuts the VM down only when it is idle (no Docker containers, no other tmux session, no
@@ -153,9 +166,14 @@ EARLY_HISTORY_WORKERS = 2        # the early stages run beside evaluate's Lean c
 EARLY_JUDGE_TIMEOUT_SECONDS = 4 * 3600
 SITE_STEPS = ("results", "conference-export", "inspect-bundle", "site-bundle")  # free, on the VM (step 5)
 UPLOAD_STEP = "upload"
+GCS_STEP, GCS_SYNC_STEP = "gcs-upload", "gcs-sync"   # step 6a and its --phase-only re-sync (6c)
 CONFIG_HOME = Path.home() / ".config" / "gdm-math-swarm"
 DEFAULT_TOKEN_FILE = CONFIG_HOME / "hf-upload-token"     # the VM host's own HF token (never in the checkout)
 DEFAULT_DATASET_FILE = CONFIG_HOME / "logs-dataset"      # the private logs dataset's name (infrastructure)
+DEFAULT_BUCKET_FILE = CONFIG_HOME / "runs-bucket"         # the private GCS archive bucket (gs://...; infrastructure)
+GCS_OWNER_STEP = ("set the run archive bucket on the VM (GDM_RUNS_BUCKET or ~/.config/gdm-math-swarm/runs-bucket, "
+                  "gs://...; HANDOFF.local.md), give the VM access scope storage-rw and its service account bucket "
+                  "IAM, then rerun scripts/upload_run.py --target gcs on the VM")
 CORE_DIRS = ("conference", "evaluations", "oversight")   # offload_runs.RUN_KEEP_DIRS
 CORE_MAX_TOP_FILE = 1024 * 1024                           # offload_runs.SMALL
 OWNER_STEP = ("install the VM's HF upload token: docs/validation.md, 'Runs go to the logs dataset from the VM' "
@@ -230,6 +248,7 @@ class Supervisor:
         self.shadow_record = None
         self.site_steps = {}
         self.upload_record = None
+        self.gcs_record = None
 
     def config_ledger(self, config):
         """The ledger the launched run reserves against (budget.ledger_path_for in this checkout)."""
@@ -965,7 +984,7 @@ class Supervisor:
         return token, dataset, None
 
     def upload(self, code):
-        """Step 6: the whole run and phase records to the private logs dataset (scripts/upload_run.py). Never
+        """Step 6b: the viewable subset to the private logs dataset (scripts/upload_run.py --target hf). Never
         raises and never changes the worker exit; the outcome is in hf-upload.json."""
         target = self.phase / "hf-upload.json"
         record = {"utc": now(), "run_dir": str(self.run), "worker_exit": code}
@@ -985,9 +1004,11 @@ class Supervisor:
                                  str(self.phase), "--record", str(target)]
                     if (bundle / "archive-manifest.json").is_file():
                         arguments += ["--site-bundle", str(bundle)]
-                    exit_code = self.step(UPLOAD_STEP, arguments, extra_env={
-                        "HF_TOKEN_PATH": str(token), "GDM_LOGS_DATASET": dataset,
-                        "PYTHONPATH": "scripts:src:.", "HF_HUB_DISABLE_TELEMETRY": "1"})
+                    env = {"HF_TOKEN_PATH": str(token), "GDM_LOGS_DATASET": dataset,
+                           "PYTHONPATH": "scripts:src:.", "HF_HUB_DISABLE_TELEMETRY": "1"}
+                    if os.environ.get("GDM_HF_CATEGORIES"):
+                        env["GDM_HF_CATEGORIES"] = os.environ["GDM_HF_CATEGORIES"]
+                    exit_code = self.step(UPLOAD_STEP, arguments, extra_env=env)
                     try:
                         record = {**record, **json.loads(target.read_text())}
                     except (OSError, ValueError):
@@ -1002,6 +1023,91 @@ class Supervisor:
         except Exception:
             pass
         return record
+
+    @staticmethod
+    def runs_bucket():
+        """The archive bucket (gs://...): GDM_RUNS_BUCKET, else DEFAULT_BUCKET_FILE, else "". Never printed."""
+        bucket = os.environ.get("GDM_RUNS_BUCKET", "").strip()
+        if not bucket and DEFAULT_BUCKET_FILE.is_file():
+            bucket = DEFAULT_BUCKET_FILE.read_text().strip()
+        return bucket if bucket.startswith("gs://") else ""
+
+    def gcs_env(self, bucket):
+        """The GCS step's environment: the minimal one plus the bucket and gcloud's own settings (no HF token)."""
+        env = {"GDM_RUNS_BUCKET": bucket, "PYTHONPATH": "scripts:src:."}
+        for key in ("GCLOUD", "CLOUDSDK_CONFIG", "CLOUDSDK_CORE_PROJECT"):
+            if os.environ.get(key):
+                env[key] = os.environ[key]
+        return env
+
+    def gcs_command(self, record, *extra):
+        return ["scripts/upload_run.py", "--target", "gcs", "--run-dir", str(self.run), "--phase-dir",
+                str(self.phase), "--record", str(record), *extra]
+
+    def gcs_upload(self, code):
+        """Step 6a: the complete run and phase folder to the GCS archive bucket. Never raises and never changes
+        the worker exit; the outcome is in gcs-upload.json."""
+        target = self.phase / "gcs-upload.json"
+        record = {"utc": now(), "run_dir": str(self.run), "worker_exit": code, "bucket": "GDM_RUNS_BUCKET (private)"}
+        try:
+            bucket = self.runs_bucket()
+            gcloud = os.environ.get("GCLOUD") or "gcloud"
+            if self.args.no_gcs:
+                record.update(outcome="skipped", reason="--no-gcs")
+            elif not self.run.exists():
+                record.update(outcome="skipped", reason="no run directory")
+            elif not bucket:
+                record.update(outcome="skipped_no_bucket",
+                              reason=f"no archive bucket (GDM_RUNS_BUCKET or {DEFAULT_BUCKET_FILE})",
+                              owner_step=GCS_OWNER_STEP)
+            elif not shutil.which(gcloud, path=self.env.get("PATH")):
+                record.update(outcome="failed_no_gcloud", reason="gcloud not found on PATH (or GCLOUD)",
+                              owner_step=GCS_OWNER_STEP)
+            else:
+                self.status("uploading_gcs", worker_exit=code)
+                exit_code = self.step(GCS_STEP, self.gcs_command(target), extra_env=self.gcs_env(bucket))
+                try:
+                    record = {**record, **json.loads(target.read_text())}
+                except (OSError, ValueError):
+                    record.update(outcome="failed")
+                record["exit"] = exit_code
+        except Exception as error:
+            record.update(outcome="supervisor_error", error_type=type(error).__name__, detail=str(error))
+        record["finished_utc"] = now()
+        self.gcs_record = record
+        self.write_gcs_record()
+        return record
+
+    def write_gcs_record(self):
+        try:
+            (self.phase / "gcs-upload.json").write_text(json.dumps(self.gcs_record, indent=2, default=str))
+        except Exception:
+            pass
+
+    def gcs_sync(self):
+        """Step 6c: re-sync the phase folder (hf-upload.json, gcs-upload.json) to the bucket after the HF step.
+        Only when step 6a ran; recorded in gcs-upload.json under records_sync. Never raises."""
+        record = self.gcs_record or {}
+        if "exit" not in record:   # skipped (no bucket, --no-gcs, no gcloud) or a supervisor error before the step
+            return None
+        sync = {"utc": now()}
+        try:
+            with tempfile.TemporaryDirectory(prefix="gdm-gcs-sync-") as scratch:
+                result = Path(scratch) / "sync.json"
+                exit_code = self.step(GCS_SYNC_STEP, self.gcs_command(result, "--phase-only"),
+                                      extra_env=self.gcs_env(self.runs_bucket()))
+                try:
+                    sync.update(json.loads(result.read_text()))
+                except (OSError, ValueError):
+                    sync.update(outcome="failed")
+                sync["exit"] = exit_code
+        except Exception as error:
+            sync.update(outcome="supervisor_error", error_type=type(error).__name__, detail=str(error))
+        sync["finished_utc"] = now()
+        record["records_sync"] = sync
+        self.gcs_record = record
+        self.write_gcs_record()
+        return sync
 
     def core_files(self):
         """The run files the operator's computer keeps (offload_runs.keep_locally for a run unit)."""
@@ -1036,8 +1142,8 @@ class Supervisor:
         selected = ["budget-final.sqlite", "budget-before-launch.sqlite", "budget-after-pilot.sqlite",
                     "budget-results.sqlite", "pilot.exit", "pilot.log", "supervisor-console.log", "worker.exit",
                     "live-checkpoint.json", "launch-budget.json", self.config_path.name, "behavior-judge.json",
-                    "incident-report.json", "site-steps.json", "hf-upload.json", "OFFLOADED.json", *LIVE_FILES] + [
-                        a + b for a in FOLLOW_UPS + JUDGE_STEPS + SITE_STEPS + (UPLOAD_STEP,)
+                    "incident-report.json", "site-steps.json", "hf-upload.json", "gcs-upload.json", *LIVE_FILES] + [
+                        a + b for a in FOLLOW_UPS + JUDGE_STEPS + SITE_STEPS + (UPLOAD_STEP, GCS_STEP, GCS_SYNC_STEP)
                         for b in (".log", ".exit")]
         with tarfile.open(self.phase / "completed-phase.tgz", "w:gz") as tar:
             for name in selected:
@@ -1056,9 +1162,11 @@ class Supervisor:
                 tar.add(route, arcname=SIMPLE_ROUTE_DIR + "/" + route.name)
         hashes = {name: hashlib.sha256((self.phase / name).read_bytes()).hexdigest() for name in packaged}
         (self.phase / "completed-checksums.json").write_text(json.dumps(hashes, indent=2))
-        upload = self.upload_record or {}
+        upload, gcs = self.upload_record or {}, self.gcs_record or {}
         self.status("ready_for_retrieval", worker_exit=code, hashes=hashes, resume_bundle=self.resume_summary(),
                     hf_upload={k: upload.get(k) for k in ("outcome", "dataset_commit", "reason")},
+                    gcs_upload={**{k: gcs.get(k) for k in ("outcome", "uploaded_files", "reason")},
+                                "records_sync": (gcs.get("records_sync") or {}).get("outcome")},
                     behavior_judge=None if self.judge_record is None else
                     {k: self.judge_record.get(k) for k in ("outcome", "exit", "reason")},
                     incident_report=None if self.incident_record is None else
@@ -1138,7 +1246,9 @@ class Supervisor:
             marker.write(now())
         code = self.work()
         self.site(code)
+        self.gcs_upload(code)   # the complete archive first; a failure never blocks the HF subset
         self.upload(code)
+        self.gcs_sync()
         self.package(code)
         if self.args.no_shutdown:
             self.status("done_vm_left_running", worker_exit=code)
@@ -1161,7 +1271,9 @@ def parse_args(argv=None):
     parser.add_argument("--no-postrun", action="store_true", help="skip the reconcile/evaluate/timeline steps and the judge")
     parser.add_argument("--no-shutdown", action="store_true", help="leave the VM running at the end")
     parser.add_argument("--no-upload", action="store_true",
-                        help="do not upload the run to the private logs dataset (it stays on the VM)")
+                        help="do not upload the viewable subset to the private logs dataset")
+    parser.add_argument("--no-gcs", action="store_true",
+                        help="do not archive the run in the private GCS bucket (it stays on the VM)")
     parser.add_argument("--hf-token-file", default=str(DEFAULT_TOKEN_FILE),
                         help="the VM host's own HF token file for the upload (default "
                              "~/.config/gdm-math-swarm/hf-upload-token, mode 600; never in the checkout)")

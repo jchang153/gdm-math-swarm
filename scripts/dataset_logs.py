@@ -62,6 +62,26 @@ CATEGORIES = {
 }
 DOWNLOAD_ONLY = ('jsonl', 'snapshots', 'database', 'transcripts', 'resume', 'timeline')
 TIMELINE_MD = 'analysis/timeline.md'
+# What new runs put in the logs dataset (owner decision, November 19, 2026: docs/plan.md, "Run storage: GCS archive,
+# HF viewable subset, nothing local"): only what the public site links to or the log viewer reads. The complete run
+# is in the private GCS bucket (scripts/gcs_runs.py); resume bundles and snapshot archives are no longer uploaded
+# to the dataset, and pages link them to the site's private-records notice. GDM_HF_CATEGORIES (comma-separated
+# category names) overrides the default.
+HF_SUBSET_DEFAULT = ('eval', 'jsonl', 'timeline', 'transcripts', 'database')
+
+
+def hf_categories(value=None):
+    """The dataset categories uploaded to the logs dataset for new runs (``value``, else GDM_HF_CATEGORIES, else
+    HF_SUBSET_DEFAULT)."""
+    import os
+    text = value if value is not None else os.environ.get('GDM_HF_CATEGORIES')
+    if text is None or not str(text).strip():
+        return frozenset(HF_SUBSET_DEFAULT)
+    names = frozenset(x.strip() for x in str(text).split(',') if x.strip())
+    unknown = names - set(CATEGORIES)
+    if unknown:
+        raise ValueError('Unknown dataset categories: ' + ', '.join(sorted(unknown)))
+    return names
 
 
 def category(relative):

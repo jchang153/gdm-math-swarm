@@ -88,6 +88,18 @@ def restore_inputs(run_dir, log, restore=None):
     """Restore the files stage 0 reads when the run is core-only; returns how many were restored."""
     unit = offload_runs.unit_of(run_dir)
     manifest = run_dir / "OFFLOADED.json"
+    if unit is not None and (run_dir / "GCS.json").is_file():
+        # Offloaded to the run bucket (docs/plan.md, November 19, 2026): restore what stage 0 reads from there.
+        import gcs_runs
+        restored = 0
+        for prefix in STAGE0_INPUTS:
+            if not (run_dir / prefix).exists():
+                log(f"story map: restoring {prefix} of {unit} from the run bucket")
+                try:
+                    restored += (restore or (lambda u, p: gcs_runs.restore_unit(u, prefix=p, log=log)))(unit, prefix)
+                except ValueError as error:   # nothing under that prefix in the bucket
+                    log(f"story map: {error}")
+        return restored
     if unit is None or not manifest.is_file():
         return 0
     rows = json.loads(manifest.read_text()).get("files", [])

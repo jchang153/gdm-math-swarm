@@ -14,6 +14,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
+import dataset_logs  # noqa: E402
 import fetch_run  # noqa: E402
 import offload_runs  # noqa: E402
 import publish_hf_library  # noqa: E402
@@ -110,46 +111,28 @@ class UploadRunTests(unittest.TestCase):
 
     def upload(self):
         return upload_run.upload(self.run, self.phase, self.phase / 'site-bundle', repo=REPO, api=self.dataset,
-                                 work=self.tmp / 'work', stamp='upload-test', log=lambda m: None)
+                                 categories=dataset_logs.HF_SUBSET_DEFAULT, stamp='upload-test', log=lambda m: None)
 
-    def test_whole_run_uploaded_in_one_data_commit_and_verified(self):
+    def test_only_the_viewable_subset_goes_to_the_dataset(self):
+        # November 19, 2026: the complete run goes to the GCS archive bucket; the dataset keeps only what the
+        # site links to or the log viewer reads (dataset_logs.hf_categories()).
         result = self.upload()
         self.assertEqual(result['outcome'], 'uploaded')
-        self.assertEqual(len(self.dataset.commits), 2)   # data, then the manifests
+        self.assertEqual(len(self.dataset.commits), 1)   # one data commit, no manifest commit
         files = self.dataset.files
-        # The site bundle's dataset files at their exact paths (pages pinned to the commit link them).
-        self.assertIn('run-x/inspect/x.eval', files)
-        self.assertEqual(files['run-x/snapshots.tar.gz'], self.snap)
-        self.assertIn('run-x/upload-test/OFFLOADED.json', files)
-        self.assertIn('phase-b/run-x/upload-test/OFFLOADED.json', files)
-        manifest = json.loads((self.run / 'OFFLOADED.json').read_text())
-        recorded = {r['path'] for r in manifest['files']}
-        self.assertTrue({'results.json', 'runtime.jsonl', 'conference/state.sqlite', 'inspect/x.eval',
-                         'snapshots/agent-001/a.txt'} <= recorded)
+        # The site bundle's Inspect log at its exact path (pages pinned to the commit link it).
+        self.assertEqual(set(files), {'run-x/inspect/x.eval'})
+        self.assertEqual(result['left_out'], ['run-x/snapshots.tar.gz'])
+        self.assertEqual(result['skipped_categories'], ['snapshots'])
+        # No whole-run units, resume bundles, snapshots, ledgers, packaged tarballs or OFFLOADED.json.
+        self.assertFalse([m for m in files if 'budget' in m or 'completed-' in m or 'resume' in m
+                          or 'phase-b' in m or 'OFFLOADED' in m])
+        self.assertFalse((self.run / 'OFFLOADED.json').exists())
         # Nothing is deleted on the VM.
         self.assertTrue((self.run / 'runtime.jsonl').exists() and (self.run / 'snapshots').is_dir())
-        # The resume archive goes up only as a copy without the agents' session keys.
-        excluded = manifest['excluded_by_screen']
-        self.assertEqual(excluded[0]['repacked_without'], ['home/.agent/sessions/1.abc.key'])
-        repacked = files[excluded[0]['repacked_dataset_path']]
-        with tarfile.open(fileobj=io.BytesIO(repacked)) as tar:
-            self.assertEqual(tar.getnames(), ['home/notes.md'])
-        # Ledgers, packaged tarballs, the site bundle and live files never go to the dataset.
-        members = set()
-        for path, data in files.items():
-            if path.endswith('.tar.gz') and '/upload-test/' in path:
-                with tarfile.open(fileobj=io.BytesIO(data)) as tar:
-                    members |= {f'{path}:{m}' for m in tar.getnames()}
-        self.assertFalse([m for m in [*files, *members] if 'budget' in m or 'completed-' in m or 'status' in m])
-        phase = json.loads((self.phase / 'OFFLOADED.json').read_text())
-        self.assertEqual({r['path'] for r in phase['files']}, {'pilot.log'})
-        reasons = {r['path']: r['reason'] for r in phase['local_only']}
-        self.assertIn('budget ledger', reasons['budget-final.sqlite'])
-        for name in ('completed-phase.tgz', 'supervisor-status.json', 'site-bundle/archive-manifest.json'):
-            self.assertIn(name, reasons)
 
     def test_never_overwrites_and_refuses_a_public_dataset(self):
-        self.dataset.files['run-x/snapshots.tar.gz'] = b'other bytes'
+        self.dataset.files['run-x/inspect/x.eval'] = b'other bytes'
         with self.assertRaises(ValueError):
             self.upload()
         self.assertEqual(self.dataset.commits, [])

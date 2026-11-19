@@ -2594,3 +2594,40 @@ material stays researcher-only: the VM checkout holds a copy of `private/` and `
 never placed in experimental agent workspaces), and host credentials (GitHub deploy key, HF token, gcloud and wrangler
 logins, the Claude login) are installed on the VM by the owner, never copied from the laptop. Experiments still run
 on the experiment VMs, never on the control VM.
+
+## Run storage: GCS archive, HF viewable subset, nothing local (owner decision, November 19, 2026)
+
+Owner (chat, November 19, 2026, after the proposal "the VM uploads the full run to GCS and the viewable subset to
+HF; publish = restore from GCS, build, publish, delete the local copy"): "ok, let's go ahead and do that, and
+offload all runs from local machine".
+
+Approved:
+
+- A private Google Cloud Storage bucket in the VM project is the single complete archive of run data. Its name is
+  only in `GDM_RUNS_BUCKET` (`gs://...`; HANDOFF.local.md; on a VM also `~/.config/gdm-math-swarm/runs-bucket`),
+  never in tracked files. Layout: `runs/<RUN>/<path>` and `runs/phase-b/<RUN>/<path>`, one object per file
+  (`scripts/gcs_runs.py`), each verified by size and MD5 (CRC32C when an object has no MD5) after upload and after
+  download, plus `runs/<unit>/GCS.json` and a full manifest `runs/<unit>/_gcs/manifest-<UTC>.json.gz`. Budget
+  ledgers are included; dot-files, symlinks, credential-named files and files failing the credential screen are
+  not (a tar archive whose only problem is the agents' `.key` members goes as a repacked copy).
+- The private HF logs dataset keeps only what the public site links to or the log viewer reads
+  (`dataset_logs.HF_SUBSET_DEFAULT`: Inspect logs, raw JSONL, the timeline, transcripts, databases; override with
+  `GDM_HF_CATEGORIES`). Resume bundles, snapshot archives and the `completed-*.tgz` packages no longer go to HF;
+  site pages link those to the private-records notice. Earlier runs already in the dataset stay as they are.
+- The owner's computer keeps only a tiny index per run (`results.json`, `settings.json`, `run-budget.json`,
+  `OFFLOADED.json`, `hf-upload.json`, `GCS.json`, `gcs-upload.json`) and temporary restores
+  (`scripts/offload_runs.py offload --to gcs`, `restore --from gcs`). Analysis steps that offload automatically
+  (judge, story map, restore) use the bucket whenever `GDM_RUNS_BUCKET` is set.
+- VM post-run (`scripts/supervise_run.py`): the full run and phase records go to the bucket
+  (`upload_run.py --target gcs`, `PHASE/gcs-upload.json`), then the viewable subset to HF
+  (`upload_run.py --target hf`, `PHASE/hf-upload.json`), then the phase records are re-synced to the bucket. A
+  failure of either upload never blocks the other or changes the run's exit.
+- Publishing stays one command: `publish_cloudflare.py publish --run RUN` uses the local site bundle, else restores
+  it (or the raw run and its Inspect View) from the bucket into a scratch folder deleted after planning.
+
+Owner steps still needed (proposal, not yet done): the bucket itself (project IAM; the migration agent's attempt
+on November 19 got HTTP 403), and VM access to it. Every VM today runs as the project's VM runtime service account
+with only the `logging.write` and `monitoring.write` access scopes, so VMs cannot write to any bucket until the
+owner (with the VMs stopped) sets the scopes to include `storage-rw` (or `cloud-platform`) and grants that service
+account `roles/storage.objectAdmin` (or objectCreator plus objectViewer) on the bucket. Until then the VM records
+`skipped_no_bucket` or a failed GCS step, and the run stays complete on the VM.

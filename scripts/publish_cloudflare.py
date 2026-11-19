@@ -15,12 +15,20 @@ Subcommands (each plans read-only by default; ``--commit`` deploys):
         Runs already on Cloudflare but absent from the Space (another collaborator's) are preserved and stay in
         the catalogue. Changes to runs present in both come from the Space's guarded HF maintenance and are
         listed in the receipt.
-    publish_cloudflare.py publish --bundle PREPARED_DIRECTORY [--dataset-commit SHA] [--replace-pages] [--commit]
+    publish_cloudflare.py publish (--bundle PREPARED_DIRECTORY | --run RUN) [--dataset-commit SHA] [--replace-pages]
+                                  [--commit]
         Merge a prepare_hf_library.py bundle: new runs are added, every existing run file is immutable (with
         --replace-pages only the bundle runs' .html pages may change; each replacement is recorded), the
         catalogue is merged newest first. Files of the bundle's dataset-files/ (private) are never deployed;
         with --dataset-commit (the HF logs-dataset commit that holds them) pages link there, otherwise links to
-        them point to the site's private-records notice.
+        them point to the site's private-records notice. With a dataset commit only the HF subset
+        (dataset_logs.hf_categories(); not resume bundles or snapshots for new runs) is checked in and linked to the
+        dataset; other dataset files are in the GCS archive and their links go to the notice.
+        --run RUN (owner decision, November 19, 2026: "publish = restore from GCS, build, publish, delete local
+        copy") resolves the bundle itself (``bundle_for_run``): runs/phase-b/RUN/site-bundle/ (local, else restored
+        from the GDM_RUNS_BUCKET archive), else one built by prepare_hf_library.py from the local raw run or the run
+        restored from the bucket; the dataset commit defaults to runs/phase-b/RUN/hf-upload.json's. Restored and
+        built copies live in a scratch folder deleted after planning.
     publish_cloudflare.py restyle [--run RUN ...] [--commit] [--receipt FILE]
         Re-render the layout of pages already on the site (``site_layout.apply``: results.html, the conference
         view and the simplified judge report of every run, or only the given runs) and the root pages from the
@@ -937,12 +945,55 @@ def dataset_checker(commit, api=None):
     return check
 
 
-def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages=False, remote=None, site=None):
+def dataset_category(path):
+    """The dataset category of a logs-dataset path (``[live/]RUN/<relative>``, URL-quoted or not), or None."""
+    parts = urllib.parse.unquote(path.split('?', 1)[0].split('#', 1)[0]).strip('/').split('/')
+    if parts[0] == 'live':
+        parts = parts[1:]
+    return dataset_logs.category('/'.join(parts[1:])) if len(parts) > 1 else None
+
+
+DATASET_PATH_LINK = re.compile(r'href="https://huggingface\.co/datasets/[^"/]+/[^"/]+/(?:blob|resolve|tree)/'
+                               + re.escape(dataset_logs.COMMIT_PLACEHOLDER) + r'/([^"]*)"')
+
+
+def off_hf_links(document, page, subset):
+    """Links of a prepared page (dataset placeholder) to dataset files whose category is not in the HF subset
+    (``subset``: dataset_logs.hf_categories(); resume bundles and snapshot archives by default) repointed to the
+    site's private-records notice: those files are only in the private GCS archive, never pinned to HF.
+    Returns (document, count)."""
+    target = '../' * page.count('/') + PRIVATE_PAGE
+    count = 0
+
+    def swap(match):
+        nonlocal count
+        kind = dataset_category(match.group(1))
+        if kind is None or kind in subset:
+            return match.group(0)
+        count += 1
+        return f'href="{target}"'
+    return DATASET_PATH_LINK.sub(swap, document), count
+
+
+def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages=False, remote=None, site=None,
+                hf_subset=None):
     """The site after merging a prepared bundle (immutable existing run files unless --replace-pages). A bundle
     whose dataset files are already in the logs dataset (left on the VM) needs ``dataset_commit``; ``remote``
-    defaults to dataset_checker(dataset_commit)."""
-    if remote is None and dataset_commit:
-        remote = dataset_checker(dataset_commit)
+    defaults to dataset_checker(dataset_commit).
+
+    With a dataset commit, only the HF subset (``hf_subset``, default dataset_logs.hf_categories(); owner decision,
+    November 19, 2026) is in the logs dataset: dataset files of other categories are accepted as private (they are
+    in the GCS archive) without asking ``remote``, and page links to them go to the private-records notice."""
+    subset = dataset_logs.hf_categories() if hf_subset is None else frozenset(hf_subset)
+    bucket_only = []
+    if dataset_commit:
+        checker = remote if remote is not None else dataset_checker(dataset_commit)
+
+        def remote(name, size, sha256):
+            if dataset_category(name) not in subset:
+                bucket_only.append(name)
+                return True
+            return checker(name, size, sha256)
     manifest, incoming = load_bundle(bundle, remote)
     if manifest.get('layout') == 'records-in-space':
         raise ValueError('Legacy records-in-space bundle refused: raw records are private')
@@ -954,7 +1005,7 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
     selected = set(manifest['runs'])
     bundle = Path(bundle)
     files = dict(base_files)
-    added, replaced = [], []
+    added, replaced, off_hf = [], [], 0
     viewer = None  # math site: pages compared as finish will serve them (log viewer links)
     if site_of(site).key == DEFAULT_SITE:
         viewer = set(log_viewer.viewer_runs(base_files))
@@ -972,6 +1023,10 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
         data = (bundle / name).read_bytes()
         if dataset_logs.COMMIT_PLACEHOLDER.encode() in data:
             if dataset_commit:
+                if DATASET_PATH_LINK.search(data.decode('utf-8', 'replace')):
+                    text, count = off_hf_links(data.decode('utf-8'), name, subset)
+                    if count:
+                        data, off_hf = text.encode('utf-8'), off_hf + count
                 data = dataset_logs.pin_commit(data, dataset_commit)
             else:
                 data = private_links(data.decode('utf-8'), name).encode()
@@ -1018,7 +1073,9 @@ def plan_bundle(base_files, bundle, unlisted, dataset_commit=None, replace_pages
                               **({'dataset_commit': dataset_commit} if dataset_commit else {})},
                    'added_files': len(added), 'replaced_pages': replaced, 'repointed_private_links': repointed,
                    'private_files_not_deployed': {'files': len(private),
-                                                  'bytes': sum(x['bytes'] for x in private.values())}}
+                                                  'bytes': sum(x['bytes'] for x in private.values())},
+                   **({'hf_subset': sorted(subset), 'repointed_off_hf_links': off_hf,
+                       'bucket_only_dataset_files': len(bucket_only)} if dataset_commit else {})}
 
 
 def plan_restyle(base_files, unlisted, runs=None, site=None):
@@ -1723,6 +1780,140 @@ def storymap_taxonomy():
     return load_taxonomy(DEFAULT_TAXONOMY)
 
 
+# --- publish --run: restore from the GCS archive, build, publish, delete the local copy (owner decision,
+# November 19, 2026: docs/plan.md, "Run storage: GCS archive, HF viewable subset, nothing local") -----------------
+RUNS = ROOT / 'runs'
+HF_UPLOAD = 'hf-upload.json'
+SITE_BUNDLE = 'site-bundle'
+INSPECT_VIEW = 'inspect-view'
+OFFLOAD_MARKERS = ('GCS.json', 'OFFLOADED.json')
+
+
+def local_run_complete(run_dir):
+    """A local raw run usable for building a bundle: it has Inspect logs (inspect/*.eval) and was never offloaded
+    (no GCS.json or OFFLOADED.json: an offload deletes everything but the small index). Anything else is restored
+    from the bucket."""
+    run_dir = Path(run_dir)
+    return (run_dir.is_dir() and any((run_dir / 'inspect').glob('*.eval'))
+            and not any((run_dir / m).exists() for m in OFFLOAD_MARKERS))
+
+
+def recorded_commit(path):
+    """The ``dataset_commit`` of a phase hf-upload.json (scripts/upload_run.py), or None."""
+    try:
+        commit = json.loads(Path(path).read_text()).get('dataset_commit')
+    except (OSError, ValueError, AttributeError):
+        return None
+    return commit if isinstance(commit, str) and re.fullmatch(r'[0-9a-f]{40}', commit) else None
+
+
+def recorded_subset(path):
+    """The dataset categories an hf-upload.json says are in the logs dataset: its ``hf_categories`` (the viewable
+    subset, schema gdm-run-upload/2), every category for an earlier whole-run upload, else None (the default)."""
+    try:
+        record = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(record, dict) or record.get('outcome') != 'uploaded':
+        return None
+    if record.get('schema') == 'gdm-run-upload/2' and isinstance(record.get('hf_categories'), list):
+        return frozenset(record['hf_categories'])
+    return frozenset(dataset_logs.CATEGORIES)
+
+
+def prepare_env():
+    """The environment of prepare_hf_library.py: the caller's, without credential-like variables (GDM_LOGS_DATASET
+    passes through), with the repository's import path."""
+    import gcs_runs
+    env = {k: v for k, v in os.environ.items() if not gcs_runs.SECRET_ENV.search(k)}
+    env['PYTHONPATH'] = os.pathsep.join(str(ROOT / x) for x in ('scripts', 'src', '.'))
+    return env
+
+
+def bundle_for_run(run, workdir, store=None, runner=subprocess.run, runs_root=RUNS, log=print):
+    """The prepared bundle of ``run`` for ``publish --run``, resolved into ``workdir`` (a scratch folder the
+    caller deletes after planning). Returns {'bundle': Path, 'dataset_commit': str or None, 'resolved': kind,
+    'hf_subset': the categories hf-upload.json says are in the logs dataset (recorded_subset), or None}.
+
+    (a) the local runs/phase-b/RUN/site-bundle/ (the VM's prepared bundle, fetched); else (b) that folder restored
+    from the bucket (runs/phase-b/RUN/site-bundle/, uploaded by the VM); else (c) a bundle built here by
+    prepare_hf_library.py from the local raw run when complete (``local_run_complete``), otherwise from runs/RUN
+    restored from the bucket, with the Inspect View bundle runs/phase-b/RUN/inspect-view/ (local, else restored).
+    The dataset commit is runs/phase-b/RUN/hf-upload.json's (local index, else the bucket's copy). ``store`` is a
+    gcs_runs store (default GcloudStore from GDM_RUNS_BUCKET, created only when the bucket is needed)."""
+    import gcs_runs
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', run):
+        raise ValueError('Invalid run ID: ' + run)
+    runs_root, workdir = Path(runs_root), Path(workdir)
+    phase_local, phase_tmp = runs_root / 'phase-b' / run, workdir / 'phase'
+    unit = f'phase-b/{run}'
+    listing = None
+    subset = None
+
+    def phase_listing():
+        nonlocal store, listing
+        if listing is None:
+            store = gcs_runs.store_for(store=store)
+            listing = {k: v for k, v in store.list(gcs_runs.unit_key(unit)).items()
+                       if not k.startswith(gcs_runs.INTERNAL + '/')}
+        return listing
+
+    def restore_phase(prefix):
+        gcs_runs.restore_unit(unit, dest=phase_tmp, prefix=prefix, store=store, log=log)
+        return phase_tmp / prefix
+
+    def commit():
+        nonlocal subset
+        if (phase_local / HF_UPLOAD).is_file():
+            record = phase_local / HF_UPLOAD
+        else:
+            try:
+                in_bucket = HF_UPLOAD in phase_listing()
+            except ValueError:  # no bucket configured (a local site bundle without its upload record)
+                return None
+            if not in_bucket:
+                return None
+            record = restore_phase(HF_UPLOAD)
+        subset = recorded_subset(record)
+        return recorded_commit(record)
+
+    if (phase_local / SITE_BUNDLE / 'archive-manifest.json').is_file():
+        found = commit()
+        return {'bundle': phase_local / SITE_BUNDLE, 'dataset_commit': found, 'resolved': 'local site-bundle',
+                'hf_subset': subset}
+    if f'{SITE_BUNDLE}/archive-manifest.json' in phase_listing():
+        bundle = restore_phase(SITE_BUNDLE + '/')
+        found = commit()
+        return {'bundle': bundle, 'dataset_commit': found, 'resolved': 'site-bundle restored from the bucket',
+                'hf_subset': subset}
+    if local_run_complete(runs_root / run):
+        runs_dir, resolved = runs_root, 'local raw run'
+    else:
+        store = gcs_runs.store_for(store=store)
+        if not gcs_runs.has_unit(run, store=store):
+            raise ValueError(f'{run}: no site bundle and no complete run, locally or in the bucket')
+        runs_dir, resolved = workdir / 'runs', 'raw run restored from the bucket'
+        gcs_runs.restore_unit(run, dest=runs_dir / run, store=store, log=log)
+    if (phase_local / INSPECT_VIEW / 'index.html').is_file():
+        viewer = phase_local / INSPECT_VIEW
+    elif f'{INSPECT_VIEW}/index.html' in phase_listing():
+        viewer = restore_phase(INSPECT_VIEW + '/')
+    else:
+        raise ValueError(f'{run}: no Inspect View bundle (runs/phase-b/{run}/{INSPECT_VIEW}/index.html, locally '
+                         'or in the bucket); build one with `inspect view bundle` first')
+    bundle = workdir / 'bundle'
+    done = runner([sys.executable, str(ROOT / 'scripts' / 'prepare_hf_library.py'), '--runs-dir', str(runs_dir),
+                   '--run', f'{run}={viewer}', '--output-dir', str(bundle)],
+                  cwd=ROOT, env=prepare_env(), capture_output=True, text=True)
+    if done.returncode != 0:
+        raise RuntimeError(f'prepare_hf_library.py failed ({done.returncode}): '
+                           + ((done.stderr or done.stdout or '')[-1500:]))
+    if not (bundle / 'archive-manifest.json').is_file():
+        raise RuntimeError('prepare_hf_library.py wrote no bundle')
+    found = commit()
+    return {'bundle': bundle, 'dataset_commit': found, 'resolved': resolved, 'hf_subset': subset}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -1730,8 +1921,12 @@ def main(argv=None):
     mirror.add_argument('--revision', help='Space revision (default: current head, pinned at planning)')
     mirror.add_argument('--snapshot', type=Path, help='an existing local snapshot of exactly --revision')
     bundle = sub.add_parser('publish', help='merge a prepare_hf_library.py bundle')
-    bundle.add_argument('--bundle', required=True, type=Path)
-    bundle.add_argument('--dataset-commit', help='HF logs-dataset commit holding the bundle\'s private files')
+    source = bundle.add_mutually_exclusive_group(required=True)
+    source.add_argument('--bundle', type=Path, help='a prepare_hf_library.py bundle')
+    source.add_argument('--run', help='a run: its site bundle, local or restored from the GCS archive, or built '
+                                      'from the run (``bundle_for_run``); the scratch copy is deleted after planning')
+    bundle.add_argument('--dataset-commit', help='HF logs-dataset commit holding the bundle\'s private files '
+                                                 '(--run: default runs/phase-b/RUN/hf-upload.json\'s)')
     bundle.add_argument('--replace-pages', action='store_true', help='allow the bundle runs\' .html pages to change')
     restyle = sub.add_parser('restyle', help='re-render the layout of published run pages and the catalogue')
     restyle.add_argument('--run', action='append', help='only this run\'s pages (repeatable; default all runs)')
@@ -1781,7 +1976,8 @@ def main(argv=None):
         return 0 if result['ok'] else 1
     if args.command == 'publish' and args.dataset_commit and not re.fullmatch(r'[0-9a-f]{40}', args.dataset_commit):
         parser.error('--dataset-commit must be a full commit')
-    if args.receipt and args.command == 'publish' and args.receipt.resolve().is_relative_to(args.bundle.resolve()):
+    if args.receipt and args.command == 'publish' and args.bundle \
+            and args.receipt.resolve().is_relative_to(args.bundle.resolve()):
         parser.error('--receipt must be outside the prepared bundle')
     site = SITES[args.site]
     if args.command == 'viewer' and site.key != DEFAULT_SITE:
@@ -1852,9 +2048,17 @@ def main(argv=None):
         elif args.command == 'withdraw':
             files, plan = plan_withdraw(base_files, unlisted, args.run, site=site)
             message = 'Withdraw ' + ', '.join(plan['source']['runs'])
-        else:
+        elif args.bundle:
             files, plan = plan_bundle(base_files, args.bundle, unlisted, args.dataset_commit, args.replace_pages,
                                       site=site)
+            message = 'Publish ' + ', '.join(plan['source']['runs'])
+        else:  # --run: the scratch copy (restored or built) is deleted once the plan holds the files
+            with tempfile.TemporaryDirectory(prefix='cf-run-') as scratch:
+                found = bundle_for_run(args.run, scratch, log=lambda text: print(text, file=sys.stderr))
+                commit = args.dataset_commit or found['dataset_commit']
+                files, plan = plan_bundle(base_files, found['bundle'], unlisted, commit, args.replace_pages,
+                                          site=site, hf_subset=found.get('hf_subset'))
+            plan['source']['resolved'] = found['resolved']
             message = 'Publish ' + ', '.join(plan['source']['runs'])
         # The log viewer (November 12, 2026): created by the ``viewer`` command; once it is served, every math-site
         # deployment keeps it in sync and points the Inspect links at it.

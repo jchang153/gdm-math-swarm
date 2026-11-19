@@ -219,13 +219,21 @@ VM=<owner VM name from HANDOFF.local.md>
      `inference_finished` events.
 7. **Afterwards:** the supervisor runs reconciliation, evaluation, the behavior
    judge, the incident report, builds results and the site bundle on the VM, **uploads the whole run to the
-   private logs dataset** (`hf-upload.json`; item 16) and packages only the core, then waits for `retrieved.marker`.
+   private GCS run bucket** (`gcs-upload.json`) and **only the viewable subset to the private logs dataset**
+   (`hf-upload.json`; item 53, docs/plan.md "Run storage: GCS archive, HF viewable subset, nothing local") and
+   packages only the core, then waits for `retrieved.marker`.
    - **Never copy `runs/<RUN_ID>` back.** From your computer:
      `PYTHONPATH=scripts:src:. .venv/bin/python scripts/fetch_run.py --vm $VM --run <RUN_ID> [--publish]`
      (core into `runs/<RUN_ID>/`, records and ledger backups into `runs/phase-b/<RUN_ID>/`, Cloudflare publish
      or preview from a scratch bundle, touches the marker). docs/validation.md, step 19a.
    - If `hf-upload.json` says `skipped_no_credential`, the VM has no HF upload token yet (owner step, item 16);
      the run stays on the VM: rerun `scripts/upload_run.py` there after the token is installed.
+   - If `gcs-upload.json` says `skipped_no_bucket` or failed, the VM has no bucket name
+     (`~/.config/gdm-math-swarm/runs-bucket`) or no storage access (scopes `storage-rw`/`cloud-platform` plus
+     bucket IAM for the VM service account; item 53): rerun
+     `scripts/upload_run.py --target gcs --run-dir runs/RUN --phase-dir runs/phase-b/RUN --record runs/phase-b/RUN/gcs-upload.json`
+     there once access exists.
+   - Afterwards keep only the index locally: `offload_runs.py offload --to gcs --unit RUN --unit phase-b/RUN`.
 8. **Stop:**
    - `$G compute instances stop $VM --project $GDM_GCP_PROJECT --zone $GDM_GCP_ZONE`.
    - Verify `TERMINATED`. Closing SSH or tmux does NOT stop the VM.
@@ -299,7 +307,14 @@ The full reference is `private/docs/gcp-vm.md` (host-only) and `docs/validation.
 5. **Facts-only results page:** `scripts/build_results.py` and `scripts/export_conference.py` now run on the VM
    (supervisor, before the upload; results before the incident report). `scripts/build_experiment_index.py` runs
    in `fetch_run.py`. `scripts/export_transcripts.py` (local only) needs the Inspect logs restored into a scratch
-   folder (`offload_runs.py restore --unit RUN --prefix inspect/ --dest SCRATCH`).
+   folder (`offload_runs.py restore [--from gcs] --unit RUN --prefix inspect/ --dest SCRATCH [-- CMD]`; `--from`
+   defaults to the bucket when the run has `GCS.json` and `GDM_RUNS_BUCKET` is set).
+   **Run storage (owner decision, 2026-11-19; item 53):** the private GCS bucket `$GDM_RUNS_BUCKET`
+   (HANDOFF.local.md) is the complete archive (`runs/<RUN>/`, `runs/phase-b/<RUN>/`; `scripts/gcs_runs.py`); HF keeps
+   only what the site links or the log viewer reads; this computer keeps only each run's index. Offload:
+   `PYTHONPATH=scripts:src:. .venv/bin/python scripts/offload_runs.py offload --to gcs --unit RUN | --all`.
+   Publish in one command: `scripts/publish_cloudflare.py publish --run RUN [--commit]` (local site bundle, else
+   restored from the bucket into a scratch folder deleted after planning).
 6. **Publish to HF:**
    - Preview with `scripts/prepare_hf_library.py`, then
      `scripts/publish_hf_library.py --bundle DIR [--commit]`.
@@ -2210,6 +2225,19 @@ is being merged into main via `collab-env`.
     - 2026-11-19 ~12:15 PST: arms relabelled (owner; docs/plan.md "Arm relabelling: silent = 1/2, reason = 3/4"):
       silent = A1 (rollback) / A2 (revert), reason = A3 (rollback) / A4 (revert); monitors M2 <-> M3, M3a -> M2a.
       This item and the monitor items above now use the new labels; earlier dated reports keep the old ones.
+53. **BUILT 2026-11-19 (~13:30 PST), NOT YET USABLE: run storage = GCS archive, HF viewable subset, nothing local**
+    (owner, chat ~12:30 PST: "ok, let's go ahead and do that, and offload all runs from local machine"; docs/plan.md
+    "Run storage: GCS archive, HF viewable subset, nothing local"). Tooling committed: `scripts/gcs_runs.py`
+    (gcloud storage layer, offload/restore, size+MD5 verification), `offload_runs.py offload --to gcs` /
+    `restore --from {auto,hf,gcs} [--cleanup]` (auto-offload after judge/story map/restore uses the bucket when
+    `GDM_RUNS_BUCKET` is set), `upload_run.py --target {hf,gcs}` (HF = viewable subset only,
+    `dataset_logs.HF_SUBSET_DEFAULT`, `GDM_HF_CATEGORIES`), supervisor order GCS -> HF -> phase re-sync
+    (`gcs-upload.json`, `hf-upload.json`), `publish_cloudflare.py publish --run RUN` with automatic restore,
+    story-map input restore from the bucket. Blockers (owner): (1) the bucket does not exist yet (403 on create;
+    HANDOFF.local.md), so no smoke test was run; (2) all 25 VMs run as the VM runtime service account with only
+    `logging.write`+`monitoring.write` scopes: with VMs stopped, set scopes to include `storage-rw` and grant the
+    service account `roles/storage.objectAdmin` on the bucket, and write the bucket name to
+    `~/.config/gdm-math-swarm/runs-bucket` on each VM. A separate migration agent moves the existing local runs.
 
 ## Next steps / open items
 

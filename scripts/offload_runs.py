@@ -42,6 +42,24 @@ DIR`` (a scratch folder) is preferred over restoring in place; with ``-- CMD`` t
 
 ``restore`` downloads the dataset objects named in OFFLOADED.json at the recorded commit and writes each
 offloaded file back to its original path after checking its SHA-256 (existing files are left alone).
+
+GCS archive (owner decision, November 19, 2026: docs/plan.md, "Run storage: GCS archive, HF viewable subset,
+nothing local"): with ``GDM_RUNS_BUCKET`` set (gs://...; HANDOFF.local.md) the private bucket is the complete
+archive (scripts/gcs_runs.py):
+
+    python scripts/offload_runs.py offload --to gcs --unit RUN [--unit phase-b/NAME ...] [--all] [--dry-run]
+                                           [--keep-all] [--replace]
+    python scripts/offload_runs.py restore --from gcs --unit RUN [--prefix inspect/] [--dest DIR] [--force]
+                                           [--cleanup] [-- CMD ARGS]
+
+``offload --to gcs`` uploads every file of the unit to ``runs/<unit>/`` (budget ledgers included; the same
+credential screen), verifies each object by size and MD5 (CRC32C when there is no MD5), writes GCS.json and the
+bucket manifest, then deletes everything locally except the index (gcs_runs.INDEX_FILES). ``restore --from gcs``
+downloads (verified) into runs/UNIT or --dest; with ``-- CMD`` the --dest folder is deleted afterwards, and an
+in-place restore is offloaded again (``--cleanup`` instead only deletes the restored files that are unchanged).
+``--from`` defaults to ``auto``: the bucket when the unit has GCS.json or no OFFLOADED.json (and GDM_RUNS_BUCKET is
+set), else the dataset. ``auto_offload`` (judge, story map, restore) offloads to the bucket when GDM_RUNS_BUCKET is
+set, else to the dataset as before.
 """
 import argparse
 import concurrent.futures
@@ -569,7 +587,8 @@ def all_units(runs_root=None):
     core again (restored or added later, e.g. analysis outputs). Units in use (a live lease) are left out, and
     so are the Cloudflare site caches (phase-b/cloudflare*: rebuildable, deleted after verify, never uploaded)."""
     root = Path(runs_root or RUNS)
-    candidates = [p.name for p in sorted(root.iterdir()) if p.is_dir() and p.name not in SKIP_UNITS]
+    candidates = [p.name for p in sorted(root.iterdir()) if p.is_dir() and p.name not in SKIP_UNITS
+                  and not p.name.startswith('.')]
     if (root / 'phase-b').is_dir():
         candidates += ['phase-b/' + p.name for p in sorted((root / 'phase-b').iterdir())
                        if p.is_dir() and p.name != STAMP and not p.name.startswith('cloudflare')]
@@ -706,7 +725,12 @@ def auto_offload(run_dir, *, label, skip=False, log=print, runs_root=None, offlo
     if unit is None:
         log(f'{label}: {run_dir} is not a run folder under runs/; nothing offloaded')
         return {'status': 'not_a_unit'}
-    repo = dataset_repo()
+    import gcs_runs
+    try:
+        use_gcs = gcs_runs.bucket_url() is not None
+    except ValueError:
+        use_gcs = False
+    repo = 'gcs' if use_gcs else dataset_repo()
     if repo is None:
         log(f'{label}: GDM_LOGS_DATASET is not set (HANDOFF.local.md); {unit} not offloaded. Later: '
             f'python scripts/offload_runs.py offload --unit {unit}')
@@ -720,20 +744,25 @@ def auto_offload(run_dir, *, label, skip=False, log=print, runs_root=None, offlo
         if others:
             log(f'{label}: {unit} is still in use by {", ".join(others)}; the last of them offloads it')
             return {'status': 'deferred', 'unit': unit, 'in_use_by': others}
-        if (unit_dir / 'OFFLOADED.json').is_file() and not pending_bytes(unit, runs_root):
+        if (gcs_runs.pending(unit, runs_root) == 0 if use_gcs else
+                (unit_dir / 'OFFLOADED.json').is_file() and not pending_bytes(unit, runs_root)):
             log(f'{label}: {unit} holds only its core; nothing to offload')
             return {'status': 'nothing_to_offload', 'unit': unit}
         scratch = Path(work or tempfile.mkdtemp(prefix='offload-work-'))
         try:
-            result = (offload or offload_unit)(unit, repo=repo, work=scratch, runs_root=runs_root,
-                                               log=lambda m: log(f'offload: {m}'))
+            if use_gcs and offload is None:
+                result = gcs_runs.offload_unit(unit, runs_root=runs_root, log=lambda m: log(f'offload: {m}'))
+            else:
+                result = (offload or offload_unit)(unit, repo=repo, work=scratch, runs_root=runs_root,
+                                                   log=lambda m: log(f'offload: {m}'))
         except Exception as error:  # the analysis itself succeeded; the run stays complete locally
             log(f'{label}: offload of {unit} failed ({type(error).__name__}: {error}); the run is unchanged '
                 f'locally. Retry: python scripts/offload_runs.py offload --unit {unit}')
             return {'status': 'failed', 'unit': unit, 'error': f'{type(error).__name__}: {error}'}
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
-    return {'status': 'offloaded', **{k: result.get(k) for k in ('unit', 'commit', 'freed_bytes', 'offloaded')}}
+    return {'status': 'offloaded', 'backend': 'gcs' if use_gcs else 'hf',
+            **{k: result.get(k) for k in ('unit', 'commit', 'freed_bytes', 'offloaded', 'stamp')}}
 
 
 def add_offload_flag(parser):
@@ -858,6 +887,66 @@ def restore(unit, prefix='', force=False, cache=None, dest=None):
     return restored
 
 
+def restore_source(unit, requested='auto', runs_root=None):
+    """'gcs' or 'hf' for a restore: ``requested`` unless 'auto'; auto picks the bucket when the unit has GCS.json
+    or no OFFLOADED.json and GDM_RUNS_BUCKET is set, else the dataset."""
+    if requested != 'auto':
+        return requested
+    import gcs_runs
+    unit_dir = Path(runs_root or RUNS) / unit
+    try:
+        bucket = gcs_runs.bucket_url()
+    except ValueError:
+        bucket = None
+    if bucket and ((unit_dir / gcs_runs.RECORD).is_file() or not (unit_dir / 'OFFLOADED.json').is_file()):
+        return 'gcs'
+    return 'hf'
+
+
+def restore_gcs_and_run(args, runner=subprocess.call, store=None, runs_root=None):
+    """``restore --from gcs``: download (verified), optionally run CMD under a lease, then delete --dest, or for
+    an in-place restore offload again (default) or with --cleanup delete only the unchanged restored files."""
+    import gcs_runs
+    command = list(args.run or [])
+    if command[:1] == ['--']:
+        command = command[1:]
+    root = Path(runs_root or RUNS)
+    unit_dir = root / args.unit
+    target = Path(args.dest) if args.dest else unit_dir
+
+    def fetch():
+        return gcs_runs.restore_unit(args.unit, runs_root=root, dest=args.dest, prefix=args.prefix,
+                                     force=args.force, store=store, log=lambda m: print(m, flush=True))
+
+    def cleanup():
+        if args.dest:
+            shutil.rmtree(args.dest, ignore_errors=True)
+            print(f'deleted the scratch restore {args.dest}')
+            return
+        removed = 0
+        for relative in gcs_runs.restored_paths(args.unit, target, store=store):
+            (target / relative).unlink()
+            removed += 1
+        print(f'{args.unit}: deleted {removed} restored files (unchanged, in the bucket)')
+
+    if not command:
+        fetch()
+        if getattr(args, 'cleanup', False):
+            cleanup()
+        return 0
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    with lease(unit_dir, 'restore: ' + ' '.join(command)[:120]):
+        fetch()
+        code = runner(command)
+    if args.no_offload:
+        print(f'kept {target} (--no-offload)')
+    elif args.dest or getattr(args, 'cleanup', False):
+        cleanup()
+    else:
+        auto_offload(unit_dir, label='restore', log=lambda m: print(m, flush=True), runs_root=runs_root)
+    return code
+
+
 def restore_and_run(args, runner=subprocess.call):
     """``restore`` from the command line. With ``-- CMD``: restore, run CMD while holding a lease on the run,
     then offload the run again (in place) or delete the --dest folder (default; --no-offload keeps the files)."""
@@ -885,6 +974,36 @@ def restore_and_run(args, runner=subprocess.call):
     return code
 
 
+def offload_gcs_main(args, store=None, runs_root=None):
+    """``offload --to gcs``: one unit after another (each holds the unit's offload lock and skips units in use)."""
+    import gcs_runs
+    store = gcs_runs.store_for(None, store)
+    root = Path(runs_root or RUNS)
+    units = gcs_runs.all_units(root) if args.all else args.unit
+    results = []
+    for unit in units:
+        try:
+            unit_dir = root / unit
+            if not unit_dir.is_dir():
+                raise ValueError('No such unit: ' + unit)
+            with _offload_lock(unit_dir, exclusive=True, blocking=False) as locked:
+                if not locked or live_leases(unit_dir):
+                    results.append({'unit': unit, 'status': 'in_use'})
+                    print(f'{unit}: in use; skipped', flush=True)
+                    continue
+                results.append(gcs_runs.offload_unit(unit, runs_root=root, store=store, keep_all=args.keep_all,
+                                                     dry_run=args.dry_run, replace=args.replace,
+                                                     log=lambda m: print(m, flush=True)))
+        except Exception as error:
+            results.append({'unit': unit, 'error': f'{type(error).__name__}: {error}'})
+            print(f'ERROR {unit}: {error}', flush=True)
+        if args.report:
+            dataset_logs.write_json(args.report, {'created': now(), 'backend': 'gcs', 'results': results})
+    failed = [r['unit'] for r in results if 'error' in r]
+    print(f'{len(results) - len(failed)} units done, {len(failed)} failed: {failed}')
+    return 1 if failed else 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -897,17 +1016,31 @@ def main():
     off.add_argument('--batch', action='store_true', help='few large commits (HF: 128 commits per hour)')
     off.add_argument('--work', default=None, help='scratch folder for archives')
     off.add_argument('--report', default=None)
+    off.add_argument('--to', choices=('hf', 'gcs'), default='hf',
+                     help='hf: the private logs dataset (default); gcs: the private run bucket GDM_RUNS_BUCKET, '
+                          'keeping only the index locally')
+    off.add_argument('--replace', action='store_true',
+                     help='gcs: replace bucket objects whose bytes differ (default: only index files)')
     res = sub.add_parser('restore')
     res.add_argument('--unit', required=True)
     res.add_argument('--prefix', default='')
     res.add_argument('--force', action='store_true')
     res.add_argument('--cache', default=None)
     res.add_argument('--dest', default=None, help='write into this folder instead of runs/UNIT (preferred)')
+    res.add_argument('--from', dest='source', choices=('auto', 'hf', 'gcs'), default='auto',
+                     help='auto (default): the bucket when the unit has GCS.json or no OFFLOADED.json and '
+                          'GDM_RUNS_BUCKET is set, else the logs dataset')
+    res.add_argument('--cleanup', action='store_true',
+                     help='gcs: afterwards delete the restored files again (--dest: the folder) instead of offloading')
     add_offload_flag(res)
     res.add_argument('run', nargs=argparse.REMAINDER,
                      help='-- CMD ARGS: run CMD on the restored files, then offload the run again (in place) or '
                           'delete --dest; the exit code is CMD\'s')
     args = parser.parse_args()
+    if args.command == 'restore' and restore_source(args.unit, args.source) == 'gcs':
+        sys.exit(restore_gcs_and_run(args))
+    if args.command == 'offload' and args.to == 'gcs':
+        sys.exit(offload_gcs_main(args))
     if hf_visibility.DATASET_REPO == 'HF-ORG/LOGS-DATASET':
         parser.error('Set GDM_LOGS_DATASET (HANDOFF.local.md)')
     if args.command == 'restore':

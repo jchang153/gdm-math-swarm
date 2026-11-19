@@ -1612,6 +1612,46 @@ The VM's HF token is the owner's to install (`scripts/vm_hf_setup.py`; docs/vali
 supervisor records `skipped_no_credential` in `PHASE/hf-upload.json`, keeps the run on the VM and the site bundle is
 not publishable until the upload is rerun there.
 
+## Run storage: GCS archive, HF viewable subset, nothing local (November 19, 2026)
+
+Owner decision (docs/plan.md, "Run storage: GCS archive, HF viewable subset, nothing local"); this supersedes the
+two sections above for new runs and new offloads (earlier dataset uploads stay as they are).
+
+- **Archive.** The private bucket `GDM_RUNS_BUCKET` (`gs://...`; HANDOFF.local.md; on a VM also
+  `~/.config/gdm-math-swarm/runs-bucket`) holds every run completely: `runs/<RUN>/<path>` and
+  `runs/phase-b/<RUN>/<path>`, one object per file, verified by size and MD5 (CRC32C when an object has no MD5).
+  Each unit also has `GCS.json` (summary: counts, local-only files, screen exclusions, conflicts, manifest key; the
+  bucket is named only as `GDM_RUNS_BUCKET`) and `_gcs/manifest-<UTC>.json.gz` (every file with bytes, SHA-256,
+  MD5). Tool: `scripts/gcs_runs.py` through the `gcloud storage` CLI (the operator's login on the Mac, the VM
+  service account on a VM); single-request uploads, credential-like environment variables removed.
+- **Screen.** As for the dataset offload (dot-files, symlinks, credential-named files and files failing the
+  credential screen stay where they are; a tar archive whose only problem is credential-named members goes as a
+  repacked copy without them), except that budget ledgers are included.
+- **Offload** (Mac): `PYTHONPATH=scripts:src:. .venv/bin/python scripts/offload_runs.py offload --to gcs --unit RUN
+  [--unit phase-b/RUN] | --all [--dry-run] [--keep-all] [--replace]`. Identical objects are not uploaded again;
+  an object with other bytes is replaced only for index files (or with `--replace`), otherwise the file is a
+  conflict and stays local. After verification only the index stays: `results.json`, `settings.json`,
+  `run-budget.json`, `OFFLOADED.json`, `hf-upload.json`, `GCS.json`, `gcs-upload.json`. The judge, the story map
+  and `restore ... -- CMD` offload to the bucket automatically when `GDM_RUNS_BUCKET` is set.
+- **Restore:** `offload_runs.py restore --from gcs --unit RUN [--prefix inspect/] [--dest DIR] [--force]
+  [--cleanup] [-- CMD ARGS]`. Objects are downloaded into a scratch folder, verified, then moved into place
+  (existing files kept unless `--force`). With `-- CMD` a `--dest` folder is deleted afterwards and an in-place
+  restore is offloaded again; `--cleanup` deletes the unchanged restored files instead. `--from auto` (default)
+  picks the bucket when the run has `GCS.json` (or no `OFFLOADED.json`) and `GDM_RUNS_BUCKET` is set.
+- **VM post-run** (`scripts/supervise_run.py`): `upload_run.py --target gcs` uploads the full run and phase
+  folder (site bundle, Inspect View bundle and ledgers included; nothing deleted on the VM; `PHASE/gcs-upload.json`),
+  then `upload_run.py --target hf` uploads only the viewable subset of the site bundle's `dataset-files/` to the
+  logs dataset (`dataset_logs.HF_SUBSET_DEFAULT`: Inspect logs, raw JSONL, timeline, transcripts, databases;
+  `--hf-categories` or `GDM_HF_CATEGORIES` override; no resume bundles, snapshots or `completed-*.tgz`;
+  `PHASE/hf-upload.json`, schema `gdm-run-upload/2`, no OFFLOADED.json), then re-syncs the phase records to the
+  bucket. Neither failure blocks the other. The VM needs the access scope `storage-rw` (or `cloud-platform`) and
+  bucket IAM (`roles/storage.objectAdmin`) for its service account; `--no-gcs` skips the bucket step.
+- **Publishing:** `publish_cloudflare.py publish --run RUN [--dataset-commit SHA] [--commit]` uses
+  `runs/phase-b/RUN/site-bundle/` when present, else restores it from the bucket, else builds a bundle with
+  `prepare_hf_library.py` from the local raw run or one restored from the bucket (with the restored Inspect View
+  bundle); the scratch copy is deleted after planning. The dataset commit defaults to `hf-upload.json`'s. Links to
+  dataset files outside the recorded HF subset (resume bundles, snapshots) point to the private-records notice.
+
 ## Near-live mirror
 
 The owner chose a near-live view of runs on the website while they are going ("option 1 (near-live)",

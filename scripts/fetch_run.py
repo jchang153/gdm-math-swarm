@@ -158,7 +158,9 @@ def fetch(run, cloud, *, remote_root='gdm-math-swarm', publish=False, marker=Tru
         record['core'] = {'written': len(core[0]), 'unchanged': len(core[1]), 'kept_existing_different': core[2]}
         record['phase'] = {'written': len(phase[0]), 'unchanged': len(phase[1]),
                            'kept_existing_different': phase[2]}
-        if upload.get('outcome') == 'uploaded':   # the upload's manifests (newest, also after a rerun on the VM)
+        # The upload's manifests (newest, also after a rerun on the VM). From November 19, 2026 the HF upload is the
+        # viewable subset only (schema gdm-run-upload/2) and writes no OFFLOADED.json; the full run is in the bucket.
+        if upload.get('outcome') == 'uploaded' and upload.get('schema') != 'gdm-run-upload/2':
             for remote, local in ((f'{remote_root}/runs/{run}/OFFLOADED.json', ROOT / 'runs' / run),
                                   (f'{phase_remote}/OFFLOADED.json', ROOT / 'runs' / 'phase-b' / run)):
                 folder = tmp / 'manifest' / ('phase' if local.parent.name == 'phase-b' else 'run')

@@ -58,6 +58,13 @@ class SuperviseRunTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         os.environ["GDM_TEST_REPO"] = str(ROOT)
         supervise.ENV_KEYS = (*supervise.ENV_KEYS, "GDM_TEST_REPO")
+        # No archive bucket unless a test sets one (never the host's own ~/.config/gdm-math-swarm/runs-bucket).
+        for patcher in (mock.patch.object(supervise, "DEFAULT_BUCKET_FILE", self.tmp / "no-runs-bucket"),
+                        mock.patch.dict(os.environ)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for key in ("GDM_RUNS_BUCKET", "GCLOUD", "GDM_HF_CATEGORIES"):
+            os.environ.pop(key, None)
 
     def tearDown(self):
         os.environ.pop("OPENROUTER_API_KEY", None)
@@ -142,6 +149,115 @@ class SuperviseRunTests(unittest.TestCase):
         import tarfile
         with tarfile.open(self.phase / "completed-phase.tgz") as tar:
             self.assertTrue({"hf-upload.json", "upload.log", "upload.exit", "site-steps.json"} <= set(tar.getnames()))
+
+    STUB_UPLOAD = (
+        "import json, os, sys\n"
+        "assert 'OPENROUTER_API_KEY' not in os.environ\n"
+        "args = sys.argv[1:]\n"
+        "gcs = '--target' in args and args[args.index('--target') + 1] == 'gcs'\n"
+        "kind = ('gcs-sync' if '--phase-only' in args else 'gcs') if gcs else 'hf'\n"
+        "if gcs: assert 'HF_TOKEN_PATH' not in os.environ and 'GDM_LOGS_DATASET' not in os.environ\n"
+        "else: assert 'GDM_RUNS_BUCKET' not in os.environ\n"
+        "fail = os.path.exists(os.path.join(os.environ['GDM_TEST_FLAGS'], 'fail-' + kind))\n"
+        "open(args[args.index('--record') + 1], 'w').write(json.dumps({'outcome': 'failed' if fail else 'uploaded',"
+        " 'kind': kind, 'uploaded_files': 3, 'dataset_commit': None if gcs else 'c' * 40,"
+        " 'bucket_env': os.environ.get('GDM_RUNS_BUCKET'), 'args': args}))\n"
+        "raise SystemExit(2 if fail else 0)\n")
+
+    def gcs_setup(self, *failing):
+        token = self.tmp / "hf-token"
+        token.write_text("not-a-real-token")
+        token.chmod(0o600)
+        gcloud = self.tmp / "fake-gcloud"
+        gcloud.write_text("#!/bin/sh\nexit 0\n")
+        gcloud.chmod(0o755)
+        flags = self.tmp / "flags"
+        flags.mkdir()
+        for kind in failing:
+            (flags / ("fail-" + kind)).write_text("")
+        (self.tmp / "scripts" / "upload_run.py").write_text(self.STUB_UPLOAD)
+        supervise.ENV_KEYS = (*supervise.ENV_KEYS, "GDM_TEST_FLAGS")
+        self.addCleanup(lambda: setattr(supervise, "ENV_KEYS",
+                                        tuple(k for k in supervise.ENV_KEYS if k != "GDM_TEST_FLAGS")))
+        os.environ.update(GDM_TEST_FLAGS=str(flags), GDM_RUNS_BUCKET="gs://test-bucket", GCLOUD=str(gcloud),
+                          GDM_LOGS_DATASET="org/logs")
+        return token
+
+    def run_with_status(self, *extra):
+        seen = []
+        original = supervise.Supervisor.status
+
+        def status(supervisor, stage, **fields):
+            seen.append((stage, fields))
+            return original(supervisor, stage, **fields)
+        with mock.patch.object(supervise.Supervisor, "status", status):
+            code = supervise.Supervisor(self.args("--no-shutdown", *extra)).main()
+        ready = [f for s, f in seen if s == "ready_for_retrieval"]
+        return code, ready[0] if ready else None
+
+    def records(self):
+        return (json.loads((self.phase / "gcs-upload.json").read_text()),
+                json.loads((self.phase / "hf-upload.json").read_text()))
+
+    def test_gcs_archive_then_hf_subset_then_records_sync(self):
+        token = self.gcs_setup()
+        code, ready = self.run_with_status("--hf-token-file", str(token))
+        self.assertEqual(code, 0)
+        gcs, hf = self.records()
+        self.assertEqual((gcs["outcome"], gcs["exit"], gcs["kind"]), ("uploaded", 0, "gcs"))
+        self.assertEqual(gcs["bucket_env"], "gs://test-bucket")
+        self.assertIn("--record", gcs["args"])
+        self.assertNotIn("--phase-only", gcs["args"])
+        self.assertEqual((gcs["records_sync"]["outcome"], gcs["records_sync"]["kind"]), ("uploaded", "gcs-sync"))
+        self.assertIn("--phase-only", gcs["records_sync"]["args"])
+        self.assertEqual((hf["outcome"], hf["kind"]), ("uploaded", "hf"))
+        self.assertEqual(ready["gcs_upload"], {"outcome": "uploaded", "uploaded_files": 3, "reason": None,
+                                               "records_sync": "uploaded"})
+        self.assertEqual(ready["hf_upload"]["outcome"], "uploaded")
+        import tarfile
+        with tarfile.open(self.phase / "completed-phase.tgz") as tar:
+            names = set(tar.getnames())
+        self.assertTrue({"gcs-upload.json", "gcs-upload.log", "gcs-upload.exit", "gcs-sync.log", "gcs-sync.exit",
+                         "hf-upload.json", "upload.log"} <= names)
+
+    def test_gcs_failure_does_not_block_hf(self):
+        token = self.gcs_setup("gcs")
+        code, _ = self.run_with_status("--hf-token-file", str(token))
+        self.assertEqual(code, 0)   # never changes the worker exit
+        gcs, hf = self.records()
+        self.assertEqual((gcs["outcome"], gcs["exit"]), ("failed", 2))
+        self.assertEqual(gcs["records_sync"]["outcome"], "uploaded")
+        self.assertEqual(hf["outcome"], "uploaded")
+
+    def test_hf_failure_does_not_block_gcs(self):
+        token = self.gcs_setup("hf")
+        code, ready = self.run_with_status("--hf-token-file", str(token))
+        self.assertEqual(code, 0)
+        gcs, hf = self.records()
+        self.assertEqual((hf["outcome"], hf["exit"]), ("failed", 2))
+        self.assertEqual((gcs["outcome"], gcs["records_sync"]["outcome"]), ("uploaded", "uploaded"))
+        self.assertEqual(ready["gcs_upload"]["outcome"], "uploaded")
+
+    def test_gcs_skipped_without_bucket_or_gcloud_or_by_flag(self):
+        code, ready = self.run_with_status()
+        self.assertEqual(code, 0)
+        gcs = json.loads((self.phase / "gcs-upload.json").read_text())
+        self.assertEqual(gcs["outcome"], "skipped_no_bucket")
+        self.assertIn("runs-bucket", gcs["owner_step"])
+        self.assertNotIn("records_sync", gcs)
+        self.assertEqual(ready["gcs_upload"]["outcome"], "skipped_no_bucket")
+        self.assertFalse((self.phase / "gcs-upload.log").exists())
+        for name in ("supervisor.started", "gcs-upload.json", "hf-upload.json"):
+            (self.phase / name).unlink()
+        with mock.patch.dict(os.environ, {"GDM_RUNS_BUCKET": "gs://test-bucket",
+                                          "GCLOUD": str(self.tmp / "no-gcloud")}):
+            self.run_with_status()
+        self.assertEqual(json.loads((self.phase / "gcs-upload.json").read_text())["outcome"], "failed_no_gcloud")
+        for name in ("supervisor.started", "gcs-upload.json", "hf-upload.json"):
+            (self.phase / name).unlink()
+        with mock.patch.dict(os.environ, {"GDM_RUNS_BUCKET": "gs://test-bucket"}):
+            self.run_with_status("--no-gcs")
+        self.assertEqual(json.loads((self.phase / "gcs-upload.json").read_text())["outcome"], "skipped")
 
     def test_token_readable_by_others_is_refused(self):
         token = self.tmp / "hf-token"
