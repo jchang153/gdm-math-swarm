@@ -2555,3 +2555,42 @@ Current-facing text (this file, docs/HANDOFF.md, code, site titles and figures) 
 and raw run records made before 2026-11-19 keep the old labels; verbatim owner quotes are unchanged and marked
 "(old labels)" where they use them. Story-map event codes with similar names (e.g. M1, an overseer-board post read)
 are unrelated and unchanged.
+
+## Always-on Claude control VM (owner decision, November 19, 2026)
+
+Owner (chat, 2026-11-19 ~13:45 PST, verbatim): "ok, can we do the gcp vm?", approving the proposal of a small
+always-on GCP "control" VM for Claude Code sessions.
+
+Purpose: run the operator's Claude Code sessions (the sessions that drive experiments, fetch runs, publish the site
+and keep the handoff current) on a host that stays up when the owner's laptop is closed. Sessions run inside tmux with
+Claude Code Remote Control, so the owner can drive them from the Claude app or claude.ai; at the laptop, the owner
+opens the VM through the Claude desktop app's SSH environment.
+
+Design (decided):
+- One small VM in the experiment project and region (name and zone only in `HANDOFF.local.md`): e2-standard-2
+  (2 vCPU, 8 GB; resizable later), Ubuntu 24.04 LTS, 100 GB pd-balanced boot disk, Shielded VM, OS Login.
+- Networking as for the experiment VMs: no external IP, outbound HTTPS (Anthropic, GitHub, HF, PyPI) through the
+  project's existing Cloud NAT, SSH only through IAP TCP forwarding using the existing IAP firewall rule; no new
+  ingress rules.
+- Identity: the experiment VMs' runtime identity with logging/monitoring scopes only. A dedicated service account
+  (start/stop/SSH experiment VMs, IAP tunnel, act as the experiment VMs' account, read/write the planned run bucket)
+  needs a project administrator; until then gcloud on the VM uses the owner's own `gcloud auth login`.
+- A dedicated non-root user for Claude sessions with `loginctl enable-linger` (HANDOFF "Known gotchas": runs die on
+  automatic upgrades without linger); unattended security upgrades stay on with automatic reboot off.
+- A systemd user service runs `claude remote-control` in the repository checkout (restart on failure), plus a tmux
+  helper for interactive sessions. Claude Code user settings on the VM deny reading `.env`, `~/.ssh` and token files.
+- Always on: no idle auto-stop. This is the one exception to the stop-when-idle instruction for experiment VMs, and
+  it covers this VM only.
+
+Budget (the resource budget for this VM): about $60 per month while running, from e2-standard-2 on-demand
+(about $49) plus the 100 GB pd-balanced disk (about $10) plus Cloud NAT per-VM and data-processing charges (about
+$1-2 at light use). Stopping the VM stops the compute charge; the disk (about $10 per month) continues until it is
+deleted. It makes no model calls of its own: Claude Code sessions use the owner's Claude subscription, and paid
+experiment invocations keep their own per-run budgets ("One per-run budget, no manual approvals (October 20, 2026)").
+
+What runs there: Claude Code sessions (Remote Control and tmux), the repository checkout with its `.venv`, gcloud
+(to start, stop and reach experiment VMs through IAP), the HF and GCS run tooling, and site publishing. Researcher-only
+material stays researcher-only: the VM checkout holds a copy of `private/` and `HANDOFF.local.md` (never committed;
+never placed in experimental agent workspaces), and host credentials (GitHub deploy key, HF token, gcloud and wrangler
+logins, the Claude login) are installed on the VM by the owner, never copied from the laptop. Experiments still run
+on the experiment VMs, never on the control VM.
