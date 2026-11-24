@@ -474,6 +474,12 @@ def make_monitor_log(path):
     return log
 
 
+def agentic_effective(options, settings):
+    """settings.json ``effective.agentic_monitor`` (agentic_monitor.agentic_effective)."""
+    from .agentic_monitor import agentic_effective as effective
+    return effective(options, settings)
+
+
 def reviewer_effective(options, settings):
     """settings.json ``effective.reviewer`` (review_live.reviewer_effective)."""
     from .review_live import reviewer_effective as effective
@@ -618,7 +624,7 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
                 system_prompt_mode="replace", auto_memory=True, in_flight_grace=IN_FLIGHT_GRACE_SECONDS,
                 auto_restart=False, neutral=False, roles=None, definitions_for=None, continue_for=None,
                 env_for=None, resume=None, monitor_hook=False, reviewer=None,
-                rollback=None):
+                rollback=None, agentic=None):
     """Solver running one genuine Claude Code peer inside its own sandbox.
 
     ``roles`` ({agent_id: "solver"|"overseer"}, oversight.roles), ``definitions_for(agent_id)``
@@ -648,6 +654,10 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
     ``reviewer`` (a review_live.LiveReviewer, or None): the asynchronous reviewer's loop for this agent
     runs in the agent's own task group (solvers only; overseers are never reviewed) and ends with it.
 
+    ``agentic`` (an agentic_monitor.AgenticMonitors, or None; arm AG): a sample whose id is an agentic
+    monitor (``agmon-NNN``) runs ``agentic.run_sample`` instead (its own tools, no snapshots or resume
+    state); when a solver's sample ends, ``agentic.solver_finished`` lets its monitor's waits return at once.
+
     ``resume`` (a resume_bundle.ResumeBundler, or None): after the final snapshot poll each
     agent's resume state is saved (docs/runtime.md, "Resume bundle"), and every
     ``resume.checkpoint_minutes`` after the common start when that is set. Saving reads the
@@ -668,6 +678,11 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
         async def execute(state, generate):
             agent_id = str(state.sample_id)
             sbox = sandbox()
+            if agentic is not None and agentic.is_monitor(agent_id):  # arm AG: research_swarm.agentic_monitor
+                with agent_transport_scope():
+                    return await agentic.run_sample(state, sbox=sbox, gen_filter=filter_for(agent_id), clock=clock,
+                                                    record=record, run_dir=run_dir, in_flight_grace=in_flight_grace,
+                                                    system_prompt_mode=system_prompt_mode)
             persona = personas.get(agent_id)
             role = (roles or {}).get(agent_id)
             prompt = prompt_for(agent_id, persona)
@@ -842,6 +857,8 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
                             "final_output": inference.get("last_output_kind"),
                             "error": None if outcome["error"] is None else repr(outcome["error"])[:2000],
                             "inference": inference})
+                        if agentic is not None and (role or "solver") == "solver":
+                            agentic.solver_finished(agent_id)
             if outcome["error"] is not None:
                 raise outcome["error"]
             return state
@@ -850,16 +867,22 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
 
 
 def build_task(*, agent_ids, files, solver, compose, metadata, initial_message, name="gdm_math_swarm",
-               initial_messages=None):
+               initial_messages=None, sample_files=None, sample_compose=None):
     """The Inspect task (one sample per peer). Disables Inspect's .env loading first
     (``inspect_adapter.disable_inspect_dotenv``): every evaluation of this task, paid
-    or mock, must never load the host .env into the process environment."""
+    or mock, must never load the host .env into the process environment. ``sample_files``
+    ({agent_id: files}) overrides ``files`` for those samples (agentic monitors get none).
+    ``sample_compose`` ({agent_id: compose path}) gives those samples their own Docker
+    sandbox (agentic monitors: ``make_agentic_compose``); the others use ``compose``."""
     from inspect_ai import Task
     from inspect_ai.dataset import Sample
     from .inspect_adapter import disable_inspect_dotenv
     disable_inspect_dotenv()
+    own = sample_compose or {}
     return Task(name=name,
-                dataset=[Sample(id=a, input=(initial_messages or {}).get(a, initial_message), files=dict(files))
+                dataset=[Sample(id=a, input=(initial_messages or {}).get(a, initial_message),
+                                files=dict((sample_files or {}).get(a, files)),
+                                **({"sandbox": ("docker", own[a])} if a in own else {}))
                          for a in agent_ids],
                 solver=solver, sandbox=("docker", compose), metadata=metadata)
 
@@ -1285,6 +1308,12 @@ def monitor_launch_problems(config):
     return monitor_problems(config)
 
 
+def agentic_launch_problems(config):
+    """The ``agentic_monitor`` block's problems (research_swarm.agentic_monitor.agentic_problems)."""
+    from .agentic_monitor import agentic_problems
+    return agentic_problems(config)
+
+
 def integrity_reminder_problems(config):
     block = config.get("integrity_reminder")
     if block is None:
@@ -1394,6 +1423,7 @@ def preflight(config, repo_root):
     blockers.extend(integrity_reminder_problems(config))  # docs/plan.md, "periodic integrity reminder"
     blockers.extend(monitor_launch_problems(config))  # docs/plan.md, "Top-down monitor arms"
     blockers.extend(reviewer_launch_problems(config))  # docs/plan.md, "Asynchronous reviewer arms A1–A4"
+    blockers.extend(agentic_launch_problems(config))  # docs/plan.md, "Agentic monitor arm AG"
     allocation = None
     try:
         allocation = persona_counts_for(config, personas_for(config, int(config.get("agent_count", APPROVED_AGENT_COUNT)),
@@ -1711,6 +1741,15 @@ def make_compose(run_dir, config, agent_image):
     return write_compose(Path(run_dir) / "compose.yaml", *_compose_args(config, agent_image))
 
 
+AGENTIC_COMPOSE_NAME = "compose-agentic-monitor.yaml"
+
+
+def make_agentic_compose(run_dir, config, agent_image, mem_limit):
+    """Arm AG: the agentic monitors' compose file, identical to ``make_compose``'s except its
+    memory cap (``agentic_monitor.mem_limit``; the solvers keep ``agent_memory``)."""
+    return write_compose(Path(run_dir) / AGENTIC_COMPOSE_NAME, agent_image, mem_limit, config.get("agent_cpus"))
+
+
 def compose_fingerprint(config, agent_image_id):
     """sha256 of the exact compose text ``make_compose(run_dir, config, agent_image_id)``
     writes (interface X3: evidence records it as ``compose_sha256``; launch gates
@@ -1975,12 +2014,18 @@ async def _run_pilot(config, repo_root, conference_factory=None):
     from .seeded import seed_agent
     seed = seed_agent(config)
     overseer_ids = oversight.overseer_ids(overseer)
-    agent_ids = solver_ids + overseer_ids  # Inspect samples
+    # Agentic monitor arm AG (research_swarm.agentic_monitor): one more sample per solver (agmon-NNN), never a
+    # conference participant.
+    from .agentic_monitor import ROLE as AGENTIC_ROLE, agentic_settings, monitor_id as agentic_monitor_id
+    agentic_options = agentic_settings(config)  # None: no agentic monitors
+    agentic_ids = [agentic_monitor_id(a) for a in solver_ids] if agentic_options else []
+    agent_ids = solver_ids + overseer_ids + agentic_ids  # Inspect samples
     conference_ids = solver_ids + ([seed] if seed else []) + overseer_ids
     # Per-role model (docs/plan.md, "Multi-overseer seeded runs, October 26, 2026"): the overseers'
     # own OpenRouter model, checked by the same route-pricing and compatibility gates; None: one model.
     overseer_settings = oversight.overseer_settings(config, pricing_verified=True, live_compatibility_verified=True)
     roles = oversight.roles(solver_ids, overseer, seed)
+    roles.update({a: AGENTIC_ROLE for a in agentic_ids})
     from .dataset import task_set_of
     task_set = config.get("task_set") if code else task_set_of(config)
     listing, task_files = export_tasks_for(config, repo_root)
@@ -2015,6 +2060,8 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                              else max(0, int((max_seconds - 1) // integrity_reminder[0])))  # 60 min: minute 55
             conference.enable_integrity_reminder(*integrity_reminder, last_boundary=last_boundary)
         compose = make_compose(run_dir, config, images["agent"]["id"])
+        agentic_compose = (make_agentic_compose(run_dir, config, images["agent"]["id"], agentic_options["mem_limit"])
+                           if agentic_options else None)
         # Loads the key and records its provider-side limit (unpaid, informational) before any
         # paid request; the run's budget is the spending control.
         model, provider_limit = build_openrouter_model(
@@ -2067,6 +2114,10 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             "seeded": None if seed is None else seeded_settings(config),
             **({"monitor": monitor_effective(monitor_options, settings)} if monitor_options else {}),
             **({"reviewer": reviewer_effective(reviewer_options, settings)} if reviewer_options else {}),
+            **({"agentic_monitor": {**agentic_effective(agentic_options, settings),
+                                    "compose_file": AGENTIC_COMPOSE_NAME,
+                                    "compose_sha256": hashlib.sha256(Path(agentic_compose).read_bytes()).hexdigest()}}
+               if agentic_options else {}),
             "overseer": None if overseer is None else oversight.effective_overseer(overseer, proof_checker,
                                                                                     overseer_settings,
                                                                                     domain=domain)}
@@ -2093,7 +2144,9 @@ async def _run_pilot(config, repo_root, conference_factory=None):
         resume = resume_bundle.ResumeBundler(run_dir, record, neutral=neutral, clock=clock,
                                              checkpoint_minutes=resume_checkpoints,
                                              run_info=_safe_resume_run_info(config, effective, settings, repo_root,
-                                                                            agent_ids, listing, record))
+                                                                            [a for a in agent_ids
+                                                                             if a not in agentic_ids],
+                                                                            listing, record))
         def prompt_for(agent, persona):
             text = _prompt_for(agent, persona)
             if push:  # docs/plan.md, "Push delivery of board posts and DMs": accurate delivery wording
@@ -2129,8 +2182,19 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                          log=make_review_log(run_dir / "review" / "calls.jsonl"), run_dir=run_dir,
                                          **({"rollback": rollback_manager.apply} if rollback_manager else {}))
             record("reviewer_enabled", None, reviewer_effective(reviewer_options, settings))
+        agentic = None
+        if agentic_options:  # docs/plan.md, "Agentic monitor arm AG"; one monitor per solver (not the seed)
+            from .agentic_monitor import AgenticMonitors
+            agentic = AgenticMonitors(agentic_options, conference=conference, record=record, solver_ids=solver_ids,
+                                      stop=clock.stop, neutral=neutral)
+            record("agentic_monitor_enabled", None, agentic_effective(agentic_options, settings))
 
         def filter_for(agent):
+            if agentic is not None and agentic.is_monitor(agent):
+                # Same model, settings, barrier and run ledger as the solvers (ledger agent ``agmon-NNN``);
+                # no push, monitor hook, reviewer or rollback.
+                return agentic.wrap_filter(agent, budget_filter(agent, ledger, settings, barrier, record, "pilot",
+                                                                archive, clock.stop, **neutral_args))
             # Overseers with their own model reserve, request and settle with its settings.
             own = overseer_settings is not None and oversight.is_overseer(agent, overseer)
             return budget_filter(agent, ledger, overseer_settings if own else settings, barrier, record, "pilot",
@@ -2138,11 +2202,12 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                                  push=conference if push else None,
                                  **({"monitor": live_monitor} if live_monitor is not None else {}),
                                  **({"review": live_reviewer.history} if live_reviewer is not None else {}),
+                                 **({"review": agentic.history} if agentic is not None else {}),
                                  **({"rollback": rollback_manager} if rollback_manager is not None else {}))
 
         solver = peer_solver(conference=conference, definitions=definitions, personas=personas,
                              prompt_for=prompt_for, roles=({a: r for a, r in roles.items() if a in agent_ids}
-                                                           if overseer else None),
+                                                           if overseer or agentic else None),
                              definitions_for=lambda a: oversight.definitions_for(a, overseer, definitions, domain=domain),
                              continue_for=lambda a: _continue_for(a, overseer, neutral, push),
                              env_for=lambda a: oversight.claude_code_env_for(a, overseer),
@@ -2152,22 +2217,28 @@ async def _run_pilot(config, repo_root, conference_factory=None):
                              auto_restart=config.get("auto_restart") is True, resume=resume, **neutral_args,
                              **({"monitor_hook": True} if live_monitor is not None else {}),
                              **({"reviewer": live_reviewer} if live_reviewer is not None else {}),
-                             **({"rollback": rollback_manager} if rollback_manager is not None else {}))
+                             **({"rollback": rollback_manager} if rollback_manager is not None else {}),
+                             **({"agentic": agentic} if agentic is not None else {}))
+        initial_messages = {a: oversight.OVERSEER_INITIAL_MESSAGE for a in overseer_ids}
+        if agentic is not None:
+            from .agentic_monitor import initial_message as agentic_initial_message
+            initial_messages.update({a: agentic_initial_message() for a in agentic_ids})
         task = build_task(agent_ids=agent_ids, files=agent_files(task_files), solver=solver, compose=compose,
                           metadata={"condition": condition_label(variant, track), "prompt_variant": variant,
                                     "persona_reviewing": reviewing, "personas": personas, "persona_seed": persona_seed,
                                     **({"track": "seeded", "seed_agent": seed} if seed else {}),
                                     **({"neutral_environment": NEUTRAL_ENVIRONMENT_VERSION} if neutral else {})},
                           initial_message=agent_initial_message(config, variant),
-                          initial_messages=({a: oversight.OVERSEER_INITIAL_MESSAGE for a in overseer_ids}
-                                            if overseer else None))
+                          initial_messages=initial_messages or None,
+                          sample_files={a: {} for a in agentic_ids} or None,
+                          **({"sample_compose": {a: agentic_compose for a in agentic_ids}} if agentic_ids else {}))
         return await supervise(eval_async(task, model=model, **eval_options(len(agent_ids), run_dir, config)),
                                clock, conference, record, config)
     finally:
         await asyncio.to_thread(conference.close)
         if resume is not None:  # the final manifest lists every participant (missing ones too)
             try:
-                resume.write_manifest(resume_bundle.FINAL_LABEL, expected=agent_ids)
+                resume.write_manifest(resume_bundle.FINAL_LABEL, expected=[a for a in agent_ids if a not in agentic_ids])
             except Exception as ex:
                 _safe_record(record, "resume_bundle_error", None, {"label": "manifest", "error": type(ex).__name__})
         (run_dir / "run-budget.json").write_text(json.dumps(ledger.end_run(), indent=2))

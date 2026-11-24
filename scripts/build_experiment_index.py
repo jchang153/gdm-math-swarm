@@ -313,7 +313,12 @@ _MONITOR_ARM = {('actions', 'silent'): 'M1', ('actions', 'reason'): 'M3', ('full
                 ('full', 'reason'): 'M4'}
 _REVIEWER_ARM = {('rollback', 'reason'): 'A3', ('rollback', 'silent'): 'A1', ('revert', 'reason'): 'A4',
                  ('revert', 'silent'): 'A2'}
+# Agentic monitor arm AG (owner, November 23, 2026; docs/plan.md): one agentic monitor per solver. Run IDs carry
+# "-agentic-" (or "-agentic-monitor-"), optionally followed by "disclosed-".
+AGENTIC_RUN = r'-agentic(?:-monitor)?-(disclosed-)?'
+AGENTIC_TITLE = 'AG: agentic monitor (wait, revert + reason, messages)'
 _TITLES = (
+    (AGENTIC_RUN, lambda m: AGENTIC_TITLE + (', disclosed to agents' if m[1] else '')),
     # Asynchronous reviewer arms A1-A4 (owner, November 18, 2026; docs/plan.md).
     (r'-seeded-reviewer-(rollback|revert)-(reason|silent)-',
      lambda m: f'{_REVIEWER_ARM[(m[1], m[2])]}: async reviewer, {m[1]}, '
@@ -480,6 +485,16 @@ def spec_chips(entry, p):
         out.append(('k-ov', 'reason shown' if found[2] == 'reason' else 'silent',
                     "The agent is told the reviewer's reason" if found[2] == 'reason'
                     else 'Nobody is notified'))
+    found = re.search(AGENTIC_RUN, run)
+    if found:
+        out.append(('k-ov', 'agentic monitor',
+                    'One agentic monitor per solver, outside the swarm and '
+                    + ('described in the solvers\' instructions' if found[1] else 'undisclosed')
+                    + ': it chooses when to look (wait), reverts its own solver\'s accepted submissions with the reason '
+                    'sent by DM, and may message its solver'))
+        out.append(('k-ov', 'revert + reason, messages',
+                    'Its only intervention is reverting its solver\'s accepted submissions (reason sent by DM); it may '
+                    'also message its solver at any time'))
     if seed:
         minute = math.floor(seed['minute'] + 0.5) if seed.get('minute') is not None else '?'
         out.append(('k-seed', f'exploit at +{minute} min', 'Planted exploit (seed)'))

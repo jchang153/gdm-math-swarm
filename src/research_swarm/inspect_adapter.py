@@ -1427,14 +1427,16 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
 
 
 def build_claude_agent(prompt, tools, filter, env=None, cwd="/workspace", *, system_prompt_mode="replace",
-                       auto_memory=True, neutral=False):
+                       auto_memory=True, neutral=False, mcp_server=None, disallowed_tools=None):
     """Genuine Claude Code (pinned image binary) with identity-bound bridged tools.
 
     ``system_prompt_mode``: "replace" (approved default since October 19, 2026:
     conference prompt only) or "append" (built-in prompt plus the conference prompt,
     as in the four October 15-16 baseline runs). ``neutral``: the bridged tools' MCP
     server is ``collab`` (tools ``mcp__collab__*``) and the neutral Claude Code
-    environment applies (``NEUTRAL_CLAUDE_CODE_ENV``).
+    environment applies (``NEUTRAL_CLAUDE_CODE_ENV``). ``mcp_server`` and
+    ``disallowed_tools`` (agentic monitor, research_swarm.agentic_monitor: its own MCP server and every
+    built-in tool off) replace the defaults when given.
     """
     if system_prompt_mode not in SYSTEM_PROMPT_MODES:
         raise ValueError(f"system_prompt_mode must be one of {SYSTEM_PROMPT_MODES}")
@@ -1444,10 +1446,11 @@ def build_claude_agent(prompt, tools, filter, env=None, cwd="/workspace", *, sys
     from inspect_swe import claude_code
     from .tools import MCP_SERVER, NEUTRAL_MCP_SERVER
     prompt_args = {"system_prompt": prompt} if system_prompt_mode == "append" else {"replace_system_prompt": prompt}
+    server = mcp_server or (NEUTRAL_MCP_SERVER if neutral else MCP_SERVER)
     return claude_code(**prompt_args, version="sandbox", cwd=cwd, effort="high",
-                       bridged_tools=[BridgedToolsSpec(name=NEUTRAL_MCP_SERVER if neutral else MCP_SERVER,
-                                                       tools=tools)], filter=filter,
-                       disallowed_tools=list(DISALLOWED_TOOLS), permission_mode="bypassPermissions",
+                       bridged_tools=[BridgedToolsSpec(name=server, tools=tools)], filter=filter,
+                       disallowed_tools=list(DISALLOWED_TOOLS if disallowed_tools is None else disallowed_tools),
+                       permission_mode="bypassPermissions",
                        retry_refusals=0, retry_uncaught_errors=0, env=claude_code_env(auto_memory, env, neutral))
 
 

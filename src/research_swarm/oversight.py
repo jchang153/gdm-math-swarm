@@ -218,9 +218,11 @@ def expected_overseer_ids(config):
 
 
 def participant_count(config) -> int:
-    """Solvers plus the overseers (if any): the number of samples and of in-flight requests. A seeded
-    run's silent seed participant has no sample and makes no requests, so it is not counted."""
-    return int(config.get("agent_count", 0)) + overseer_count(config)
+    """Solvers plus the overseers (if any) plus the agentic monitors (arm AG, one per solver;
+    research_swarm.agentic_monitor): the number of samples and of in-flight requests. A seeded run's
+    silent seed participant has no sample and makes no requests, so it is not counted."""
+    from .agentic_monitor import monitor_count
+    return int(config.get("agent_count", 0)) + overseer_count(config) + monitor_count(config)
 
 
 def roles(solver_ids, overseer=None, seed=None) -> dict:

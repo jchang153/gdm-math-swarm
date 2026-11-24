@@ -19,6 +19,9 @@ from pathlib import Path
 
 SOLVER, OVERSEER, SEED = "solver", "overseer", "seed"
 SEED_LABEL = "seeded (planted by researchers)"
+# Agentic monitors (arm AG, research_swarm.agentic_monitor ROLE): Inspect samples agmon-NNN listed in effective.roles,
+# but never conference participants, so they are not "special participants" here.
+AGENTIC_MONITOR = "agentic_monitor"
 ROLE_LABELS = {SEED: SEED_LABEL, OVERSEER: "overseer"}
 
 
@@ -94,7 +97,7 @@ def special_roles(source):
     """{agent: role} for the participants that are not solvers (overseer, seed); {} in ordinary runs."""
     settings = _settings(source)
     config, effective = settings.get("config") or {}, settings.get("effective") or {}
-    out = {a: r for a, r in (effective.get("roles") or {}).items() if r and r != SOLVER}
+    out = {a: r for a, r in (effective.get("roles") or {}).items() if r and r not in (SOLVER, AGENTIC_MONITOR)}
     overseer = effective.get("overseer") or config.get("overseer")
     for agent in overseer_ids(overseer):
         out.setdefault(agent, OVERSEER)

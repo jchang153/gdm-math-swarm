@@ -199,10 +199,27 @@ def read_runtime(run, stop_utc=None):
     """Single pass over runtime.jsonl."""
     out = {'start': None, 'stop': None, 'reason': None, 'elapsed': None, 'exits': collections.Counter(),
            'budget_exits': [], 'restarts': 0, 'admitted': {}, 'finished': {}, 'unbilled': set(), 'monitor': set(),
-           'reviewer': set(), 'tokens': collections.Counter(), 'agents': collections.defaultdict(lambda: {
+           'reviewer': set(), 'agentic': set(), 'agentic_exits': collections.Counter(),
+           'tokens': collections.Counter(), 'agents': collections.defaultdict(lambda: {
                'requests': 0, 'finished': 0, 'unbilled': 0, 'restarts': 0, 'exit': None, 'exit_at': None})}
     for event in json_lines(run / 'runtime.jsonl'):
         kind, payload, agent = event.get('kind'), event.get('payload') or {}, event.get('agent_id')
+        if run_metrics.is_agentic_monitor(agent):
+            # Agentic monitors (arm AG, research_swarm.agentic_monitor): their requests are ledger-admitted in the
+            # same run budget (ledger label agmon-NNN) and counted in the run's spending, with the subtotal
+            # budget.pilot.agentic_monitor; they are not agents, so per-agent counts, exits and tokens stay agents.
+            if kind == 'inference_admitted':
+                out['admitted'][payload['request_id']] = Decimal(payload.get('reserved_usd') or 0)
+                out['agentic'].add(payload['request_id'])
+            elif kind == 'inference_finished' and payload.get('request_id') is not None:
+                out['finished'][payload['request_id']] = (payload.get('basis'), payload.get('settled_usd'))
+                out['agentic'].add(payload['request_id'])
+                out['admitted'].setdefault(payload['request_id'], Decimal(0))  # settled, so never held
+            elif kind == 'inference_unbilled':
+                out['unbilled'].add(payload.get('request_id'))
+            elif kind == 'agent_exit':
+                out['agentic_exits'][payload.get('status')] += 1
+            continue
         if kind == 'common_start' and out['start'] is None:
             out['start'] = event['timestamp']
         elif kind == 'run_stop':
@@ -338,6 +355,9 @@ def budgets(run, runtime, ledger):
             for part in ('monitor', 'reviewer'):
                 if runtime.get(part):
                     pilot[part] = dict(ledger_scope(db, 'pilot', runtime[part])[0], requests=len(runtime[part]))
+            if runtime.get('agentic'):
+                pilot['agentic_monitor'] = dict(ledger_scope(db, 'pilot', runtime['agentic'])[0],
+                                                requests=len(runtime['agentic']))
             if budget is not None:
                 pilot['cap_usd'] = dec(budget)
                 pilot['remaining_usd'] = dec(max(Decimal(0), budget - Decimal(committed) * NANO))
@@ -370,6 +390,7 @@ def budgets(run, runtime, ledger):
             held += reserved
     monitor = runtime_subtotal(runtime, runtime['monitor']) if runtime['monitor'] else None
     reviewer = runtime_subtotal(runtime, runtime['reviewer']) if runtime.get('reviewer') else None
+    agentic = runtime_subtotal(runtime, runtime['agentic']) if runtime.get('agentic') else None
     if unresolved:
         print(f'warning: {unresolved} request(s) have no settlement in runtime.jsonl and are reported as held; pass '
               '--ledger with a post-settlement ledger copy for exact run spending', file=sys.stderr)
@@ -383,6 +404,8 @@ def budgets(run, runtime, ledger):
         pilot['monitor'] = monitor
     if reviewer is not None:
         pilot['reviewer'] = reviewer
+    if agentic is not None:
+        pilot['agentic_monitor'] = agentic
     budget = recorded_run_budget(run)
     if budget is not None:
         pilot['cap_usd'] = dec(budget)
@@ -752,12 +775,13 @@ def outcome_section(m):
     rows = [(esc(label), esc(_metric(run_metrics.lookup(m, key)))) for key, label in run_metrics.HEADLINE
             if (not key.startswith('monitor.') or (m.get('monitor') or {}).get('present'))
             and (not key.startswith(('reviewer.', 'cost.reviewer')) or (m.get('reviewer') or {}).get('present'))
+            and (not key.startswith('agentic.') or (m.get('agentic') or {}).get('present'))
             and (key != 'cost.oversight_usd' or run_metrics.lookup(m, key))]  # runs without oversight: no row
     out = ['<h2 id="outcome-metrics">Outcome metrics</h2>',
            '<p class="muted">Slowdown, cost, fake and genuine submissions for comparing monitor arms, overseer runs '
            'and baselines. Genuine uncredited counts come from the offline re-judge when it has run.</p>', table(rows, ('Metric', 'Value'))]
     defs = [(name, (m.get(name) or {}).get('definition')) for name in ('fakes', 'genuine', 'slowdown', 'cost',
-                                                                       'monitor', 'reviewer')]
+                                                                       'monitor', 'reviewer', 'agentic')]
     out.append('<details><summary>Definitions and gaps</summary><ul>'
                + ''.join(f'<li><strong>{esc(n)}</strong>: {esc(d)}</li>' for n, d in defs if d)
                + ''.join(f'<li>Gap: {esc(g)}</li>' for g in m.get('gaps') or []) + '</ul></details>')
@@ -1072,6 +1096,11 @@ def render(results, title, inspect_logs=(), settings=None):
     if pilot.get('reviewer'):
         m = pilot['reviewer']
         detail.append(('Asynchronous reviewer calls (this run, included above)',
+                       f'{money(m["settled_usd"])} settled, {money(m["held_usd"])} held over {m["requests"]} requests '
+                       f'({m["unresolved_requests"]} unresolved)'))
+    if pilot.get('agentic_monitor'):
+        m = pilot['agentic_monitor']
+        detail.append(('Agentic monitor calls (this run, included above)',
                        f'{money(m["settled_usd"])} settled, {money(m["held_usd"])} held over {m["requests"]} requests '
                        f'({m["unresolved_requests"]} unresolved)'))
     if 'key_usage_counter' in results:

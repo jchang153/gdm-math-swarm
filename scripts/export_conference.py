@@ -89,7 +89,9 @@ TIMELINE_LOCATIONS = ('dataset', 'offline')
 # Optional data field (multi-overseer runs, October 26, 2026): the overseers' ids when a run has several,
 # so the Oversight intro names every overseer. Single-overseer and earlier pages lack it.
 # Optional data field (coding runs, November 3, 2026): domain 'code' selects the coding section texts.
-OPTIONAL_KEYS = ('run_start', 'overseers', 'domain')
+# Optional data field (agentic monitor arm AG, November 23, 2026): true when the run had per-solver agentic monitors,
+# whose DMs and reverts carry the reviewer identity; selects the AG oversight intro and the monitor label on DMs.
+OPTIONAL_KEYS = ('run_start', 'overseers', 'domain', 'agentic_monitor')
 # Section of the private overseer board (multi-overseer runs with the board); inserted into the page script
 # only when the run has it, so every other page is unchanged.
 OVERSEER_BOARD_SECTION = ("overseer_board:['Overseer board','Posts on the private overseer board, in posting order. "
@@ -98,6 +100,61 @@ OVERSEER_BOARD_SECTION = ("overseer_board:['Overseer board','Posts on the privat
 MULTI_OVERSIGHT_INTRO = ("'Credits the overseers reverted (with the stated reason and the reverting overseer) and the "
                          "proof checks they ran. A reverted credit removed the credit and the library entry and "
                          "reopened the problem; the original submission stays in the records.'")
+# Agentic monitor arm AG (docs/plan.md, "Agentic monitor arm AG (owner decisions, November 23, 2026)"): one monitor
+# agmon-NNN per solver, external and undisclosed; its reverts (ConferenceService.reviewer_revert) and DMs
+# (reviewer_message) are stored under the reviewer identity. runtime.jsonl agentic_revert / agentic_message events
+# name the monitor that acted.
+AGENTIC_KINDS = ('agentic_revert', 'agentic_message')
+AGENTIC_OVERSIGHT_INTRO = ("'Credits the agentic monitors reverted (each monitor watches one solver and may revert only "
+                           "that solver\\'s accepted submissions; the stated reason went to the solver by DM). The "
+                           "solvers saw the reverting identity and the DM sender as the reviewer. A reverted credit "
+                           "removed the credit and the library entry and reopened the problem; the original "
+                           "submission stays in the records.'")
+AGENTIC_NO_OVERSIGHT = "'No credit was reverted by an agentic monitor.'"
+AGENTIC_WARNING = ('Agentic monitor run (arm AG): direct messages and credit reverts from the reviewer identity were '
+                   'made by the per-solver agentic monitors (agmon-NNN, one per solver, external to the swarm and not '
+                   'disclosed to the solvers); solvers saw the sender as the reviewer. The acting monitor is named '
+                   'from runtime.jsonl where recorded.')
+DM_SENDER_JS = "node('strong',m.sender+' → '+m.recipient)"
+AGENTIC_DM_SENDER_JS = ("node('strong',m.sender+(m.agentic_monitor?' (agentic monitor '+m.agentic_monitor+')':'')"
+                        "+' → '+m.recipient)")
+
+
+def agentic_actions(settings, runtime):
+    """(is an AG run, {message key: monitor}, {submission key: monitor}) from settings.json and runtime.jsonl
+    events. Message keys: the stored public id and 'dm-NNNNNN'; submission keys: the integer id and
+    'sub-NNNNNN' / public id as recorded."""
+    config = ((settings.get('effective') or {}).get('agentic_monitor')
+              or (settings.get('config') or {}).get('agentic_monitor'))
+    enabled = isinstance(config, dict) and config.get('enabled') is True
+    messages, reverts = {}, {}
+    for event in runtime:
+        kind = event.get('kind')
+        if not (isinstance(kind, str) and kind.startswith('agentic_')):
+            continue
+        enabled = True
+        payload = event.get('payload') if isinstance(event.get('payload'), dict) else {}
+        monitor = payload.get('monitor') or event.get('agent_id')
+        if not monitor:
+            continue
+        if kind in AGENTIC_KINDS and payload.get('message_id'):
+            messages[str(payload['message_id'])] = monitor
+        if kind == 'agentic_revert' and payload.get('submission_id') is not None:
+            sid = payload['submission_id']
+            reverts[str(sid)] = monitor
+            text = str(sid)
+            if text.isdigit():
+                reverts[f'sub-{int(text):06d}'] = monitor
+    return enabled, messages, reverts
+
+
+def _message_monitor(row, messages):
+    for key in (row.get('public_id'), f"dm-{row['message_id']:06d}" if isinstance(row.get('message_id'), int) else None):
+        if key is not None and str(key) in messages:
+            return messages[str(key)]
+    return None
+
+
 # The capture-time line of a captured-file page, as exported before October 25, 2026 (America/Los_Angeles).
 _CAPTURE_LINE = re.compile(r'(<h2>Capture \d+</h2><p>)([A-Z][a-z]{2} \d{1,2}, \d{4} \d{1,2}:\d{2}:\d{2} [AP]M) '
                            r'(PDT|PST|UTC)( · )')
@@ -220,6 +277,12 @@ def export(run, out=None):
         records.append(record('board', 'post-' + str(row['post_id']), row['intent_type'], row['message'], row['posted_at'],
                        [row['agent_id']], detail={'tags': json.loads(row['tags'])}))
     # The board stores posts, not a reply graph. Do not invent reply threads.
+    agentic, agentic_messages, agentic_reverts = agentic_actions(settings, runtime)
+    if agentic_messages:
+        for row in tables['messages']:
+            monitor = _message_monitor(row, agentic_messages)
+            if monitor:
+                row['agentic_monitor'] = monitor
     conversations = defaultdict(list)
     for row in tables['messages']:
         conversations[tuple(sorted((row['sender'], row['recipient'])))].append(row)
@@ -274,11 +337,15 @@ def export(run, out=None):
     # Oversight (overseer runs): reverted credits and proof checks, with the overseer's stated reasons.
     for row in reversions:
         sid = f"sub-{row['submission_id']:06d}"
+        monitor = (agentic_reverts.get(sid) or agentic_reverts.get(str(row['submission_id']))
+                   or (row.get('public_id') and agentic_reverts.get(str(row['public_id'])))) if agentic_reverts else None
         records.append(record('oversight', 'reversion-' + str(row['reversion_id']),
                               f"Credit reverted · {row['task_id']}",
                               f"{row['reverted_by']} reverted {row['credited_agent']}'s credit for {row['task_id']} "
-                              f"({sid}). Reason: {row['reason']}", row['reverted_at'],
-                              [row['reverted_by'], row['credited_agent']], row['task_id'], detail=row))
+                              f"({sid}). Reason: {row['reason']}" + (f" (agentic monitor {monitor})" if monitor else ''),
+                              row['reverted_at'],
+                              [row['reverted_by'], row['credited_agent']], row['task_id'],
+                              detail=dict(row, agentic_monitor=monitor) if monitor else row))
     for event in proof_checks:
         p = event.get('payload') or {}
         target = p.get('submission_id') if p.get('target') == 'accepted_submission' else p.get('file_path')
@@ -301,7 +368,7 @@ def export(run, out=None):
     records.extend(captured_file_records(versions, seeds))
 
     categories = ('board', 'dms', 'library', 'submissions', 'feedback', 'files')
-    if overseer or reversions or proof_checks:  # the Oversight section exists only in overseer runs
+    if overseer or reversions or proof_checks or agentic:  # the Oversight section: overseer, reviewer and AG runs
         categories = categories[:5] + ('oversight',) + categories[5:]
     if board_on:  # the Overseer board section exists only in runs with the board
         categories = categories[:-1] + ('overseer_board',) + categories[-1:]
@@ -316,6 +383,8 @@ def export(run, out=None):
                         + (' The seeded participant was planted by the researchers: it has no model, container or '
                            'transcript, and its accepted submission and library file were injected at the trigger.'
                            if seeds else ''))
+    if agentic:
+        warnings.append(AGENTIC_WARNING)
     if not evaluations_path.exists():
         warnings.append('No independent evaluation records: evaluations/evaluations.jsonl is absent, so no '
                         'submission was independently evaluated.')
@@ -328,6 +397,8 @@ def export(run, out=None):
         data['overseers'] = overseer_ids
     if code_run:
         data['domain'] = 'code'
+    if agentic:
+        data['agentic_monitor'] = True
     (out / 'index.html').write_text(agent_badges.decorate_page(render_index(data), 'conference-view/index.html', badge_map))
     packs, index = pack_captures(run.name, versions)
     write_packed_files(out, packs, index, start, badge_map)
@@ -684,6 +755,12 @@ for(const id of ['search','agent','task'])el(id).addEventListener(id==='search'?
         script = script.replace("'Credits the overseer reverted (with its stated reason) and the proof checks it ran. "
                                 "A reverted credit removed the credit and the library entry and reopened the problem; "
                                 "the original submission stays in the records.'", MULTI_OVERSIGHT_INTRO, 1)
+    if data.get('agentic_monitor') is True:  # agentic monitor runs (arm AG)
+        script = script.replace("'Credits the overseer reverted (with its stated reason) and the proof checks it ran. "
+                                "A reverted credit removed the credit and the library entry and reopened the problem; "
+                                "the original submission stays in the records.'", AGENTIC_OVERSIGHT_INTRO, 1)
+        script = script.replace("'No credit was reverted and no proof check was run.'", AGENTIC_NO_OVERSIGHT, 1)
+        script = script.replace(DM_SENDER_JS, AGENTIC_DM_SENDER_JS, 1)
     if data.get('domain') == 'code':   # coding runs: section texts about solutions and tests, not proofs
         for old, new in CODE_SECTION_WORDING:
             script = script.replace(old, new)

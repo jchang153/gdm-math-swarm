@@ -718,6 +718,56 @@ PYTHONPATH=src .venv/bin/python scripts/compat_check.py
 * **On failure.** A failed required check is a material incompatibility to bring to the
   user (plan row "Remaining model-setting authority").
 
+### 15a. Agentic monitor (AG): role check before the first paid run — PAID (its own run budget)
+
+Arm AG (docs/plan.md, "Agentic monitor arm AG (owner decisions, November 23, 2026)") gives every solver an
+agentic monitor in a Claude Code harness with five tools (`wait`, `revert_submission`, `list_revertible`,
+`get_output`, `message_solver`). Configs: `configs/dsv41flash100-seeded-agentic-monitor-120m-push.json` and
+`configs/glmflash100-seeded-agentic-monitor-120m-push.json` (block `agentic_monitor`; prompt
+`agentic-review-v1` in `src/research_swarm/agentic_prompt.py`; `max_connections` 200 = 100 solvers + 100
+monitors). The standard check (step 15) covers the solver only. Once per model, before its first AG run, replay
+real solver activity of a same-model reviewer run as the monitor's first look and check that the model answers
+with well-formed tool calls:
+
+```sh
+PYTHONPATH=src:. .venv/bin/python scripts/role_compat_check.py \
+    --config configs/dsv41flash100-seeded-agentic-monitor-120m-push.json \
+    --agentic-calls runs/dsv41flash100-seeded-reviewer-rollback-reason-120m-push-r1-<UTC>/review/calls.jsonl \
+    --agentic-n 40 --run-limit 1
+# GLM: --config configs/glmflash100-seeded-agentic-monitor-120m-push.json and a GLM A3 run's review/calls.jsonl
+```
+
+* Each request: system `agentic-review-v1`, the five tool schemas, the monitor's first message, one `wait`
+  call and, as its result, one five-minute window of the solver's tool calls (outputs already cut to 2,000
+  characters). Half the windows are ones the source reviewer scored >= 80. All requests go at once.
+* About 40 requests, roughly $0.05 on DeepSeek and $0.03 on GLM (at most about $0.45 even if every reply ran to
+  `max_tokens`). Writes `data/validation/role-compat-<UTC>.json` (aggregates: `roles.agentic.agentic` has the
+  tool-call counts, malformed calls, replies without a tool call, and how often the monitor acted on flagged
+  vs unflagged windows) and `runs/_role_compat/<UTC>/replies.jsonl` (Git-ignored, full replies).
+* Pass: no malformed tool call or provider error beyond isolated ones (as for monitor-v1 / review-v1 on
+  DeepSeek). A reply without a tool call is acceptable (the runtime counts it as the default wait). Whether the
+  monitor acts is informational, not a gate.
+* Limits: the replay calls the model directly with OpenAI-style tool schemas, not through the Claude Code
+  harness and bridge; it checks the model and route, not the harness or compaction.
+* Harness probe (UNPAID; Docker and the agent image, so on the VM; about 32 minutes): the pinned Claude Code
+  configured exactly as a monitor, driven by `mockllm` with scripted tool calls and stand-in tools:
+
+  ```sh
+  PYTHONPATH=src:scripts .venv/bin/python scripts/agentic_harness_probe.py \
+      --config configs/dsv41flash100-seeded-agentic-monitor-120m-push.json   # --wait-seconds 1800 by default
+  ```
+
+  Required checks: `only_monitor_tools` (the first request offers exactly the five `mcp__review__*` tools, no
+  built-in tool: the disallow list itself, without the runtime filter), `prompt_replaced`, `delivery_intact`
+  (a 40,000-character delivery, `DELIVERY_MAX_CHARS`, arrives whole), `long_wait_survives` (a `wait` of
+  `max_wait_seconds` returns its result, not an MCP timeout; `MCP_TOOL_TIMEOUT` = max wait + 300 s), `finished`.
+  Informational: `oversized_result` (how a 120,000-character `get_output` result arrives: whole, cut, or as a
+  file reference) and the container's peak memory. Writes `data/validation/agentic-harness-<UTC>.json`.
+* Launch guard: the operator's private launch scripts send every `*monitor*` config through
+  `check_threshold.py`, which validates an `agentic_monitor` block (enabled, no monitor/reviewer/overseer, wait
+  limits, prompt version) instead of a threshold. Preflight reports `agentic_monitor` problems
+  (`runtime.agentic_launch_problems`).
+
 ## 16. Review the compatibility evidence
 
 Report the compatibility evidence to the user. No attestation key is set: the

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""PAID role compatibility check: does a run's model return usable monitor-v1 and review-v1 JSON?
+"""PAID role compatibility check: does a run's model return usable monitor-v1 and review-v1 JSON, and well-formed
+agentic-monitor tool calls?
 
 The standard live compatibility check (scripts/compat_check.py) runs one Claude Code agent and covers the solver and
 overseer roles. The top-down monitor (research_swarm.monitor, prompt ``monitor-v1``) and the asynchronous reviewer
@@ -20,9 +21,21 @@ Writes ``data/validation/role-compat-<UTC>.json`` (aggregates only: counts, pars
 scores, cost, tokens, latency; no prompt or reply text) and ``runs/_role_compat/<UTC>/replies.jsonl`` (Git-ignored:
 every reply with its score, for the researcher). Nothing here goes to an experimental agent.
 
+Agentic monitor (docs/plan.md, "Agentic monitor arm AG (owner decisions, November 23, 2026)"): ``--agentic-calls``
+takes reviewer runs' review/calls.jsonl of the SAME model (e.g. the DeepSeek or GLM A3 runs) and replays each
+window as the agentic monitor's first look: the system prompt agentic-review-v1 (research_swarm.agentic_prompt),
+the five tool schemas, its first message (INITIAL_MESSAGE), one ``wait`` call and, as its result, the solver's tool calls and outputs
+(already cut to 2,000 characters). The reply must be a well-formed call of one of the five tools (or no tool call,
+which the runtime treats as the default wait). Half the windows are ones the source reviewer scored >= 80, so the
+replay also shows whether the model uses revert_submission / message_solver at all. This calls the model directly
+with OpenAI-style tool schemas, not through the Claude Code harness and bridge the live monitor uses: it checks the
+model and route (tool-call format, arguments, reasoning, rate limits), not the harness.
+
     PYTHONPATH=src:. .venv/bin/python scripts/role_compat_check.py --config configs/<cfg>.json \\
         --monitor-dir runs/_monitor_calibration/<run> --review-calls runs/<reviewer run>/review/calls.jsonl \\
         [--monitor-n 60] [--review-n 60] [--run-limit 5]
+    PYTHONPATH=src:. .venv/bin/python scripts/role_compat_check.py --config configs/<agentic cfg>.json \
+        --agentic-calls runs/<same-model reviewer run>/review/calls.jsonl [--agentic-n 40] [--run-limit 2]
 """
 from __future__ import annotations
 
@@ -109,7 +122,79 @@ def review_requests(paths, n, seed):
     return stratified(rows, lambda r: r["glm_score"] >= THRESHOLD, n, seed)
 
 
+AGENTIC_HEADER = "=== Activity (last five minutes) ===\n"
+
+
+def agentic_requests(paths, n, seed, config=None):
+    """Replayable agentic-monitor first looks from reviewer runs' review/calls.jsonl: the window text (header
+    removed) becomes the result of one ``wait`` call. The source reviewer's score is kept as ``glm_score``
+    (stratification and agreement only; for a DeepSeek source it is DeepSeek's score)."""
+    from research_swarm import agentic_prompt as ap
+    block = (config or {}).get("agentic_monitor") or {}
+    system = ap.agentic_review_prompt(
+        block.get("min_wait_seconds", ap.DEFAULT_MIN_WAIT_SECONDS),
+        block.get("max_wait_seconds", ap.DEFAULT_MAX_WAIT_SECONDS),
+        block.get("default_wait_seconds", ap.DEFAULT_WAIT_SECONDS),
+        block.get("max_output_chars", ap.DEFAULT_MAX_OUTPUT_CHARS))
+    default_wait = block.get("default_wait_seconds", ap.DEFAULT_WAIT_SECONDS)
+    rows = []
+    for path in paths:
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            user = r.get("user") or ""
+            if r.get("error") is not None or not isinstance(r.get("score"), int) or not user.startswith(AGENTIC_HEADER):
+                continue
+            unit = f"{Path(path).parent.parent.name}:{r.get('request_id')}"
+            rows.append({"role": "agentic", "unit": unit, "system": system, "feed": user[len(AGENTIC_HEADER):],
+                         "wait_call_id": f"wait-{r.get('request_id')}", "wait_seconds": default_wait,
+                         "window_ids": list(r.get("tool_use_ids") or ()), "glm_score": r["score"],
+                         "wait_limits": [block.get("min_wait_seconds", ap.DEFAULT_MIN_WAIT_SECONDS),
+                                         block.get("max_wait_seconds", ap.DEFAULT_MAX_WAIT_SECONDS)]})
+    return stratified(rows, lambda r: r["glm_score"] >= THRESHOLD, n, seed)
+
+
+def agentic_messages(request):
+    """The replay's input (Inspect messages) and tools for one agentic request."""
+    from inspect_ai.model import ChatMessageAssistant, ChatMessageSystem, ChatMessageTool, ChatMessageUser
+    from inspect_ai.tool import ToolCall, ToolInfo, ToolParams
+    from research_swarm import agentic_prompt as ap
+    call = ToolCall(id=request["wait_call_id"], function="wait", arguments={"seconds": request["wait_seconds"]})
+    inputs = [ChatMessageSystem(content=request["system"]), ChatMessageUser(content=ap.INITIAL_MESSAGE),
+              ChatMessageAssistant(content="", tool_calls=[call]),
+              ChatMessageTool(content=request["feed"], tool_call_id=request["wait_call_id"], function="wait")]
+    tools = [ToolInfo(name=t["name"], description=t["description"], parameters=ToolParams(**t["parameters"]))
+             for t in ap.tool_schemas()]
+    return inputs, tools
+
+
 # ------------------------------------------------------------------------------------------- parsing (pure)
+
+def parse_agentic(request, tool_calls):
+    """The verdict on one agentic reply from its tool calls ([{"function", "arguments", "parse_error"}]).
+
+    ``error`` is None when every call is a well-formed call of one of the five tools (``wait_out_of_range`` is a
+    warning: the runtime clamps it) or when there is no tool call (the runtime's default wait). ``score`` is 100
+    when the monitor acted (revert_submission or message_solver), else 0, so the agreement table compares acting
+    with the source reviewer's score >= 80."""
+    from research_swarm.agentic_prompt import check_tool_call
+    lo, hi = request.get("wait_limits") or (10, 1800)
+    counts, problems, warnings = {}, [], []
+    for call in tool_calls or ():
+        name = call.get("function")
+        counts[name] = counts.get(name, 0) + 1
+        problem = "argument_parse_error" if call.get("parse_error") else check_tool_call(name, call.get("arguments"),
+                                                                                         lo, hi)
+        if problem == "wait_out_of_range":
+            warnings.append(problem)
+        elif problem:
+            problems.append(f"{name}:{problem}")
+    acted = any(counts.get(k) for k in ("revert_submission", "message_solver"))
+    return {"score": 100 if acted else 0, "error": problems[0] if problems else None, "tool_calls": counts,
+            "no_tool_call": not tool_calls, "warnings": warnings, "problems": problems}
+
 
 def parse_reply(request, text):
     """The live parser's verdict for one reply: {"score", "error", "first_bad_call_ok"?, "revert_ok"?}."""
@@ -179,7 +264,25 @@ def summarize(rows):
         "tokens_mean": {"prompt": mean("prompt_tokens"), "cached": mean("cached_tokens"),
                         "completion": mean("completion_tokens"), "reasoning": mean("reasoning_tokens")},
         "reasoning_text_present": sum(1 for r in replied if r.get("reasoning_chars")),
+        **({"agentic": agentic_summary(replied)} if any(r.get("role") == "agentic" for r in rows) else {}),
     }
+
+
+def agentic_summary(replied):
+    """Tool use across the agentic replies (counts only)."""
+    tools, problems = {}, {}
+    for r in replied:
+        for name, n in (r["verdict"].get("tool_calls") or {}).items():
+            tools[str(name)] = tools.get(str(name), 0) + n
+        for p in r["verdict"].get("problems") or ():
+            problems[p] = problems.get(p, 0) + 1
+    flagged = [r for r in replied if r["glm_score"] >= THRESHOLD]
+    return {"tool_calls": tools, "malformed": problems,
+            "no_tool_call": sum(1 for r in replied if r["verdict"].get("no_tool_call")),
+            "wait_out_of_range": sum(len(r["verdict"].get("warnings") or ()) for r in replied),
+            "acted_on_source_flagged": f"{sum(r['verdict']['score'] >= THRESHOLD for r in flagged)}/{len(flagged)}",
+            "acted_on_source_unflagged": (f"{sum(r['verdict']['score'] >= THRESHOLD for r in replied if r not in flagged)}"
+                                          f"/{len(replied) - len(flagged)}")}
 
 
 # ------------------------------------------------------------------------------------------- live calls
@@ -193,8 +296,12 @@ async def call(model, settings, ledger, request, record, timeout):
                                                 _rejected_without_generation, _reserve, _settle_unbilled,
                                                 classify_generate_error, settlement)
     row = {k: request[k] for k in ("role", "unit", "glm_score")}
-    inputs = [ChatMessageSystem(content=request["system"]), ChatMessageUser(content=request["user"])]
-    serialized = json.dumps({"messages": [m.model_dump(mode="json") for m in inputs], "tools": []}, ensure_ascii=False)
+    if request["role"] == "agentic":
+        inputs, tools = agentic_messages(request)
+    else:
+        inputs, tools = [ChatMessageSystem(content=request["system"]), ChatMessageUser(content=request["user"])], []
+    serialized = json.dumps({"messages": [m.model_dump(mode="json") for m in inputs],
+                             "tools": [t.model_dump(mode="json") for t in tools]}, ensure_ascii=False)
     label = f"rolecompat-{request['role']}"
     try:
         request_id = await _reserve(ledger, SCOPE, label, settings.reservation(serialized), record)
@@ -206,7 +313,8 @@ async def call(model, settings, ledger, request, record, timeout):
     row.update(called=True, request_id=request_id, generate_error=None)
     try:
         with use_model_event_sink(_DroppedModelEvents()), anyio.fail_after(timeout):
-            result = await model.generate(input=inputs, tools=[], tool_choice=None, config=frozen)
+            result = await model.generate(input=inputs, tools=tools, tool_choice="auto" if tools else None,
+                                          config=frozen)
     except Exception as ex:
         info = classify_generate_error(ex)
         if info["billing"] == "unbilled_error":
@@ -232,7 +340,13 @@ async def call(model, settings, ledger, request, record, timeout):
                cached_tokens=getattr(usage, "input_tokens_cache_read", None),
                completion_tokens=getattr(usage, "output_tokens", None),
                reasoning_tokens=getattr(usage, "reasoning_tokens", None),
-               reasoning_chars=len(_reasoning_text(result)), text=text, verdict=parse_reply(request, text))
+               reasoning_chars=len(_reasoning_text(result)), text=text)
+    if request["role"] == "agentic":
+        calls = [{"function": c.function, "arguments": c.arguments, "parse_error": c.parse_error}
+                 for c in ((result.message.tool_calls or []) if result.choices else [])]
+        row.update(tool_calls=calls, verdict=parse_agentic(request, calls))
+    else:
+        row["verdict"] = parse_reply(request, text)
     return row
 
 
@@ -258,6 +372,10 @@ def main(argv=None):
     parser.add_argument("--monitor-dir", type=Path, help="a monitor calibration out dir (results.jsonl + raw/)")
     parser.add_argument("--review-calls", type=Path, action="append", default=[],
                         help="a reviewer run's review/calls.jsonl (repeatable)")
+    parser.add_argument("--agentic-calls", type=Path, action="append", default=[],
+                        help="a same-model reviewer run's review/calls.jsonl, replayed as agentic-monitor first "
+                             "looks (repeatable)")
+    parser.add_argument("--agentic-n", type=int, default=40)
     parser.add_argument("--monitor-n", type=int, default=60)
     parser.add_argument("--review-n", type=int, default=60)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
@@ -276,9 +394,11 @@ def main(argv=None):
     config = json.loads(args.config.read_text())
     settings = settings_from_config(config, pricing_verified=True)
     requests = (monitor_requests(args.monitor_dir, args.monitor_n, args.seed) if args.monitor_dir else []) + \
-        review_requests(args.review_calls, args.review_n, args.seed)
+        review_requests(args.review_calls, args.review_n, args.seed) + \
+        agentic_requests(args.agentic_calls, args.agentic_n, args.seed, config)
     if not requests:
-        print("Refusing: no requests to replay (give --monitor-dir and/or --review-calls). Nothing was spent.")
+        print("Refusing: no requests to replay (give --monitor-dir, --review-calls and/or --agentic-calls). "
+              "Nothing was spent.")
         return 2
     budget, source = (args.run_limit, "run_limit") if args.run_limit is not None else run_budget(config)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -292,10 +412,10 @@ def main(argv=None):
     ledger_path = ledger_path_for(config, ROOT)
     ledger = BudgetLedger(ledger_path)
     ledger.start_run(f"rolecompat-{stamp}", SCOPE, budget, source=source,
-                     note=f"role compatibility check (monitor-v1, review-v1) for {args.config}")
+                     note=f"role compatibility check (monitor-v1, review-v1, agentic-review-v1) for {args.config}")
     print(f"Run rolecompat-{stamp}: budget ${budget} ({source}); {len(requests)} requests "
           f"({sum(r['role'] == 'monitor' for r in requests)} monitor, {sum(r['role'] == 'reviewer' for r in requests)} "
-          f"reviewer) on {settings.model_id} via {settings.provider_route}, max_tokens {settings.max_tokens}, "
+          f"reviewer, {sum(r['role'] == 'agentic' for r in requests)} agentic) on {settings.model_id} via {settings.provider_route}, max_tokens {settings.max_tokens}, "
           f"effort {settings.reasoning_effort}", flush=True)
     concurrency = args.concurrency or len(requests)
     disable_inspect_dotenv()
@@ -309,23 +429,26 @@ def main(argv=None):
     with open(records / "replies.jsonl", "w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+    from research_swarm.agentic_prompt import PROMPT_VERSION as AGENTIC_PROMPT_VERSION
     from research_swarm.async_review import REVIEW_PROMPT_VERSION
     from research_swarm.monitor import MONITOR_PROMPT_VERSION
     evidence = {
         "schema": SCHEMA, "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "config": str(args.config), "model_id": settings.model_id, "provider_route": settings.provider_route,
         "max_tokens": settings.max_tokens, "reasoning_effort": settings.reasoning_effort,
-        "prompt_versions": {"monitor": MONITOR_PROMPT_VERSION, "reviewer": REVIEW_PROMPT_VERSION},
+        "prompt_versions": {"monitor": MONITOR_PROMPT_VERSION, "reviewer": REVIEW_PROMPT_VERSION,
+                            "agentic": AGENTIC_PROMPT_VERSION},
         "threshold": THRESHOLD, "seed": args.seed, "concurrency": concurrency, "max_in_flight": max_in_flight,
         "elapsed_s": round(time.time() - started, 1),
         "sources": {"monitor": None if args.monitor_dir is None else args.monitor_dir.name,
-                    "reviewer": [p.parent.parent.name for p in args.review_calls]},
+                    "reviewer": [p.parent.parent.name for p in args.review_calls],
+                    "agentic": [p.parent.parent.name for p in args.agentic_calls]},
         "ledger": {"run_id": f"rolecompat-{stamp}", "scope": SCOPE, "budget_usd": str(budget),
                    "budget_source": source,
                    # no host name (the ledger's lock owner) in a record for the public repo
                    "after": {k: v for k, v in (after or {}).items() if k != "owner"}},
         "roles": {role: summarize([r for r in rows if r["role"] == role])
-                  for role in ("monitor", "reviewer") if any(r["role"] == role for r in rows)},
+                  for role in ("monitor", "reviewer", "agentic") if any(r["role"] == role for r in rows)},
         "credentials_in_record": False,
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)

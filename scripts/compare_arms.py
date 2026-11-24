@@ -7,11 +7,12 @@ decisions, November 10, 2026)"). Each run's metrics come from research/analysis/
 the two-sided Student t interval of the mean over the arm's runs (mean ± t(0.975, n-1) · sd / sqrt(n)); with one
 run it is not defined and only the value is shown. ``n`` is the number of runs that have the metric (missing
 values, e.g. monitor statistics of a run without a monitor or step timing of an offloaded run, are left out, not
-counted as zero). Arm labels are free text (M1-M4, A1-A4 for the asynchronous reviewer arms, ...); the reviewer
-statistics (``reviewer.*``) are n/a for arms without a reviewer, and rows that are n/a in every arm are left out.
+counted as zero). Arm labels are free text (M1-M4, A1-A4 for the asynchronous reviewer arms, AG for the agentic
+monitor arm, ...); the reviewer statistics (``reviewer.*``) are n/a for arms without a reviewer, the agentic monitor
+statistics (``agentic.*``) n/a for arms without one, and rows that are n/a in every arm are left out.
 
   python scripts/compare_arms.py --arm control runs/C1 runs/C2 runs/C3 --arm M1 runs/A runs/B runs/C \\
-      [--arm 1ov ...] [--arm A3 runs/...-reviewer-rollback-reason-r1-... ...] [--metric slowdown.step_seconds.median ...] [--json OUT.json] [--ledger LEDGER.sqlite]
+      [--arm 1ov ...] [--arm A3 runs/...-reviewer-rollback-reason-r1-... ...] [--arm AG runs/...-agentic-r1-... ...] [--metric slowdown.step_seconds.median ...] [--json OUT.json] [--ledger LEDGER.sqlite]
 
 Offline: no model calls, network, Docker or credentials.
 """

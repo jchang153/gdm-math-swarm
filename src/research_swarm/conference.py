@@ -1823,10 +1823,11 @@ class ConferenceService:
                            "removed, the solution was withdrawn from the shared library, and the problem is open "
                            "again. Nobody was notified."}
 
-    def _revert_accepted(self, actor, problem_id, reason, tool, call_id):
+    def _revert_accepted(self, actor, problem_id, reason, tool, call_id, expect_credited=None):
         """Revert ``problem_id``'s accepted submission (credit removed, library entry withdrawn, problem
         reopened) on behalf of ``actor``; (public submission id, credited agent, submission id). Raises
-        ToolError when the problem has no accepted submission."""
+        ToolError when the problem has no accepted submission, or (``expect_credited``) when it is credited
+        to another agent (checked in the same transaction)."""
         agent_id = actor
         with self._transaction() as db:
             row = db.execute("SELECT status, credited_agent, accepted_at, accepted_submission, library_artifact "
@@ -1834,6 +1835,8 @@ class ConferenceService:
             status, credited, accepted_at, submission, artifact = row
             if status != "closed" or submission is None:
                 raise ToolError(f"Problem {problem_id} has no accepted submission to revert.")
+            if expect_credited is not None and credited != expect_credited:
+                raise ToolError(f"Problem {problem_id} has no accepted submission by {expect_credited}.")
             now = self._clock()
             library_path = self._library_path_of(db, artifact)
             public_id = db.execute("SELECT public_id FROM submissions WHERE submission_id = ?",
@@ -1885,17 +1888,21 @@ class ConferenceService:
         return {task: {"credited_agent": credited, "submission_id": f"sub-{submission:06d}",
                        "public_submission_id": public_id} for task, credited, submission, public_id in rows}
 
-    def reviewer_revert(self, problem_id, reason, reviewer="reviewer", reviewed_agent=None) -> dict | None:
+    def reviewer_revert(self, problem_id, reason, reviewer="reviewer", reviewed_agent=None,
+                        credited_agent=None) -> dict | None:
         """Revert ``problem_id``'s accepted submission as the reviewer (like an overseer's revert_submission,
         nobody notified here). Returns {"problem_id", "submission_id", "public_submission_id", "author"}, or
-        None when the problem has no accepted submission (any more) or the service is closing."""
+        None when the problem has no accepted submission (any more), it is not credited to
+        ``credited_agent`` (when given; the agentic monitor reverts only its own solver's submissions) or the
+        service is closing."""
         if problem_id not in self._tasks:
             return None
         call_id = "call-" + uuid.uuid4().hex[:16]
         reason = _safe_text(str(reason or "").strip()) or "(no reason given)"
         try:
             public_id, credited, submission_id = self._reviewer_call(
-                lambda: self._revert_accepted(reviewer, problem_id, reason, "reviewer", call_id))
+                lambda: self._revert_accepted(reviewer, problem_id, reason, "reviewer", call_id,
+                                              expect_credited=credited_agent))
         except ToolError:
             return None
         if reviewed_agent is not None:
@@ -1905,6 +1912,22 @@ class ConferenceService:
                                  "reviewer", call_id)
         return {"problem_id": problem_id, "submission_id": submission_id, "public_submission_id": public_id,
                 "author": credited}
+
+    def accepted_submissions_of(self, agent_id) -> list:
+        """The problems currently closed with an accepted submission credited to ``agent_id`` (agentic
+        monitor, research_swarm.agentic_monitor ``list_revertible``), in acceptance order:
+        [{"problem_id", "submission_id", "public_submission_id", "accepted_at" (ISO), "source"}]."""
+        with self._lock:
+            if self._closed:
+                return []
+            rows = self._db.execute(
+                "SELECT t.task_id, t.accepted_submission, s.public_id, t.accepted_at, s.source FROM tasks t "
+                "JOIN submissions s ON s.submission_id = t.accepted_submission "
+                "WHERE t.status = 'closed' AND t.credited_agent = ? ORDER BY t.accepted_at, t.task_id",
+                (agent_id,)).fetchall()
+        return [{"problem_id": task, "submission_id": f"sub-{submission:06d}", "public_submission_id": public_id,
+                 "accepted_at": _iso(accepted_at), "source": source}
+                for task, submission, public_id, accepted_at, source in rows]
 
     def reviewer_message(self, recipient, body, sender="reviewer") -> str | None:
         """A direct message from the reviewer to ``recipient`` (delivered like any DM: push or get_messages,

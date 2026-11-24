@@ -323,6 +323,19 @@ _REVIEWER_ARM = {('rollback', 'reason'): 'A3', ('rollback', 'silent'): 'A1', ('r
                  ('revert', 'silent'): 'A2'}
 
 
+# Agentic monitor arm AG (owner, November 23, 2026; docs/plan.md): the same run-ID pattern as
+# scripts/build_experiment_index.py (AGENTIC_RUN).
+_AGENTIC_RUN = re.compile(r'-agentic(?:-monitor)?-(disclosed-)?')
+
+
+def _agentic(run):
+    """(arm, short agentic monitor spec) of an agentic monitor run, else None."""
+    m = _AGENTIC_RUN.search(run)
+    if not m:
+        return None
+    return 'AG', 'wait, revert + reason, messages' + (', disclosed to agents' if m[1] else '')
+
+
 def _reviewer(run):
     """(arm, short reviewer spec) of an asynchronous reviewer run, else None."""
     m = _REVIEWER_RUN.search(run)
@@ -361,8 +374,11 @@ def _spec(document, run):
     agents_tile, _ = _tile(document, 'Agents')
     if not solvers and agents_tile:
         chips.append(('Agents', agents_tile))
-    monitor, reviewer = _monitor(run), _reviewer(run)
-    if monitor:  # a monitor run's intro says "no overseer" (no overseer agents); the monitor is its oversight
+    monitor, reviewer, agentic = _monitor(run), _reviewer(run), _agentic(run)
+    if agentic:  # one agentic monitor per solver (AG); the intro says "no overseer"
+        chips.append(('Monitor', 'agentic, one per solver: wait, revert with reason, messages'
+                      + (', disclosed to agents' if agentic[1].endswith('disclosed to agents') else '')))
+    elif monitor:  # a monitor run's intro says "no overseer" (no overseer agents); the monitor is its oversight
         chips.append(('Monitor', monitor[1]))
     elif reviewer:  # likewise the asynchronous reviewer (A1-A4)
         chips.append(('Reviewer', f'asynchronous, {reviewer[1]}'))
@@ -379,7 +395,9 @@ def _spec(document, run):
     rep = re.search(r'-r(\d+)-\d{8}T', run)
     if solvers:
         title = solvers
-        if monitor:
+        if agentic:
+            title += f' · {agentic[0]}: agentic monitor, {agentic[1]}'
+        elif monitor:
             arm, spec = monitor
             kind, block = spec.split(', ', 1)  # M1a/M2a: block = 'silent block, disclosed to agents'
             title += f' · {arm}: {kind} monitor, {block}'

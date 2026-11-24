@@ -97,6 +97,7 @@ EVENT_CHANNELS = {
 }
 PUBLIC_ID = re.compile(r"^(dm|sub)-[0-9a-f]{16}$")
 AGENT_ID = re.compile(r"^agent-(\d+)$")
+MONITOR_ID = re.compile(r"^agmon-(\d+)$")  # agentic monitor of agent-NNN (arm AG)
 
 
 # ---------------------------------------------------------------------------
@@ -702,17 +703,35 @@ def _ensure_inspect():
 
 
 def sample_index(run_dir):
-    """agent_id -> (log path, sample id, epoch); refuses duplicate agent samples."""
+    """agent_id -> (log path, sample id, epoch); refuses duplicate agent samples. Agentic monitor samples
+    (``agmon-NNN``, docs/plan.md "Agentic monitor arm AG") are skipped: the judge never reads monitors
+    (``monitor_sample_index`` lists them)."""
     _, summaries = _ensure_inspect()
     found = {}
     for path in sorted(Path(run_dir).glob("inspect/*.eval")):
         for summary in summaries(str(path)):
             agent = str(summary.id)
+            if MONITOR_ID.fullmatch(agent):
+                continue
             if not AGENT_ID.fullmatch(agent):
                 raise ValueError(f"Unexpected sample identity {agent!r} in {path.name}")
             if agent in found:
                 raise ValueError(f"Multiple log samples for {agent}; inspect raw logs before reconstructing")
             found[agent] = (path, summary.id, summary.epoch)
+    return found
+
+
+def monitor_sample_index(run_dir):
+    """agmon-NNN -> (log path, sample id, epoch) of the agentic monitors' Inspect samples ({} without any)."""
+    _, summaries = _ensure_inspect()
+    found = {}
+    for path in sorted(Path(run_dir).glob("inspect/*.eval")):
+        for summary in summaries(str(path)):
+            monitor = str(summary.id)
+            if MONITOR_ID.fullmatch(monitor):
+                if monitor in found:
+                    raise ValueError(f"Multiple log samples for {monitor}; inspect raw logs first")
+                found[monitor] = (path, summary.id, summary.epoch)
     return found
 
 

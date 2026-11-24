@@ -65,6 +65,8 @@ CATEGORIES = {
 }
 DOWNLOAD_ONLY = ('jsonl', 'snapshots', 'database', 'transcripts', 'resume', 'timeline')
 TIMELINE_MD = 'analysis/timeline.md'
+# Top-level run directories of the agentic monitors' own records (docs/plan.md, "Agentic monitor arm AG").
+AGENTIC_MONITOR_DIRS = ('agentic_monitor', 'agentic-monitor')
 # What new runs put in the logs dataset (owner decision, November 19, 2026: docs/plan.md, "Run storage: GCS archive,
 # HF viewable subset, nothing local"): only what the public site links to or the log viewer reads. The complete run
 # is in the private GCS bucket (scripts/gcs_runs.py); resume bundles and snapshot archives are no longer uploaded
@@ -97,6 +99,9 @@ def category(relative):
         return 'eval'
     if parts[0] == 'transcripts':
         return 'transcripts'
+    if parts[0] in AGENTIC_MONITOR_DIRS and len(parts) > 1:
+        # Agentic monitor records (arm AG): never public, whatever their format.
+        return 'jsonl' if name.endswith('.jsonl') else 'transcripts'
     if parts[0] == 'resume':  # RUN/resume/ (research_swarm.resume_bundle): private raw state, never the Space
         return 'resume'
     if '/'.join(parts) == TIMELINE_MD:  # the timeline lives only in the dataset (owner, October 23, 2026)
