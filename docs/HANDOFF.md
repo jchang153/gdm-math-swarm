@@ -2300,7 +2300,7 @@ is being merged into main via `collab-env`.
       VM TERMINATED, disk kept. Details in HANDOFF.local.md and private/ops/control-vm/.
     - **GCS** (item 53) blocked: owner's group lacks storage.buckets.create; needs a project admin.
 
-56. **LIVE 2026-11-23 (launched 17:22-17:28 PST, all 19 confirmed running 17:34 PST; end ~19:30 PST): DeepSeek oversight re-run** (owner, chat 2026-11-23;
+56. **DONE 2026-11-23 (ran 17:22-19:30 PST; collected and published ~22:00-23:00 PST): DeepSeek oversight re-run** (owner, chat 2026-11-23;
     docs/plan.md "DeepSeek V4.1 Flash oversight re-run (owner decision, November 23, 2026)"). DeepSeek V4.1 Flash
     (1017) on `deepinfra/fp8/priority` in every role (solvers, overseers, monitor, reviewer), 100 solvers, 120 min,
     push; arms x 3 runs: control, 10ov, M1, M3, A1, A3 (seeded, agent-101 at +3 min) + 1 unseeded control = 19 runs.
@@ -2320,8 +2320,26 @@ is being merged into main via `collab-env`.
 
     - **Launch (2026-11-23):** 19 owner VMs, one run per VM (a 19th VM created from a snapshot for the unseeded
       control, owner-approved), synced to dbe97b6; freeze_route, compat check and preflight passed first try on all
-      19; simple judge on. VM -> run ids and helper scripts: private/ops/ds-oversight/. Collect after ~20:30 PST,
-      then stop VMs. Cloud credit status and disk-cleanup note: HANDOFF.local.md.
+      19; simple judge on. VM -> run ids and helper scripts: private/ops/ds-oversight/.
+    - **Collected (2026-11-23 ~20:40-20:57 PST):** all 19 ended normally (120 min, max_run_seconds); each VM uploaded
+      its full run to the private HF logs dataset (`RUN/upload-<UTC>/OFFLOADED.json`) and was then stopped (all 19
+      TERMINATED). No paid calls after the runs.
+    - **Published (2026-11-23 21:14-22:50 PST), series `ds120`** on https://gdm-math-swarm-experiments.pages.dev
+      (`experiments#series-ds120`; run pages `RUN/results.html`). Runs restored from the dataset by their manifests,
+      Inspect View bundles rebuilt locally (`inspect view bundle`), bundles from `prepare_hf_library.py` (the VMs'
+      site bundles are not in the dataset). Seeded control r1 alone (dataset commit = its upload commit), then the
+      other 18 in one bundle pinned to the dataset head after the last upload (2580bacf, holds every run's upload
+      unchanged; one deploy instead of 18, each deploy needs ~9 GB RAM and ~45 min on the Mac). Deployments 354a11b0
+      and 2b85d419: site 9,029 files (limit 20,000), 136 runs; private files not deployed; `verify` (19 runs) and
+      `verify --viewer` ok. Receipts `runs/phase-b/cloudflare/receipts/dsv41flash100-seeded-control-120m-push-r1-20261124T012603Z.json`,
+      `.../dsv41flash100-oversight-batch18-20261124.json`. runs/index.html rebuilt. Local copies then returned to the
+      index (every deleted file matched its manifest SHA-256; restore with `offload_runs.py restore --unit RUN`).
+    - **Results** (means r1-r3; `results.json` outcome_metrics; fakers / credited fakers / fake-minutes / genuine
+      credited tasks / settled $): control 90.0 / 17.3 / 3,665 / 14.0 / 8.76; unseeded control (1 run) 71 / 15 /
+      3,812 / 14 / 8.92; 10ov 18.3 / 12.3 / 422 / 14.0 / 8.50; M1 29.3 / 8.3 / 890 / 12.3 / 13.45 (monitor $8.08);
+      M3 4.3 / 2.0 / 281 / 13.0 / 14.91 (monitor $8.25); A1 87.0 / 22.0 / 3,148 / 12.3 / 8.78 (reviewer $2.08);
+      A3 47.3 / 23.0 / 2,323 / 13.7 / 9.77 (reviewer $1.58). Every run also reports $3-6 of holds not yet settled
+      (total = settled + held). Median step 39-45 s (control, 10ov, A1/A3) vs 54-55 s with the monitor.
 ## Next steps / open items
 
 - **Logs dataset storage (2026-11-19):** the dataset is now in the owner's PRO account (1 TB private; item 54), so
