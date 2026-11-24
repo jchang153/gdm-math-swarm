@@ -52,6 +52,18 @@ class SampleIndexTests(unittest.TestCase):
                     history.sample_index(run)
 
 
+class HostExitTests(unittest.TestCase):
+    def test_monitor_exits_skipped(self):
+        """agmon-NNN agent_exit records once crashed the judge's history (agent_code: Unexpected agent identity)."""
+        runtime = [{'kind': 'common_start', 'timestamp': 1.0, 'agent_id': None, 'payload': {}},
+                   {'kind': 'agent_exit', 'timestamp': 2.0, 'agent_id': 'agmon-001', 'payload': {'status': 'ok'}},
+                   {'kind': 'agent_exit', 'timestamp': 3.0, 'agent_id': 'agent-001', 'payload': {'status': 'ok'}}]
+        with tempfile.TemporaryDirectory() as tmp:
+            host = history.load_host(Path(tmp), runtime, SimpleNamespace(events=[]), [])
+        self.assertEqual(list(host['exits']), ['agent-001'])
+        self.assertEqual([i['id'] for i in host['items'] if i['id'].startswith('HOST.exit.')], ['HOST.exit.A01'])
+
+
 class MonitorTranscriptTests(unittest.TestCase):
     def test_pairing(self):
         self.assertEqual(export_transcripts.solver_of('agmon-007'), 'agent-007')

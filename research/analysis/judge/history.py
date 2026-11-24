@@ -1143,7 +1143,8 @@ def load_host(run_dir, runtime, conf, problems):
             host["stop_time"] = iso(record.get("timestamp"))
             host["stop_reason"] = (record.get("payload") or {}).get("reason")
             host["stop_line"] = line
-        elif kind == "agent_exit" and agent:
+        elif kind == "agent_exit" and agent and not MONITOR_ID.fullmatch(str(agent)):
+            # agentic monitors (agmon-NNN, arm AG) are not judged and have no rubric code (agent_code)
             host["exits"][agent] = dict(record.get("payload") or {}, time=iso(record.get("timestamp")),
                                         runtime_line=line)
     evaluations = run_dir / "evaluations" / "evaluations.jsonl"
