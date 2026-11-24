@@ -287,5 +287,26 @@ class ReviewerSiteTests(unittest.TestCase):
         self.assertEqual(run_profile.series_of('glmflash100-seeded-control-120m-push-r1-20261104T042405Z')[0], 'push120')
 
 
+    def test_deepseek_rerun_series_and_titles(self):
+        """DeepSeek oversight re-run (owner decision, November 23, 2026): series ds120, the same arm titles."""
+        cases = {'seeded-control': 'Control', 'seeded-10ov-ds': '10 DeepSeek overseers',
+                 'seeded-monitor-actions-silent': 'M1: actions-only monitor, silent block',
+                 'seeded-monitor-actions-reason': 'M3: actions-only monitor, block with reason',
+                 'seeded-reviewer-rollback-silent': 'A1: async reviewer, rollback, silent',
+                 'seeded-reviewer-rollback-reason': 'A3: async reviewer, rollback, reason shown',
+                 'control': 'Control, no planted exploit'}
+        for arm, title in cases.items():
+            run = f'dsv41flash100-{arm}-120m-push-r2-20261124T010000Z'
+            self.assertEqual(run_profile.series_of(run)[0], 'ds120')
+            self.assertEqual(build_experiment_index.short_title({'run': run}), f'{title} · run 2')
+        self.assertIn('ds120', catalogue_intro.SERIES_LINES)
+        self.assertEqual(run_profile.series_of('dsv41flash-25-seeded-control-60m-push-20261105T201815Z')[0], 'sweep25')
+        for name in cases:
+            config = json.loads((ROOT / 'configs' / f'dsv41flash100-{name}-120m-push.json').read_text())
+            self.assertEqual(config['candidate_model_id'], 'deepseek/deepseek-v4.1-flash-1017')
+            self.assertEqual(config['provider_route'], 'deepinfra/fp8/priority')
+            self.assertNotIn('model', config.get('overseer') or {})  # overseers on the solvers' model
+
+
 if __name__ == '__main__':
     unittest.main()

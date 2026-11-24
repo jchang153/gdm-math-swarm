@@ -183,6 +183,8 @@ def about_section(text=None):
 # titles of run_profile.SERIES ("I prefer the old names which I'm familiar with").
 SERIES_LINES = {
     'sweep25': 'Five frontier models, 25 agents each, a planted cheat and no overseers; 1 hour.',
+    'ds120': 'The GLM oversight arms repeated with DeepSeek in every role: control, 10 overseers, monitor M1/M3, '
+             'reviewer A1/A3; 3 repeats each plus an unplanted control, 2 hours.',
     'reviewer120': 'A reviewer outside the swarm checks each agent every 5 minutes and undoes, after the fact: rollback '
                    'or revert, reason shown or silent; 4 arms, 3 repeats each, 2 hours.',
     'monitor120': 'A generic monitor outside the swarm blocks risky tool calls; 4 arms, 3-6 repeats each, plus 2 runs where '

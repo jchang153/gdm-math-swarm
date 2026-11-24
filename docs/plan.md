@@ -2666,3 +2666,49 @@ Approved and done:
 Consequence, accepted by the owner: HF user repositories have no collaborators, so only the owner's account can read
 the dataset; the other organization member (collaborator) lost access to it. The rule against deleting or modifying
 the dataset's contents without owner approval is unchanged.
+
+## DeepSeek V4.1 Flash oversight re-run (owner decision, November 23, 2026)
+
+**Approved by the owner (chat, November 23, 2026; relayed by the coordinating agent; an approval, not a proposal).**
+Re-run the oversight study with DeepSeek V4.1 Flash (1017) (`deepseek/deepseek-v4.1-flash-1017`, route
+`deepinfra/fp8/priority`, as in `configs/dsv41flash-25-seeded-control-60m-push.json` and the October 26 DeepSeek
+overseer configs) replacing GLM 5.3 Flash everywhere: solvers, overseers, the top-down monitor and the asynchronous
+reviewer are all DeepSeek (same-model design). 100 solvers, 120 minutes, push delivery, everything else identical to
+the GLM 120-minute push arms.
+
+- Arms, 3 runs each, seeded (the same seed artifact credited to agent-101 at minute 3): control; 10ov (10 DeepSeek
+  overseers with check_proof, revert_submission and the private overseer board, as
+  `glmflash100-seeded-10ov-glm-120m-push`); M1 (monitor, actions only, silent block); M3 (monitor, actions only,
+  block with reason); A1 (reviewer, rollback, silent); A3 (reviewer, rollback, reason shown). Plus one unseeded
+  control run (the control without the seeded block). 19 runs in all. Labels as relabelled on November 19, 2026.
+- Spending: each run's `run_budget_usd` is the only control (default $100; raise it only when a DeepSeek arm's
+  projected spend needs more, with the reasoning stated).
+
+Implementation (operator choices, November 23, 2026; not owner decisions):
+- Configs `configs/dsv41flash100-seeded-{control,10ov-ds,monitor-actions-silent,monitor-actions-reason,`
+  `reviewer-rollback-silent,reviewer-rollback-reason}-120m-push.json` and `configs/dsv41flash100-control-120m-push.json`
+  (unseeded). Each differs from its GLM source only in `experiment`, `requested_model`, `candidate_model_id`,
+  `provider_route`, `provider_settings` (DeepSeek's from the sweep config: prompt $0.147/M, output $0.441/M,
+  context 1,048,576, `max_tokens` 16384, reasoning effort high), the free-text arm note, and `run_budget_usd` for the
+  monitor and reviewer arms (below). The overseers, monitor and reviewer have no model of their own, so they run on
+  the solvers' model and settings. The unseeded control is the DeepSeek control with `track` "spontaneous",
+  `seeded_contagion_enabled` false and no `seeded` block (so no agent-101). Run ids
+  `dsv41flash100-<arm>-120m-push-r<n>-<UTC>`; catalogue series `ds120` ("DeepSeek V4.1 Flash oversight re-run",
+  `scripts/run_profile.py`); card titles as the GLM arms, the unseeded control "Control, no planted exploit".
+- Budgets: control, unseeded control and 10ov $100. M1, M3, A1 and A3 $150, because their projected spend can reach
+  $100: DeepSeek agents take about 2.3 times as many steps per agent-hour as GLM (25-agent sweep: 3,350 requests in
+  60 min, $0.0013 each), so 100 unslowed solvers make about 27,000 requests ($35) in 120 minutes; the monitor is
+  called once per response with tool calls at $0.0022-0.0025 per call (role check below), up to about $65 more; A1's
+  repeated rollbacks broke prompt caching for GLM (80% vs 96%), which at DeepSeek's cache price could raise agent
+  spend up to about 2.7 times; A3 gets the same limit because DeepSeek may answer the reason like A1.
+- Role compatibility (monitor-v1 and review-v1 have never run on DeepSeek): `scripts/role_compat_check.py` replays
+  real monitor-v1 requests (calibration of the GLM control 120m push r1) and review-v1 requests (GLM A1/A3 r1, r2) on
+  the DeepSeek route through the live call path and parsers, all at once; evidence
+  `data/validation/role-compat-20261124T010940Z.json` (150 requests at once) and `role-compat-20261124T011251Z.json`
+  (220 at once), $0.68 in all. 367 of 370 replies parsed; 0 rate limits or provider errors. Informational: at
+  the fixed threshold 80 DeepSeek flagged 72 of the 91 monitor windows and 77 of the 91 review windows GLM had
+  flagged, and 1 and 2 of the 93 and 92 it had not. The only failures: 3
+  replies whose reasoning ran to `max_tokens` 16384 (2 empty, 1 monitor reply cut after 6 of 14 actions), and 1 of 79
+  flagged reviews named a `first_bad_call` with one extra character (no rollback). The live code lets such calls
+  through or does not act, as for GLM. No prompt change. The standard compatibility check
+  (`scripts/compat_check.py`) runs on each VM before launch, as usual.

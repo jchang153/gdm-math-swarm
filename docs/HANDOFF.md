@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-18 ~09:35 PT by Claude (Opus 5.5) story-map agent (item 51: story-map times in h/m/s live, deployments a5640791, 8daca472).
+Last updated: 2026-11-23 ~17:20 PST by Claude (Opus 5.5) DeepSeek re-run config agent (item 56: DeepSeek oversight re-run configs ready, launch pending).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -2299,6 +2299,24 @@ is being merged into main via `collab-env`.
       STOPPED by owner decision ("keep everything on my mac for now, and kill that claude code"): service disabled,
       VM TERMINATED, disk kept. Details in HANDOFF.local.md and private/ops/control-vm/.
     - **GCS** (item 53) blocked: owner's group lacks storage.buckets.create; needs a project admin.
+
+56. **CONFIGS READY 2026-11-23 (~17:20 PST), LAUNCH PENDING: DeepSeek oversight re-run** (owner, chat 2026-11-23;
+    docs/plan.md "DeepSeek V4.1 Flash oversight re-run (owner decision, November 23, 2026)"). DeepSeek V4.1 Flash
+    (1017) on `deepinfra/fp8/priority` in every role (solvers, overseers, monitor, reviewer), 100 solvers, 120 min,
+    push; arms x 3 runs: control, 10ov, M1, M3, A1, A3 (seeded, agent-101 at +3 min) + 1 unseeded control = 19 runs.
+    - Configs `configs/dsv41flash100-seeded-{control,10ov-ds,monitor-actions-silent,monitor-actions-reason,reviewer-rollback-silent,reviewer-rollback-reason}-120m-push.json`
+      and `configs/dsv41flash100-control-120m-push.json`; each = its GLM 120m-push source with only the model/route/
+      provider_settings (from the DS sweep config), experiment name, arm note and (M1/M3/A1/A3) budget changed.
+      Run ids `dsv41flash100-<arm>-120m-push-r<n>-<UTC>`; catalogue series `ds120`.
+    - Budgets: control x2 and 10ov $100; M1/M3/A1/A3 $150 (projection in docs/plan.md: DS takes ~2.3x GLM's steps per
+      agent-hour, so monitor calls or A1's cache loss can push spend toward $100).
+    - Role check (`scripts/role_compat_check.py`, new; $0.68): monitor-v1 and review-v1 on DeepSeek parse 367/370
+      (3 replies ran reasoning to max_tokens; 1/79 flagged reviews had a mistyped first_bad_call); 0 rate limits or
+      errors with 150 and 220 requests at once; monitor ~$0.0023/call, p50 6-10 s, p90 ~50-65 s (long reasoning,
+      ~100 tok/s, not queueing). Evidence `data/validation/role-compat-20261124T0{10940,11251}Z.json`.
+    - Launch steps per VM (VM prep by a separate agent): ship main, `freeze_route.py`, `compat_check.py --config
+      <cfg> --max-requests 6` (standard solver/overseer check; the DS cap probe has flaked before, retry), `preflight.py`,
+      supervisor as in item 52 (linger on, `ulimit -n 65536`). Config gates pass offline for all 7 configs.
 
 ## Next steps / open items
 

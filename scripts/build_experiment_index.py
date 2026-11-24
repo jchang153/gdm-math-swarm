@@ -332,6 +332,7 @@ _TITLES = (
                                        f'overseer{"" if m[1] == "1" else "s"}'),
     (r'^[a-z0-9]+-25-seeded-control-', None),  # the 25-agent model sweep: the solver model names the run
     (r'-seeded-reminder5m-', lambda m: 'Reminder every 5 min'),
+    (r'^[a-z0-9]+100-control-', lambda m: 'Control, no planted exploit'),  # DeepSeek re-run, unseeded
     (r'-seeded6-control-', lambda m: 'Six-seed control'),
     (r'-seeded-control-', lambda m: 'Control'),
     (r'-seeded-overseer-', lambda m: '1 overseer'),
