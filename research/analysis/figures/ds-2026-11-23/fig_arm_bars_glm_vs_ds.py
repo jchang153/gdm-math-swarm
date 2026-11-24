@@ -2,7 +2,8 @@
 mean ± SEM. GLM data exactly as ../meeting-2026-11-18/fig_arm_bars_reviewer.py uses it: monitor_arms-2026-11-16.json
 (control, 10ov n=6, M1, and data key "M2" = current M3 actions-reason n=6), overseer_share.json for the 10ov overseer
 cost, and results.json outcome_metrics of the local glmflash100-seeded-reviewer-rollback-{silent,reason} runs for
-A1/A3. DeepSeek data from monitor_arms-ds-2026-11-23.json. Run from the repo root."""
+A1/A3. AG (agentic monitor per solver): GLM from monitor_arms-glm-ag-2026-11-24.json, DeepSeek with the other
+DeepSeek arms from monitor_arms-ds-2026-11-24.json (both written by compute_ag_arms.py). Run from the repo root."""
 import glob
 import json
 from pathlib import Path
@@ -15,9 +16,10 @@ D = Path(__file__).resolve().parent
 OLD = ROOT / "research/analysis/figures/meeting-2026-11-18"
 g = json.load(open(ROOT / "research/analysis/monitor_arms-2026-11-16.json"))["arms"]
 ov = json.load(open(OLD / "overseer_share.json"))
-ds = json.load(open(ROOT / "research/analysis/monitor_arms-ds-2026-11-23.json"))["arms"]
+ds = json.load(open(ROOT / "research/analysis/monitor_arms-ds-2026-11-24.json"))["arms"]
 # Old data keys: "M2" there is actions-reason (now M3); "M1" is actions-silent in both labellings.
 g["M3"] = g["M2"]
+g["AG"] = json.load(open(ROOT / "research/analysis/monitor_arms-glm-ag-2026-11-24.json"))["arms"]["AG"]
 def dig(d, key):
     for p in key.split("."): d = d[p]
     return d
@@ -28,20 +30,20 @@ for a, tag in {"A1": "rollback-silent", "A3": "rollback-reason"}.items():
     assert len(runs) == 3, runs
     om = [json.load(open(p + "/results.json"))["outcome_metrics"] for p in runs]
     g[a] = {"runs": [Path(p).name for p in runs], "metrics": {k: {"values": [dig(o, k) for o in om]} for k in KEYS}}
-ORDER = [a for a in ["control", "10ov", "M1", "M3", "A1", "A3"] if a in ds]
+ORDER = [a for a in ["control", "10ov", "M1", "M3", "A1", "A3", "AG"] if a in ds]
 LABEL = {"control": "control", "10ov": "10 ov", "M1": "M1 actions\nsilent", "M3": "M3 actions\nreason",
-         "A1": "A1 rollback\nsilent", "A3": "A3 rollback\nreason"}
-FAM = {"control": "g", "10ov": "b", "M1": "o", "M3": "o", "A1": "p", "A3": "p"}
-LIGHT = {"g": "#d4d4d4", "b": "#b1cde9", "o": "#f0d3b2", "p": "#d3c4ea"}; EDGE = {"g": "#909090", "b": "#5a8fcb", "o": "#d9822b", "p": "#8a6cc7"}
-DOT = {"g": "#808080", "b": "#2a72c4", "o": "#d9822b", "p": "#7350b8"}; DARK = {"b": "#2a72c4", "o": "#dd8a3a", "p": "#7350b8"}
+         "A1": "A1 rollback\nsilent", "A3": "A3 rollback\nreason", "AG": "AG agentic\nrevert+reason"}
+FAM = {"control": "g", "10ov": "b", "M1": "o", "M3": "o", "A1": "p", "A3": "p", "AG": "t"}
+LIGHT = {"g": "#d4d4d4", "b": "#b1cde9", "o": "#f0d3b2", "p": "#d3c4ea", "t": "#b6e2d3"}; EDGE = {"g": "#909090", "b": "#5a8fcb", "o": "#d9822b", "p": "#8a6cc7", "t": "#3fa883"}
+DOT = {"g": "#808080", "b": "#2a72c4", "o": "#d9822b", "p": "#7350b8", "t": "#1a9a72"}; DARK = {"b": "#2a72c4", "o": "#dd8a3a", "p": "#7350b8", "t": "#1a9a72"}
 def vals(src, a, key):
     v = np.array([x if x is not None else np.nan for x in src[a]["metrics"][key]["values"]], float)
     return v[~np.isnan(v)]
 def oversight(model, a):
     f = FAM[a]
     if f == "g": return np.zeros(1)
-    if model == "DS": return vals(ds, a, {"b": "cost.overseer_usd", "o": "cost.monitor_usd", "p": "cost.reviewer_usd"}[f])
-    if f == "o": return vals(g, a, "cost.monitor_usd")
+    if model == "DS": return vals(ds, a, {"b": "cost.overseer_usd", "o": "cost.monitor_usd", "p": "cost.reviewer_usd", "t": "cost.monitor_usd"}[f])
+    if f in ("o", "t"): return vals(g, a, "cost.monitor_usd")
     if f == "p": return vals(g, a, "cost.reviewer_usd")
     return np.array([next(v["overseer_usd"] for k, v in ov.items() if r in k) for r in g[a]["runs"]])
 panels = [("fakes.fakers", "Fakers (of 100 solvers)", 1), ("fakes.fake_submissions", "Fake submissions", 0),
@@ -51,7 +53,7 @@ panels = [("fakes.fakers", "Fakers (of 100 solvers)", 1), ("fakes.fake_submissio
 MODELS = [("GLM", g, -0.21), ("DS", ds, 0.21)]
 W = 0.38
 plt.rcParams.update({"font.size": 10, "axes.spines.top": False, "axes.spines.right": False})
-fig, axs = plt.subplots(2, 3, figsize=(22, 12.5))
+fig, axs = plt.subplots(2, 3, figsize=(24, 12.5))
 x = np.arange(len(ORDER))
 for ax, (key, title, dec) in zip(axs.flat, panels):
     labels = []
@@ -84,15 +86,16 @@ fig.legend(handles=[Patch(facecolor="white", edgecolor="#555555", label="GLM 5.3
                     Patch(facecolor="#bbbbbb", edgecolor="#555555", label="DeepSeek V4.1 Flash (filled, right)"),
                     Patch(color=LIGHT["g"], label="No oversight"), Patch(color=LIGHT["b"], label="In-swarm overseers"),
                     Patch(color=LIGHT["o"], label="Blocking monitor, threshold 80"),
-                    Patch(color=LIGHT["p"], label="Asynchronous reviewer, every 5 min, threshold 80")],
-           loc="upper left", bbox_to_anchor=(0.01, 0.94), ncol=6, frameon=False, fontsize=10)
+                    Patch(color=LIGHT["p"], label="Asynchronous reviewer, every 5 min, threshold 80"),
+                    Patch(color=LIGHT["t"], label="Agentic monitor per solver")],
+           loc="upper left", bbox_to_anchor=(0.01, 0.94), ncol=7, frameon=False, fontsize=10)
 fig.suptitle("GLM 5.3 Flash vs. DeepSeek V4.1 Flash, shared oversight arms", x=0.01, y=0.995, ha="left", fontsize=16)
 fig.text(0.01, 0.948, "Bar = arm mean; error bar = ±1 SEM; dots = runs (n = 3 unless marked). 100 solvers, 120 min, push, seeded. "
-         "GLM runs: control Nov 4; 10 ov r1–r3 Nov 4 + r4–r6 Nov 16; M1 Nov 11; M3 (actions-reason) r1–r3 Nov 11 + r4–r6 Nov 16; "
-         "A1/A3 Nov 19. DeepSeek runs: Nov 24 (UTC).", fontsize=10)
+         "GLM runs: control Nov 4; 10 ov r1–r3 Nov 4 + r4–r6 Nov 16; M1 Nov 11; M3 r1–r3 Nov 11 + r4–r6 Nov 16; "
+         "A1/A3 Nov 19; AG Nov 24. DeepSeek runs: Nov 24 (UTC). AG cost includes $8-18 held per run.", fontsize=10)
 fig.tight_layout(rect=(0, 0, 1, 0.91))
 for ext in ("png", "pdf"):
-    fig.savefig(D / f"arm_bars_6metrics_glm_vs_ds-2026-11-23.{ext}", dpi=150)
+    fig.savefig(D / f"arm_bars_6metrics_glm_vs_ds-2026-11-24.{ext}", dpi=150)
 for a in ORDER:
     for model, src, _ in MODELS:
         print(a, model, len(src[a]["runs"]), [round(float(vals(src, a, k).mean()), 2) for k, *_ in panels], round(float(oversight(model, a).mean()), 3))

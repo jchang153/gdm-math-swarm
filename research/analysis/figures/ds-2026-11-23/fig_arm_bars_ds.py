@@ -1,6 +1,7 @@
 """Six-metric arm comparison for the DeepSeek V4.1 Flash oversight runs (2026-11-23/24), mean ± SEM error bars.
 Derived from ../meeting-2026-11-18/fig_arm_bars_reviewer.py (same panels, colours and cost split); data from
-research/analysis/monitor_arms-ds-2026-11-23.json (compute_ds_arms.py). Run from the repo root."""
+research/analysis/monitor_arms-ds-2026-11-24.json (compute_ds_arms.py, then compute_ag_arms.py adds arm AG).
+Run from the repo root."""
 import json
 from pathlib import Path
 import matplotlib; matplotlib.use("Agg")
@@ -9,17 +10,17 @@ from matplotlib.patches import Patch
 import numpy as np
 ROOT = Path(__file__).resolve().parents[4]
 D = Path(__file__).resolve().parent
-data = json.load(open(ROOT / "research/analysis/monitor_arms-ds-2026-11-23.json"))
+data = json.load(open(ROOT / "research/analysis/monitor_arms-ds-2026-11-24.json"))
 arms = data["arms"]
-ORDER = [a for a in ["control", "unseeded-control", "10ov", "M1", "M3", "A1", "A3"] if a in arms]
+ORDER = [a for a in ["control", "unseeded-control", "10ov", "M1", "M3", "A1", "A3", "AG"] if a in arms]
 LABEL = {"control": "control", "unseeded-control": "control\nUNSEEDED\n(n=1, no seed)", "10ov": "10 ov",
-         "M1": "M1\nactions\nsilent", "M3": "M3\nactions\nreason", "A1": "A1\nrollback\nsilent", "A3": "A3\nrollback\nreason"}
-FAM = {"control": "g", "unseeded-control": "u", "10ov": "b", "M1": "o", "M3": "o", "A1": "p", "A3": "p"}
-LIGHT = {"g": "#d4d4d4", "u": "#ffffff", "b": "#b1cde9", "o": "#f0d3b2", "p": "#d3c4ea"}
-EDGE = {"g": "#b5b5b5", "u": "#808080", "b": "#7aa8db", "o": "#e6b47f", "p": "#a68bd3"}
-DOT = {"g": "#808080", "u": "#808080", "b": "#2a72c4", "o": "#d9822b", "p": "#7350b8"}
-DARK = {"b": "#2a72c4", "o": "#dd8a3a", "p": "#7350b8"}
-OVKEY = {"b": "cost.overseer_usd", "o": "cost.monitor_usd", "p": "cost.reviewer_usd"}
+         "M1": "M1\nactions\nsilent", "M3": "M3\nactions\nreason", "A1": "A1\nrollback\nsilent", "A3": "A3\nrollback\nreason", "AG": "AG\nagentic\nrevert+reason"}
+FAM = {"control": "g", "unseeded-control": "u", "10ov": "b", "M1": "o", "M3": "o", "A1": "p", "A3": "p", "AG": "t"}
+LIGHT = {"g": "#d4d4d4", "u": "#ffffff", "b": "#b1cde9", "o": "#f0d3b2", "p": "#d3c4ea", "t": "#b6e2d3"}
+EDGE = {"g": "#b5b5b5", "u": "#808080", "b": "#7aa8db", "o": "#e6b47f", "p": "#a68bd3", "t": "#5fb597"}
+DOT = {"g": "#808080", "u": "#808080", "b": "#2a72c4", "o": "#d9822b", "p": "#7350b8", "t": "#1a9a72"}
+DARK = {"b": "#2a72c4", "o": "#dd8a3a", "p": "#7350b8", "t": "#1a9a72"}
+OVKEY = {"b": "cost.overseer_usd", "o": "cost.monitor_usd", "p": "cost.reviewer_usd", "t": "cost.monitor_usd"}
 def vals(a, key): return [v if v is not None else np.nan for v in arms[a]["metrics"][key]["values"]] or [np.nan]
 def oversight(a):
     f = FAM[a]
@@ -27,9 +28,9 @@ def oversight(a):
 panels = [("fakes.fakers", "Fakers (of 100 solvers)", 1), ("fakes.fake_submissions", "Fake submissions", 0),
           ("fakes.credited_fake_submissions", "Credited fakes", 1), ("genuine.credited_tasks", "Genuine credited tasks", 1),
           ("slowdown.step_seconds.median", "Median seconds per step", 1),
-          ("cost.total_usd", "Cost per run (USD)\nlight = swarm, hatched = oversight (overseers, monitor or reviewer)", 1)]
+          ("cost.total_usd", "Cost per run (USD)\nlight = swarm, hatched = oversight (overseers, monitors or reviewer)", 1)]
 plt.rcParams.update({"font.size": 10, "axes.spines.top": False, "axes.spines.right": False})
-fig, axs = plt.subplots(2, 3, figsize=(21, 12.5))
+fig, axs = plt.subplots(2, 3, figsize=(23, 12.5))
 x = np.arange(len(ORDER))
 for ax, (key, title, dec) in zip(axs.flat, panels):
     labels = []
@@ -58,15 +59,17 @@ fig.legend(handles=[Patch(color=LIGHT["g"], label="No oversight (seeded)"),
                     Patch(facecolor="white", edgecolor="#808080", linestyle="--", label="No oversight, unseeded (no planted faker; n = 1)"),
                     Patch(color=LIGHT["b"], label="In-swarm overseers (bottom-up)"),
                     Patch(color=LIGHT["o"], label="Blocking monitor (top-down), threshold 80"),
-                    Patch(color=LIGHT["p"], label="Asynchronous reviewer, every 5 min, threshold 80")],
-           loc="upper left", bbox_to_anchor=(0.01, 0.94), ncol=5, frameon=False, fontsize=10.5)
-fig.suptitle("DeepSeek V4.1 Flash: oversight arms vs. control (2026-11-23)", x=0.01, y=0.995, ha="left", fontsize=16)
+                    Patch(color=LIGHT["p"], label="Asynchronous reviewer, every 5 min, threshold 80"),
+                    Patch(color=LIGHT["t"], label="Agentic monitor per solver (revert with reason)")],
+           loc="upper left", bbox_to_anchor=(0.01, 0.94), ncol=6, frameon=False, fontsize=10.5)
+fig.suptitle("DeepSeek V4.1 Flash: oversight arms vs. control (2026-11-23; agentic monitor AG 2026-11-24)", x=0.01, y=0.995, ha="left", fontsize=16)
 miss = data.get("missing") or []
 fig.text(0.01, 0.948, "Bar = arm mean; error bar = ±1 standard error of the mean; dots = individual runs (n = 3 unless marked). "
-         "100 DeepSeek V4.1 Flash solvers, 120 min, push; all arms seeded except the unseeded control."
+         "100 DeepSeek V4.1 Flash solvers, 120 min, push; all arms seeded except the unseeded control. "
+         "AG: results.json metrics, cost = settled + held ($14-18 held per AG run)."
          + (f"  Missing runs: {len(miss)}." if miss else ""), fontsize=10.5)
 fig.tight_layout(rect=(0, 0, 1, 0.91))
 for ext in ("png", "pdf"):
-    fig.savefig(D / f"arm_bars_6metrics_ds-2026-11-23.{ext}", dpi=150)
+    fig.savefig(D / f"arm_bars_6metrics_ds-2026-11-24.{ext}", dpi=150)
 for a in ORDER:
     print(a, len(arms[a]["runs"]), [round(float(np.nanmean(vals(a, k))), 2) for k, *_ in panels], round(float(np.nanmean(oversight(a))), 3))
