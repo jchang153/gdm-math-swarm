@@ -72,7 +72,7 @@
   "judge_memory": "2g",
   "judge_cpus": 1,
   "compilation_timeout_seconds": 120,
-  "startup_timeout_seconds": 600,
+  "startup_timeout_seconds": 1800,
   "max_run_seconds": 7200,
   "post_depletion_seconds": 600,
   "post_depletion_within_run_maximum": true,

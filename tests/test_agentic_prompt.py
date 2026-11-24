@@ -91,7 +91,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config["run_budget_usd"], budget)
         self.assertIn("Agentic monitor arm AG", config["agentic_monitor_note"])
         self.assertEqual(config["max_connections"], 200)  # 100 solvers + 100 monitors (oversight.participant_count)
-        same = set(src) - {"experiment", "reviewer", "reviewer_note", "run_budget_usd", "max_connections"}
+        # 1800 s start barrier: 200 samples' setup (AG startup failure, HANDOFF item 57).
+        self.assertEqual((config["startup_timeout_seconds"], src["startup_timeout_seconds"]), (1800, 600))
+        same = set(src) - {"experiment", "reviewer", "reviewer_note", "run_budget_usd", "max_connections",
+                           "startup_timeout_seconds"}
         self.assertEqual({k: config[k] for k in same}, {k: src[k] for k in same})
         self.assertEqual(set(config) - set(src), {"agentic_monitor", "agentic_monitor_note"})
         self.assertEqual((config["agent_count"], config["max_run_seconds"], config["push_delivery"],

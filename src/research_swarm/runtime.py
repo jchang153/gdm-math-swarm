@@ -313,6 +313,73 @@ def agent_files(task_files):
     return files
 
 
+# Workspace setup as one archive (build_task). Inspect's sample init writes each Sample.files
+# entry with two `docker compose exec` calls (mkdir -p, then tee): 73 files per solver are 146
+# execs, which under load (100 agentic monitors' bridges already polling their containers with
+# execs that bypass Inspect's limits) took 4-10 s per file and kept every solver past the 600 s
+# start barrier (HANDOFF item 57). One exec now creates the same parent directories (mkdir -p),
+# extracts a tar archive of the same bytes and checks every file exists, as the container's default user: no owner or
+# permissions from the archive (members 0666, so the umask applies, as for tee's new files) and
+# no archived mtimes (-m), so the files are those Inspect's per-file writes produce.
+WORKSPACE_ARCHIVE_TIMEOUT = 600
+_WORKSPACE_ARCHIVE_SCRIPT = ('set -e\nroot="$1"\nshift\n'
+                             'for f in "$@"; do /bin/mkdir -p -- "$(/usr/bin/dirname -- "$f")"; done\n'
+                             '/usr/bin/base64 -d | /usr/bin/tar -x -m --no-same-owner --no-same-permissions '
+                             '-f - -C "$root"\n'
+                             'for f in "$@"; do if [ ! -f "$f" ]; then echo "missing: $f" >&2; exit 1; fi; done\n')
+
+
+def archivable_files(files):
+    """True when every Sample.files value is literal text Inspect would write as its UTF-8 bytes
+    (empty, or multi-line so never an existing path, data URI or URL) under an absolute path."""
+    return bool(files) and all(isinstance(path, str) and path.startswith("/") and ".." not in path.split("/")
+                               and isinstance(text, str) and (text == "" or "\n" in text)
+                               for path, text in files.items())
+
+
+def workspace_archive(files):
+    """Deterministic tar (sorted regular files, mode 0666, no owner, mtime 0) of ``files``
+    ({absolute path: text}), member names relative to the filesystem root."""
+    import io
+    import tarfile
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for path in sorted(files):
+            data = files[path].encode("utf-8")
+            info = tarfile.TarInfo(path.lstrip("/"))
+            info.size, info.mode, info.mtime, info.type = len(data), 0o666, 0, tarfile.REGTYPE
+            archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def workspace_archive_command(files, root="/"):
+    """The single exec: mkdir -p each file's parent (as Inspect's write_file does), extract stdin's
+    base64 archive under ``root``, then fail unless every file exists (``root`` other than "/" is
+    for tests; the file paths are passed as arguments under ``root``)."""
+    import posixpath
+    paths = sorted(posixpath.join(root, path.lstrip("/")) for path in files)
+    return ["/bin/sh", "-c", _WORKSPACE_ARCHIVE_SCRIPT, "sh", root, *paths]
+
+
+async def write_workspace_files(sbox, files):
+    """Write ``files`` into the sample's sandbox with one exec; on failure falls back to Inspect's
+    per-file ``write_file`` (the same bytes). Returns "archive" or "per_file"."""
+    import base64
+    import logging
+    data = base64.b64encode(workspace_archive(files)).decode("ascii")
+    try:
+        result = await sbox.exec(workspace_archive_command(files), input=data, timeout=WORKSPACE_ARCHIVE_TIMEOUT)
+        if result.success:
+            return "archive"
+        detail = (result.stderr or "")[:300]
+    except Exception as ex:  # cancellation is a BaseException and propagates
+        detail = f"{type(ex).__name__}: {str(ex)[:300]}"
+    logging.getLogger(__name__).warning("workspace archive setup failed (%s); writing files one by one", detail)
+    for path in sorted(files):
+        await sbox.write_file(path, files[path])
+    return "per_file"
+
+
 # Container-side listing for the observer: regular files only, symlinks never
 # followed, the dependency tree (.lake) skipped; stops entirely at the limit.
 _LIST_SCRIPT = r"""
@@ -876,15 +943,32 @@ def build_task(*, agent_ids, files, solver, compose, metadata, initial_message, 
     sandbox (agentic monitors: ``make_agentic_compose``); the others use ``compose``."""
     from inspect_ai import Task
     from inspect_ai.dataset import Sample
+    from inspect_ai.solver import chain, solver as inspect_solver
+    from inspect_ai.util import sandbox
     from .inspect_adapter import disable_inspect_dotenv
     disable_inspect_dotenv()
     own = sample_compose or {}
+    per_sample = {a: dict((sample_files or {}).get(a, files)) for a in agent_ids}
+    # Literal-text files are written by the first solver step as one archive (write_workspace_files);
+    # anything else stays in Sample.files for Inspect's own per-file copy.
+    archived = {a: f for a, f in per_sample.items() if archivable_files(f)}
+
+    @inspect_solver
+    def workspace_files():
+        async def solve(state, generate):
+            wanted = archived.get(str(state.sample_id))
+            if wanted:
+                await write_workspace_files(sandbox(), wanted)
+            return state
+        return solve
+
     return Task(name=name,
                 dataset=[Sample(id=a, input=(initial_messages or {}).get(a, initial_message),
-                                files=dict((sample_files or {}).get(a, files)),
+                                files={} if a in archived else per_sample[a],
                                 **({"sandbox": ("docker", own[a])} if a in own else {}))
                          for a in agent_ids],
-                solver=solver, sandbox=("docker", compose), metadata=metadata)
+                solver=chain(workspace_files(), solver) if archived else solver,
+                sandbox=("docker", compose), metadata=metadata)
 
 
 def _module_gate():

@@ -1697,7 +1697,7 @@ def _fake_sandbox_class():
                 cmd = [sys.executable, *cmd[1:-1], self.base + cmd[-1]]
             else:
                 cmd = [sys.executable if c == "python3" else self._map(c) for c in cmd]
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            proc = subprocess.run(cmd, input=input or "", capture_output=True, text=True, timeout=timeout)
             return ExecResult(success=proc.returncode == 0, returncode=proc.returncode,
                               stdout=proc.stdout.replace(self.base, ""), stderr=proc.stderr)
 
