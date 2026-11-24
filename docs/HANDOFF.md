@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-24 ~03:15 PST by Claude (Opus 5.5) AG launch agent (item 57: AG arm, 4 of 6 runs live, DS r2 and GLM r2 failed at startup).
+Last updated: 2026-11-24 ~03:45 PST by Claude (Opus 5.5) AG launch agent (item 57: AG arm, all 6 runs live after the r2 reruns).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -2340,7 +2340,7 @@ is being merged into main via `collab-env`.
       M3 4.3 / 2.0 / 281 / 13.0 / 14.91 (monitor $8.25); A1 87.0 / 22.0 / 3,148 / 12.3 / 8.78 (reviewer $2.08);
       A3 47.3 / 23.0 / 2,323 / 13.7 / 9.77 (reviewer $1.58). Every run also reports $3-6 of holds not yet settled
       (total = settled + held). Median step 39-45 s (control, 10ov, A1/A3) vs 54-55 s with the monitor.
-57. **LIVE 2026-11-24 (4 of 6 running since 02:55-03:02 PST; 2 failed at startup): agentic monitor arm AG** (owner, chat
+57. **LIVE 2026-11-24 (all 6 running; common starts 02:55-03:36 PST, pilots end ~04:55-05:36 PST): agentic monitor arm AG** (owner, chat
     2026-11-23/24; docs/plan.md "Agentic monitor arm AG (owner decisions, November 23, 2026)"). One agentic monitor per
     solver (`agmon-NNN`, Claude Code harness, five tools, prompt `agentic-review-v1`), 100 solvers + 100 monitors,
     120 min, push, seeded. Budgets (config `run_budget_usd`, the only spending control): $150 DeepSeek, $250 GLM;
@@ -2349,7 +2349,9 @@ is being merged into main via `collab-env`.
       43d2f1b (`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` 2,100,000 ms, attribution header off, the monitor's requests drop the
       "# Environment" message and neutralize billing/identity lines); b54210f (startup with 200 samples: each solver
       workspace written with one exec instead of 146; `startup_timeout_seconds` 1800 in both AG configs). Root cause of
-      the first failure: the 100 file-less monitors started first and their bridges' polling flooded docker exec.
+      the first failure: the 100 file-less monitors started first and their bridges' polling flooded docker exec. fffe02b
+      (AG-only start gate: at most 24 agents starting at once, `agentic_monitor.startup_concurrency`; MCP readiness wait
+      300 s instead of 120 s; config defaults, no config edits).
     - Role check (validation.md 15a, paid, 6.5 cents): both passed. DeepSeek 40/40 parsed, 0 malformed, 0 errors (tool
       calls: wait 36, list_revertible 6, get_output 1); GLM 40/40 parsed, 0 malformed, 0 errors (wait 37,
       list_revertible 3). `revert_submission` and `message_solver` were never called in the replay (acted on 0/20 flagged,
@@ -2372,7 +2374,11 @@ is being merged into main via `collab-env`.
         the first minutes, no new `agentic_error` after the start. Post-run (judge, upload) ~1-2 h after the end.
       - Failed again with `startup_timeout` (1,800 s), 0 provider calls: `dsv41flash100-...-r2-20261124T103741Z` (168/200
         ready; 13 monitors, 19 solvers missing) and `glmflash100-...-r2-20261124T103802Z` (180/200; 2 monitors, 18
-        solvers). Empty; not to be published. Their VMs are idle after packaging. DS r2 and GLM r2 still need a run.
+        solvers). Empty; not to be published.
+    - **Reruns of r2 (fffe02b, launched 03:22-03:23 PST on the same two VMs):**
+      `dsv41flash100-seeded-agentic-monitor-120m-push-r2-20261124T112224Z` (barrier +778 s, common start ~03:35, ends
+      ~05:35) and `glmflash100-seeded-agentic-monitor-120m-push-r2-20261124T112253Z` (+814 s, ~03:36, ends ~05:36). Startup
+      with the gate: 0 `agent_restart` and 0 `agentic_error` before the start; slot wait median ~5 min, max ~10.5 min.
 ## Next steps / open items
 
 - **Logs dataset storage (2026-11-19):** the dataset is now in the owner's PRO account (1 TB private; item 54), so
