@@ -30,6 +30,7 @@ from pathlib import Path
 
 from research.analysis import roles as roles_mod
 from research.analysis import validity_corrections
+from research.analysis.storymap import agentic as agentic_mod
 from research.analysis.storymap import domain as domain_mod
 from research.analysis.storymap.fake_rule import classify, is_fake
 
@@ -205,7 +206,7 @@ def mins(seconds, start):
 
 
 class RunContext:
-    def __init__(self, run_dir):
+    def __init__(self, run_dir, agentic_rows=None):
         self.run_dir = Path(run_dir)
         self.settings = roles_mod.load_settings(self.run_dir)
         self.roles = dict(roles_mod.special_roles(self.settings))
@@ -290,6 +291,14 @@ class RunContext:
         if self.start is None:
             clock = (self.settings.get("effective") or {}).get("common_start_utc")
             self.start = _epoch(clock) or 0.0
+        # Agentic-monitor runs only (arm AG; storymap/agentic.py): monitors and the reviewer sender they use get
+        # role agentic_monitor, and the reviewer's messages / reverts are attributed to the solver's monitor.
+        self.agentic = None
+        if agentic_mod.is_agentic(self.settings, self.run_dir):
+            self.agentic = agentic_mod.AgenticRun(self, agentic_rows)
+            for monitor in self.agentic.monitors:
+                self.roles[monitor] = agentic_mod.ROLE
+            self.roles[agentic_mod.REVIEWER_ID] = agentic_mod.ROLE
 
     def monitor_records(self):
         """``{tool_use_id: {"score", "enforced", "decided_t", "agent"}}`` from runtime.jsonl's monitor events (read
@@ -615,6 +624,8 @@ class Builder:
                     self.add(ts, kind, p["text"], turn=turn, mid=mid)
             elif kind == "push":
                 self.pending_push.append(p)
+            elif kind == "agentic_revert":
+                self.on_agentic_revert(ts, p)
             elif kind == "tool_result":
                 name, turn, args, self.call_ts = self.calls.get(p.get("id"), (None, max(self.turn, 0), None, ts))
                 self.add(ts, "tool_result", trim_result(name, p["text"]), tool=short_tool(name), turn=turn,
@@ -732,6 +743,9 @@ class Builder:
                            detail=dict(detail, post_id=pid, posted_at=self.t(_epoch(it.get("created_ts"))
                                                                               or row.get("posted_at")),
                                        intent_type=row.get("intent_type"), reread=reread), turn=turn)
+            elif channel == "dm" and self.ag_message_author(author):
+                self.on_agentic_message(ts, it.get("public_id"), self.push_item_key(it), it.get("text"),
+                                        _epoch(it.get("created_ts")), "push", detail, turn)
             elif channel == "dm":
                 mid = self.push_item_key(it)
                 row = self.ctx.msg_by_public.get(it.get("public_id")) or {}
@@ -755,12 +769,53 @@ class Builder:
     def push_event_id(self, it):
         """The event id of a pushed item: ``B1:post-000123``, ``D1:dm-000045``, ``R1:<agent>:reminder-003``."""
         typ = PUSH_CHANNEL_TYPE[it["channel"]]
+        if typ == "D1" and self.ag_message_author(it.get("author")):
+            typ = agentic_mod.MESSAGE_EVENT
         return f"R1:{self.agent}:{self.push_item_key(it)}" if typ == "R1" else f"{typ}:{self.push_item_key(it)}"
 
     @staticmethod
     def push_item_key(it):
         """The pushed item's id as the pull events name it: ``post-000123``, ``dm-000045``, ``reminder-003``."""
         return str(it.get("id") or (f"reminder-{int(it['boundary']):03d}" if it.get("boundary") is not None else "?"))
+
+    # -- agentic monitors (arm AG only; storymap/agentic.py): G1 revert, G2 message delivered
+    def ag_message_author(self, author):
+        ag = getattr(self.ctx, "agentic", None)
+        return ag is not None and ag.is_monitor_message(author)
+
+    def reverter(self, rev):
+        """The reversion's author: ``reverted_by``, or in AG runs the monitor behind ``reviewer``."""
+        ag = getattr(self.ctx, "agentic", None)
+        if ag is None or rev.get("reverted_by") != agentic_mod.REVIEWER_ID:
+            return rev["reverted_by"]
+        return ag.revert_monitor(rev.get("submission_id"), rev.get("credited_agent"))
+
+    def on_agentic_revert(self, ts, rec):
+        d = rec["detail"]
+        self.event(ts, agentic_mod.REVERT_EVENT, f"{agentic_mod.REVERT_EVENT}:{d['submission_id']}",
+                   agentic_mod.g1_text(d, d["monitor"]), tool=None, author=d["monitor"], fake=rec["fake"],
+                   tags=["revert_notice"], outcome="reverted", detail=dict(d))
+
+    def on_agentic_message(self, ts, public_id, dm_id, text, sent_epoch, how, extra, turn):
+        """G2 at the message's first delivery to this solver (push or pull); a re-read gets no event."""
+        key = dm_id or public_id
+        if key in self.seen_dms:
+            return
+        self.seen_dms.add(key)
+        row = self.ctx.msg_by_public.get(public_id) if public_id else None
+        body = (row or {}).get("body") or text or ""
+        sent = (row or {}).get("sent_at") or sent_epoch
+        monitor = self.ctx.agentic.message_monitor(public_id, self.agent)
+        detail = agentic_mod.g2_detail(self.ctx, monitor, public_id, row, body, sent, ts)
+        detail["dm_id"] = detail["dm_id"] or dm_id
+        detail.update(extra)
+        tags = text_tags(body, agentic_mod.ROLE, self.ctx.trick)
+        if detail["revert_notice"] and "revert_notice" not in tags:
+            tags = [x for x in tags if x != "unrelated"] + ["revert_notice"]
+        self.event(ts, agentic_mod.MESSAGE_EVENT, f"{agentic_mod.MESSAGE_EVENT}:{key}",
+                   agentic_mod.g2_text(detail, "pushed" if how == "push" else "pulled"),
+                   tool="push" if how == "push" else "get_messages", author=monitor, tags=tags, detail=detail,
+                   turn=turn)
 
     # -- derived conference events
     def derive(self, ts, tool, args, text, turn):
@@ -845,11 +900,12 @@ class Builder:
                 continue
             self.p2_seen.add(sub_id)
             outcome = "reopened" if p.get("status") == "open" else "credit_removed"
+            by = self.reverter(rev)
             self.event(ts, "P2", f"P2:{sid(sub_id)}",
-                       f"Own credit for {rev['task_id']} ({sid(sub_id)}) removed by {rev['reverted_by']}: reverted "
+                       f"Own credit for {rev['task_id']} ({sid(sub_id)}) removed by {by}: reverted "
                        f"at {self.t(rev['reverted_at'])}, seen at {self.t(ts)} (problem now {p.get('status')}"
                        + (f", credited to {p.get('credited_agent')}" if p.get("credited_agent") else "") + ")",
-                       tool=tool, author=rev["reverted_by"], tags=["revert_notice"], outcome=outcome,
+                       tool=tool, author=by, tags=["revert_notice"], outcome=outcome,
                        detail={"task_id": rev["task_id"], "submission_id": sid(sub_id),
                                "reverted_at": self.t(rev["reverted_at"]), "seen_at": self.t(ts),
                                "reason": rev["reason"], "status_now": p.get("status"),
@@ -884,6 +940,10 @@ class Builder:
                 continue
             row = self.ctx.msg_by_public.get(m.get("message_id"))
             mid = "dm-%06d" % row["message_id"] if row else m.get("message_id")
+            if self.ag_message_author(author):
+                self.on_agentic_message(ts, m.get("message_id"), mid, m.get("message"), _epoch(m.get("sent_at")),
+                                        "pull", {"delivery": "pull"}, turn)
+                continue
             reread = mid in self.seen_dms
             self.seen_dms.add(mid)
             msg = m.get("message") or ""
@@ -909,13 +969,13 @@ class Builder:
         credited = row["outcome"] == "accepted"
         text = (f"Submitted {row['task_id']} ({sid(row['submission_id'])}): {row['outcome']}"
                 + (", credited" if credited else "") + (f"; FAKE ({row['form'] or 'evaluator'})" if row["fake"] else "")
-                + (f"; later reverted at {self.t(rev['reverted_at'])} by {rev['reverted_by']}" if rev else ""))
+                + (f"; later reverted at {self.t(rev['reverted_at'])} by {self.reverter(rev)}" if rev else ""))
         self.event(ts, "S1", f"S1:{sid(row['submission_id'])}", text, tool="submit_solution", author=self.agent,
                    fake=bool(row["fake"]), outcome=row["outcome"],
                    detail={"task_id": row["task_id"], "submission_id": sid(row["submission_id"]),
                            "public_id": row["public_id"], "credited": credited,
                            "reverted_at": self.t(rev["reverted_at"]) if rev else None,
-                           "reverted_by": rev["reverted_by"] if rev else None, "validity": row["validity"],
+                           "reverted_by": self.reverter(rev) if rev else None, "validity": row["validity"],
                            "form": row["form"], "stage": row["stage"], "reason": row["reason"],
                            "submitted_at": self.t(row["submitted_at"]), "judged_at": self.t(row["judged_at"]),
                            "task_status_at_submission": row["task_status_at_submission"]}, turn=turn)
@@ -1333,22 +1393,28 @@ def item_tokens(item):
     return n
 
 
-def build_agent(run_dir, agent, ctx=None):
-    ctx = ctx or RunContext(run_dir)
+def build_agent(run_dir, agent, ctx=None, agentic_rows=None):
+    ctx = ctx or RunContext(run_dir, agentic_rows=agentic_rows)
     stream, source = session_stream(run_dir, agent), "session_jsonl"
     if stream is None:
         stream, source = inspect_stream(run_dir, agent), "inspect"
-    items = Builder(ctx, agent).feed(place_pushes(stream, ctx.pushes.get(agent)))
+    stream = place_pushes(stream, ctx.pushes.get(agent))
+    if getattr(ctx, "agentic", None) is not None:
+        stream = agentic_mod.place_reverts(stream, ctx.agentic.reverts_of(agent))
+    items = Builder(ctx, agent).feed(stream)
     times = [it["t"] for it in items if it["t"] is not None]
-    return items, {"items": len(items), "est_tokens": sum(item_tokens(it) for it in items),
-                   "first_min": min(times) if times else None, "last_min": max(times) if times else None,
-                   "role": ctx.role(agent), "source": source}
+    entry = {"items": len(items), "est_tokens": sum(item_tokens(it) for it in items),
+             "first_min": min(times) if times else None, "last_min": max(times) if times else None,
+             "role": ctx.role(agent), "source": source}
+    if getattr(ctx, "agentic", None) is not None and ctx.role(agent) == "solver":
+        entry["monitor"] = agentic_mod.monitor_of(agent)
+    return items, entry
 
 
 def _work(job):
-    run_dir, agent, out = job
+    run_dir, agent, out = job[:3]
     try:
-        items, entry = build_agent(run_dir, agent)
+        items, entry = build_agent(run_dir, agent, agentic_rows=job[3] if len(job) > 3 else None)
     except Exception as ex:  # noqa: BLE001 - reported per agent, the run continues
         return agent, {"error": f"{type(ex).__name__}: {ex}"}
     with open(Path(out) / f"{agent}.jsonl", "w", encoding="utf-8") as f:
@@ -1364,7 +1430,8 @@ def extract(run_dir, out, agents=None, workers=4, log=None, overseers=False):
     selected = agents or (ctx.overseers() if overseers else ctx.solvers())
     tl = Path(out) / "timeline"
     tl.mkdir(parents=True, exist_ok=True)
-    jobs = [(str(run_dir), a, str(tl)) for a in selected]
+    rows = ctx.agentic.rows if ctx.agentic is not None else None
+    jobs = [(str(run_dir), a, str(tl)) + ((rows,) if rows is not None else ()) for a in selected]
     index = {}
     if workers <= 1:
         results = map(_work, jobs)
@@ -1391,6 +1458,8 @@ def extract(run_dir, out, agents=None, workers=4, log=None, overseers=False):
                                                   encoding="utf-8")
         (tl / "monitor_reasons.json").write_text(json.dumps(monitor_reasons(run_dir, tl, index), indent=1,
                                                             ensure_ascii=False) + "\n", encoding="utf-8")
+    if ctx.agentic is not None and not overseers:   # agentic-monitor runs only (arm AG)
+        agentic_mod.write_outputs(ctx, out, [a for a in index if ctx.role(a) == "solver"], workers, log)
     if overseers or any(ctx.role(a) == "overseer" for a in selected):
         (tl / "overseer_context.json").write_text(json.dumps(overseer_context(ctx), indent=1) + "\n",
                                                    encoding="utf-8")
