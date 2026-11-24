@@ -41,6 +41,28 @@ Times are run minutes from the conference's ``run_started_at``, the story maps' 
   (storymap/fake_rule.py, as faking_heatmap.collect) for the submission or library file concerned, else null.
   Push deliveries, listings and status calls are left out.
 
+Agentic monitors (arm AG; docs/plan.md, "Agentic monitors in the story maps (owner decision, November 24, 2026)").
+Only in an AG run (settings ``agentic_monitor.enabled``, or monitor actions in runtime.jsonl) the graph gains, after
+the other nodes, one node per solver's monitor ``{"id": "agmon-NNN", "role": "agentic_monitor", "parent":
+"agent-NNN", "page": "agents/agent-NNN.monitor.html" (the pair page, linked even when not built), "acted": bool,
+"stats": {"reverts", "messages", "unsent", "refused"}}``, a top-level ``"agentic": {"monitors", "acted", "source"}``,
+and two event types, src the monitor and dst its solver:
+
+* ``agmon_revert``: the reviewer-identity ``submission_reverted`` (conference time), the monitor named by
+  runtime.jsonl ``agentic_revert`` (joined by submission id), else agmon-NNN of the credited agent; ``fake`` the
+  reverted submission's fake rule, ``problem``, ``text`` the reason, ``delivered`` the run minute the reason DM
+  reached the solver (messages.delivered_at; null when never delivered or unknown). The reason DM itself is not a
+  separate event.
+* ``agmon_message``: a reviewer-identity ``dm_sent`` that is an ``agentic_message`` (joined by public message id),
+  ``text`` in full (MESSAGE_MAX), ``sent`` true, ``delivered`` as above; a message the conference could not store
+  (runtime ``sent`` false) is drawn at its runtime.jsonl time with ``sent`` false.
+
+``acted`` is true for a monitor with at least one revert or message (refused reverts only count in ``stats``). The
+viewer shows acted monitors by default as satellites of their solvers (toggle "agentic monitors", option "all
+monitors"). Without runtime.jsonl, the 1:1 pairing names the monitor and a reviewer DM within REVERT_NOTICE_GAP
+seconds after a revert to the same solver is taken as its notice. The "reviewer" identity stays dropped from every
+other event type. A non-AG run's graph.json is byte-identical to before. graph-thumb.json leaves monitors out.
+
 Shared viewer (owner, November 6, 2026): the published graph.html is a small stable shell that loads one shared
 viewer for the whole site, ``_graph/viewer.js`` and ``_graph/viewer.css`` at the site root (``../../../_graph/`` from
 RUN/analysis/storymap/graph.html), and fetches ``graph.json`` next to itself. Both viewer files are generated from
@@ -93,7 +115,14 @@ THUMB_JSON = 'graph-thumb.json'
 THUMB_FRAMES = 24
 THUMB_CHAR = {'none': 'n', 'considering': 'c', 'deferred': 'd', 'faking': 'x', 'rejected': 'r', 'stopped': 's'}
 TYPES = ('dm', 'board_post', 'board_read', 'library_publish', 'library_read', 'submit', 'credited', 'revert', 'check',
-         'ov_board_post', 'ov_board_read')
+         'ov_board_post', 'ov_board_read', 'agmon_revert', 'agmon_message')
+# Agentic monitor arm AG (docs/plan.md, "Agentic monitors in the story maps (owner decision, November 24, 2026)"):
+# monitor agmon-NNN watches solver agent-NNN (research_swarm.agentic_monitor); its reverts and DMs are stored in the
+# conference under the reviewer identity and named in runtime.jsonl (agentic_revert / agentic_message).
+AGMON_PREFIX, SOLVER_PREFIX = 'agmon-', 'agent-'
+AGMON_ROLE = 'agentic_monitor'
+AGMON_KINDS = ('agentic_revert', 'agentic_message', 'agentic_revert_refused')
+REVERT_NOTICE_GAP = 5.0   # seconds: without runtime.jsonl, a reviewer DM this soon after a revert is its reason notice
 
 
 def message_text(text):
@@ -399,6 +428,150 @@ def build_events(ctx, rows):
     return events
 
 
+def agmon_of(solver):
+    """``agent-007`` -> ``agmon-007`` (None for any other id)."""
+    s = str(solver or '')
+    return AGMON_PREFIX + s[len(SOLVER_PREFIX):] if s.startswith(SOLVER_PREFIX) else None
+
+
+def solver_of(monitor):
+    s = str(monitor or '')
+    return SOLVER_PREFIX + s[len(AGMON_PREFIX):] if s.startswith(AGMON_PREFIX) else None
+
+
+def agentic_runtime(run_dir):
+    """runtime.jsonl rows of the agentic monitors' actions (AGMON_KINDS), in file order; [] when absent."""
+    rows = []
+    try:
+        f = (Path(run_dir) / 'runtime.jsonl').open(encoding='utf-8')
+    except OSError:
+        return rows
+    with f:
+        for line in f:
+            if '"agentic_' not in line:
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and row.get('kind') in AGMON_KINDS:
+                rows.append(row)
+    return rows
+
+
+def is_agentic(settings, runtime_rows):
+    """An AG run: settings' agentic_monitor.enabled, or any monitor action in runtime.jsonl (as
+    scripts/export_conference.py agentic_actions)."""
+    config = ((settings.get('effective') or {}).get('agentic_monitor')
+              or (settings.get('config') or {}).get('agentic_monitor'))
+    return (isinstance(config, dict) and config.get('enabled') is True) or bool(runtime_rows)
+
+
+def agentic_events(ctx, rows, runtime_rows):
+    """(graph events, {monitor: stats}) of an AG run's monitors (see the module docstring). The conference rows
+    (``rows``, kinds submission_reverted / dm_sent by the reviewer identity) give the times; runtime.jsonl names the
+    acting monitor (joined by submission id and public message id), else the 1:1 pairing names it (agmon-NNN acts
+    only on agent-NNN)."""
+    from research_swarm.async_review import REVIEWER_ID
+    start = ctx.start
+    rt_rev, rt_msg, notices = {}, {}, set()
+    stats = {}
+
+    def stat(monitor):
+        return stats.setdefault(monitor, {'reverts': 0, 'messages': 0, 'unsent': 0, 'refused': 0})
+
+    for r in runtime_rows:
+        p = r.get('payload') if isinstance(r.get('payload'), dict) else {}
+        monitor = p.get('monitor') or r.get('agent_id')
+        if not str(monitor or '').startswith(AGMON_PREFIX):
+            continue
+        p = dict(p, monitor=monitor, solver=p.get('solver') or solver_of(monitor), _ts=_num(r.get('timestamp')))
+        if r.get('kind') == 'agentic_revert_refused':
+            stat(monitor)['refused'] += 1
+        elif r.get('kind') == 'agentic_revert':
+            sid = _sid(p.get('submission_id'))
+            if sid is not None:
+                rt_rev[sid] = p
+            if p.get('message_id'):
+                notices.add(str(p['message_id']))
+        elif r.get('kind') == 'agentic_message':
+            if p.get('message_id'):
+                rt_msg[str(p['message_id'])] = p
+            elif p.get('_ts') is not None:   # not delivered: no conference row; drawn from runtime.jsonl
+                rt_msg[f'unsent-{len(rt_msg)}'] = p
+
+    def delivered(public_id=None, internal=None):
+        msg = ctx.msg_by_public.get(public_id) if public_id else None
+        if msg is None and internal is not None:
+            m = re.fullmatch(r'dm-(\d+)', str(internal))
+            msg = ctx.messages.get(int(m.group(1))) if m else None
+        ts = _num((msg or {}).get('delivered_at'))
+        return minutes(ts, start) if ts is not None else None
+
+    def sub_fake(value):
+        sub = ctx.subs.get(_sid(value))
+        return bool(sub['fake']) if sub else None
+
+    events, seen_rev, seen_msg, last_revert = [], set(), set(), {}
+
+    def add(ts, typ, monitor, solver, fake=None, problem=None, text=None, **extra):
+        e = {'t': minutes(ts, start), 'type': typ, 'src': monitor, 'dst': solver,
+             'fake': fake if isinstance(fake, bool) else None, 'problem': problem,
+             'text': message_text(text) if text else None}
+        e.update(extra)
+        events.append(e)
+        stat(monitor)
+
+    for r in rows:
+        kind, agent, ts = r.get('kind'), r.get('agent_id'), r.get('timestamp')
+        p = r.get('payload') if isinstance(r.get('payload'), dict) else {}
+        if ts is None or agent != REVIEWER_ID:
+            continue
+        if kind == 'submission_reverted':
+            sid = _sid(p.get('submission_id'))
+            rt = rt_rev.get(sid) or {}
+            solver = p.get('credited_agent') or rt.get('solver')
+            monitor = rt.get('monitor') or agmon_of(solver)
+            if not monitor or not solver:
+                continue
+            seen_rev.add(sid)
+            last_revert[solver] = float(ts)
+            stat(monitor)['reverts'] += 1
+            add(ts, 'agmon_revert', monitor, solver, sub_fake(p.get('submission_id')), p.get('problem_id'),
+                p.get('reason') or rt.get('reason'),
+                delivered=delivered(rt.get('message_id')) if rt.get('message_id') else None)
+        elif kind == 'dm_sent':
+            pub, solver = p.get('public_message_id'), p.get('recipient')
+            if pub and str(pub) in notices:
+                continue   # a revert's reason notice: its delivery time is on the agmon_revert event
+            rt = rt_msg.get(str(pub)) if pub else None
+            if rt is None and not runtime_rows and solver in last_revert \
+                    and 0 <= float(ts) - last_revert[solver] <= REVERT_NOTICE_GAP:
+                continue   # no runtime.jsonl: the DM right after a revert is its notice
+            monitor = (rt or {}).get('monitor') or agmon_of(solver)
+            if not monitor or not solver:
+                continue
+            if pub:
+                seen_msg.add(str(pub))
+            stat(monitor)['messages'] += 1
+            add(ts, 'agmon_message', monitor, solver, None, None, p.get('message') or (rt or {}).get('text'),
+                sent=True, delivered=delivered(pub, p.get('message_id')))
+    # runtime-only actions: a revert without its conference event, a message that could not be delivered
+    for sid, rt in rt_rev.items():
+        if sid not in seen_rev and rt.get('_ts') is not None and rt.get('solver'):
+            stat(rt['monitor'])['reverts'] += 1
+            add(rt['_ts'], 'agmon_revert', rt['monitor'], rt['solver'], sub_fake(sid), rt.get('problem_id'),
+                rt.get('reason'), delivered=delivered(rt.get('message_id')) if rt.get('message_id') else None)
+    for key, rt in rt_msg.items():
+        if key in seen_msg or rt.get('_ts') is None or not rt.get('solver'):
+            continue
+        sent = bool(rt.get('sent')) and not key.startswith('unsent-')
+        stat(rt['monitor'])['messages' if sent else 'unsent'] += 1
+        add(rt['_ts'], 'agmon_message', rt['monitor'], rt['solver'], None, None, rt.get('text'), sent=sent,
+            delivered=delivered(rt.get('message_id')) if sent else None)
+    return events, stats
+
+
 def build_graph(run_dir, map_dir=None, overseer_map=None):
     """The graph.json object of a run (contract in the module docstring)."""
     from research.analysis.storymap.extract import RunContext
@@ -410,7 +583,10 @@ def build_graph(run_dir, map_dir=None, overseer_map=None):
         (settings.get('effective') or {}).get('max_run_seconds'))
     smap, omap = load_map(map_dir), load_map(overseer_map)
     tmax = secs / 60 if secs else view.STANDARD_LENGTHS
-    ids = sorted(set(ctx.agents) | set(ctx.roles))
+    # agentic monitors (and the reviewer identity they act under, which storymap.extract gives their role in AG
+    # runs) are not participants: their nodes are added below as satellites
+    ids = sorted(a for a in set(ctx.agents) | set(ctx.roles)
+                 if not str(a).startswith(AGMON_PREFIX) and ctx.roles.get(a) != AGMON_ROLE)
     nodes, states, thoughts, maps = [], {}, {}, {}
     for agent in ids:
         role = ctx.roles.get(agent, 'solver')
@@ -421,9 +597,31 @@ def build_graph(run_dir, map_dir=None, overseer_map=None):
             states[agent] = overseer_states(rec, tmax) if role == 'overseer' else solver_states(rec, tmax)
             thoughts[agent] = thoughts_of(rec)
             maps[agent] = mini_map(rec, tmax, role == 'overseer')
+    rows = conference_events(run_dir)
+    events = build_events(ctx, rows)
+    runtime_rows = agentic_runtime(run_dir)
+    agentic = None
+    if is_agentic(settings, runtime_rows):
+        # AG run: one satellite node per solver's monitor (after the other nodes), its reverts and messages
+        extra, stats = agentic_events(ctx, rows, runtime_rows)
+        events = sorted(events + extra, key=lambda e: (e['t'], TYPES.index(e['type'])))
+        acted = 0
+        for n in list(nodes):
+            monitor = agmon_of(n['id']) if n['role'] == 'solver' else None
+            if not monitor:
+                continue
+            st = stats.get(monitor) or {'reverts': 0, 'messages': 0, 'unsent': 0, 'refused': 0}
+            did = bool(st['reverts'] or st['messages'] or st['unsent'])
+            acted += did
+            nodes.append({'id': monitor, 'role': AGMON_ROLE, 'parent': n['id'],
+                          'page': f"agents/{n['id']}.monitor.html", 'acted': did, 'stats': st})
+        agentic = {'monitors': sum(n['role'] == AGMON_ROLE for n in nodes), 'acted': acted,
+                   'source': 'runtime.jsonl + conference' if runtime_rows else 'conference (1:1 pairing)'}
     graph = {'schema': SCHEMA, 'run': run_dir.name, 'minutes': round(tmax, 3),
              'title': run_title(run_dir.name, settings), 'nodes': nodes, 'states': states, 'thoughts': thoughts,
-             'maps': maps, 'events': build_events(ctx, conference_events(run_dir))}
+             'maps': maps, 'events': events}
+    if agentic:
+        graph['agentic'] = agentic
     names = view.load_taxonomy(SOLVER_TAXONOMY) if SOLVER_TAXONOMY.is_file() else {}
     used = {th['code'] for a, rows in thoughts.items() if ctx.roles.get(a) != 'overseer' for th in rows}
     codes = {c: names[c] for c in sorted(used) if c in names}
@@ -465,7 +663,10 @@ def thumb(graph, frames=THUMB_FRAMES, badges=None):
     """The graph-thumb.json object of a graph.json object (contract in the module docstring). Mirrors the viewer
     (scripts/storymap_graph_template.html): its time range (tMin = min(0, first event, first state), tMax =
     max(minutes, last event)), stateAt and first-fake rule. ``badges``: node_badges() of the run, or None."""
-    nodes = [{'id': n['id'], 'role': n.get('role') or 'solver'} for n in graph.get('nodes') or []]
+    # agentic monitors (AG runs) are left out: 20 satellites would crowd the small snapshot, whose stance and fake
+    # dots are the point; the full graph shows them
+    nodes = [{'id': n['id'], 'role': n.get('role') or 'solver'} for n in graph.get('nodes') or []
+             if n.get('role') != AGMON_ROLE]
     if badges is not None:
         for n in nodes:
             n['b'] = badges.get(n['id'], '')
