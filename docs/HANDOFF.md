@@ -2434,8 +2434,15 @@ is being merged into main via `collab-env`.
       upload), deployment 33d882e9; receipt `runs/phase-b/cloudflare/receipts/agentic-monitor-batch6-20261124.json`; private
       files not deployed (1,280). The 8 empty failed-startup attempts stay in the dataset, unpublished. Local copies then
       offloaded back to the index (judge outputs and re-rendered pages added to the dataset add-only by
-      `offload_runs.py`); the judge's `agents.jsonl` links on the pages point at the pinned commit and therefore 404 for
-      the owner (the file is in a later dataset commit).
+      `offload_runs.py`). (Correction 13:55 PST: no served page links the judge's `agents.jsonl`, checked on all 6
+      results.html and simple_judge/report.html pages and experiments.json; nothing to re-pin.)
+    - **Own series (owner, 2026-11-24: "runs shouldn't be in repeat categories"), deployed 13:52 PST:** new catalogue
+      series `ag120` "Agentic monitor per solver (AG)" (`scripts/run_profile.py`, first in SERIES) holds the 6 AG runs
+      of both models; before, the 3 GLM runs fell into `push120` (21 runs) and the 3 DS runs into `ds120` (22). Now
+      ag120 6, ds120 19, push120 18 (text: six 10-overseer replicates, r4-r6 Nov 16); 141 runs, each in exactly one
+      series (tests/test_series_unique.py). Commit 56f834f; `restyle --run` of the 43 affected runs (43 results.html
+      + catalogue) -> deployment 75ba16e5, viewer b91e76c9; verify ok, verify --viewer ok; receipt
+      `runs/phase-b/cloudflare/receipts/ag-series-20261124.json`.
 
 ## Next steps / open items
 
