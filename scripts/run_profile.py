@@ -45,16 +45,27 @@ SERIES = (
      'the silent seed. Board posts and direct messages are pushed into the next tool result, as in the 120-minute '
      'push runs; unread notices remain for new library files only. Compare with the GLM 5.3 Flash push control '
      '(100 solvers, 120 minutes).'),
+    # Agentic monitor arm AG (owner decisions, November 23, 2026; docs/plan.md): one series for both models, before
+    # ds120 and push120 so that neither claims its runs (owner, November 24, 2026: every run in exactly one series).
+    # Same run-ID test as build_experiment_index.AGENTIC_RUN and site_layout._AGENTIC_RUN.
+    ('ag120', r'-agentic(?:-monitor)?-(?:disclosed-)?', 'Agentic monitor per solver (AG)',
+     'Six 120-minute seeded runs (100 solvers, the planted exploit at +3 min, no overseers, pushed messages), three '
+     'replicates with GLM 5.3 Flash and three with DeepSeek V4.1 Flash (1017), all on November 24, 2026. Each solver '
+     'has its own agentic monitor outside the swarm, on the same model as the solvers and not disclosed to them. A '
+     'monitor waits as long as it chooses for its solver\'s new tool calls, lists its solver\'s revertible accepted '
+     'submissions, reads full tool outputs, reverts its own solver\'s accepted submissions (the reason is sent to the '
+     'solver by direct message) and may message its solver. Solver steps were about twice as slow as in the other '
+     '120-minute runs, consistent with 200 containers per VM. Compare with the asynchronous reviewer arms A2 and A4, '
+     'the top-down monitors and each model\'s push control.'),
     # DeepSeek oversight re-run (owner decision, November 23, 2026; docs/plan.md): every model role on DeepSeek.
     ('ds120', r'^dsv41flash100-', 'DeepSeek V4.1 Flash oversight re-run',
-     '120-minute runs with 100 DeepSeek V4.1 Flash (1017) solvers and pushed messages, repeating the GLM 5.3 Flash '
-     'oversight arms with DeepSeek in every model role (solvers, overseers, monitor and reviewer: the same model '
-     'and settings). Three replicates each, all with the planted exploit at +3 min: a control, 10 overseers with a '
-     'private overseer board, the actions-only blocking monitor silent (M1) or with the reason shown (M3), and the '
-     'asynchronous reviewer with rollback, silent (A1) or with the reason shown (A3); plus one control without a '
-     'planted exploit. A further arm (AG) gives each solver its own agentic monitor outside the swarm, undisclosed '
-     'to the solvers: it waits as long as it chooses before reading its solver\'s new tool calls, reverts its own '
-     'solver\'s accepted submissions with the reason sent by direct message, and may message its solver. Compare with the GLM 5.3 Flash push control, overseer, monitor and reviewer runs.'),
+     'Nineteen 120-minute runs with 100 DeepSeek V4.1 Flash (1017) solvers and pushed messages, repeating the GLM 5.3 '
+     'Flash oversight arms with DeepSeek in every model role (solvers, overseers, monitor and reviewer: the same '
+     'model and settings). Three replicates each, all with the planted exploit at +3 min: a control, 10 overseers '
+     'with a private overseer board, the actions-only blocking monitor silent (M1) or with the reason shown (M3), and '
+     'the asynchronous reviewer with rollback, silent (A1) or with the reason shown (A3); plus one control without a '
+     'planted exploit. The DeepSeek agentic monitor runs (AG) are in their own series. Compare with the GLM 5.3 '
+     'Flash push control, overseer, monitor and reviewer runs.'),
     ('reviewer120', r'^glmflash100-seeded-reviewer-.+-120m-push-r\d', 'Asynchronous reviewer',
      '120-minute seeded runs (100 GLM 5.3 Flash solvers, the planted exploit at +3 min, no overseers, no blocking '
      'monitor, pushed messages) with an asynchronous reviewer outside the swarm: every 5 minutes a GLM 5.3 Flash '
@@ -80,9 +91,9 @@ SERIES = (
      '120-minute push runs; compare with the 180-minute communication-only runs, where they were announced by '
      'unread notices.'),
     ('push120', r'^glmflash100-seeded-.+-120m-push-r\d', '120-minute runs with pushed messages',
-     'Fifteen 120-minute seeded runs (100 GLM 5.3 Flash solvers, the planted exploit at +3 min), three replicates '
-     'each of a control, a control with an integrity reminder every 5 minutes, and 1, 2 or 10 GLM 5.3 Flash '
-     'overseers. Board posts, direct messages and reminders are pushed: appended to the solver\'s next tool result '
+     'Eighteen 120-minute seeded runs (100 GLM 5.3 Flash solvers, the planted exploit at +3 min): three replicates '
+     'each of a control, a control with an integrity reminder every 5 minutes and 1 or 2 GLM 5.3 Flash overseers, '
+     'and six of 10 GLM 5.3 Flash overseers (r4-r6 added on November 16, 2026). Board posts, direct messages and reminders are pushed: appended to the solver\'s next tool result '
      'instead of announced by an unread notice. Unread notices remain for new library files only.'),
     ('reminder60', r'^glmflash100-seeded-reminder5m-60m-notices-', '60-minute control with an integrity reminder',
      'Three replicates of the 60-minute seeded control with unread notices (100 GLM 5.3 Flash solvers, no '

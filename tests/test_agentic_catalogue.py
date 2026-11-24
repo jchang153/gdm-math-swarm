@@ -1,5 +1,6 @@
 """Agentic monitor arm AG (docs/plan.md, "Agentic monitor arm AG (owner decisions, November 23, 2026)"): catalogue
-card titles, run-spec chips, run-page titles/chips and the ds120 series texts. Offline; no run records needed."""
+card titles, run-spec chips, run-page titles/chips and the AG series (ag120, both models; owner, November 24, 2026:
+every run in exactly one series). Offline; no run records needed."""
 from pathlib import Path
 import sys
 import unittest
@@ -26,7 +27,10 @@ class AgenticCatalogueTest(unittest.TestCase):
     def test_card_title_and_series(self):
         for run in AG_RUNS:
             self.assertEqual(build_experiment_index.short_title({'run': run}), f'{TITLE} · run 1')
-            self.assertEqual(run_profile.series_of(run)[0], 'ds120')
+            self.assertEqual(run_profile.series_of(run)[0], 'ag120')
+        for run in ('glmflash100-seeded-agentic-monitor-120m-push-r2-20261124T112253Z',
+                    'dsv41flash100-seeded-agentic-monitor-120m-push-r3-20261124T103722Z', DISCLOSED):
+            self.assertEqual(run_profile.series_of(run)[0], 'ag120')
         self.assertEqual(build_experiment_index.short_title({'run': DISCLOSED}),
                          f'{TITLE}, disclosed to agents · run 2')
 
@@ -58,9 +62,12 @@ class AgenticCatalogueTest(unittest.TestCase):
         self.assertNotIn('agentic', chips)
 
     def test_series_texts(self):
-        self.assertIn('AG', catalogue_intro.SERIES_LINES['ds120'])
-        ds120 = next(t for k, _, _, t in run_profile.SERIES if k == 'ds120')
-        self.assertIn('agentic monitor', ds120)
+        self.assertIn('agentic monitor', catalogue_intro.SERIES_LINES['ag120'])
+        texts = {k: t for k, _, _, t in run_profile.SERIES}
+        self.assertIn('agentic monitor', texts['ag120'])
+        self.assertIn('Nineteen', texts['ds120'])
+        self.assertIn('Eighteen', texts['push120'])
+        self.assertIn('own series', texts['ds120'])
         self.assertIn('Agentic monitor', dict(catalogue_intro.GLOSSARY))
 
 

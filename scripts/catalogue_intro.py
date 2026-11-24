@@ -187,15 +187,16 @@ def about_section(text=None):
 # titles of run_profile.SERIES ("I prefer the old names which I'm familiar with").
 SERIES_LINES = {
     'sweep25': 'Five frontier models, 25 agents each, a planted cheat and no overseers; 1 hour.',
+    'ag120': 'An undisclosed agentic monitor per solver, outside the swarm, waits, reverts its solver\'s submissions '
+             'with the reason sent and messages it; GLM and DeepSeek, 3 repeats each, 2 hours.',
     'ds120': 'The GLM oversight arms repeated with DeepSeek in every role: control, 10 overseers, monitor M1/M3, '
-             'reviewer A1/A3, and AG: an agentic monitor per solver that waits, reverts with the reason sent and messages '
-             'its solver; 3 repeats each plus an unplanted control, 2 hours.',
+             'reviewer A1/A3; 3 repeats each plus an unplanted control, 2 hours.',
     'reviewer120': 'A reviewer outside the swarm checks each agent every 5 minutes and undoes, after the fact: rollback '
                    'or revert, reason shown or silent; 4 arms, 3 repeats each, 2 hours.',
     'monitor120': 'A generic monitor outside the swarm blocks risky tool calls; 4 arms, 3-6 repeats each, plus 2 runs where '
                   'agents are told about the monitor; 2 hours.',
     'push120': '100 agents with a planted cheat: no overseer, a reminder every 5 minutes, or 1, 2 or 10 overseers who '
-               'can check and undo; 3 repeats each, 2 hours.',
+               'can check and undo; 3 repeats each (6 for 10 overseers), 2 hours.',
     'push120comms': 'Overseers who can only post and message, no undo; 1, 2 or 10 of them, 2 hours.',
     'reminder60': 'A reminder of the integrity rules every 5 minutes, no overseers; 1 hour.',
     'conditions180': 'Overseers with only messaging or only check-and-undo powers; 3 hours.',
