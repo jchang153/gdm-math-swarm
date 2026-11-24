@@ -40,6 +40,7 @@ _IDENTITY_LINE = re.compile(r"^You are[^\n]*(?:Claude|Anthropic)[^\n]*(?:\n|$)",
 _MODEL_LINE = re.compile(r"^You are powered by the model[^\n]*(?:\n|$)", re.MULTILINE)
 _REMINDER = re.compile(r"<system-reminder>(.*?)</system-reminder>[ \t]*\n*", re.DOTALL)
 _ENVIRONMENT_HEAD = "# Environment\nYou have been invoked in the following environment"
+ENVIRONMENT_HEAD = _ENVIRONMENT_HEAD  # public: the agentic monitor drops this whole message
 _WORKING_DIR = re.compile(r"^ - Primary working directory: (\S[^\n]*)$", re.MULTILINE)
 _PLATFORM = re.compile(r"^ - Platform: (\S[^\n]*)$", re.MULTILINE)
 _DATE = re.compile(r"^Today's date is [^\n]+$", re.MULTILINE)

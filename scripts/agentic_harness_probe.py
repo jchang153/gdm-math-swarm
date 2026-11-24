@@ -103,7 +103,10 @@ def evaluate(requests, *, wait_seconds, delivery_chars, big_chars, server="revie
     system = first.get("system") or ""
     checks["prompt_replaced"] = {"passed": bool(prompt) and prompt in system and len(system) - len(prompt) <= 500,
                                  "other_system_chars": (len(system) - len(prompt)) if prompt and prompt in system
-                                 else None}
+                                 else None,
+                                 # the other system text itself (Claude Code's own; no credentials), for diagnosis
+                                 "other_system_text": (system.replace(prompt, "<PROMPT>", 1) if prompt and prompt in system
+                                                       else system)[:4000]}
     after_delivery = by_step.get("after_delivery") or {}
     d = summarize_result(after_delivery.get("last_tool_text"), DELIVERY_HEAD, DELIVERY_TAIL, delivery_chars)
     checks["delivery_intact"] = {"passed": d["whole"], **d}
@@ -156,10 +159,14 @@ def stand_in_tools(wait_cap, delivery_chars, big_chars):
 
 def scripted_filter(steps, log, prompt):
     """A generate filter that never calls a model: records each request and answers the monitor session's
-    requests with the next step (other requests of the CLI, e.g. without the monitor prompt, get "ok")."""
+    requests with the next step (other requests of the CLI, e.g. without the monitor prompt, get "ok").
+    Requests are recorded as the monitor's model receives them: after ``agentic_monitor.monitor_messages``, the
+    runtime filter's removal of Claude Code's own system text (``prompt_replaced`` checks the result)."""
     from inspect_ai.model import ChatMessageSystem, ChatMessageTool, ModelOutput
+    from research_swarm.agentic_monitor import monitor_messages
 
     async def intercept(model, messages, tools, tool_choice, config):
+        messages, _ = monitor_messages(messages)
         last_tool = next((m for m in reversed(messages) if isinstance(m, ChatMessageTool)), None)
         system = "\n".join(m.text for m in messages if isinstance(m, ChatMessageSystem))
         if prompt not in system:

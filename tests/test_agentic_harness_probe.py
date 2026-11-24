@@ -35,6 +35,13 @@ class ProbeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             hp.filler(1, "HH", "T")
 
+    def test_prompt_replaced_records_other_text(self):
+        checks = run(first={"system": "x" * 600 + "\nPROMPT"})
+        self.assertFalse(checks["prompt_replaced"]["passed"])
+        self.assertEqual(checks["prompt_replaced"]["other_system_chars"], 601)
+        self.assertTrue(checks["prompt_replaced"]["other_system_text"].endswith("\n<PROMPT>"))
+        self.assertTrue(run(first={"system": "PROMPT"})["prompt_replaced"]["passed"])
+
     def test_all_pass(self):
         checks = run()
         self.assertTrue(all(v["passed"] for k, v in checks.items() if not v.get("informational")))

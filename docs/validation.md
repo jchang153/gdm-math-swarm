@@ -760,7 +760,10 @@ PYTHONPATH=src:. .venv/bin/python scripts/role_compat_check.py \
   Required checks: `only_monitor_tools` (the first request offers exactly the five `mcp__review__*` tools, no
   built-in tool: the disallow list itself, without the runtime filter), `prompt_replaced`, `delivery_intact`
   (a 40,000-character delivery, `DELIVERY_MAX_CHARS`, arrives whole), `long_wait_survives` (a `wait` of
-  `max_wait_seconds` returns its result, not an MCP timeout; `MCP_TOOL_TIMEOUT` = max wait + 300 s), `finished`.
+  `max_wait_seconds` returns its result, not an MCP timeout; `MCP_TOOL_TIMEOUT` and
+  `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` = max wait + 300 s), `finished`. `prompt_replaced` checks the first request
+  after the monitor filter's removal of Claude Code's own system text (`agentic_monitor.monitor_messages`: billing
+  and identity lines, the environment message, product-naming reminders) and records the remaining other text.
   Informational: `oversized_result` (how a 120,000-character `get_output` result arrives: whole, cut, or as a
   file reference) and the container's peak memory. Writes `data/validation/agentic-harness-<UTC>.json`.
 * Launch guard: the operator's private launch scripts send every `*monitor*` config through

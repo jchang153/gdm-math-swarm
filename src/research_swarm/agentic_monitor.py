@@ -74,6 +74,10 @@ EXTRA_DISALLOWED_TOOLS = ("Bash", "BashOutput", "KillShell", "KillBash", "TaskSt
 # results to files, which a monitor without file tools could not read).
 DELIVERY_MAX_CHARS = 40_000
 # Claude Code's MCP tool-call timeout must exceed the longest wait (milliseconds = (max wait + margin) * 1000).
+# Claude Code 2.1.296 also aborts a tool that sends "no response or progress" for 300 s (unpaid harness probe
+# 20261124T085609Z: wait(1800) aborted after 302 s); CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT gets the same value. MCP
+# progress notifications are not an option: the MCP endpoint is Inspect's in-container bridge proxy, which sends
+# none, and Inspect's bridged-server config has no per-server ``timeout`` field.
 MCP_TOOL_TIMEOUT_MARGIN_SECONDS = 300
 MAX_MCP_OUTPUT_TOKENS = "50000"
 
@@ -240,8 +244,31 @@ def mcp_tool_timeout_ms(settings):
 
 
 def claude_code_env_extra(settings):
-    """The monitor's extra Claude Code environment (no credentials; the bridge supplies the placeholder token)."""
-    return {"MCP_TOOL_TIMEOUT": mcp_tool_timeout_ms(settings), "MAX_MCP_OUTPUT_TOKENS": MAX_MCP_OUTPUT_TOKENS}
+    """The monitor's extra Claude Code environment (no credentials; the bridge supplies the placeholder token).
+    Both MCP timeouts (whole call and silence) exceed the longest wait; ``CLAUDE_CODE_ATTRIBUTION_HEADER=0``
+    drops the billing-header system line at the source (as in the neutral environment)."""
+    timeout = mcp_tool_timeout_ms(settings)
+    return {"MCP_TOOL_TIMEOUT": timeout, "CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT": timeout,
+            "MAX_MCP_OUTPUT_TOKENS": MAX_MCP_OUTPUT_TOKENS, "CLAUDE_CODE_ATTRIBUTION_HEADER": "0"}
+
+
+def monitor_messages(messages):
+    """(messages, counts): what the monitor's model receives of Claude Code's request. In ``replace`` mode
+    Claude Code still adds system text besides the monitor prompt (unpaid harness probe 20261124T085609Z: 942
+    characters): the billing-header line, the identity line "You are a Claude agent, built on Anthropic's
+    Claude Agent SDK.", and a system message "# Environment / You have been invoked in the following
+    environment: ..." (working directory, platform, shell, OS, the untrusted-downloads advice, "You are powered
+    by the model ...", a ``<total_tokens>`` counter, the date). The environment message is dropped whole (the
+    monitor has no files or shell); the rest goes through the neutral environment's rewrite
+    (``neutral_env.neutralize_messages``: billing and identity lines, ``<system-reminder>`` blocks naming the
+    product such as the git-attribution reminder). Deterministic; never mutates ``messages``."""
+    from inspect_ai.model import ChatMessageSystem
+    from .neutral_env import ENVIRONMENT_HEAD, neutralize_messages
+    kept = [m for m in messages if not (isinstance(m, ChatMessageSystem) and isinstance(m.content, str)
+                                        and m.content.startswith(ENVIRONMENT_HEAD))]
+    out, counts = neutralize_messages(kept)
+    counts["environment_removed"] = len(messages) - len(kept)
+    return out, counts
 
 
 def agentic_effective(options, settings):
@@ -550,8 +577,9 @@ class AgenticMonitors:
 
     # bridge filter -----------------------------------------------------------
     def wrap_filter(self, monitor, inner):
-        """The monitor's bridge filter: records Claude Code's compaction requests (``agentic_compaction``) and
-        sends the model only this server's tools, then delegates to ``inner`` (the run's budget filter)."""
+        """The monitor's bridge filter: records Claude Code's compaction requests (``agentic_compaction``),
+        removes Claude Code's own system text (``monitor_messages``) and sends the model only this server's
+        tools, then delegates to ``inner`` (the run's budget filter)."""
         from .rollback import COMPACTION_MARKER
         prefix = f"mcp__{MCP_SERVER}__"
         seen = {"compaction": None, "tools_error": False}
@@ -571,6 +599,7 @@ class AgenticMonitors:
                     if seen["compaction"] != key:  # a CLI retry of the same request is not a new compaction
                         seen["compaction"] = key
                         self._record("agentic_compaction", monitor, {"monitor": monitor, "messages": len(messages)})
+                messages, _ = monitor_messages(messages)
                 own = [t for t in tools if str(getattr(t, "name", "")).startswith(prefix)]
                 if own:
                     tools = own

@@ -117,6 +117,10 @@ class IdentifierAndConfigTests(unittest.TestCase):
         self.assertEqual(specs[0][1], agentic_prompt.TOOL_DESCRIPTIONS["wait"])
         env = ag.claude_code_env_extra(settings)
         self.assertEqual(env["MCP_TOOL_TIMEOUT"], str((1800 + 300) * 1000))
+        # probe 20261124T085609Z: Claude Code 2.1.296 aborts a tool silent for 300 s unless this is raised
+        self.assertEqual(env["CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"], env["MCP_TOOL_TIMEOUT"])
+        self.assertGreaterEqual(int(env["CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT"]), (1800 + 300) * 1000)
+        self.assertEqual(env["CLAUDE_CODE_ATTRIBUTION_HEADER"], "0")
         self.assertFalse([k for k in env if "KEY" in k or "TOKEN" in k.replace("MAX_MCP_OUTPUT_TOKENS", "")])
         disallowed = ag._disallowed_tools()
         for name in ("Bash", "Read", "Write", "Edit", "WebFetch", "WebSearch", "Agent", "Task", "TodoWrite",
@@ -369,6 +373,45 @@ class BridgeTests(unittest.TestCase):
         admitted = [e for e in events if e[0] == "inference_admitted"]
         self.assertEqual(len(admitted), 3)
         self.assertEqual(inner.state["requests"], 3)
+
+    def _claude_code_request(self, prompt):
+        """Claude Code 2.1.296's replace-mode request as the bridge passes it (non-neutral run)."""
+        from inspect_ai.model import ChatMessageSystem, ChatMessageUser
+        from tests.test_neutral_env import ATTRIBUTION, ENVIRONMENT
+        return [ChatMessageSystem(content="x-anthropic-billing-header: cc_version=2.1.296.abc; cc_entrypoint=sdk-cli;"),
+                ChatMessageSystem(content="You are a Claude agent, built on Anthropic's Claude Agent SDK."),
+                ChatMessageSystem(content=prompt),
+                ChatMessageUser(content=ATTRIBUTION + "Begin."),
+                ChatMessageSystem(content=ENVIRONMENT)]
+
+    def test_monitor_messages_leave_only_the_prompt(self):
+        from inspect_ai.model import ChatMessageSystem
+        prompt = ag.system_prompt(ag.agentic_settings(config()))
+        messages = self._claude_code_request(prompt)
+        out, counts = ag.monitor_messages(messages)
+        system = [m.text for m in out if isinstance(m, ChatMessageSystem)]
+        self.assertEqual(system, [prompt])
+        self.assertEqual([m.text for m in out if m.role == "user"], ["Begin."])
+        self.assertEqual(counts["environment_removed"], 1)
+        self.assertEqual(len(messages), 5)  # never mutated
+        self.assertEqual(ag.monitor_messages(out)[0], out)  # idempotent
+
+    def test_filter_wrapper_removes_claude_code_system_text(self):
+        from inspect_ai.model import ChatMessageSystem
+        from inspect_ai.tool import ToolInfo, ToolParams
+        seen = []
+
+        async def inner(model, messages, tools, tool_choice, config):
+            seen.append(messages)
+            return "out"
+        inner.state = {"requests": 0}
+        monitors = ag.AgenticMonitors(ag.agentic_settings(config()), conference=None, record=lambda *e: None,
+                                      solver_ids=agents(1), history=FakeHistory())
+        prompt = ag.system_prompt(monitors.settings)
+        tools = [ToolInfo(name="mcp__review__wait", description="w", parameters=ToolParams())]
+        asyncio.run(monitors.wrap_filter("agmon-001", inner)(None, self._claude_code_request(prompt), tools,
+                                                             None, None))
+        self.assertEqual([m.text for m in seen[0] if isinstance(m, ChatMessageSystem)], [prompt])
 
     def test_filter_wrapper_sends_only_monitor_tools(self):
         from inspect_ai.tool import ToolInfo, ToolParams
