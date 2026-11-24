@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-23 ~17:20 PST by Claude (Opus 5.5) DeepSeek re-run config agent (item 56: DeepSeek oversight re-run configs ready, launch pending).
+Last updated: 2026-11-24 ~02:25 PST by Claude (Opus 5.5) AG launch agent (item 57: AG arm, 6 runs failed at startup, relaunch pending).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -2340,6 +2340,31 @@ is being merged into main via `collab-env`.
       M3 4.3 / 2.0 / 281 / 13.0 / 14.91 (monitor $8.25); A1 87.0 / 22.0 / 3,148 / 12.3 / 8.78 (reviewer $2.08);
       A3 47.3 / 23.0 / 2,323 / 13.7 / 9.77 (reviewer $1.58). Every run also reports $3-6 of holds not yet settled
       (total = settled + held). Median step 39-45 s (control, 10ov, A1/A3) vs 54-55 s with the monitor.
+57. **FAILED AT STARTUP 2026-11-24 (launched 01:50-01:52 PST, stopped ~02:01-02:03 PST, $0 model spend): agentic monitor
+    arm AG, 6 runs** (owner, chat 2026-11-23/24; docs/plan.md "Agentic monitor arm AG (owner decisions, November 23,
+    2026)"). One agentic monitor per solver (`agmon-NNN`, Claude Code harness, five tools, prompt `agentic-review-v1`),
+    100 solvers + 100 monitors, 120 min, push, seeded.
+    - Code: 6b86d52 (AG runtime, prompt, analysis, configs; 2 GB monitor cap `agentic_monitor.mem_limit`, solvers 7 GB)
+      and 43d2f1b (fix: `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` 2,100,000 ms, attribution header off, the monitor's requests
+      drop the "# Environment" message and neutralize billing/identity lines). Runs used 43d2f1b.
+    - Role check (validation.md 15a, paid, 6.5 cents): both passed. DeepSeek 40/40 parsed, 0 malformed, 0 errors (tool
+      calls: wait 36, list_revertible 6, get_output 1); GLM 40/40 parsed, 0 malformed, 0 errors (wait 37,
+      list_revertible 3). `revert_submission` and `message_solver` were never called in the replay (acted on 0/20 flagged,
+      0/20 unflagged windows). Records `data/validation/role-compat-20261124T085019Z.json` (DS), `...085022Z.json` (GLM).
+    - Harness probe (unpaid, mockllm): on 6b86d52 FAILED `long_wait_survives` (Claude Code 2.1.296 aborts an MCP tool
+      silent for 300 s) and `prompt_replaced` (942 chars of other system text); on 43d2f1b PASSED every required check
+      (five tools only, prompt replaced with 0 other chars, 40,000-char delivery whole, 1,800 s wait returned, finished;
+      a 120,000-char `get_output` arrives cut to ~2.2k chars with a file reference; peak memory 273 MiB).
+    - Runs `dsv41flash100-seeded-agentic-monitor-120m-push-r{1,2,3}-20261124T{095044,095100,095107}Z` (budget $150 each)
+      and `glmflash100-seeded-agentic-monitor-120m-push-r{1,2,3}-20261124T{095235,095208,095156}Z` ($250 each), one per
+      owner VM (mapping in HANDOFF.local.md, scripts in private/ops/ag/). freeze_route, compat check and preflight passed
+      first try. **All 6 stopped with `run_stop` reason `startup_timeout`** (600 s barrier): all 100 monitors reached
+      `agent_ready`, 0 of 100 solvers did (barrier 100/200), 0 provider calls. Solver workspace setup was still running
+      at the timeout: Inspect `write_file` of the problem files took ~4-10 s each per solver (agent-001 still writing
+      problems/ at +9 min), likely contention with 200 samples at once (Inspect subprocess limit 96 = vCPUs). Each VM
+      packaged and uploaded the empty run to the logs dataset (`OFFLOADED.json`); supervisors are waiting for retrieval.
+    - Next: fix startup for 200 samples (for example a longer `startup_timeout_seconds`, more Inspect subprocesses or
+      a single archive write per workspace), then relaunch the 6 runs (new run ids).
 ## Next steps / open items
 
 - **Logs dataset storage (2026-11-19):** the dataset is now in the owner's PRO account (1 TB private; item 54), so
