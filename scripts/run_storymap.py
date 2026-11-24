@@ -51,7 +51,9 @@ sys.path[:0] = [str(ROOT), str(ROOT / "src"), str(ROOT / "scripts")]
 
 import offload_runs  # noqa: E402
 
-STAGE0_INPUTS = ("resume/", "inspect/", "runtime.jsonl")
+# Everything stage 0 and the interaction graph read: index-only local runs (docs/plan.md, November 19, 2026) keep
+# none of it, so conference/ (state.sqlite, events.jsonl) and evaluations/ (evaluations.jsonl) are restored too.
+STAGE0_INPUTS = ("resume/", "inspect/", "runtime.jsonl", "conference/", "evaluations/")
 
 
 def parse_args(argv=None):

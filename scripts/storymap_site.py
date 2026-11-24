@@ -35,7 +35,8 @@ VIEWER_DIR = '_graph'  # site-root folder of the shared interaction-graph viewer
 VIEWER_FILES = ('viewer.js', 'viewer.css')
 # The only links out of the story-map folder: the graph shell's shared viewer (RUN/analysis/storymap -> site root).
 SHARED_LINKS = {GRAPH_PAGE: frozenset(f'../../../{VIEWER_DIR}/{n}' for n in VIEWER_FILES)}
-AGENT_PAGE = re.compile(r'agents/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.html')
+# Agentic-monitor runs (docs/plan.md, November 24, 2026) add the monitor-solver pair page agents/<solver>.monitor.html.
+AGENT_PAGE = re.compile(r'agents/[A-Za-z0-9][A-Za-z0-9_-]{0,63}(?:\.monitor)?\.html')
 STORYMAP_INDEX = STORYMAP_DIR + '/index.html'
 STORYMAP_LABEL = 'Story map'
 STORYMAP_HELP = ('Per-agent map of reasoning about cheating next to what each agent read, saw and did, as read by '

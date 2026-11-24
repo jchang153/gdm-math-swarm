@@ -102,6 +102,10 @@ class AllowlistTests(unittest.TestCase):
         published; the overseer prompts are screened like the solver prompts; the overseer codebook is public text."""
         self.assertTrue(sm.published('taxonomy_overseer.html'))
         self.assertTrue(sm.published('agents/agent-102.html'))
+        # Agentic-monitor pair pages (November 24, 2026); no other dotted agent page names.
+        self.assertTrue(sm.published('agents/agent-018.monitor.html'))
+        self.assertFalse(sm.published('agents/agent-018.other.html'))
+        self.assertFalse(sm.published('agents/agent-018.monitor.json'))
         self.assertFalse(prepare_hf_library.run_excluded('analysis/storymap/taxonomy_overseer.html'))
         self.assertTrue(prepare_hf_library.run_excluded('analysis/storymap/timeline/overseer_context.json'))
         self.assertTrue(prepare_hf_library.run_excluded('analysis/storymap-overseer/stage1/agent-102.jsonl'))
