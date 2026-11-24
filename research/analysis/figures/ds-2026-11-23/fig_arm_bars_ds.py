@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[4]
 D = Path(__file__).resolve().parent
 data = json.load(open(ROOT / "research/analysis/monitor_arms-ds-2026-11-24.json"))
 arms = data["arms"]
-ORDER = [a for a in ["control", "unseeded-control", "10ov", "M1", "M3", "A1", "A3", "AG"] if a in arms]
+ORDER = [a for a in ["control", "unseeded-control", "10ov", "M1", "M3", "A2", "A4", "AG"] if a in arms]
 LABEL = {"control": "control", "unseeded-control": "control\nUNSEEDED\n(n=1, no seed)", "10ov": "10 ov",
          "M1": "M1\nactions\nsilent", "M3": "M3\nactions\nreason", "A1": "A1\nrollback\nsilent", "A3": "A3\nrollback\nreason", "AG": "AG\nagentic\nrevert+reason"}
 FAM = {"control": "g", "unseeded-control": "u", "10ov": "b", "M1": "o", "M3": "o", "A1": "p", "A3": "p", "AG": "t"}

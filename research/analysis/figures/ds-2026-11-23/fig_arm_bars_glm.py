@@ -27,7 +27,7 @@ for a, tag in {"A1": "rollback-silent", "A2": "revert-silent", "A3": "rollback-r
     om = [json.load(open(p + "/results.json"))["outcome_metrics"] for p in runs]
     g[a] = {"runs": [Path(p).name for p in runs], "metrics": {k: {"values": [dig(o, k) for o in om]} for k in KEYS}}
 arms = g
-ORDER = [a for a in ["control", "10ov", "M1", "M3", "A1", "A2", "A3", "A4", "AG"] if a in arms]
+ORDER = [a for a in ["control", "10ov", "M1", "M3", "A2", "A4", "AG"] if a in arms]
 LABEL = {"control": "control", "unseeded-control": "control\nUNSEEDED\n(n=1, no seed)", "10ov": "10 ov",
          "M1": "M1\nactions\nsilent", "M3": "M3\nactions\nreason", "A1": "A1\nrollback\nsilent", "A3": "A3\nrollback\nreason", "A2": "A2\nrevert\nsilent", "A4": "A4\nrevert\nreason", "AG": "AG\nagentic\nrevert+reason"}
 FAM = {"control": "g", "unseeded-control": "u", "10ov": "b", "M1": "o", "M3": "o", "A1": "p", "A2": "p", "A3": "p", "A4": "p", "AG": "t"}
@@ -79,7 +79,7 @@ fig.legend(handles=[Patch(color=LIGHT["g"], label="No oversight"),
            loc="upper left", bbox_to_anchor=(0.01, 0.94), ncol=5, frameon=False, fontsize=10.5)
 fig.suptitle("GLM 5.3 Flash: oversight arms vs. control (agentic monitor AG 2026-11-24)", x=0.01, y=0.995, ha="left", fontsize=16)
 fig.text(0.01, 0.948, "Bar = arm mean; error bar = ±1 SEM; dots = runs (n = 3 unless marked). 100 GLM 5.3 Flash solvers, 120 min, push, seeded. Runs: control Nov 4; 10 ov Nov 4 + Nov 16; M1 Nov 11; "
-         "M3 Nov 11 + Nov 16; A1-A4 Nov 19; AG Nov 24. AG cost = settled + held ($8-15 held per run).", fontsize=10.5)
+         "M3 Nov 11 + Nov 16; A2/A4 Nov 19; AG Nov 24. AG cost = settled + held ($8-15 held per run).", fontsize=10.5)
 fig.tight_layout(rect=(0, 0, 1, 0.91))
 for ext in ("png", "pdf"):
     fig.savefig(D / f"arm_bars_6metrics_glm-2026-11-24.{ext}", dpi=150)
