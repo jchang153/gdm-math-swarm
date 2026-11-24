@@ -80,17 +80,76 @@ class StartBarrier:
         self.started_at = None
         self.started_wall = None
         self.record = record or (lambda *args: None)
+        self.on_arrive = []  # callables(agent_id), e.g. StartupGate.release; failures never block the barrier
 
     async def ready(self, agent_id):
         if agent_id not in self.arrived and not self.event.is_set():
             self.arrived.add(agent_id)
             self.record("agent_ready", agent_id, {"arrived": len(self.arrived), "required": self.count})
+            for callback in list(self.on_arrive):
+                try:
+                    callback(agent_id)
+                except Exception as ex:
+                    print(f"WARNING: barrier on_arrive failed ({type(ex).__name__}: {ex})", file=sys.stderr,
+                          flush=True)
             if len(self.arrived) == self.count:
                 self.started_at = time.monotonic()
                 self.started_wall = time.time()
                 self.record("common_start", None, {"agent_count": self.count})
                 self.event.set()
         await self.event.wait()
+
+
+class StartupGate:
+    """At most ``limit`` agents between launching a Claude Code session and their first inference request
+    (arrival at the StartBarrier), so a 200-sample run (arm AG: 100 solvers + 100 agentic monitors) does not
+    start 200 bridges at once. Each bridge start issues dozens of ``docker compose exec`` calls (tool
+    injection, the sandbox service, the proxy, Claude Code's config) plus an MCP readiness probe every 0.5 s,
+    none of them under Inspect's docker-cli limiter; with 200 concurrent starts on top of the polling of agents
+    already waiting, dockerd saturated, probes timed out (``MCPEndpointsUnreachableError``) and agents retried
+    with growing backoff (November 24, 2026, attempt 2: 2 of 6 runs missed the 1,800 s barrier).
+
+    Only the start is gated: a slot is released when the agent reaches the barrier (``StartBarrier.on_arrive``)
+    or when its session ends without reaching it (an error: the retry queues again behind the others). After
+    the common start (or once the agent has arrived) ``acquire`` returns at once, so restarts are never gated
+    and nothing changes after the run's clock starts. Agents never wait on each other's progress beyond the
+    slot, so it cannot deadlock the barrier."""
+
+    def __init__(self, limit, barrier, record=None):
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise ValueError("startup gate limit must be a positive integer")
+        self.limit = limit
+        self.barrier = barrier
+        self.record = record or (lambda *args: None)
+        self._semaphore = asyncio.Semaphore(limit)
+        self.held = set()
+        self.peak = 0
+        barrier.on_arrive.append(self.release)
+
+    def _open(self, agent_id):
+        return self.barrier.event.is_set() or agent_id in self.barrier.arrived
+
+    async def acquire(self, agent_id):
+        """Wait for a start slot; True when one is now held by ``agent_id`` (release it with ``release``)."""
+        if self._open(agent_id) or agent_id in self.held:
+            return False
+        started = time.monotonic()
+        await self._semaphore.acquire()
+        if self._open(agent_id):  # arrived or started while waiting
+            self._semaphore.release()
+            return False
+        self.held.add(agent_id)
+        self.peak = max(self.peak, len(self.held))
+        _safe_record(self.record, "startup_slot", agent_id, {
+            "waited_seconds": round(time.monotonic() - started, 3), "starting": len(self.held),
+            "limit": self.limit, "arrived": len(self.barrier.arrived)})
+        return True
+
+    def release(self, agent_id):
+        """Free ``agent_id``'s slot (idempotent; no-op when it holds none)."""
+        if agent_id in self.held:
+            self.held.discard(agent_id)
+            self._semaphore.release()
 
 
 def _safe_record(record, kind, agent, payload):
@@ -788,9 +847,13 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
                                      **neutral_args)
             gen_filter = filter_for(agent_id)
             extra_env = env_for(agent_id) if env_for else None
+            # Arm AG (200 samples): the agentic block's start gate and MCP readiness timeout apply to the
+            # solvers too; every other run builds the agent exactly as before.
+            startup_gate = getattr(agentic, "startup_gate", None) if agentic is not None else None
+            ag_bridge = agentic.bridge_options() if agentic is not None else {}
             agent = build_claude_agent(prompt, tools, gen_filter, system_prompt_mode=system_prompt_mode,
                                        auto_memory=auto_memory, **neutral_args,
-                                       **({"env": extra_env} if extra_env else {}))
+                                       **({"env": extra_env} if extra_env else {}), **ag_bridge)
             agent_state = AgentState(messages=state.messages)
             snapshots = Snapshotter(run_dir / "snapshots", agent_id, record,
                                     roots=NEUTRAL_SNAPSHOT_ROOTS if neutral else SNAPSHOT_ROOTS)
@@ -825,11 +888,16 @@ def peer_solver(*, conference, definitions, personas, prompt_for, filter_for, ru
                         requests_before = int((getattr(gen_filter, "state", None) or {}).get("requests") or 0)
                         session_status, session_error = None, None
                         try:
+                            if startup_gate is not None:
+                                await startup_gate.acquire(agent_id)
                             result = await agent(agent_state)
                             state.messages, state.output = result.messages, result.output
                             session_status = "harness_completed"
                         except Exception as ex:
                             session_status, session_error = "error", ex
+                        finally:
+                            if startup_gate is not None:
+                                startup_gate.release(agent_id)
                         if not auto_restart or clock.stop.is_set() or budget_refused():
                             break
                         made = int((getattr(gen_filter, "state", None) or {}).get("requests") or 0) - requests_before
@@ -2271,6 +2339,7 @@ async def _run_pilot(config, repo_root, conference_factory=None):
             from .agentic_monitor import AgenticMonitors
             agentic = AgenticMonitors(agentic_options, conference=conference, record=record, solver_ids=solver_ids,
                                       stop=clock.stop, neutral=neutral)
+            agentic.startup_gate = StartupGate(agentic_options["startup_concurrency"], barrier, record)
             record("agentic_monitor_enabled", None, agentic_effective(agentic_options, settings))
 
         def filter_for(agent):

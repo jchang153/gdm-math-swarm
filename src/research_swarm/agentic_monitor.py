@@ -48,13 +48,23 @@ from .monitor import DEFAULT_MAX_OUTPUT_CHARS, _cut, neutral_reason
 AGENTIC_KEY = "agentic_monitor"
 PROMPT_VERSION = "agentic-review-v1"
 AGENTIC_KEYS = frozenset({"enabled", "max_output_chars", "min_wait_seconds", "max_wait_seconds",
-                          "default_wait_seconds", "disclosed", "prompt_version", "mem_limit"})
+                          "default_wait_seconds", "disclosed", "prompt_version", "mem_limit",
+                          "startup_concurrency", "mcp_ready_timeout_seconds", "monitor_bridge_polling_seconds"})
 # mem_limit: the monitor containers' own Docker memory cap (a second compose file, compose-agentic-monitor.yaml;
 # solvers keep the config's agent_memory). Owner approval: docs/plan.md, "Agentic monitor arm AG", November 24, 2026.
 DEFAULT_MEM_LIMIT = "2g"
 DEFAULTS = {"max_output_chars": DEFAULT_MAX_OUTPUT_CHARS, "min_wait_seconds": 10, "max_wait_seconds": 1800,
             "default_wait_seconds": 60, "disclosed": False, "prompt_version": PROMPT_VERSION,
-            "mem_limit": DEFAULT_MEM_LIMIT}
+            "mem_limit": DEFAULT_MEM_LIMIT, "startup_concurrency": 24, "mcp_ready_timeout_seconds": 300,
+            "monitor_bridge_polling_seconds": None}
+# Bridge startup with 200 samples (attempt 2, November 24, 2026: 2 of 6 runs missed the 1,800 s barrier with
+# MCPEndpointsUnreachableError restarts while dockerd was saturated by docker compose exec calls):
+# startup_concurrency: at most this many agents (solvers and monitors) between launching a session and their first
+#   inference request (runtime.StartupGate); restarts and everything after the common start are not gated.
+# mcp_ready_timeout_seconds: inspect_swe's wait for the bridged MCP endpoint before each launch (its default is
+#   120 s); a slow probe under load then delays a launch instead of failing it into a backoff restart.
+# monitor_bridge_polling_seconds: the monitors' bridge model-service polling interval (None: Inspect's 2 s);
+#   off by default because it adds pickup latency (half the interval on average) to every monitor request.
 MEM_LIMIT_PATTERN = re.compile(r"[0-9]+(\.[0-9]+)?[kmgKMG]")
 ROLE = "agentic_monitor"
 MONITOR_PREFIX = "agmon-"
@@ -158,6 +168,14 @@ def agentic_problems(config):
         problems.append(f"{AGENTIC_KEY} needs min_wait_seconds <= default_wait_seconds <= max_wait_seconds")
     if not isinstance(merged["mem_limit"], str) or not MEM_LIMIT_PATTERN.fullmatch(merged["mem_limit"]):
         problems.append(f"{AGENTIC_KEY}.mem_limit must be a Docker memory size such as \"2g\" or \"1536m\"")
+    concurrency = merged["startup_concurrency"]
+    if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1:
+        problems.append(f"{AGENTIC_KEY}.startup_concurrency must be a positive integer")
+    if not (_number(merged["mcp_ready_timeout_seconds"]) and merged["mcp_ready_timeout_seconds"] > 0):
+        problems.append(f"{AGENTIC_KEY}.mcp_ready_timeout_seconds must be a positive number")
+    polling = merged["monitor_bridge_polling_seconds"]
+    if polling is not None and not (_number(polling) and 0.2 <= polling <= 30):
+        problems.append(f"{AGENTIC_KEY}.monitor_bridge_polling_seconds must be null or a number from 0.2 to 30")
     if not isinstance(merged["disclosed"], bool):
         problems.append(f"{AGENTIC_KEY}.disclosed must be true or false")
     elif merged["disclosed"]:
@@ -394,6 +412,12 @@ class AgenticMonitors:
         self.feeds = {}
         self._done = {}
         self._finished = set()
+        self.startup_gate = None  # runtime.StartupGate, set by the runtime (shared with the solvers)
+
+    def bridge_options(self):
+        """build_claude_agent keyword arguments for every agent of an AG run (solvers and monitors)."""
+        timeout = self.settings.get("mcp_ready_timeout_seconds")
+        return {} if timeout is None else {"mcp_ready_timeout": float(timeout)}
 
     # identifiers -------------------------------------------------------------
     @property
@@ -622,7 +646,7 @@ class AgenticMonitors:
         import anyio
         from inspect_ai.agent import AgentState
         from inspect_ai.model import ChatMessageUser
-        from .inspect_adapter import build_claude_agent, prepare_neutral_home
+        from .inspect_adapter import build_claude_agent, model_service_polling, prepare_neutral_home
         from .runtime import BUDGET_DENIALS, _safe_record, exit_status, restart_delay, wait_for_in_flight
         monitor = str(state.sample_id)
         solver = solver_of(monitor)
@@ -647,7 +671,9 @@ class AgenticMonitors:
         agent = build(prompt, self.tools(monitor), gen_filter, env=claude_code_env_extra(self.settings),
                       system_prompt_mode=system_prompt_mode, auto_memory=False,
                       **({"neutral": True} if self.neutral else {}), mcp_server=MCP_SERVER,
-                      disallowed_tools=list(_disallowed_tools()))
+                      disallowed_tools=list(_disallowed_tools()), **self.bridge_options())
+        gate = self.startup_gate
+        polling = self.settings.get("monitor_bridge_polling_seconds")
         agent_state = AgentState(messages=state.messages)
         outcome = {"status": None, "error": None, "harness_after_stop": None}
         feed = self.feed(monitor)
@@ -667,12 +693,18 @@ class AgenticMonitors:
                 while True:
                     session_error = None
                     try:
-                        result = await agent(agent_state)
+                        if gate is not None:
+                            await gate.acquire(monitor)
+                        with model_service_polling(polling):
+                            result = await agent(agent_state)
                         state.messages, state.output = result.messages, result.output
                         status = "harness_completed"
                     except Exception as ex:
                         status, session_error = "error", ex
                         self._error(monitor, "session", ex)
+                    finally:
+                        if gate is not None:
+                            gate.release(monitor)
                     if clock.stop.is_set() or budget_refused():
                         break
                     if self.solver_stopped(solver) and feed.stop_noted and not feed.peek():

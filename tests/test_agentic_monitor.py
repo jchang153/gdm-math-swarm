@@ -18,7 +18,8 @@ from tests.test_conference import GOOD, FakeJudge, agents, make_tasks
 from tests.test_inspect_adapter import HAVE_INSPECT, run_ledger
 
 BLOCK = {"enabled": True, "max_output_chars": 2000, "min_wait_seconds": 10, "max_wait_seconds": 1800,
-         "default_wait_seconds": 60, "disclosed": False, "prompt_version": "agentic-review-v1", "mem_limit": "2g"}
+         "default_wait_seconds": 60, "disclosed": False, "prompt_version": "agentic-review-v1", "mem_limit": "2g",
+         "startup_concurrency": 24, "mcp_ready_timeout_seconds": 300, "monitor_bridge_polling_seconds": None}
 
 
 def config(**extra):
@@ -604,6 +605,9 @@ class AgenticOrchestrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("mem_limit: 2g\n", Path(task["compose"]).read_text())
         agentic = captured["agentic"]
         self.assertEqual(agentic.monitor_ids, monitors)
+        self.assertIsInstance(agentic.startup_gate, runtime.StartupGate)
+        self.assertEqual(agentic.startup_gate.limit, 24)
+        self.assertIn(agentic.startup_gate.release, agentic.startup_gate.barrier.on_arrive)
         self.assertEqual(captured["roles"]["agmon-007"], "agentic_monitor")
         self.assertEqual(captured["roles"]["agent-007"], "solver")
         # The monitor's filter wraps a budget filter under its own id; the solver's feeds the shared history.

@@ -1427,7 +1427,8 @@ def budget_filter(agent_id, ledger, settings, barrier, record, scope="pilot", ar
 
 
 def build_claude_agent(prompt, tools, filter, env=None, cwd="/workspace", *, system_prompt_mode="replace",
-                       auto_memory=True, neutral=False, mcp_server=None, disallowed_tools=None):
+                       auto_memory=True, neutral=False, mcp_server=None, disallowed_tools=None,
+                       mcp_ready_timeout=None):
     """Genuine Claude Code (pinned image binary) with identity-bound bridged tools.
 
     ``system_prompt_mode``: "replace" (approved default since October 19, 2026:
@@ -1436,7 +1437,9 @@ def build_claude_agent(prompt, tools, filter, env=None, cwd="/workspace", *, sys
     server is ``collab`` (tools ``mcp__collab__*``) and the neutral Claude Code
     environment applies (``NEUTRAL_CLAUDE_CODE_ENV``). ``mcp_server`` and
     ``disallowed_tools`` (agentic monitor, research_swarm.agentic_monitor: its own MCP server and every
-    built-in tool off) replace the defaults when given.
+    built-in tool off) replace the defaults when given. ``mcp_ready_timeout`` (arm AG,
+    ``agentic_monitor.mcp_ready_timeout_seconds``): inspect_swe's wait for the bridged MCP endpoint
+    before each launch; None keeps inspect_swe's default (120 s).
     """
     if system_prompt_mode not in SYSTEM_PROMPT_MODES:
         raise ValueError(f"system_prompt_mode must be one of {SYSTEM_PROMPT_MODES}")
@@ -1451,7 +1454,70 @@ def build_claude_agent(prompt, tools, filter, env=None, cwd="/workspace", *, sys
                        bridged_tools=[BridgedToolsSpec(name=server, tools=tools)], filter=filter,
                        disallowed_tools=list(DISALLOWED_TOOLS if disallowed_tools is None else disallowed_tools),
                        permission_mode="bypassPermissions",
-                       retry_refusals=0, retry_uncaught_errors=0, env=claude_code_env(auto_memory, env, neutral))
+                       retry_refusals=0, retry_uncaught_errors=0, env=claude_code_env(auto_memory, env, neutral),
+                       **({} if mcp_ready_timeout is None else {"mcp_ready_timeout": float(mcp_ready_timeout)}))
+
+
+# Model-service polling of one bridge (arm AG monitors only, ``agentic_monitor.monitor_bridge_polling_seconds``).
+# inspect_ai's bridge serves the in-container proxy through a file-queue sandbox service that it polls with
+# ``docker compose exec find`` every 2 s (hard-coded in run_model_service); a longer interval for the monitors
+# cuts their share of dockerd load at the cost of pickup latency (on average half the interval per model request
+# or bridged tool call). Scoped by a context variable, so every other bridge keeps Inspect's 2 s.
+_MODEL_SERVICE_POLLING = None
+
+
+def _model_service_polling_var():
+    global _MODEL_SERVICE_POLLING
+    if _MODEL_SERVICE_POLLING is None:
+        import contextvars
+        _MODEL_SERVICE_POLLING = contextvars.ContextVar("gdm_model_service_polling", default=None)
+    return _MODEL_SERVICE_POLLING
+
+
+def install_model_service_polling():
+    """Wrap inspect_ai's bridge ``sandbox_service`` so a polling interval set with ``model_service_polling``
+    applies to the bridge model service started in that context. Idempotent; False if Inspect's layout differs
+    (then nothing is patched and Inspect's interval stays)."""
+    try:
+        from inspect_ai.agent._bridge.sandbox import service as bridge_service
+    except ImportError:
+        return False
+    original = getattr(bridge_service, "sandbox_service", None)
+    if original is None or not hasattr(bridge_service, "MODEL_SERVICE"):
+        return False
+    if getattr(original, "_gdm_polling", False):
+        return True
+    var = _model_service_polling_var()
+
+    async def sandbox_service(*args, **kwargs):
+        interval = var.get()
+        name = kwargs.get("name", args[0] if args else None)
+        if interval is not None and name == bridge_service.MODEL_SERVICE:
+            kwargs["polling_interval"] = float(interval)
+        return await original(*args, **kwargs)
+
+    sandbox_service._gdm_polling = True
+    bridge_service.sandbox_service = sandbox_service
+    return True
+
+
+class model_service_polling:
+    """Context manager: bridges started inside poll their model service every ``seconds`` (None: unchanged)."""
+
+    def __init__(self, seconds):
+        self.seconds = seconds
+        self.token = None
+
+    def __enter__(self):
+        if self.seconds is not None:
+            install_model_service_polling()
+            self.token = _model_service_polling_var().set(float(self.seconds))
+        return self
+
+    def __exit__(self, *exc):
+        if self.token is not None:
+            _model_service_polling_var().reset(self.token)
+        return False
 
 
 def installed_versions():
