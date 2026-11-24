@@ -25,6 +25,13 @@ fakers in run and sample) is written to ``OUT/sample.json`` before anything else
 agents and the pipeline gets ``--agents``; ``view`` reads the record and says on the index that only N solvers are
 mapped. Not with ``--agents`` or ``--overseer``.
 
+``--agentic`` (docs/plan.md, "Agentic monitors in the story maps (owner decision, November 24, 2026)"): after the
+solver pipeline, the short per-monitor stories of an agentic-monitor (AG) run (``research.analysis.storymap.
+agentic_story``: one call per monitor that acted, code labels for idle ones) into OUT/agentic_story/ and
+OUT/agentic_story.jsonl, on the solver map's ledger label, so stages 1-3 and the stories share the run's one budget
+(``--run-limit``). Stage 0 runs again when the monitor timelines (``TIMELINE/agentic/``) are missing. With
+``--sample`` only the sampled solvers' monitors. Not with ``--overseer``.
+
 ``--overseer`` (docs/plan.md, "Overseer story maps (November 5, 2026)") maps the run's overseers instead: stage 0
 with ``extract --overseers`` into ``--timeline`` (default ``--out``, default RUN/analysis/storymap-overseer), the
 pipeline with ``--overseer`` (its own ledger label and budget), no validation (validate.py is solver-specific) and
@@ -55,6 +62,8 @@ def parse_args(argv=None):
                                                  "RUN/analysis/storymap-overseer)")
     parser.add_argument("--overseer", action="store_true",
                         help="map the overseers (extract --overseers, pipeline --overseer); no validation or pages")
+    parser.add_argument("--agentic", action="store_true",
+                        help="also write the per-monitor stories of an agentic-monitor run (same budget)")
     parser.add_argument("--sample", type=int, metavar="N",
                         help="map a stratified sample of N solvers (OUT/sample.json; not with --agents/--overseer)")
     parser.add_argument("--sample-seed", type=int, default=None, help="seed of --sample (default 20261106)")
@@ -82,6 +91,11 @@ def missing_timelines(folder, agents):
     folder = Path(folder)
     base = folder / "timeline" if (folder / "timeline").is_dir() else folder
     return [a for a in agents if not (base / f"{a}.jsonl").is_file()]
+
+
+def has_agentic_timelines(folder):
+    from research.analysis.storymap import agentic_story
+    return bool(agentic_story.list_monitors(agentic_story.agentic_folder(folder)))
 
 
 def restore_inputs(run_dir, log, restore=None):
@@ -120,6 +134,9 @@ def main(argv=None, *, steps=None):
     timeline = (args.timeline or out_dir).resolve()
     steps = steps or default_steps()
     agents_args = []
+    if args.agentic and args.overseer:
+        log("refused: --agentic is not used with --overseer")
+        return 2
     if args.sample is not None:
         if args.overseer or any(a == "--agents" or a.startswith("--agents=") for a in rest):
             log("refused: --sample is not used with --agents or --overseer")
@@ -133,7 +150,8 @@ def main(argv=None, *, steps=None):
     with contextlib.ExitStack() as stack:
         if unit is not None:
             stack.enter_context(offload_runs.lease(run_dir, "story map"))
-        if not has_timeline(timeline) or (agents_args and missing_timelines(timeline, agents_args[1].split(","))):
+        if not has_timeline(timeline) or (agents_args and missing_timelines(timeline, agents_args[1].split(","))) \
+                or (args.agentic and not steps.get("has_agentic", has_agentic_timelines)(timeline)):
             steps["restore"](run_dir, log)
             code = steps["extract"](["--run-dir", str(run_dir), "--out", str(timeline),
                                      *(["--overseers"] if args.overseer else []), *agents_args])
@@ -145,6 +163,12 @@ def main(argv=None, *, steps=None):
         if code:
             log(f"story map: pipeline exit {code}; not validated, rendered or offloaded")
             return code
+        if args.agentic:
+            code = steps["agentic"](["--run-dir", str(run_dir), "--timeline", str(timeline), "--out", str(out_dir),
+                                     *agents_args, *rest])
+            if code:
+                log(f"story map: agentic stories exit {code}; not validated, rendered or offloaded")
+                return code
         if args.overseer:
             log(f"story map: overseer map in {out_dir}; not validated (solver-specific) or rendered here: render "
                 f"with view --map SOLVER_MAP --timeline SOLVER_TIMELINE --overseer-map {out_dir} "
@@ -162,8 +186,8 @@ def main(argv=None, *, steps=None):
 
 
 def default_steps():
-    from research.analysis.storymap import extract, pipeline, validate, view
-    return {"restore": restore_inputs, "extract": lambda a: extract.main(a) or 0,
+    from research.analysis.storymap import agentic_story, extract, pipeline, validate, view
+    return {"restore": restore_inputs, "extract": lambda a: extract.main(a) or 0, "agentic": agentic_story.main,
             "pipeline": pipeline.main, "validate": validate.main, "view": lambda a: view.main(a) or 0}
 
 

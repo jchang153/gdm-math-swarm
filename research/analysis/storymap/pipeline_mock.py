@@ -145,6 +145,9 @@ def reply(user):
     stage = unit.get("stage")
     if stage == "h":
         return deception_reply(user)
+    if stage == "m":   # the per-monitor story of agentic-monitor runs (storymap/agentic_story.py)
+        from .agentic_story import mock_reply
+        return mock_reply(user)
     if unit.get("mode") == "overseer":
         return overseer_reply(unit, user)
     if stage == 1:

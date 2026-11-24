@@ -89,7 +89,10 @@ def taxonomy_info(path=None):
     # Monitor-run material (``<!-- monitor-runs:begin -->`` blocks: events X1/X2, thought group W) is left out
     # here, so every prompt, SHA-256 and code list is byte for byte what it was before it was added; it is read by
     # ``monitor_info`` and sent only for agents with block events (owner request, November 12, 2026).
-    text = strip_monitor(data.decode("utf-8"))
+    # Agentic-monitor material (``<!-- agentic-runs:begin -->`` blocks: events G1/G2 and the per-monitor story labels;
+    # docs/plan.md, "Agentic monitors in the story maps", November 24, 2026) is left out the same way; it is read by
+    # ``agentic_info`` and sent only for solvers with G1/G2 events and in the per-monitor stories.
+    text = strip_agentic(strip_monitor(data.decode("utf-8")))
     data = text.encode("utf-8")
     codes, names = [], {}
     for match in _CODE_HEADING.finditer(text):
@@ -132,6 +135,62 @@ def monitor_info(path=None):
     return {"text": text, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
             "codes": [c for c in codes if c[0] == MONITOR_GROUP], "names": names,
             "event_types": [m.group(1) for m in _EVENT_HEADING.finditer(text)]}
+
+
+AGENTIC_BLOCK = re.compile(r"\n<!-- agentic-runs:begin -->\n(.*?)<!-- agentic-runs:end -->\n", re.S)
+# Solver timeline events of agentic-monitor runs (AG arm): G1 the solver's own monitor reverted its accepted
+# submission (at revert time), G2 a message of its monitor delivered to it. Not to be confused with the thought codes
+# G1/G2 of group G: event types are always written "event G1"/"event G2" and are never thought codes.
+AGENTIC_EVENT_TYPES = ("G1", "G2")
+ALL_EVENT_TYPES = EVENT_TYPES + MONITOR_EVENT_TYPES + AGENTIC_EVENT_TYPES
+AGENTIC_PROMPTS_RELATIVE = "research/analysis/storymap/prompts_agentic.md"
+AGENTIC_NOTE_SECTIONS = ("AGENTIC_STAGE1_NOTE", "AGENTIC_STAGE2_NOTE", "AGENTIC_STAGE3_NOTE")
+AGENTIC_STORY_SECTION = "AGENTIC_STORY"
+_ANY_SECTION = re.compile(r"^## (\w+)\s*$", re.M)
+
+
+def strip_agentic(text):
+    """The taxonomy without its agentic-run blocks (the file as it was before they were added)."""
+    return AGENTIC_BLOCK.sub("", text)
+
+
+def _named_blocks(text):
+    """{section name: body of its fenced ``text`` block} for every ``## NAME`` section of a prompt file."""
+    heads = list(_ANY_SECTION.finditer(text))
+    out = {}
+    for n, head in enumerate(heads):
+        body = text[head.end():heads[n + 1].start() if n + 1 < len(heads) else len(text)].split("\n")
+        try:
+            start = next(k for k, line in enumerate(body) if line.strip() == "```text")
+            end = max(k for k, line in enumerate(body) if line.strip() == "```")
+        except (StopIteration, ValueError):
+            continue
+        if end > start:
+            out[head.group(1)] = "\n".join(body[start + 1:end]).strip("\n")
+    return out
+
+
+def agentic_info(path=None, prompts_path=None):
+    """The agentic-monitor material: {"text", "sha256", "event_types"} of the taxonomy's agentic-run blocks
+    (concatenated in file order), plus, from the researcher-only ``prompts_agentic.md``, ``notes`` ({stage key:
+    note text} for ``stage1``..``stage3``; sections AGENTIC_STAGE1_NOTE..AGENTIC_STAGE3_NOTE), ``story_template``
+    (section AGENTIC_STORY, the per-monitor story's system prompt before rendering), ``prompts_sha256`` and
+    ``prompts_version``. The notes go into user messages only (the system prompts stay byte for byte)."""
+    _, data = _read(TAXONOMY_RELATIVE, path)
+    text = "\n\n".join(m.group(1).strip("\n") for m in AGENTIC_BLOCK.finditer(data.decode("utf-8")))
+    source, raw = _read(AGENTIC_PROMPTS_RELATIVE, prompts_path)
+    template = raw.decode("utf-8")
+    blocks = _named_blocks(template)
+    missing = [name for name in AGENTIC_NOTE_SECTIONS + (AGENTIC_STORY_SECTION,) if name not in blocks]
+    if missing:
+        raise ValueError(f"{_shown(source)} lacks the fenced text block of section(s) {missing}")
+    version = _VERSION.search(template)
+    return {"text": text, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "event_types": [m.group(1) for m in _EVENT_HEADING.finditer(text)],
+            "notes": {f"stage{n}": blocks[f"AGENTIC_STAGE{n}_NOTE"] for n in (1, 2, 3)},
+            "story_template": blocks[AGENTIC_STORY_SECTION],
+            "prompts_sha256": hashlib.sha256(raw).hexdigest(), "prompts_version": version.group(1) if version else None,
+            "prompts_path": _shown(source)}
 
 
 def taxonomy_codes(path=None):

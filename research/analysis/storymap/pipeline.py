@@ -62,6 +62,15 @@ and the overseer map's spend never count against each other's budget. Unit heade
 and pipeline.json records ``"mode": "overseer"`` (``billing``: mock or paid) only in this mode; solver mode is byte
 for byte as before. Lean (math) runs only.
 
+Agentic-monitor runs (AG arm; docs/plan.md, "Agentic monitors in the story maps", November 24, 2026): a solver
+whose timeline has G1 (its undisclosed monitor reverted its accepted submission) or G2 (a monitor message delivered)
+events gets the researcher-only notes AGENTIC_STAGE1..3_NOTE (private/research/analysis/storymap/
+prompts_agentic.md, read through ``schema.agentic_info`` with the taxonomy's agentic-run blocks) in its user
+messages only: stage 1 from the chunk holding its first G event, stage 2 for each selected G event
+(``chunk.agentic_stage2``; G1/G2 carry the F codes like a P2 revert), stage 3 when its FACTS list them. The system
+prompts are unchanged, so other agents' units still resume. The per-monitor stories are a separate pass
+(``storymap/agentic_story.py``) on the same ledger label and budget.
+
 Outputs (``OUT``): ``stage1/<agent>.jsonl`` (one row per chunk), ``stage2/<agent>.jsonl`` (one row per event),
 ``stage3/<agent>.json``, ``map.jsonl`` (every stage-3 row in ``OUT/stage3``), ``pipeline.json`` (models, prompt
 SHA-256s, per-stage requests, tokens and cost, budget record, stop), ``units/``, ``raw/`` (request and response
@@ -341,7 +350,19 @@ def monitor_section(text):
     return section("MONITOR BLOCKS", MONITOR_STAGE1_NOTE + "\n\n" + text)
 
 
-def stage1_user(agent, chunk, chunks, state, gap, role=None, mode=None, monitor=None):
+# Agentic-monitor runs (docs/plan.md, "Agentic monitors in the story maps", November 24, 2026): the note texts
+# AGENTIC_STAGE1_NOTE, AGENTIC_STAGE2_NOTE and AGENTIC_STAGE3_NOTE are researcher-only (private/research/analysis/
+# storymap/prompts_agentic.md; ``schema.agentic_info``); they go into the user messages of solvers with G1/G2 events
+# only, like the monitor notes above, so no system prompt changes and every other unit still resumes.
+AGENTIC_SECTION = "AGENTIC MONITOR"
+
+
+def agentic_section(note, taxonomy_text):
+    """The user-message section of an agentic-monitor note, followed by the taxonomy's agentic-run blocks."""
+    return section(AGENTIC_SECTION, note + ("\n\n" + taxonomy_text if taxonomy_text else ""))
+
+
+def stage1_user(agent, chunk, chunks, state, gap, role=None, mode=None, monitor=None, agentic=None):
     header = {"stage": 1, "agent": agent, "chunk": chunk["chunk"], "chunks": chunks,
               **{k: chunk[k] for k in ("first_item", "last_item", "first_turn", "last_turn", "t_from", "t_to")}}
     if mode:
@@ -355,7 +376,8 @@ def stage1_user(agent, chunk, chunks, state, gap, role=None, mode=None, monitor=
                          f"i={chunk['first_item']} to i={chunk['last_item']})"),
         section("CARRIED STATE", carried),
         section("CHUNK", chunking.render_items(chunk["items"])),
-        *([monitor_section(monitor)] if monitor else [])])
+        *([monitor_section(monitor)] if monitor else []),
+        *([agentic] if agentic else [])])
 
 
 def _thought_line(thought):
@@ -426,9 +448,10 @@ def same_delivery(items, item):
             and it["event"]["detail"].get("delivery_id") == did]
 
 
-def stage2_user(agent, event, window, state_before, thoughts, delivery=(), mode=None, context=None):
+def stage2_user(agent, event, window, state_before, thoughts, delivery=(), mode=None, context=None, agentic=None):
     """The stage-2 user message. Overseer mode (``mode="overseer"``) adds the mode to the header, has no
-    ``overseer_expected`` and adds a SOLVER CONTEXT AT EVENT section (run-level counts at the event time)."""
+    ``overseer_expected`` and adds a SOLVER CONTEXT AT EVENT section (run-level counts at the event time).
+    ``agentic``: the rendered AGENTIC MONITOR section (``agentic_section``) of a G1/G2 event."""
     item = event["item"]
     header = {"stage": 2, "agent": agent, "event_id": event["event_id"], "event_type": event["type"],
               "event_item": item["i"], "event_t": item.get("t"), "selected_because": event["reason"],
@@ -440,7 +463,8 @@ def stage2_user(agent, event, window, state_before, thoughts, delivery=(), mode=
     span = (f"items i={window['first_item']} to i={window['last_item']}, turns {window['first_turn']} to "
             f"{window['last_turn']}; ends at: {window['end_rule']}{', trimmed to fit' if window['truncated'] else ''}")
     note = [section("EVENT NOTE", REMINDER_STAGE2_NOTE)] if event["type"] == "R1" else \
-        [section("EVENT NOTE", MONITOR_STAGE2_NOTE)] if event["type"] in chunking.MONITOR_TYPES else []
+        [section("EVENT NOTE", MONITOR_STAGE2_NOTE)] if event["type"] in chunking.MONITOR_TYPES else \
+        [agentic] if agentic and event["type"] in chunking.AGENTIC_TYPES else []
     if is_pushed(item):
         detail = item["event"]["detail"]
         header.update(delivery="push", delivery_id=detail.get("delivery_id"), position=detail.get("position"),
@@ -448,6 +472,8 @@ def stage2_user(agent, event, window, state_before, thoughts, delivery=(), mode=
         note = [section("EVENT NOTE", (PUSH_REMINDER_NOTE + "\n\n" if event["type"] == "R1" else "") + PUSH_STAGE2_NOTE),
                 section("SAME DELIVERY", f"(item {int(detail.get('position') or 0) + 1} of {detail.get('delivery_size')} "
                                          f"in block {detail.get('delivery_id')})\n" + chunking.render_items(delivery))]
+        if agentic and event["type"] in chunking.AGENTIC_TYPES:
+            note.insert(0, agentic)
     if mode == OVERSEER:
         counts = solver_context_at(context, item.get("t"))
         note.append(section("SOLVER CONTEXT AT EVENT",
@@ -468,7 +494,7 @@ def _dash_count(value):
     return "unknown" if value is None else str(value)
 
 
-def stage3_user(agent, facts, s1_rows, s2_rows, mode=None):
+def stage3_user(agent, facts, s1_rows, s2_rows, mode=None, agentic=None):
     header = {"stage": 3, "agent": agent, "first_min": facts.get("first_min"), "last_min": facts.get("last_min")}
     if mode:
         header["mode"] = mode
@@ -497,7 +523,12 @@ def stage3_user(agent, facts, s1_rows, s2_rows, mode=None):
         *([section("NOTE ON INTEGRITY REMINDERS", REMINDER_STAGE3_NOTE)] if facts.get("integrity_reminders_seen")
           else []),
         *([section("NOTE ON PUSH DELIVERY", PUSH_STAGE3_NOTE)] if facts.get("push_deliveries") else []),
-        *([section("NOTE ON MONITOR BLOCKS", MONITOR_STAGE3_NOTE)] if facts.get("monitor_blocks_seen") else [])])
+        *([section("NOTE ON MONITOR BLOCKS", MONITOR_STAGE3_NOTE)] if facts.get("monitor_blocks_seen") else []),
+        *([agentic] if agentic and has_agentic_facts(facts) else [])])
+
+
+def has_agentic_facts(facts):
+    return bool(facts.get("agentic_reverts_seen") or facts.get("agentic_messages_seen"))
 
 
 OVERSEER_STAGE2_KEEP = ("event_id", "event_type", "event_t", "registered", "change", "response", "recognised_trick",
@@ -505,8 +536,10 @@ OVERSEER_STAGE2_KEEP = ("event_id", "event_type", "event_t", "registered", "chan
 
 
 def overseer_expected(event):
-    """True for an overseer-authored event or a P2 revert (the stage-2 ``overseer`` object is then required)."""
-    return event["type"] == "P2" or (event["item"].get("event") or {}).get("author_role") == "overseer"
+    """True for an overseer-authored event, a P2 revert or an agentic monitor's revert or message (G1/G2: the
+    monitor acts as a reviewer, so the F codes apply; the stage-2 ``overseer`` object is then required)."""
+    return event["type"] in ("P2",) + chunking.AGENTIC_TYPES \
+        or (event["item"].get("event") or {}).get("author_role") == "overseer"
 
 
 # ---------------------------------------------------------------------------
@@ -531,6 +564,7 @@ class StoryMap:
         self.schema = schema if isinstance(schema, SchemaAdapter) else SchemaAdapter(schema)
         self.prompts = self.schema.prompts()
         self._monitor = None     # the taxonomy's monitor-run material (read when the first blocked agent needs it)
+        self._agentic = None     # the agentic-monitor material (read when the first solver with G events needs it)
         self.run_id = run_id
         self.mode = mode
         self.log = log or (lambda message: None)
@@ -747,11 +781,28 @@ class StoryMap:
             self._monitor = info()
         return self._monitor
 
+    def agentic_material(self):
+        """``schema.agentic_info()`` (taxonomy agentic-run blocks and the private AGENTIC notes), read once."""
+        if self._agentic is None:
+            info = getattr(self.schema.module, "agentic_info", None)
+            if info is None:
+                raise PipelineError("the schema module has no agentic_info (needed for agents with G1/G2 events)")
+            self._agentic = info()
+        return self._agentic
+
+    def agentic_for(self, stage):
+        """The rendered AGENTIC MONITOR section of a stage (``stage1``..``stage3``)."""
+        material = self.agentic_material()
+        return agentic_section(material["notes"][stage], material["text"])
+
     async def stage1(self, agent, items, model_id, root, prefix=""):
         chunks = chunking.chunk_items(items, self.chunk_tokens)
         system = self.prompts["stage1"]
         first_block = next((it["i"] for it in items if (it.get("event") or {}).get("type") in chunking.MONITOR_TYPES
                             and it.get("kind") == "event"), None) if self.overseer is None else None
+        first_agentic = next((it["i"] for it in items if it.get("kind") == "event"
+                              and (it.get("event") or {}).get("type") in chunking.AGENTIC_TYPES), None) \
+            if self.overseer is None else None
         rows, state, gap, stopped = [], None, False, False
         for chunk in chunks:
             meta = {"agent": agent, "chunk": chunk["chunk"], "chunks": len(chunks),
@@ -762,8 +813,10 @@ class StoryMap:
                 continue
             blocked = first_block is not None and chunk["last_item"] >= first_block
             material = self.monitor_material() if blocked else None
+            agentic = self.agentic_for("stage1") if first_agentic is not None and chunk["last_item"] >= first_agentic \
+                else None
             user = stage1_user(agent, chunk, len(chunks), state, gap, (self.index.get(agent) or {}).get("role"),
-                               mode=self.map_mode, monitor=material["text"] if material else None)
+                               mode=self.map_mode, monitor=material["text"] if material else None, agentic=agentic)
             context = {"items": chunk["items"], "fix_item_fields": True}
             if material:
                 context["codes"] = list(self.schema.module.taxonomy_info()["thought_codes"]) + material["codes"]
@@ -807,8 +860,10 @@ class StoryMap:
                     "event_item": item["i"], "event_t": item.get("t"), "selected_because": event["reason"],
                     "window": {k: window[k] for k in ("first_item", "last_item", "first_turn", "last_turn", "end_rule",
                                                       "truncated", "est_tokens")}}
+            agentic = self.agentic_for("stage2") if self.overseer is None and event["type"] in chunking.AGENTIC_TYPES \
+                else None
             user = stage2_user(agent, event, window, state_before, inside, same_delivery(items, item),
-                               mode=self.map_mode, context=self.context)
+                               mode=self.map_mode, context=self.context, agentic=agentic)
             name = f"{item['i']:06d}-{event['event_id']}"
             try:
                 unit = await self.unit(stage=2, model_id=model_id, folder=root / "units" / "stage2" / agent, name=name,
@@ -832,7 +887,8 @@ class StoryMap:
     async def stage3(self, agent, items, s1_rows, s2_rows, model_id, root, prefix=""):
         facts = self.overseer.hard_facts(agent, items, self.index.get(agent), self.context) if self.overseer \
             else chunking.hard_facts(agent, items, self.index.get(agent))
-        user = stage3_user(agent, facts, s1_rows, s2_rows, mode=self.map_mode)
+        agentic = self.agentic_for("stage3") if self.overseer is None and has_agentic_facts(facts) else None
+        user = stage3_user(agent, facts, s1_rows, s2_rows, mode=self.map_mode, agentic=agentic)
         meta = {"agent": agent, "facts": facts,
                 "inputs": {"stage1_chunks": len(s1_rows), "stage1_failed": sum(r["status"] != "ok" for r in s1_rows),
                            "stage2_events": len(s2_rows), "stage2_failed": sum(r["status"] != "ok" for r in s2_rows)}}
@@ -1002,6 +1058,12 @@ def write_pipeline_record(path, story, *, meta, results):
     if story._monitor is not None:   # only when blocked agents were mapped (monitor runs)
         record["monitor_material"] = {"sha256": story._monitor.get("sha256"), "codes": story._monitor.get("codes"),
                                       "note": "taxonomy monitor-run blocks sent in the user messages of blocked agents"}
+    if story._agentic is not None:   # only when solvers with G1/G2 events were mapped (agentic-monitor runs)
+        record["agentic_material"] = {"sha256": story._agentic.get("sha256"),
+                                      "prompts_sha256": story._agentic.get("prompts_sha256"),
+                                      "prompts_version": story._agentic.get("prompts_version"),
+                                      "note": "taxonomy agentic-run blocks and the private AGENTIC_STAGE1..3_NOTE sent "
+                                              "in the user messages of solvers with G1/G2 events"}
     write_json(path, record)
     return record
 

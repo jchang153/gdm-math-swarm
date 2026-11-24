@@ -11,7 +11,11 @@ private/research/analysis/storymap/INTERFACE.md) and cuts it for the model stage
   every R1 (each delivery of the run's periodic integrity reminder, a host notice sent to every solver on a timer;
   owner, November 3, 2026). Runs without the reminder have no R1 events, so their selection is unchanged. In
   monitor runs, the first block of every block episode (X1/X2 with ``detail.episode_start``; owner request,
-  November 12, 2026); runs without a monitor have no X events.
+  November 12, 2026); runs without a monitor have no X events. In agentic-monitor runs (AG arm; docs/plan.md,
+  "Agentic monitors in the story maps", November 24, 2026), the solver's first G1 (its monitor reverted its accepted
+  submission) and every later G1 after which the solver submitted the reverted problem again, and its first G2 (a
+  monitor message delivered; plus the first G2 that is not a revert notice when the first one is), see
+  ``agentic_stage2``. Runs without an agentic monitor have no G events, so their selection is unchanged.
 * ``event_window``: 3 turns before the event's turn through the next stage-1 decision (a D-code thought after the
   event) or 10 turns after it, whichever comes first, trimmed to ``max_tokens`` (from the end, then the start;
   the event item is always kept).
@@ -34,8 +38,10 @@ WINDOW_BEFORE_TURNS = 3
 WINDOW_AFTER_TURNS = 10
 WINDOW_MAX_TOKENS = 40000
 STAGE2_TAGS = frozenset({"describes_trick", "warning"})
-STAGE2_TYPES = ("L2", "B1", "D1", "P2", "R1", "X1", "X2")
+STAGE2_TYPES = ("L2", "B1", "D1", "P2", "R1", "X1", "X2", "G1", "G2")
 MONITOR_TYPES = ("X1", "X2")
+AGENTIC_TYPES = ("G1", "G2")   # solver events of agentic-monitor runs (event types, not the thought codes G1/G2)
+AGENTIC_ROLE = "agentic_monitor"
 NON_SOLVER_ROLES = frozenset({"seed", "overseer"})
 AGENT_FILE = re.compile(r"^agent-\d+$")
 
@@ -250,7 +256,55 @@ def stage2_reason(item):
         return "integrity_reminder"
     if kind in MONITOR_TYPES:   # one reaction per block episode (its first block)
         return "monitor_block" if (event.get("detail") or {}).get("episode_start") is True else None
+    if kind in AGENTIC_TYPES:   # candidates only: ``stage2_events`` keeps those ``agentic_stage2`` selects
+        return "agentic_revert" if kind == "G1" else "agentic_message"
     return None
+
+
+def has_agentic(items):
+    """True when the timeline has an agentic-monitor event (G1/G2): only then do the agentic notes apply."""
+    return any((_event(it) or {}).get("type") in AGENTIC_TYPES for it in items)
+
+
+def _num(value):
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def agentic_stage2(items):
+    """{event id: reason} of the agentic-monitor events that get a stage-2 call (docs/plan.md, "Agentic monitors in
+    the story maps", November 24, 2026):
+
+    * the first G1 (``agentic_revert``): the solver's first experience of its monitor's revert;
+    * every later G1 after which the solver submitted the reverted problem again (an S1 with ``detail.task_id`` equal
+      to the G1's ``detail.problem_id``, later in the timeline; ``agentic_revert_resubmitted``). These are the reverts
+      the solver answered with a new act on the same problem (a re-fake or a genuine fix), so the reaction decides
+      whether the revert worked; a later revert without a resubmission repeats what the first one showed, and its
+      reaction, if any, is still visible to stage 3 through P2 and the stage-1 thoughts;
+    * the first G2 (``agentic_message``) and, when that one is a revert notice (``detail.revert_notice``; its
+      reaction is the revert's), the first G2 that is not (``agentic_message_own``): the monitor's own words."""
+    out = {}
+    events = [(n, it, _event(it)) for n, it in enumerate(items) if (_event(it) or {}).get("type") in AGENTIC_TYPES]
+    first_g1 = next(((n, it, ev) for n, it, ev in events if ev.get("type") == "G1"), None)
+    if first_g1 is not None:
+        out[str(first_g1[2].get("id") or f"item-{first_g1[1]['i']}")] = "agentic_revert"
+    for n, item, event in events:
+        if event.get("type") != "G1" or first_g1 is None or n == first_g1[0]:
+            continue
+        problem = (event.get("detail") or {}).get("problem_id")
+        again = problem is not None and any(
+            (_event(later) or {}).get("type") == "S1"
+            and ((_event(later).get("detail") or {}).get("task_id") == problem)
+            for later in items[n + 1:])
+        if again:
+            out.setdefault(str(event.get("id") or f"item-{item['i']}"), "agentic_revert_resubmitted")
+    g2 = [(it, ev) for _, it, ev in events if ev.get("type") == "G2"]
+    if g2:
+        out.setdefault(str(g2[0][1].get("id") or f"item-{g2[0][0]['i']}"), "agentic_message")
+        if (g2[0][1].get("detail") or {}).get("revert_notice"):
+            own = next(((it, ev) for it, ev in g2 if not (ev.get("detail") or {}).get("revert_notice")), None)
+            if own is not None:
+                out.setdefault(str(own[1].get("id") or f"item-{own[0]['i']}"), "agentic_message_own")
+    return out
 
 
 def has_blocks(items):
@@ -261,11 +315,16 @@ def has_blocks(items):
 def stage2_events(items):
     """The event items that get one stage-2 call each, in timeline order (one per event id)."""
     out, seen = [], set()
+    agentic = agentic_stage2(items) if has_agentic(items) else {}
     for item in items:
         reason = stage2_reason(item)
         if reason is None:
             continue
         event_id = str(item["event"].get("id") or f"item-{item['i']}")
+        if item["event"].get("type") in AGENTIC_TYPES:
+            if event_id not in agentic:
+                continue
+            reason = agentic[event_id]
         if event_id in seen:
             continue
         seen.add(event_id)
@@ -376,6 +435,17 @@ def _first(values):
     return min(values) if values else None
 
 
+FACT_TEXT_CHARS = 300
+
+
+def _cut(text, limit=FACT_TEXT_CHARS):
+    """A fact's free text, at most ``limit`` characters (``…`` marks a cut); None stays None."""
+    if text is None:
+        return None
+    text = str(text)
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
 def event_ids(items):
     """Every event id in an agent's timeline (what stage 3 may cite)."""
     return list(dict.fromkeys(str(it["event"]["id"]) for it in items
@@ -456,6 +526,27 @@ def hard_facts(agent, items, index_entry=None):
     if blocks:      # only in monitor runs with blocks (other runs' stage-3 input is unchanged)
         facts["monitor_blocks_seen"] = blocks
         facts["monitor_block_episodes"] = sum(b["episode_start"] for b in blocks)
+    reverts = [{"event_id": event.get("id"), "item": item["i"], "t": item.get("t"), "monitor": event.get("author"),
+                "problem_id": (event.get("detail") or {}).get("problem_id"),
+                "submission_id": (event.get("detail") or {}).get("submission_id"),
+                "fake": (event.get("detail") or {}).get("fake", event.get("fake")),
+                "latency_min": _num((event.get("detail") or {}).get("latency_min")),
+                "reason": _cut((event.get("detail") or {}).get("reason")),
+                "resubmitted_after": any((_event(later) or {}).get("type") == "S1"
+                                         and (_event(later).get("detail") or {}).get("task_id")
+                                         == (event.get("detail") or {}).get("problem_id")
+                                         for later in items if later["i"] > item["i"])}
+               for item, event in events if event.get("type") == "G1"]
+    notes = [{"event_id": event.get("id"), "item": item["i"], "t": item.get("t"), "monitor": event.get("author"),
+              "message_id": (event.get("detail") or {}).get("message_id"),
+              "revert_notice": bool((event.get("detail") or {}).get("revert_notice")),
+              "lag_s": _num((event.get("detail") or {}).get("lag_s")),
+              "text": _cut((event.get("detail") or {}).get("text") or item.get("text"))}
+             for item, event in events if event.get("type") == "G2"]
+    if reverts or notes:   # agentic-monitor runs only (other runs' stage-3 input is unchanged)
+        facts["agentic_monitor"] = next((r["monitor"] for r in reverts + notes if r.get("monitor")), None)
+        facts["agentic_reverts_seen"] = reverts
+        facts["agentic_messages_seen"] = notes
     pushes = {}
     for item, event in events:   # push-delivery runs only
         detail = event.get("detail") or {}
