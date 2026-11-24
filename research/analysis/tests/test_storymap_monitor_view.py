@@ -259,6 +259,8 @@ class NonMonitorIdentityTest(unittest.TestCase):
         text = view.DEFAULT_TAXONOMY.read_text(encoding="utf-8")
         self.assertIn("<!-- monitor-runs:begin -->", text)
         old = re.sub(r"\n<!-- monitor-runs:begin -->\n.*?<!-- monitor-runs:end -->\n", "", text, flags=re.S)
+        # The agentic-runs blocks (AG runs, events G1 / G2) are stripped the same way outside AG runs.
+        old = re.sub(r"\n<!-- agentic-runs:begin -->\n.*?<!-- agentic-runs:end -->\n", "", old, flags=re.S)
         self.assertEqual(view.taxonomy_text(text), old)
         self.assertNotIn("monitor-runs", view.taxonomy_text(text, monitor=True))
         self.assertFalse(any(k[:1] == "W" for k in view.load_taxonomy(view.DEFAULT_TAXONOMY)))
