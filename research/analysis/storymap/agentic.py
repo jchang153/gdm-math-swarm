@@ -14,12 +14,12 @@ the 1:1 mapping recipient ``agent-NNN`` -> ``agmon-NNN``; a revert by its submis
 
 Solver timelines (``timeline/<agent>.jsonl``, item format unchanged) gain two event types:
 
-* ``G1`` (``REVERT_EVENT``) monitor reverted my accepted submission, at the revert time (conference
-  ``reversions.reverted_at``). id ``G1:sub-000065``; author the monitor; outcome ``reverted``; fake the strict
+* ``Y1`` (``REVERT_EVENT``) monitor reverted my accepted submission, at the revert time (conference
+  ``reversions.reverted_at``). id ``Y1:sub-000065``; author the monitor; outcome ``reverted``; fake the strict
   fake rule with evaluator validity; tags ``["revert_notice"]``. detail ``{monitor, submission_id,
   public_submission_id, problem_id, reason, accepted_ts, latency_min, message_id, fake}``.
-* ``G2`` (``MESSAGE_EVENT``) monitor message delivered to me, at delivery (``push_delivered`` or the first pull
-  ``get_messages`` that returned it). id ``G2:dm-000034``; author the monitor; tool ``push`` / ``get_messages``.
+* ``Y2`` (``MESSAGE_EVENT``) monitor message delivered to me, at delivery (``push_delivered`` or the first pull
+  ``get_messages`` that returned it). id ``Y2:dm-000034``; author the monitor; tool ``push`` / ``get_messages``.
   detail ``{monitor, message_id, dm_id, text, sent_ts, delivered_ts, lag_s, revert_notice, delivery, ...push
   fields}``. It replaces the D1 that message used to get; a later re-read gets no event. P2 is unchanged except
   that its author (and text) name the monitor; S1's ``reverted_by`` names the monitor too.
@@ -34,7 +34,7 @@ context / event) from the monitor's Inspect sample: the system prompt once as a 
 discarded (a re-sent request) are left out. A tool result's time is its runtime row's time when joined (the tool's
 return), else the monitor's next model request. Event items from runtime.jsonl, placed right after the joined tool
 result (``detail.tool_call_id``, the monitor's own tool-use id) else by time:
-``GW`` wait, ``GL`` list_revertible, ``GO`` get_output, ``GR`` revert (G1's detail plus ``delivered_ts`` of its
+``GW`` wait, ``GL`` list_revertible, ``GO`` get_output, ``GR`` revert (Y1's detail plus ``delivered_ts`` of its
 DM), ``GF`` refused revert, ``GM`` message, ``GE`` error, ``GC`` compaction. ``agentic/index.json`` lists the
 monitor files ({monitor: {solver, items, est_tokens, first_min, last_min, source}}).
 
@@ -54,7 +54,7 @@ ROLE = "agentic_monitor"
 REVIEWER_ID = "reviewer"            # research_swarm.async_review.REVIEWER_ID
 MONITOR_PREFIX, SOLVER_PREFIX = "agmon-", "agent-"
 MONITOR_ID = re.compile(r"^agmon-(\d+)$")
-REVERT_EVENT, MESSAGE_EVENT = "G1", "G2"
+REVERT_EVENT, MESSAGE_EVENT = "Y1", "Y2"
 SOLVER_EVENT_TYPES = (REVERT_EVENT, MESSAGE_EVENT)
 MONITOR_EVENT_TYPES = ("GW", "GL", "GO", "GR", "GF", "GM", "GE", "GC")
 MONITOR_EVENT_NAMES = {"GW": "wait", "GL": "list revertible", "GO": "get output", "GR": "revert",
@@ -198,9 +198,9 @@ class AgenticRun:
     def is_monitor_message(self, author):
         return author == REVIEWER_ID
 
-    # solver G1 ----------------------------------------------------------------
+    # solver Y1 ----------------------------------------------------------------
     def reverts_of(self, solver):
-        """G1 records for ``solver``: every reviewer reversion credited to it (time order)."""
+        """Y1 records for ``solver``: every reviewer reversion credited to it (time order)."""
         out = []
         for rev in self.ctx.reversions_list:
             if rev.get("reverted_by") != REVIEWER_ID or rev.get("credited_agent") != solver:
@@ -230,11 +230,11 @@ class AgenticRun:
 
 
 # ---------------------------------------------------------------------------
-# Solver timelines: G1 placement
+# Solver timelines: Y1 placement
 
 
 def place_reverts(stream, reverts):
-    """The stream with one ``("agentic_revert", ts, record)`` per G1 record, before the first later record that is
+    """The stream with one ``("agentic_revert", ts, record)`` per Y1 record, before the first later record that is
     not a tool result (at the end when none is), like an unanchored push."""
     if not reverts:
         return stream
@@ -556,7 +556,7 @@ def build_monitor(ctx, monitor, delivered=None, sample=None):
 
 
 def solver_deliveries(tl, solvers):
-    """{public message id: delivered epoch} from the written solver timelines' G2 events."""
+    """{public message id: delivered epoch} from the written solver timelines' Y2 events."""
     from research.analysis.storymap.extract import _epoch as ep
     out = {}
     for agent in solvers:

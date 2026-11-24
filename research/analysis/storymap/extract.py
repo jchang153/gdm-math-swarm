@@ -778,7 +778,7 @@ class Builder:
         """The pushed item's id as the pull events name it: ``post-000123``, ``dm-000045``, ``reminder-003``."""
         return str(it.get("id") or (f"reminder-{int(it['boundary']):03d}" if it.get("boundary") is not None else "?"))
 
-    # -- agentic monitors (arm AG only; storymap/agentic.py): G1 revert, G2 message delivered
+    # -- agentic monitors (arm AG only; storymap/agentic.py): Y1 revert, Y2 message delivered
     def ag_message_author(self, author):
         ag = getattr(self.ctx, "agentic", None)
         return ag is not None and ag.is_monitor_message(author)
@@ -797,7 +797,7 @@ class Builder:
                    tags=["revert_notice"], outcome="reverted", detail=dict(d))
 
     def on_agentic_message(self, ts, public_id, dm_id, text, sent_epoch, how, extra, turn):
-        """G2 at the message's first delivery to this solver (push or pull); a re-read gets no event."""
+        """Y2 at the message's first delivery to this solver (push or pull); a re-read gets no event."""
         key = dm_id or public_id
         if key in self.seen_dms:
             return

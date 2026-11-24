@@ -28,11 +28,11 @@ Item format unchanged: `{i, t, ts, turn, kind, tool, text, event, call_id, mid}`
 
 | type | meaning | placed at | id | author / role | detail |
 |---|---|---|---|---|---|
-| `G1` | the monitor reverted my accepted submission | the revert time (conference `reversions.reverted_at`), before the first later non-result item | `G1:sub-000065` | monitor / `agentic_monitor`; `fake` the strict fake rule with evaluator validity; outcome `reverted`; tags `["revert_notice"]`; tool null | `monitor, submission_id, public_submission_id, problem_id, reason, accepted_ts, latency_min, message_id, fake` |
-| `G2` | a monitor message was delivered to me | its first delivery: the `push_delivered` event (push runs) or the first pull `get_messages` that returned it | `G2:dm-000034` | monitor / `agentic_monitor`; tool `push` or `get_messages`; tags from the text plus `revert_notice` for a revert notice | `monitor, message_id, dm_id, text, sent_ts, delivered_ts, lag_s, revert_notice, delivery` (`push`/`pull`) and, when pushed, the push fields (`delivery_id, delivery_size, delivery_items, anchor_tool_use_id, request_seq, placement, answered, position`) |
+| `Y1` | the monitor reverted my accepted submission | the revert time (conference `reversions.reverted_at`), before the first later non-result item | `Y1:sub-000065` | monitor / `agentic_monitor`; `fake` the strict fake rule with evaluator validity; outcome `reverted`; tags `["revert_notice"]`; tool null | `monitor, submission_id, public_submission_id, problem_id, reason, accepted_ts, latency_min, message_id, fake` |
+| `Y2` | a monitor message was delivered to me | its first delivery: the `push_delivered` event (push runs) or the first pull `get_messages` that returned it | `Y2:dm-000034` | monitor / `agentic_monitor`; tool `push` or `get_messages`; tags from the text plus `revert_notice` for a revert notice | `monitor, message_id, dm_id, text, sent_ts, delivered_ts, lag_s, revert_notice, delivery` (`push`/`pull`) and, when pushed, the push fields (`delivery_id, delivery_size, delivery_items, anchor_tool_use_id, request_seq, placement, answered, position`) |
 
-- G2 replaces the D1 that a monitor message used to get. A later re-read of the same message gets no event
-  (one G2 per message per solver). In a push delivery, `delivery_items` names the item `G2:dm-...`.
+- Y2 replaces the D1 that a monitor message used to get. A later re-read of the same message gets no event
+  (one Y2 per message per solver). In a push delivery, `delivery_items` names the item `Y2:dm-...`.
 - P2 (the solver notices a lost credit) is unchanged except that its author (and its text) name the monitor.
   S1's `detail.reverted_by` and text name the monitor too.
 - Units: `*_ts` fields are run-clock minutes (the clock of item `t`); `latency_min` is accept-to-revert minutes;
@@ -61,7 +61,7 @@ result (`detail.tool_call_id`, the monitor's own tool-use id; join: same tool, r
 | `GW` | `agentic_wait` | `requested_s, clamped_s, delivered_calls, updated_calls, call_ids, update_ids, call_lags_s, implicit, solver_stopped, backlog, chars` |
 | `GL` | `agentic_list_revertible` | `count, problem_ids` |
 | `GO` | `agentic_get_output` | `call_id` (a solver call id), `found, chars` |
-| `GR` | `agentic_revert` | G1's detail plus `dm_sent, delivered_ts` (of its DM; null when never delivered); `fake` set; outcome `reverted` |
+| `GR` | `agentic_revert` | Y1's detail plus `dm_sent, delivered_ts` (of its DM; null when never delivered); `fake` set; outcome `reverted` |
 | `GF` | `agentic_revert_refused` | `problem_id, why`; outcome `refused` |
 | `GM` | `agentic_message` | `message_id, dm_id, text, sent, sent_ts, delivered_ts, lag_s`; outcome `sent`/`failed` |
 | `GE` | `agentic_error` | `stage, error, detail`; outcome `error` |
@@ -99,11 +99,10 @@ counter). `agentic/index.json`: `{agmon: {solver, items, est_tokens, first_min, 
 
 ## Constants
 
-`agentic.py`: `ROLE = "agentic_monitor"`, `REVIEWER_ID = "reviewer"`, `REVERT_EVENT = "G1"`,
-`MESSAGE_EVENT = "G2"`, `SOLVER_EVENT_TYPES = ("G1", "G2")`,
+`agentic.py`: `ROLE = "agentic_monitor"`, `REVIEWER_ID = "reviewer"`, `REVERT_EVENT = "Y1"`,
+`MESSAGE_EVENT = "Y2"`, `SOLVER_EVENT_TYPES = ("Y1", "Y2")`,
 `MONITOR_EVENT_TYPES = ("GW", "GL", "GO", "GR", "GF", "GM", "GE", "GC")`, `SOLVER_EVENT_NAMES`,
 `MONITOR_EVENT_NAMES`, `CONTEXT_FILE = "agentic_context.json"`, `MONITOR_DIR = "agentic"`.
 
-The event types `G1`/`G2` share their names with the taxonomy's thought codes G1 (evaluation awareness) and G2
-(loses an earlier decision after compaction). Event ids always carry the `G1:`/`G2:` prefix; code that matches
-bare type tokens (for example the view's `EVENT_TOKEN`) must keep events and thought codes apart.
+The solver event types are `Y1`/`Y2` (renamed from G1/G2 on November 24, 2026, so they never collide
+with the taxonomy's G thought codes).

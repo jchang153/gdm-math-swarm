@@ -60,31 +60,31 @@ class AgenticExtractTests(unittest.TestCase):
         self.assertIsNone(ex.RunContext(FIX / "run").agentic)
 
     def test_g1_at_revert_time(self):
-        g1 = events(self.a1, "G1")
+        g1 = events(self.a1, "Y1")
         self.assertEqual(len(g1), 1)
         it = g1[0]
         e = it["event"]
         self.assertEqual((it["t"], e["id"], e["author"], e["author_role"], e["fake"], e["outcome"]),
-                         (10.0, "G1:sub-000002", "agmon-001", "agentic_monitor", True, "reverted"))
+                         (10.0, "Y1:sub-000002", "agmon-001", "agentic_monitor", True, "reverted"))
         self.assertEqual(e["detail"], {"monitor": "agmon-001", "submission_id": "sub-000002",
                                        "public_submission_id": "sub-5c1e0a", "problem_id": "t2",
                                        "reason": fixture.REASON, "accepted_ts": 8.0, "latency_min": 2.0,
                                        "message_id": "dm-r1", "fake": True})
         # placed between the submission (8) and the next call (10.9)
         kinds = [(x["kind"], (x["event"] or {}).get("type")) for x in self.a1[5:9]]
-        self.assertEqual(kinds, [("tool_result", None), ("event", "S1"), ("event", "G1"), ("tool_call", None)])
+        self.assertEqual(kinds, [("tool_result", None), ("event", "S1"), ("event", "Y1"), ("tool_call", None)])
         # the 1:1 fallback and a false revert (no runtime message id)
-        g1b = events(self.a2, "G1")[0]["event"]
-        self.assertEqual((g1b["author"], g1b["fake"], g1b["detail"]["message_id"]), ("agmon-002", False, None))
+        y1b = events(self.a2, "Y1")[0]["event"]
+        self.assertEqual((y1b["author"], y1b["fake"], y1b["detail"]["message_id"]), ("agmon-002", False, None))
 
     def test_g2_replaces_d1_once_per_message(self):
         self.assertEqual(events(self.a1, "D1"), [])
-        g2 = events(self.a1, "G2")
-        self.assertEqual([x["event"]["id"] for x in g2], ["G2:dm-000001", "G2:dm-000002"])
+        g2 = events(self.a1, "Y2")
+        self.assertEqual([x["event"]["id"] for x in g2], ["Y2:dm-000001", "Y2:dm-000002"])
         push, pull = g2
         d = push["event"]["detail"]
         self.assertEqual((push["t"], push["tool"], d["delivery"], d["placement"], d["delivery_items"]),
-                         (11.0, "push", "push", "anchor", ["G2:dm-000001"]))
+                         (11.0, "push", "push", "anchor", ["Y2:dm-000001"]))
         self.assertEqual((d["monitor"], d["message_id"], d["dm_id"], d["sent_ts"], d["delivered_ts"], d["lag_s"],
                           d["revert_notice"]), ("agmon-001", "dm-r1", "dm-000001", 10.0, 11.0, 60.0, True))
         self.assertIn("revert_notice", push["event"]["tags"])
