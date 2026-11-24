@@ -2300,7 +2300,7 @@ is being merged into main via `collab-env`.
       VM TERMINATED, disk kept. Details in HANDOFF.local.md and private/ops/control-vm/.
     - **GCS** (item 53) blocked: owner's group lacks storage.buckets.create; needs a project admin.
 
-56. **CONFIGS READY 2026-11-23 (~17:20 PST), LAUNCH PENDING: DeepSeek oversight re-run** (owner, chat 2026-11-23;
+56. **LIVE 2026-11-23 (launched 17:22-17:28 PST, all 19 confirmed running 17:34 PST; end ~19:30 PST): DeepSeek oversight re-run** (owner, chat 2026-11-23;
     docs/plan.md "DeepSeek V4.1 Flash oversight re-run (owner decision, November 23, 2026)"). DeepSeek V4.1 Flash
     (1017) on `deepinfra/fp8/priority` in every role (solvers, overseers, monitor, reviewer), 100 solvers, 120 min,
     push; arms x 3 runs: control, 10ov, M1, M3, A1, A3 (seeded, agent-101 at +3 min) + 1 unseeded control = 19 runs.
@@ -2318,6 +2318,10 @@ is being merged into main via `collab-env`.
       <cfg> --max-requests 6` (standard solver/overseer check; the DS cap probe has flaked before, retry), `preflight.py`,
       supervisor as in item 52 (linger on, `ulimit -n 65536`). Config gates pass offline for all 7 configs.
 
+    - **Launch (2026-11-23):** 19 owner VMs, one run per VM (a 19th VM created from a snapshot for the unseeded
+      control, owner-approved), synced to dbe97b6; freeze_route, compat check and preflight passed first try on all
+      19; simple judge on. VM -> run ids and helper scripts: private/ops/ds-oversight/. Collect after ~20:30 PST,
+      then stop VMs. Cloud credit status and disk-cleanup note: HANDOFF.local.md.
 ## Next steps / open items
 
 - **Logs dataset storage (2026-11-19):** the dataset is now in the owner's PRO account (1 TB private; item 54), so
