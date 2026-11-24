@@ -63,11 +63,11 @@ and pipeline.json records ``"mode": "overseer"`` (``billing``: mock or paid) onl
 for byte as before. Lean (math) runs only.
 
 Agentic-monitor runs (AG arm; docs/plan.md, "Agentic monitors in the story maps", November 24, 2026): a solver
-whose timeline has G1 (its undisclosed monitor reverted its accepted submission) or G2 (a monitor message delivered)
+whose timeline has Y1 (its undisclosed monitor reverted its accepted submission) or Y2 (a monitor message delivered)
 events gets the researcher-only notes AGENTIC_STAGE1..3_NOTE (private/research/analysis/storymap/
 prompts_agentic.md, read through ``schema.agentic_info`` with the taxonomy's agentic-run blocks) in its user
 messages only: stage 1 from the chunk holding its first G event, stage 2 for each selected G event
-(``chunk.agentic_stage2``; G1/G2 carry the F codes like a P2 revert), stage 3 when its FACTS list them. The system
+(``chunk.agentic_stage2``; Y1/Y2 carry the F codes like a P2 revert), stage 3 when its FACTS list them. The system
 prompts are unchanged, so other agents' units still resume. The per-monitor stories are a separate pass
 (``storymap/agentic_story.py``) on the same ledger label and budget.
 
@@ -352,7 +352,7 @@ def monitor_section(text):
 
 # Agentic-monitor runs (docs/plan.md, "Agentic monitors in the story maps", November 24, 2026): the note texts
 # AGENTIC_STAGE1_NOTE, AGENTIC_STAGE2_NOTE and AGENTIC_STAGE3_NOTE are researcher-only (private/research/analysis/
-# storymap/prompts_agentic.md; ``schema.agentic_info``); they go into the user messages of solvers with G1/G2 events
+# storymap/prompts_agentic.md; ``schema.agentic_info``); they go into the user messages of solvers with Y1/Y2 events
 # only, like the monitor notes above, so no system prompt changes and every other unit still resumes.
 AGENTIC_SECTION = "AGENTIC MONITOR"
 
@@ -451,7 +451,7 @@ def same_delivery(items, item):
 def stage2_user(agent, event, window, state_before, thoughts, delivery=(), mode=None, context=None, agentic=None):
     """The stage-2 user message. Overseer mode (``mode="overseer"``) adds the mode to the header, has no
     ``overseer_expected`` and adds a SOLVER CONTEXT AT EVENT section (run-level counts at the event time).
-    ``agentic``: the rendered AGENTIC MONITOR section (``agentic_section``) of a G1/G2 event."""
+    ``agentic``: the rendered AGENTIC MONITOR section (``agentic_section``) of a Y1/Y2 event."""
     item = event["item"]
     header = {"stage": 2, "agent": agent, "event_id": event["event_id"], "event_type": event["type"],
               "event_item": item["i"], "event_t": item.get("t"), "selected_because": event["reason"],
@@ -536,7 +536,7 @@ OVERSEER_STAGE2_KEEP = ("event_id", "event_type", "event_t", "registered", "chan
 
 
 def overseer_expected(event):
-    """True for an overseer-authored event, a P2 revert or an agentic monitor's revert or message (G1/G2: the
+    """True for an overseer-authored event, a P2 revert or an agentic monitor's revert or message (Y1/Y2: the
     monitor acts as a reviewer, so the F codes apply; the stage-2 ``overseer`` object is then required)."""
     return event["type"] in ("P2",) + chunking.AGENTIC_TYPES \
         or (event["item"].get("event") or {}).get("author_role") == "overseer"
@@ -786,7 +786,7 @@ class StoryMap:
         if self._agentic is None:
             info = getattr(self.schema.module, "agentic_info", None)
             if info is None:
-                raise PipelineError("the schema module has no agentic_info (needed for agents with G1/G2 events)")
+                raise PipelineError("the schema module has no agentic_info (needed for agents with Y1/Y2 events)")
             self._agentic = info()
         return self._agentic
 
@@ -1058,12 +1058,12 @@ def write_pipeline_record(path, story, *, meta, results):
     if story._monitor is not None:   # only when blocked agents were mapped (monitor runs)
         record["monitor_material"] = {"sha256": story._monitor.get("sha256"), "codes": story._monitor.get("codes"),
                                       "note": "taxonomy monitor-run blocks sent in the user messages of blocked agents"}
-    if story._agentic is not None:   # only when solvers with G1/G2 events were mapped (agentic-monitor runs)
+    if story._agentic is not None:   # only when solvers with Y1/Y2 events were mapped (agentic-monitor runs)
         record["agentic_material"] = {"sha256": story._agentic.get("sha256"),
                                       "prompts_sha256": story._agentic.get("prompts_sha256"),
                                       "prompts_version": story._agentic.get("prompts_version"),
                                       "note": "taxonomy agentic-run blocks and the private AGENTIC_STAGE1..3_NOTE sent "
-                                              "in the user messages of solvers with G1/G2 events"}
+                                              "in the user messages of solvers with Y1/Y2 events"}
     write_json(path, record)
     return record
 

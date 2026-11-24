@@ -12,9 +12,9 @@ private/research/analysis/storymap/INTERFACE.md) and cuts it for the model stage
   owner, November 3, 2026). Runs without the reminder have no R1 events, so their selection is unchanged. In
   monitor runs, the first block of every block episode (X1/X2 with ``detail.episode_start``; owner request,
   November 12, 2026); runs without a monitor have no X events. In agentic-monitor runs (AG arm; docs/plan.md,
-  "Agentic monitors in the story maps", November 24, 2026), the solver's first G1 (its monitor reverted its accepted
-  submission) and every later G1 after which the solver submitted the reverted problem again, and its first G2 (a
-  monitor message delivered; plus the first G2 that is not a revert notice when the first one is), see
+  "Agentic monitors in the story maps", November 24, 2026), the solver's first Y1 (its monitor reverted its accepted
+  submission) and every later Y1 after which the solver submitted the reverted problem again, and its first Y2 (a
+  monitor message delivered; plus the first Y2 that is not a revert notice when the first one is), see
   ``agentic_stage2``. Runs without an agentic monitor have no G events, so their selection is unchanged.
 * ``event_window``: 3 turns before the event's turn through the next stage-1 decision (a D-code thought after the
   event) or 10 turns after it, whichever comes first, trimmed to ``max_tokens`` (from the end, then the start;
@@ -32,16 +32,20 @@ import unicodedata
 from pathlib import Path
 
 from research.analysis.judge.history import estimate_tokens
+from research.analysis.storymap import agentic as agentic_mod
 
 DEFAULT_CHUNK_TOKENS = 25000
 WINDOW_BEFORE_TURNS = 3
 WINDOW_AFTER_TURNS = 10
 WINDOW_MAX_TOKENS = 40000
 STAGE2_TAGS = frozenset({"describes_trick", "warning"})
-STAGE2_TYPES = ("L2", "B1", "D1", "P2", "R1", "X1", "X2", "G1", "G2")
 MONITOR_TYPES = ("X1", "X2")
-AGENTIC_TYPES = ("G1", "G2")   # solver events of agentic-monitor runs (event types, not the thought codes G1/G2)
-AGENTIC_ROLE = "agentic_monitor"
+# Solver events of agentic-monitor runs (storymap/agentic.py): Y1 my monitor reverted my submission, Y2 a monitor
+# message delivered.
+AGENTIC_TYPES = agentic_mod.SOLVER_EVENT_TYPES
+AGENTIC_REVERT, AGENTIC_MESSAGE = agentic_mod.REVERT_EVENT, agentic_mod.MESSAGE_EVENT
+AGENTIC_ROLE = agentic_mod.ROLE
+STAGE2_TYPES = ("L2", "B1", "D1", "P2", "R1", "X1", "X2") + AGENTIC_TYPES
 NON_SOLVER_ROLES = frozenset({"seed", "overseer"})
 AGENT_FILE = re.compile(r"^agent-\d+$")
 
@@ -257,12 +261,12 @@ def stage2_reason(item):
     if kind in MONITOR_TYPES:   # one reaction per block episode (its first block)
         return "monitor_block" if (event.get("detail") or {}).get("episode_start") is True else None
     if kind in AGENTIC_TYPES:   # candidates only: ``stage2_events`` keeps those ``agentic_stage2`` selects
-        return "agentic_revert" if kind == "G1" else "agentic_message"
+        return "monitor_revert" if kind == AGENTIC_REVERT else "monitor_message"
     return None
 
 
 def has_agentic(items):
-    """True when the timeline has an agentic-monitor event (G1/G2): only then do the agentic notes apply."""
+    """True when the timeline has an agentic-monitor event (Y1/Y2): only then do the agentic notes apply."""
     return any((_event(it) or {}).get("type") in AGENTIC_TYPES for it in items)
 
 
@@ -274,21 +278,21 @@ def agentic_stage2(items):
     """{event id: reason} of the agentic-monitor events that get a stage-2 call (docs/plan.md, "Agentic monitors in
     the story maps", November 24, 2026):
 
-    * the first G1 (``agentic_revert``): the solver's first experience of its monitor's revert;
-    * every later G1 after which the solver submitted the reverted problem again (an S1 with ``detail.task_id`` equal
-      to the G1's ``detail.problem_id``, later in the timeline; ``agentic_revert_resubmitted``). These are the reverts
+    * the first Y1 (``monitor_revert``): the solver's first experience of its monitor's revert;
+    * every later Y1 after which the solver submitted the reverted problem again (an S1 with ``detail.task_id`` equal
+      to the Y1's ``detail.problem_id``, later in the timeline; ``monitor_revert_resubmitted``). These are the reverts
       the solver answered with a new act on the same problem (a re-fake or a genuine fix), so the reaction decides
       whether the revert worked; a later revert without a resubmission repeats what the first one showed, and its
       reaction, if any, is still visible to stage 3 through P2 and the stage-1 thoughts;
-    * the first G2 (``agentic_message``) and, when that one is a revert notice (``detail.revert_notice``; its
-      reaction is the revert's), the first G2 that is not (``agentic_message_own``): the monitor's own words."""
+    * the first Y2 (``monitor_message``) and, when that one is a revert notice (``detail.revert_notice``; its
+      reaction is the revert's), the first Y2 that is not (``monitor_message_own``): the monitor's own words."""
     out = {}
     events = [(n, it, _event(it)) for n, it in enumerate(items) if (_event(it) or {}).get("type") in AGENTIC_TYPES]
-    first_g1 = next(((n, it, ev) for n, it, ev in events if ev.get("type") == "G1"), None)
+    first_g1 = next(((n, it, ev) for n, it, ev in events if ev.get("type") == AGENTIC_REVERT), None)
     if first_g1 is not None:
-        out[str(first_g1[2].get("id") or f"item-{first_g1[1]['i']}")] = "agentic_revert"
+        out[str(first_g1[2].get("id") or f"item-{first_g1[1]['i']}")] = "monitor_revert"
     for n, item, event in events:
-        if event.get("type") != "G1" or first_g1 is None or n == first_g1[0]:
+        if event.get("type") != AGENTIC_REVERT or first_g1 is None or n == first_g1[0]:
             continue
         problem = (event.get("detail") or {}).get("problem_id")
         again = problem is not None and any(
@@ -296,14 +300,14 @@ def agentic_stage2(items):
             and ((_event(later).get("detail") or {}).get("task_id") == problem)
             for later in items[n + 1:])
         if again:
-            out.setdefault(str(event.get("id") or f"item-{item['i']}"), "agentic_revert_resubmitted")
-    g2 = [(it, ev) for _, it, ev in events if ev.get("type") == "G2"]
+            out.setdefault(str(event.get("id") or f"item-{item['i']}"), "monitor_revert_resubmitted")
+    g2 = [(it, ev) for _, it, ev in events if ev.get("type") == AGENTIC_MESSAGE]
     if g2:
-        out.setdefault(str(g2[0][1].get("id") or f"item-{g2[0][0]['i']}"), "agentic_message")
+        out.setdefault(str(g2[0][1].get("id") or f"item-{g2[0][0]['i']}"), "monitor_message")
         if (g2[0][1].get("detail") or {}).get("revert_notice"):
             own = next(((it, ev) for it, ev in g2 if not (ev.get("detail") or {}).get("revert_notice")), None)
             if own is not None:
-                out.setdefault(str(own[1].get("id") or f"item-{own[0]['i']}"), "agentic_message_own")
+                out.setdefault(str(own[1].get("id") or f"item-{own[0]['i']}"), "monitor_message_own")
     return out
 
 
@@ -536,13 +540,13 @@ def hard_facts(agent, items, index_entry=None):
                                          and (_event(later).get("detail") or {}).get("task_id")
                                          == (event.get("detail") or {}).get("problem_id")
                                          for later in items if later["i"] > item["i"])}
-               for item, event in events if event.get("type") == "G1"]
+               for item, event in events if event.get("type") == AGENTIC_REVERT]
     notes = [{"event_id": event.get("id"), "item": item["i"], "t": item.get("t"), "monitor": event.get("author"),
               "message_id": (event.get("detail") or {}).get("message_id"),
               "revert_notice": bool((event.get("detail") or {}).get("revert_notice")),
               "lag_s": _num((event.get("detail") or {}).get("lag_s")),
               "text": _cut((event.get("detail") or {}).get("text") or item.get("text"))}
-             for item, event in events if event.get("type") == "G2"]
+             for item, event in events if event.get("type") == AGENTIC_MESSAGE]
     if reverts or notes:   # agentic-monitor runs only (other runs' stage-3 input is unchanged)
         facts["agentic_monitor"] = next((r["monitor"] for r in reverts + notes if r.get("monitor")), None)
         facts["agentic_reverts_seen"] = reverts

@@ -89,9 +89,9 @@ def taxonomy_info(path=None):
     # Monitor-run material (``<!-- monitor-runs:begin -->`` blocks: events X1/X2, thought group W) is left out
     # here, so every prompt, SHA-256 and code list is byte for byte what it was before it was added; it is read by
     # ``monitor_info`` and sent only for agents with block events (owner request, November 12, 2026).
-    # Agentic-monitor material (``<!-- agentic-runs:begin -->`` blocks: events G1/G2 and the per-monitor story labels;
+    # Agentic-monitor material (``<!-- agentic-runs:begin -->`` blocks: events Y1/Y2 and the per-monitor story labels;
     # docs/plan.md, "Agentic monitors in the story maps", November 24, 2026) is left out the same way; it is read by
-    # ``agentic_info`` and sent only for solvers with G1/G2 events and in the per-monitor stories.
+    # ``agentic_info`` and sent only for solvers with Y1/Y2 events and in the per-monitor stories.
     text = strip_agentic(strip_monitor(data.decode("utf-8")))
     data = text.encode("utf-8")
     codes, names = [], {}
@@ -138,10 +138,10 @@ def monitor_info(path=None):
 
 
 AGENTIC_BLOCK = re.compile(r"\n<!-- agentic-runs:begin -->\n(.*?)<!-- agentic-runs:end -->\n", re.S)
-# Solver timeline events of agentic-monitor runs (AG arm): G1 the solver's own monitor reverted its accepted
-# submission (at revert time), G2 a message of its monitor delivered to it. Not to be confused with the thought codes
-# G1/G2 of group G: event types are always written "event G1"/"event G2" and are never thought codes.
-AGENTIC_EVENT_TYPES = ("G1", "G2")
+# Solver timeline events of agentic-monitor runs (AG arm; storymap/agentic.py): Y1 the solver's own monitor reverted
+# its accepted submission (at revert time), Y2 a message of its monitor delivered to it. Their author role is
+# AGENTIC_ROLE ("agentic_monitor"), an accepted author role beside the solver, seed and overseer roles.
+from .agentic import ROLE as AGENTIC_ROLE, SOLVER_EVENT_TYPES as AGENTIC_EVENT_TYPES  # noqa: E402
 ALL_EVENT_TYPES = EVENT_TYPES + MONITOR_EVENT_TYPES + AGENTIC_EVENT_TYPES
 AGENTIC_PROMPTS_RELATIVE = "research/analysis/storymap/prompts_agentic.md"
 AGENTIC_NOTE_SECTIONS = ("AGENTIC_STAGE1_NOTE", "AGENTIC_STAGE2_NOTE", "AGENTIC_STAGE3_NOTE")
