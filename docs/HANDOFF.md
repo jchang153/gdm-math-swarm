@@ -27,7 +27,7 @@ current enough for a new agent to continue without asking.
   `HANDOFF.local.md` at the repo root, which must also be kept current.
 - **Bump the "Last updated" line** below whenever you edit this file.
 
-Last updated: 2026-11-24 ~02:25 PST by Claude (Opus 5.5) AG launch agent (item 57: AG arm, 6 runs failed at startup, relaunch pending).
+Last updated: 2026-11-24 ~03:15 PST by Claude (Opus 5.5) AG launch agent (item 57: AG arm, 4 of 6 runs live, DS r2 and GLM r2 failed at startup).
 
 ## History rewrite and public release (2026-10-28)
 
@@ -2340,13 +2340,16 @@ is being merged into main via `collab-env`.
       M3 4.3 / 2.0 / 281 / 13.0 / 14.91 (monitor $8.25); A1 87.0 / 22.0 / 3,148 / 12.3 / 8.78 (reviewer $2.08);
       A3 47.3 / 23.0 / 2,323 / 13.7 / 9.77 (reviewer $1.58). Every run also reports $3-6 of holds not yet settled
       (total = settled + held). Median step 39-45 s (control, 10ov, A1/A3) vs 54-55 s with the monitor.
-57. **FAILED AT STARTUP 2026-11-24 (launched 01:50-01:52 PST, stopped ~02:01-02:03 PST, $0 model spend): agentic monitor
-    arm AG, 6 runs** (owner, chat 2026-11-23/24; docs/plan.md "Agentic monitor arm AG (owner decisions, November 23,
-    2026)"). One agentic monitor per solver (`agmon-NNN`, Claude Code harness, five tools, prompt `agentic-review-v1`),
-    100 solvers + 100 monitors, 120 min, push, seeded.
-    - Code: 6b86d52 (AG runtime, prompt, analysis, configs; 2 GB monitor cap `agentic_monitor.mem_limit`, solvers 7 GB)
-      and 43d2f1b (fix: `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` 2,100,000 ms, attribution header off, the monitor's requests
-      drop the "# Environment" message and neutralize billing/identity lines). Runs used 43d2f1b.
+57. **LIVE 2026-11-24 (4 of 6 running since 02:55-03:02 PST; 2 failed at startup): agentic monitor arm AG** (owner, chat
+    2026-11-23/24; docs/plan.md "Agentic monitor arm AG (owner decisions, November 23, 2026)"). One agentic monitor per
+    solver (`agmon-NNN`, Claude Code harness, five tools, prompt `agentic-review-v1`), 100 solvers + 100 monitors,
+    120 min, push, seeded. Budgets (config `run_budget_usd`, the only spending control): $150 DeepSeek, $250 GLM;
+    simple judge on, no incident report. One run per owner VM (mapping in HANDOFF.local.md, scripts in private/ops/ag/).
+    - Code: 6b86d52 (AG runtime, prompt, analysis, configs; 2 GB monitor cap `agentic_monitor.mem_limit`, solvers 7 GB);
+      43d2f1b (`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` 2,100,000 ms, attribution header off, the monitor's requests drop the
+      "# Environment" message and neutralize billing/identity lines); b54210f (startup with 200 samples: each solver
+      workspace written with one exec instead of 146; `startup_timeout_seconds` 1800 in both AG configs). Root cause of
+      the first failure: the 100 file-less monitors started first and their bridges' polling flooded docker exec.
     - Role check (validation.md 15a, paid, 6.5 cents): both passed. DeepSeek 40/40 parsed, 0 malformed, 0 errors (tool
       calls: wait 36, list_revertible 6, get_output 1); GLM 40/40 parsed, 0 malformed, 0 errors (wait 37,
       list_revertible 3). `revert_submission` and `message_solver` were never called in the replay (acted on 0/20 flagged,
@@ -2355,16 +2358,21 @@ is being merged into main via `collab-env`.
       silent for 300 s) and `prompt_replaced` (942 chars of other system text); on 43d2f1b PASSED every required check
       (five tools only, prompt replaced with 0 other chars, 40,000-char delivery whole, 1,800 s wait returned, finished;
       a 120,000-char `get_output` arrives cut to ~2.2k chars with a file reference; peak memory 273 MiB).
-    - Runs `dsv41flash100-seeded-agentic-monitor-120m-push-r{1,2,3}-20261124T{095044,095100,095107}Z` (budget $150 each)
-      and `glmflash100-seeded-agentic-monitor-120m-push-r{1,2,3}-20261124T{095235,095208,095156}Z` ($250 each), one per
-      owner VM (mapping in HANDOFF.local.md, scripts in private/ops/ag/). freeze_route, compat check and preflight passed
-      first try. **All 6 stopped with `run_stop` reason `startup_timeout`** (600 s barrier): all 100 monitors reached
-      `agent_ready`, 0 of 100 solvers did (barrier 100/200), 0 provider calls. Solver workspace setup was still running
-      at the timeout: Inspect `write_file` of the problem files took ~4-10 s each per solver (agent-001 still writing
-      problems/ at +9 min), likely contention with 200 samples at once (Inspect subprocess limit 96 = vCPUs). Each VM
-      packaged and uploaded the empty run to the logs dataset (`OFFLOADED.json`); supervisors are waiting for retrieval.
-    - Next: fix startup for 200 samples (for example a longer `startup_timeout_seconds`, more Inspect subprocesses or
-      a single archive write per workspace), then relaunch the 6 runs (new run ids).
+    - **Attempt 1 (43d2f1b, launched 01:50-01:52 PST): all 6 stopped `startup_timeout` (600 s), 0 provider calls**
+      (100/100 monitors ready, 0/100 solvers, still in workspace setup). Empty runs, uploaded to the logs dataset; **not
+      to be published**: `dsv41flash100-seeded-agentic-monitor-120m-push-r{1,2,3}-20261124T{095044,095100,095107}Z`,
+      `glmflash100-seeded-agentic-monitor-120m-push-r{1,2,3}-20261124T{095235,095208,095156}Z`.
+    - **Attempt 2 (b54210f, launched 02:37-02:38 PST).** Startup still slow: agents reached the barrier over ~17-24 min,
+      with `MCPEndpointsUnreachableError` restarts ("Bridge MCP endpoint(s) served no tools after 120s", probe exec timed
+      out after ~8-15 s) for monitors (`agentic_error`, 31-125 per run) and solvers (`agent_restart`, backoff up to 240 s).
+      - Running (common start PST; pilot ends ~120 min later): `glmflash100-seeded-agentic-monitor-120m-push-r1-20261124T103755Z`
+        (02:55, ends ~04:55), `glmflash100-...-r3-20261124T103757Z` (02:56, ~04:56),
+        `dsv41flash100-seeded-agentic-monitor-120m-push-r1-20261124T103727Z` (03:02, ~05:02),
+        `dsv41flash100-...-r3-20261124T103722Z` (03:02, ~05:02). All 200 ready, ~110-130 provider calls/min per run in
+        the first minutes, no new `agentic_error` after the start. Post-run (judge, upload) ~1-2 h after the end.
+      - Failed again with `startup_timeout` (1,800 s), 0 provider calls: `dsv41flash100-...-r2-20261124T103741Z` (168/200
+        ready; 13 monitors, 19 solvers missing) and `glmflash100-...-r2-20261124T103802Z` (180/200; 2 monitors, 18
+        solvers). Empty; not to be published. Their VMs are idle after packaging. DS r2 and GLM r2 still need a run.
 ## Next steps / open items
 
 - **Logs dataset storage (2026-11-19):** the dataset is now in the owner's PRO account (1 TB private; item 54), so
