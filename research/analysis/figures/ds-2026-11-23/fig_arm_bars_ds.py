@@ -59,9 +59,8 @@ fig.legend(handles=[Patch(color=LIGHT["g"], label="No oversight (seeded)"),
                     Patch(facecolor="white", edgecolor="#808080", linestyle="--", label="No oversight, unseeded (no planted faker; n = 1)"),
                     Patch(color=LIGHT["b"], label="In-swarm overseers (bottom-up)"),
                     Patch(color=LIGHT["o"], label="Blocking monitor (top-down), threshold 80"),
-                    Patch(color=LIGHT["p"], label="Asynchronous reviewer, every 5 min, threshold 80"),
                     Patch(color=LIGHT["t"], label="Agentic monitor per solver (revert with reason)")],
-           loc="upper left", bbox_to_anchor=(0.01, 0.94), ncol=6, frameon=False, fontsize=10.5)
+           loc="upper left", bbox_to_anchor=(0.01, 0.94), ncol=5, frameon=False, fontsize=10.5)
 fig.suptitle("DeepSeek V4.1 Flash: oversight arms vs. control (2026-11-23; agentic monitor AG 2026-11-24)", x=0.01, y=0.995, ha="left", fontsize=16)
 miss = data.get("missing") or []
 fig.text(0.01, 0.948, "Bar = arm mean; error bar = ±1 standard error of the mean; dots = individual runs (n = 3 unless marked). "
