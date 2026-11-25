@@ -2443,6 +2443,23 @@ is being merged into main via `collab-env`.
       series (tests/test_series_unique.py). Commit 56f834f; `restyle --run` of the 43 affected runs (43 results.html
       + catalogue) -> deployment 75ba16e5, viewer b91e76c9; verify ok, verify --viewer ok; receipt
       `runs/phase-b/cloudflare/receipts/ag-series-20261124.json`.
+    - **Story maps of the 6 AG runs (owner decision Nov 24, plan.md "Agentic monitors in the story maps"), published
+      18:33 PST:** `run_storymap.py --agentic --no-offload` (runs 13:17-13:50 PST, 2 at a time; none hit the $50 per-run
+      budget). Spend solver map + monitor stories: DS r1 $18.97 + $4.47, r2 $33.29 + $6.17, r3 $18.28 + $3.93; GLM r1
+      $21.31 + $3.06, r2 $18.57 + $1.14, r3 $17.14 + $0.62 (total $146.97). Monitor story labels caught / caught_late /
+      missed / false_alarm / idle (a story may carry two): DS r1 68/1/1/0/30, r2 87/3/1/0/10, r3 60/1/1/0/39; GLM r1
+      45/4/2/0/49, r2 13/5/3/0/80, r3 10/1/0/0/89; model stories disagreeing with the code labels: DS r2 5, GLM r1 1.
+      Validation: the record checks (faked, credited, first_fake_t, stopped, stage 3 phases/turning points) 0 fails in
+      all 6; soft flags as usual (stage2_event_before_reaction 54-171, stage1_quotes 49-93, stage3_causes 0-7 per run).
+      Fixes (commit 89524ba): `run_storymap.py` also restores `conference/` and `evaluations/` (index-only runs failed
+      stage 0); the site allowlist (`storymap_site.py`) admits the pair pages `agents/<solver>.monitor.html`. Views from
+      6229bf1 (Monitor lane, coverage strip, Monitor column, 100 pair pages per run). Offloaded add-only (dataset commits
+      e0d04c29, 24db6193, 16de6996, a01ee7b9, 59f8ba63, 7dd11668), local runs back to the index files. Deployed with
+      `publish_cloudflare.py storymap` (6 runs, 1,242 files + 6 results.html tabs) -> deployment 338775c1, viewer
+      82543687; verify ok, verify --viewer ok; receipt `runs/phase-b/cloudflare/receipts/storymap-ag6-20261124.json`.
+      Gotcha: the deploy unpacks the whole site (~9.7 GB footprint) and swaps on a 16 GB Mac; one attempt died on a
+      transient viewer-verify RemoteDisconnected, one crawled for 3 h under memory pressure (stopped with SIGINT, lock
+      released); the third took 50 min.
 
 ## Next steps / open items
 
