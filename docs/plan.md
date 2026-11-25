@@ -2741,3 +2741,17 @@ framework."
 Approved by the owner (chat, November 24, 2026, "approve"; decisions, not proposals): the prompt `agentic-review-v1` (src/research_swarm/agentic_prompt.py) as shown, including its two feed notes; wait minimum/cap/default 10 s / 1,800 s / 60 s; per-run budgets $150 for DeepSeek V4.1 Flash and $250 for GLM 5.3 Flash (config `run_budget_usd`); a separate memory limit of about 2 GB per monitor container (solvers keep 7 GB). Runs: 3 on DeepSeek V4.1 Flash and 3 on GLM 5.3 Flash, 100 solvers, 120 min, push, seeded (owner, November 23, 2026: "I'd like to run AG for both glm and deepseek, 3 runs each").
 
 Open (proposal, not yet decided): whether to add a DeepSeek A4 comparison arm.
+
+## Agentic monitors in the story maps (owner decision, November 24, 2026)
+
+**Approved by the owner (chat, November 24, 2026, "go"; a decision, not a proposal).** Agentic monitors (AG arm) enter
+the story map framework as partners of their solvers: (1) offline extraction of monitor timelines and new solver events
+G1 (monitor reverted my submission, at revert time) and G2 (monitor message, at delivery), plus "seen by monitor"
+coverage from `agentic_wait` call ids; monitor DMs and reverts attributed to `agmon-NNN` with role `agentic_monitor`
+instead of an anonymous "reviewer"; (2) a Monitor lane and coverage strip on solver pages, a Monitor column and filter
+on the index, only in AG runs; (3) a monitor-solver pair page per pair (monitor lanes with waits, tools, reverts,
+messages and quoted reasoning; solver lanes; links for saw-lag, message delivery lag and revert-to-submission; hard
+facts); (4) on the graph, monitors as satellite nodes of their solvers, shown by default only if they acted, with a
+toggle and monitor-to-solver revert/message edges; (5) the paid pipeline's stage 2/3 also read each solver's first
+monitor revert and message, and a short per-monitor story. Paid story maps for the 6 AG runs use the standard
+per-run judge budget (default $50 per run).
